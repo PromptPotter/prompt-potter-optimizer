@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator, Sequence
-from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    ForkCut,
     cut_operator_fork,
     fork_config,
     operator_start,
-    operator_trigger,
 )
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_build import draft_task_context
@@ -26,17 +23,15 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
 from promptpotter.domain.campaign import Campaign, CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_kinds import ForkCyclePayload
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun
-from promptpotter.domain.records.run_records import FORK_DIRECTION, CycleStart
+from promptpotter.domain.records.run_records import CycleStart
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -49,6 +44,7 @@ from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.launcher.opening import Opening
     from promptpotter.application.pipeline_resolve import DraftPipeline
 
 
@@ -73,7 +69,7 @@ def assert_origin_ready(draft: DraftFile, pipeline: DraftPipeline) -> None:
 class LaunchRequest:
     """What every launch kind states, and all `launch.py::hold` reads: a kind states only its data,
     and the members it shares with the others are spelled here once. One with no ``at`` mints its
-    cycle at its `open`; the rest open the cycle ``at`` names."""
+    cycle at its `open`; the rest open the cycle ``at`` names, a fork the one its `stand` cut."""
 
     __slots__ = ()
     budget: Budget
@@ -119,6 +115,10 @@ class LaunchRequest:
 
     def open(self, stores: Stores) -> AbstractAsyncContextManager[OpenedCycle]:
         raise NotImplementedError
+
+    def stand(self, _opening: Opening, _held: HeldBudget) -> LaunchRequest:
+        """What it opens once admitted, under its admission's gate: itself, unless a kind cuts."""
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,8 +199,8 @@ class ExistingCycle(LaunchRequest):
 
 @dataclass(frozen=True, slots=True)
 class ForkLaunch(LaunchRequest):
-    """An operator's fork of *parent*, admitted on its parent's campaign before any cut: its open
-    cuts the child, which its hold lands it on as a mint's, so a refused fork writes nothing."""
+    """An operator's fork of *parent*, admitted on its parent's campaign before any cut: its
+    `stand` cuts the child, so a refused fork writes nothing."""
 
     parent: CampaignCycle
     payload: ForkCyclePayload
@@ -235,26 +235,12 @@ class ForkLaunch(LaunchRequest):
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self._config(stores).config, self.connector(stores))
 
-    def cut(self, child: CycleHop) -> ForkCut:
-        """The cut its open made, onto *child*."""
-        direction = FORK_DIRECTION[operator_trigger(self.payload)]
-        return ForkCut(parent=self.parent.hop, child=child, direction=direction)
-
-    @asynccontextmanager
-    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
-        """The cut, then its child bound as a start-run's cycle: a cut whose binding raised is
-        withdrawn."""
-        cut = cut_operator_fork(stores, self.payload, self.start)
-        child = ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
-        try:
-            async with AsyncExitStack() as binding:
-                opened = await binding.enter_async_context(child.open(stores))
-                bound = binding.pop_all()
-        except BaseException:
-            await asyncio.to_thread(cut.withdraw, stores, JobRegistry.attach(stores.jobs_dir))
-            raise
-        async with bound:
-            yield opened
+    def stand(self, opening: Opening, held: HeldBudget) -> ExistingCycle:
+        """Cut under its admission's gate, its share landed on the child: no sibling admitted after
+        it reads the campaign without that share, and a refusal before here cut nothing."""
+        cut = cut_operator_fork(opening.stores, self.payload, self.start)
+        opening.land_cut(cut, held)
+        return ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
 
 
 @dataclass(frozen=True, slots=True)

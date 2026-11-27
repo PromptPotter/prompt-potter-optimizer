@@ -165,14 +165,16 @@ class ForkCut:
             stores.mark_superseded(self.parent, self.child.cycle_id)
         return self.child.cycle_id
 
-    def withdraw(self, stores: Stores, job_registry: JobRegistry) -> None:
-        # A cleanup fault never masks the refusal its caller re-raises; a cut it keeps lists.
+    def withdraw(self, stores: Stores, job_registry: JobRegistry, refusal: BaseException) -> None:
+        # A cleanup fault never masks *refusal*, which its caller re-raises: it rides it as a note.
         child = self.child
         try:
             with destroying(stores, job_registry, child.campaign_id, cycle_id=child.cycle_id):
                 cleanup_stub_fork_if_empty(campaign_store=stores.campaigns, hop=child)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as fault:  # noqa: BLE001
+            refusal.add_note(
+                f"the fork's stub cycle {child.cycle_id} was kept: its withdrawal failed ({fault!r})"
+            )
 
 
 def cut_fork(

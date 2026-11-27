@@ -43,6 +43,7 @@ from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import VerifyStrategy
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import NextAct, PayloadInvalidError, PotterError
 from promptpotter.shared.named_rows import imported
 
@@ -261,14 +262,6 @@ def said_text(row: Said) -> str:
     text = row.label if row.value is None else f"{row.label} {row.value}"
     text = text if row.sub is None else f"{text} ({row.sub})"
     return text if row.detail is None else f"{text} — {row.detail}"
-
-
-@dataclasses.dataclass
-class CommandResult:
-    data: dict[str, Any] | None = None
-    human: str | None = None
-    # What the process exits: all a shell, a deploy script or a spawning server reads.
-    exit_code: int = 0
 
 
 # The grammar `launch.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.

@@ -19,7 +19,7 @@ from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate
 from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
-from promptpotter.presentation.cli.main import CommandResult
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
 
 

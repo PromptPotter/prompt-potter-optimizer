@@ -298,7 +298,14 @@ BASELINE = {
     # cut on its campaign (`domain/job.py::launch_campaign`), which quota and shares read.
     # w7-rows2 (+3): `SetCouponPayload.budget` is typed (unbounded included); `RunState.successor` is one Said.
     # w7-web2 (−9): six unread served fields and two browser derivations go.
-    "package_lines": 113637,
+    # w7-rows4 (+4): `CommandResult` in `shared/` (the MCP host door imports no `cli`); `JobRegistry` refuses a dir
+    # not named `jobs`, which, as a stamp subject read off the path, would stamp nothing; `_SUBJECTS` goes.
+    # w7-open3 (+3): one admission gate holds a fork's share and its cut (`LaunchRequest.stand`); the
+    # opening's exit is the cut's one withdraw (`_unfork` goes).
+    # w7-rows5 (+2): a fork's failed withdraw names the stub it kept, as a note on the refusal it rides.
+    # w7-rows4 link 3 backed out (+5): the stamp subject read off the path by name is unsound (a dataset
+    # named `jobs` takes its workspace's stamps), so `stamped_subject` declares each root again.
+    "package_lines": 113651,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

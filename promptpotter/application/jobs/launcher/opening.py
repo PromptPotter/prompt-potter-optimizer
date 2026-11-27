@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.jobs.shares import hold_moved, release_run
@@ -22,6 +22,9 @@ from promptpotter.domain.spend import Budget, CeilingMeter, HeldBudget
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook
 from promptpotter.infrastructure.store.stores import Stores
 
+if TYPE_CHECKING:
+    from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
+
 
 @dataclass(eq=False, slots=True)
 class Opening:
@@ -31,12 +34,13 @@ class Opening:
     the account by a `Release`, filed first so a crash before the job's stamp leaves an unreleased
     job the reaper still ends; its claim of a cycle as it reads released. A raise stamps the cycle
     the job writes (`owns`), never an interrupt past the run's boundary (`running_on`), whose pause
-    the runner declared."""
+    the runner declared; a fork's cut not yet taken is withdrawn, once the job no longer holds it."""
 
     stores: Stores
     job_registry: JobRegistry
     job: Job
     ended: CycleResult | None = None
+    cut: ForkCut | None = None
     _stamps: CycleHop | None = None
     _running: bool = False
     _handed: bool = False
@@ -81,6 +85,8 @@ class Opening:
             and not (self._running and launch_interrupted(exc))
         ):
             self._stamp(job, exc, self._stamps)
+        if exc is not None and self.cut is not None:
+            self.cut.withdraw(self.stores, self.job_registry, exc)
 
     async def __aenter__(self) -> Self:
         return self.__enter__()
@@ -107,6 +113,18 @@ class Opening:
         cycle."""
         self.owns(hop)
         land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
+
+    def land_cut(self, cut: ForkCut, held: HeldBudget) -> None:
+        """The job onto the child a fork's admission cut, which its exit withdraws until taken."""
+        self.cut = cut
+        self.land(cut.child, held)
+
+    def take_cut(self) -> None:
+        """The fork's act on its parent: from here its cut is the parent's line, never withdrawn."""
+        if self.cut is None:
+            raise RuntimeError(f"job {self.job_id} cut no fork to take")
+        self.cut.take(self.stores)
+        self.cut = None
 
     def running_on(self, hop: CycleHop) -> None:
         """Past the run's boundary on *hop*: the runner declares its own stops from here."""

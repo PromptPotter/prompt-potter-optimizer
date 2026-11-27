@@ -54,6 +54,7 @@ from offline_world import Router
 from world import Shared, World, shared_run
 
 from promptpotter.application.bench.difficulty import judging_ruler, regraded_ruler, ruler_rows
+from promptpotter.application.bench.resume_and_fork import fork_siblings
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkCut,
@@ -82,6 +83,7 @@ from promptpotter.application.hierarchy_subtree import (
     unplaced_reason,
 )
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.jobs.launcher import opening as launch_opening
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.registry import JobRegistry
@@ -1737,6 +1739,61 @@ def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
         )
 
 
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_fork_that_raises_past_its_cut_before_its_take_leaves_no_stub(
+    monkeypatch: pytest.MonkeyPatch, world: World, line: Shared
+) -> None:
+    ran = world.adopt(line)
+    stores, store, (hop, _) = ran.stores, ran.stores.campaigns, line.made
+    cycles = sorted(d.name for d in store.campaign_cycle_dirs(hop.campaign_id))
+
+    def torn(*_args: object, **_kwargs: object) -> None:
+        raise OSError("the write tore")
+
+    # Its land (between the cut and the land), and its act on its parent (after its run is held).
+    for owner, name in ((launch_opening, "claim_cycle"), (type(store), "act")):
+        with monkeypatch.context() as tearing:
+            tearing.setattr(owner, name, torn)
+            asked = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2)
+            with pytest.raises(OSError, match="tore"):
+                asyncio.run(
+                    CommandDispatcher(stores, inline=Inline()).dispatch(
+                        CommandCall(asked, door=Door.HOST)
+                    )
+                )
+        assert sorted(d.name for d in store.campaign_cycle_dirs(hop.campaign_id)) == cycles, (
+            f"a fork whose {name} raised past its cut left its stub cycle"
+        )
+
+
+# A withdraw whose delete fails keeps the stub, and names it on the refusal it rides.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_fork_whose_withdraw_fails_names_its_kept_stub_on_the_refusal(
+    monkeypatch: pytest.MonkeyPatch, world: World, line: Shared
+) -> None:
+    ran = world.adopt(line)
+    stores, store, (hop, _) = ran.stores, ran.stores.campaigns, line.made
+    cycles = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)}
+
+    def torn(*_args: object, **_kwargs: object) -> None:
+        raise OSError("the write tore")
+
+    def held(*_args: object, **_kwargs: object) -> None:
+        raise OSError("the stub is held")
+
+    monkeypatch.setattr(launch_opening, "claim_cycle", torn)
+    monkeypatch.setattr(fork_siblings, "cleanup_stub_fork_if_empty", held)
+    asked = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2)
+    with pytest.raises(OSError, match="tore") as refused:
+        asyncio.run(
+            CommandDispatcher(stores, inline=Inline()).dispatch(CommandCall(asked, door=Door.HOST))
+        )
+    (stub,) = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)} - cycles
+    assert any(stub in note for note in getattr(refused.value, "__notes__", ())), (
+        "the refusal does not name the stub its failed withdraw kept"
+    )
+
+
 # The steered forks cut from the applied scenario's fork, and from each other.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
@@ -2093,7 +2150,7 @@ def test_an_archive_write_moves_the_subtrees_validator_and_the_feeds_store_versi
     stores = world.adopt(displaced).stores
     address = _listed(stores, displaced.made.fork.campaign_id).address
     validator = subtree_version(stores, address)
-    feed_jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    feed_jobs = JobRegistry(tmp_path / "feed" / "jobs", capacity=lambda _live: 1)
     fed = feed_versions(stores, feed_jobs)["store:"]
     filed(
         stores.archive,
@@ -2118,7 +2175,7 @@ def test_a_hand_edit_to_an_authored_definition_moves_the_hierarchy_and_the_feed(
     campaign = stores.campaigns.load_campaign(displaced.made.fork.campaign_id)
     assert campaign is not None
     definition = resolve_dataset(stores, campaign.dataset_name).directory / DEFINITION_FILE
-    feed_jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    feed_jobs = JobRegistry(tmp_path / "feed" / "jobs", capacity=lambda _live: 1)
     etag, fed = hierarchy_version(stores, inside=()), feed_versions(stores, feed_jobs)["store:"]
     with definition.open("a", encoding="utf-8") as hand:
         hand.write("\n# an operator's hand edit\n")

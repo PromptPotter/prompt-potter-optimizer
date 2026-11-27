@@ -1158,7 +1158,7 @@ async def test_paid_asks_racing_on_one_rate_token_admit_exactly_one(
     home, _, _, bundle, _ = sign_up
     monkeypatch.setattr(settings_mod.settings, "USER_RATE_BURST", 1)
     monkeypatch.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 1e-9)
-    passes = JobRegistry(home / "pass-jobs", capacity=lambda _: 8)
+    passes = JobRegistry(home / "pass" / "jobs", capacity=lambda _: 8)
 
     async def slot(stores: Stores, racing: threading.Barrier) -> None:
         def asked() -> None:
@@ -2351,7 +2351,9 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
     # campaign archived past the handoff refuses it, and it releases the job refused. A gate taken
     # on the loop refuses there (`io.py::refuse_on_event_loop`), so a sync registry call fails here.
     hop = held_cycle.hop
-    past = JobRegistry(tmp_path.with_name(f"{tmp_path.name}-jobs"), capacity=lambda _live: 1)
+    past = JobRegistry(
+        tmp_path.with_name(f"{tmp_path.name}-past") / "jobs", capacity=lambda _live: 1
+    )
     handed = past.create(
         user_id="u",
         principal_id="u",
@@ -2553,7 +2555,7 @@ def test_clearing_the_active_pointer_moves_the_accounts_feed_version(
     built_stores: Stores, held_cycle: _HeldCycle, tmp_path: Path
 ) -> None:
     # The pointer is the account's state: a clear no stamp marks serves the cleared target on.
-    jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    jobs = JobRegistry(tmp_path / "feed" / "jobs", capacity=lambda _live: 1)
     save_active_pointer(built_stores.base_dir, held_cycle.hop)
     pointed = cycle_reads.feed_versions(built_stores, jobs, "account")["account"]
     clear_active_pointer(built_stores.base_dir)
@@ -2634,7 +2636,7 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
         patched.setattr(cycle_cleanup, "deletable_stubs", lambda *_: [fork])
         await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
     cut = ForkCut(parent=hop, child=fork, direction=ForkDirection.OFFSHOOT)
-    await asyncio.to_thread(cut.withdraw, built_stores, passes)
+    await asyncio.to_thread(cut.withdraw, built_stores, passes, RuntimeError("refused"))
     assert campaigns.cycle_dir(fork).is_dir(), "a destroyer's act deleted a stub a pass holds"
     await asyncio.to_thread(passes.release, fork_pass.job_id)
     assert subtree_version(built_stores, family) != held_at, (
@@ -4224,7 +4226,7 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
     stored_campaign(caller.stores, step_campaign)
     minted_dataset(caller.stores, step_campaign)
     caller.stores.campaigns.mint_cycle(step_hop)
-    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     stepping = HostSession(Caller(caller.stores, queuing))
     step = StartRunPayload(
         campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id, step_rounds=1
@@ -4282,7 +4284,7 @@ async def _held_at_arms_gate(
     stored_campaign(stores, campaign)
     minted_dataset(stores, campaign)
     stores.campaigns.mint_cycle(hop)
-    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     session = HostSession(Caller(stores, queuing))
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     monkeypatch.setattr(host_surface, "_SETTLE_POLL_S", 0.0)
@@ -4414,7 +4416,7 @@ def test_a_served_from_round_act_pressed_through_the_api_is_admitted_by_its_payl
     monkeypatch.setattr(
         app.state,
         "job_registry",
-        JobRegistry(tmp_path / "queue", capacity=lambda _live: 0),
+        JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0),
         raising=False,
     )
     signed_in = build_identity_bundle(default_identity_paths())
@@ -4439,7 +4441,7 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
     host_tenant: _HostTenant,
 ) -> None:
     _, _, session, _, keyed, _ = host_tenant
-    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
     with pytest.raises(PotterError) as raised:
         await session.answer(CallTool("start-run", keyed(run)))
@@ -4492,7 +4494,7 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
 def test_a_union_field_refused_at_every_door_is_one_entry_naming_its_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     monkeypatch.setattr(app.state, "job_registry", queuing, raising=False)
     pressed = {"campaign_id": "c", "cycle_id": "y", "cells": "bogus"}
     with pytest.raises(PayloadInvalidError) as raised:
