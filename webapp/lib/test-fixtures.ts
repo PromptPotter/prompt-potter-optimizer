@@ -56,14 +56,14 @@ const NO_METER: MeteredSpend = {
   metered_usd: 0,
   billed_usd: 0,
   rate_priced_usd: 0,
-  calls_rate_priced: false,
-  rate_known: true,
-  bill_is_floor: false,
   incurred_usd: 0,
   billed_tokens: 0,
-  unpriced_tokens: 0,
   kinds: {},
   replay_share: null,
+  bill: "$0.0000",
+  rate_priced_line: null,
+  replay_line: "The search incurred nothing, so no share of it replayed",
+  buckets_line: "billed + priced at our rate: ",
 };
 
 export function configParam(over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam {

@@ -3,17 +3,13 @@ import {
   type MeteredSpend,
   type MeasuredLift,
   READING_STATE_INFO,
-  CEILING_METER_LABELS,
   COST_ABSENCE_WORDS,
   STOP_REASON_INFO,
 } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
 import {
   liftOf,
-  meteredBucketsLine,
-  ratePricedText,
   readPaired,
-  spendHeadline,
   type LineStep,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
@@ -113,14 +109,13 @@ export function benchLead(row: HeadToHeadRow | null): {
 
 export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   if (metered === null) return PLACEHOLDER;
-  const priced = ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced);
+  const priced = metered.rate_priced_line;
   const sub =
     `${priced ? `${priced} · ` : ""}Incurred ${fmtUsd(metered.incurred_usd)} · ` +
-    `Counted here against the campaign cap ${fmtUsd(metered.metered_usd)} ` +
-    `${CEILING_METER_LABELS[metered.meter]}: ${meteredBucketsLine(metered)}`;
+    `Counted here against the campaign cap ${fmtUsd(metered.metered_usd)} ${metered.buckets_line}`;
   return (
     <span className="cmp-metric">
-      {spendHeadline(metered)}
+      {metered.bill}
       <span className="cmp-metric-band" title={sub}>
         {sub}
       </span>

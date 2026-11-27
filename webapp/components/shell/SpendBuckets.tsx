@@ -6,7 +6,7 @@ import {
   RATE_PRICED_LABEL,
   type PrefixReading,
 } from "@/lib/api/types";
-import { replayShareLine, spendLines } from "@/lib/derivations";
+import { spendLines } from "@/lib/derivations";
 import { fmtUsd } from "@/lib/format";
 
 interface BucketRow {
@@ -91,7 +91,7 @@ export function SpendBuckets({
         ]}
         getRowId={(r) => r.key}
       />
-      <p className="spend-buckets-replay">{replayShareLine(metered)}</p>
+      <p className="spend-buckets-replay">{metered.replay_line}</p>
       {[meterLines.metered_line, ...meterLines.cap_lines].map((line) => (
         <p key={line} className="spend-buckets-total">
           {line}

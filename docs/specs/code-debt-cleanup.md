@@ -1044,11 +1044,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **`open_cell` resolves a whole dataset to compile its scorer** (w7-res,
   `measurement_log.py::open_cell`): it only compiles the scorer and refuses an unknown name. Root: the
   archive carries its dataset's config. **Re-test:** `open_cell` resolves no dataset.
-- **`MeteredSpend` is banked, so its words cannot be served** (w7-web): the stop record holds
-  `StopSpend.spent: MeteredSpend` (`run_records.py`), so `spend.ts::spendHeadline`,
-  `meteredBucketsLine`, `replayShareLine` and `ratePricedText` stay browser composers. Root: the stop
-  record banks the `SpendRollup` facts and the read serves `MeteredSpend`. **Run data:** a wipe.
-  **Re-test:** `git grep -n "export function" -- webapp/lib/derivations/spend.ts` names no composer.
 - **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
   `npm test` now queues behind the clone's lock (`scripts/queue_then.py`). **Re-test:** five looping
   builders plus one gate on the Windows desk reap none.

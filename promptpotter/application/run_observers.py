@@ -58,7 +58,8 @@ def declare_run_stop(
         session.store, session.hop, meter, hold_id=None if book is None else book.hold_id
     )
     spend = StopSpend(
-        spent=observers.dashboard.live.spend_metered(meter),
+        spent=observers.dashboard.spend,
+        meter=meter,
         cycle=cycle,
         campaign=campaign,
         cap=Budget(usd=budget.usd, tokens=budget.tokens),

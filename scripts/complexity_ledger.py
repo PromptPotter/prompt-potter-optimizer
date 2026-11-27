@@ -309,7 +309,9 @@ BASELINE = {
     # `PartitionRecord.verifier_graded`, and the `--set` grammar moves to `application/path_patch.py`.
     # w7-res2 (+17): one `RunResolution` is the fold the read and the run call; it replaces
     # `configure_and_apply_pipeline`, `ParamLayers.of_cycle`, `recorded_schema` and `_CampaignMerge`.
-    "package_lines": 113711,
+    # w7-spend (+20): `MeteredSpend.of` serves the spend words the browser composed (bill, rate-priced,
+    # replay and buckets lines); the stop record banks `SpendRollup`, and four unread fields go.
+    "package_lines": 113731,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -377,7 +379,8 @@ BASELINE = {
     # w7-rows2 (−1): `WarmingDashboard.warming_up`, a discriminator no door read.
     # w7-web2 (−6): `ServedBackpressure`'s epochs and sender, `Evidence.generated_at`,
     # `HeadToHead.verdict_absent`, `MeResponse.issuer`.
-    "p_served": 200,
+    # w7-spend (−3): `MeteredSpend`'s rate and floor flags no reader read.
+    "p_served": 197,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

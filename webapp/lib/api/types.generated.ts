@@ -967,20 +967,25 @@ export interface TestFamily {
   p_adjusted: number;
 }
 
-/** What a run's spend caps have counted, in the units they meter, by kind. */
+/** What a run's spend caps have counted, in the units they meter, by kind, and
+ * its words. */
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
   metered_usd: number;
   billed_usd: number;
   rate_priced_usd: number;
-  calls_rate_priced: boolean;
-  rate_known: boolean;
-  bill_is_floor: boolean;
   incurred_usd: number;
   billed_tokens: number;
-  unpriced_tokens: number;
   kinds: Record<string, KindSpend>;
   replay_share: number | null;
+  /** The bill as a person reads it: `≥` where it is a floor. */
+  bill: string;
+  /** What our rate priced, said beside the bill; null where no call was. */
+  rate_priced_line: string | null;
+  /** What share of the search a replay served free. */
+  replay_line: string;
+  /** Each kind in the meter's units: those inside the caps, then those beside. */
+  buckets_line: string;
 }
 
 /** One spend kind as every surface reads it: metered, billed, rate-priced and
@@ -3023,7 +3028,6 @@ export interface SpendBucket {
   reasoning_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
-  rate_known: boolean;
   unpriced_tokens: number;
   incurred_usd: number;
   incurred_unpriced_tokens: number;
@@ -5847,7 +5851,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "dc7ad283e12ee81e";
+export const SERVED_CONTRACT = "8b88590aed67a661";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

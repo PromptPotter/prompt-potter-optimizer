@@ -69,7 +69,6 @@ from promptpotter.domain.spend import (
     LifetimeSpend,
     MeteredSpend,
     UserSpend,
-    bill_text,
     calls_rate_priced,
     rate_priced_text,
     usd_text,
@@ -133,12 +132,7 @@ def _state_row(status: RunStatus) -> Figure:
 
 
 def _spend_row(spent: MeteredSpend) -> Figure:
-    return _figure(
-        "spend",
-        "Spend",
-        bill_text(spent.billed_usd, floor=spent.bill_is_floor),
-        rate_priced_text(spent.rate_priced_usd, priced=spent.calls_rate_priced),
-    )
+    return _figure("spend", "Spend", spent.bill, spent.rate_priced_line)
 
 
 def _lifetime_row(spent: UserSpend) -> Figure:
