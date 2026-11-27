@@ -1042,18 +1042,14 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   beside `ServedDashboard.line`, so its number and the bars' can disagree on what they count (arms
   scored over the line, or C0 plus every candidate). Door: a served count beside the line, named for
   what it counts, read by the masthead. **Re-test:** the masthead derives no count of its own.
-- **`ActiveNode.scope` is never `target`** (w7-line): `live_dashboard.py::ActiveNode` declares
-  `optimizer | target`, but `_active_node` serves `optimizer` alone (a scoring pass runs as the
-  measurement node, an optimizer node), so the target layer never lights and the client's target
-  branch is dead. Door: under pp-self the outer fold serves the inner run's active node (it already
-  folds `record.inner`) as `target`; else the variant and the client's branch go. **Re-test:** a
-  `target` scope is produced, or `ActiveNode` has no `scope`.
+  Blocked (w7-rows2): the masthead's figure is the hierarchy's `RunStanding.candidates` (the sum of
+  `candidates_scored`), which `run_standing.py` uses for lift per candidate. Which count is served
+  is the operator's call.
 - **`cycle_reads.py` copies the live round's candidates into a second shape** (w7-line):
   `application/cycle_reads.py:136` copies `current_round.candidates` whole. Door: its reader takes
-  the served line. **Re-test:** no copy of `current_round.candidates` outside the fold.
-- **A superseded cycle's successor is worded twice** (w7-line): `domain/phases.py:291`'s
-  `start_refusal` and `ServedDashboard.successor` each word the same fact. Root: one `Said` on
-  `RunState`, read by both. **Re-test:** one sentence names a cycle's successor.
+  the served line. **Re-test:** no copy of `current_round.candidates` outside the fold. Blocked
+  (w7-rows2): `LineArm` lacks `prompts`, `resolved_params`, `validation_failures` and
+  `evidence_grounding`, which `ServedArm` carries, so the line carries `ServedArm` first.
 - **`ReviewReading.feedback` has no reader** (w7-text): `potter/l1.py::review_reading` fills it, but the
   critique reaches the readout as the round block's note. Deleting it moves capo-pobb's behaviour key,
   so it waits for a planned re-key. **Re-test:** `git grep -n "feedback=\[" -- promptpotter/application/optimizers/potter/l1.py` is empty.
@@ -1068,15 +1064,9 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `meteredBucketsLine`, `replayShareLine` and `ratePricedText` stay browser composers. Root: the stop
   record banks the `SpendRollup` facts and the read serves `MeteredSpend`. **Run data:** a wipe.
   **Re-test:** `git grep -n "export function" -- webapp/lib/derivations/spend.ts` names no composer.
-- **A served discriminator no door reads by name** (w7-web): the `WarmingDashboard.warming_up`
-  discriminator (`served_dashboard.py`). Deleted, or a `Literal` tag the union reads. **Re-test:**
-  `p_served` falls by one.
 - **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
   `npm test` now queues behind the clone's lock (`scripts/queue_then.py`). **Re-test:** five looping
   builders plus one gate on the Windows desk reap none.
-- **One test over the 2 s budget** (w7-gate): `test_security.py`'s stdio MCP host (2.05 s), whose child
-  `promptpotter mcp` spends ~1.8 s importing before its first answer. Door: the stdio server starts
-  without the API's import closure. **Re-test:** `pytest --durations=10` lists none over 2 s.
 - **A fork's cut is not withdrawn by its opening's exit** (w7-open2):
   `jobs/launcher/mint_and_start.py::ForkLaunch.open` cuts the fork, but a failure after the hold opens
   and before the fork's run takes the cut (`opening.land`) is not withdrawn there.
@@ -1087,18 +1077,18 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   against the campaign without the fork's share, as one admitted beside a mint is. Root: an admitted
   request's share is held on its campaign from admission. **Re-test:** a sibling admitted between a
   fork's admission and its cut reads the fork's share.
-- **`set-coupon` parses its amounts in the handler** (w7-rows): `commands/operator_acts.py` takes
-  `usd` and `tokens` as strings (`-` = unbounded). Root: the payload carries a typed unbounded value.
-  **Re-test:** the handler parses no string.
 - **The gate rewrites `maintenance/built_key.py` on every code change** (w7-small; the wave-7 landing
   hit it at each squash): a committed key of the code tree is stale after any edit, so every commit
   regenerates it first. Root: the key is computed where it is read, or the gate's write is the
   commit's own step. **Re-test:** a code-only commit needs no regenerated file.
-- **`walk-world`'s cache touch raises on a first run** (w7-open, w7-ver2): `scripts/gate.py`'s
-  `(REPO / path.format(key=key)).touch()` raised `FileNotFoundError` under
-  `.gate_cache/walk-world/<key>/…` on a cold cache, and was green on rerun. Root: the key's directory
-  is made before the touch. Also: `gate.py --changed` on a clean tree runs no check, so it proves
-  nothing for a committed link. **Re-test:** a cold `gate.py --only walk-world` is green first time.
+- **The MCP host door loads the CLI's verb table** (w7-rows3): `presentation/mcp/server.py` imports
+  `CommandResult` from `cli.main`. Root: `CommandResult` lives below presentation. The stdio host test
+  (2.05–2.44 s, over budget) loads the `mcp` SDK (~0.42 s) and the host door's application closure
+  (~0.7 s, `bench.llm_call` 0.45 s of it), never `promptpotter.main`. **Re-test:** the host door
+  imports no `cli` module; the test's wall is re-measured against its budget.
+- **`--changed` on a branch off an unlanded `land/*` lists the whole wave** (w7-rows3): a clean tree
+  diffs against `origin/main`'s merge-base. Root: the base is the branch's upstream. **Re-test:** one
+  commit ahead of `land/w7`, `--changed` lists that commit's checks only.
 - **A subject's stamp grows a byte per write** (w7-ver2): `io.py::stamp` appends one byte to the
   subject root's `.stamp` per write, and `io.py::stamp_of` reads `(st_ino, st_size)`, sound only
   because the one inode only grows; rotating or truncating it races the `O_APPEND` writers and can hand

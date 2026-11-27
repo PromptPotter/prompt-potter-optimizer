@@ -427,7 +427,7 @@ async function loadDashboard(url: string, etag: string | null, signal: AbortSign
   const held = heldSeries.get(url);
   const asked = held ? `${url}${url.includes("?") ? "&" : "?"}series=${enc(held.version)}` : url;
   const res = await jgetIfNoneMatch<DashboardBody>(asked, etag, signal, subject);
-  if (res.kind !== "ok" || "warming_up" in res.data) return res;
+  if (res.kind !== "ok" || !("series_version" in res.data)) return res;
   const dash = res.data;
   if (!dash.series_held) {
     const closed = new Set(dash.rounds.map((r) => r.round));
@@ -452,7 +452,7 @@ export function dashboardRead(path: CyclePath, at: number | null): ReadDescripto
     load: (signal, etag, subject) => loadDashboard(url, etag, signal, subject),
     auth: true,
     // A warming cycle has no dashboard yet.
-    accept: (body): body is ServedDashboard => !("warming_up" in body),
+    accept: (body): body is ServedDashboard => "series_version" in body,
     // Moving the viewed moment keeps the unit's last snapshot rather than blanking the page.
     keep: `dashboard${SEP}${encodeCyclePath(path)}`,
     // Its run state reads the account's inbox (a pause asked).

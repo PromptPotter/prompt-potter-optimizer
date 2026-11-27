@@ -117,7 +117,6 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, descend_store
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import sample_sd
@@ -202,7 +201,6 @@ class ConfigKeys(StrictModel):
 class Evidence(StrictModel):
     """The whole read for one selection of subjects — recomputed on every fetch."""
 
-    generated_at: str
     scorer_id: str
     subjects: list[SubjectReading]
     subjects_read: int = Field(
@@ -484,7 +482,6 @@ def subject_evidence(
         spec_metric, rows, available, members=members, measurand=measurand, scorer=grader.scorer
     )
     return Evidence(
-        generated_at=utcnow_iso(),
         scorer_id=grader.scorer.id,
         subjects=rows,
         subjects_read=sum(1 for r in rows if r.n_cells),

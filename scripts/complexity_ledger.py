@@ -296,7 +296,9 @@ BASELINE = {
     # (payloads, `operator_acts.py`, the served contract), and `claim_default` re-keys dismissals.
     # w7-open2 (+93): a fork is a `ForkLaunch` request kind whose `open` cuts it, admitted before its
     # cut on its campaign (`domain/job.py::launch_campaign`), which quota and shares read.
-    "package_lines": 113644,
+    # w7-rows2 (+3): `SetCouponPayload.budget` is typed (unbounded included); `RunState.successor` is one Said.
+    # w7-web2 (−9): six unread served fields and two browser derivations go.
+    "package_lines": 113637,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -361,7 +363,10 @@ BASELINE = {
     # vote (+3): `origin_panel_cells` on the three served campaign configs, which no surface edits yet.
     # w7-host (-1): the webapp's bulletins read every field they serve, and one more the account already did.
     # w7-line, w7-web (−2): an unread served field each deleted.
-    "p_served": 207,
+    # w7-rows2 (−1): `WarmingDashboard.warming_up`, a discriminator no door read.
+    # w7-web2 (−6): `ServedBackpressure`'s epochs and sender, `Evidence.generated_at`,
+    # `HeadToHead.verdict_absent`, `MeResponse.issuer`.
+    "p_served": 200,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

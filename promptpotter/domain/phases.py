@@ -7,7 +7,7 @@ from typing import Literal, NamedTuple
 from pydantic import Field, computed_field
 
 from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.said import Tone
+from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import DiagnosticError, ErrorCategory, NextAct
 from promptpotter.shared.worded import Worded
@@ -283,12 +283,24 @@ class RunState(NamedTuple):
         return not self.producer.attached
 
     @property
+    def successor(self) -> Said | None:
+        """The one sentence naming the fork this cycle's line runs on; null where it is its own."""
+        if self.runs_on is None:
+            return None
+        return Said(
+            key="superseded",
+            tone="attention",
+            label=f"Its line runs on in fork {self.runs_on}: open that cycle to run or pause it.",
+            value=self.runs_on,
+        )
+
+    @property
     def start_refusal(self) -> str:
         """Why `start-run` / `resume` is refused; empty where one is admitted."""
         if self.inner:
             return INNER_LAUNCH_REFUSAL
-        if self.runs_on is not None:
-            return f"Its line runs on in fork {self.runs_on}: open that cycle to run or pause it."
+        if self.successor is not None:
+            return self.successor.label
         if self.resumable:
             return ""
         return "A run of this cycle is in flight. Pause it or let it end, then ask again."

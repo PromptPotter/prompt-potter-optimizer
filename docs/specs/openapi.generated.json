@@ -204,23 +204,14 @@
       },
       "ActiveNode": {
         "additionalProperties": false,
-        "description": "The node running now, in the layer whose ids name it: under pp-self both layers share ids.",
+        "description": "The optimizer's node running now: a target's calls land on its own ledger, never this one.",
         "properties": {
           "node": {
             "title": "Node",
             "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "optimizer",
-              "target"
-            ],
-            "title": "Scope",
-            "type": "string"
           }
         },
         "required": [
-          "scope",
           "node"
         ],
         "title": "ActiveNode",
@@ -358,15 +349,6 @@
             "title": "Buckets",
             "type": "array"
           },
-          "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Bill.key_source`).",
-            "enum": [
-              "model",
-              "api_key"
-            ],
-            "title": "Group By",
-            "type": "string"
-          },
           "peak_requests": {
             "anyOf": [
               {
@@ -437,7 +419,6 @@
         },
         "required": [
           "window",
-          "group_by",
           "buckets",
           "series_labels",
           "bill",
@@ -7161,10 +7142,6 @@
             "title": "Factors",
             "type": "array"
           },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
           "grid": {
             "anyOf": [
               {
@@ -7276,7 +7253,6 @@
           }
         },
         "required": [
-          "generated_at",
           "scorer_id",
           "subjects",
           "subjects_read",
@@ -8268,17 +8244,8 @@
                 "type": "null"
               }
             ],
+            "description": "Null where it gives none: `verdict_line` says why",
             "title": "Verdict"
-          },
-          "verdict_absent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReadingState"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "verdict_line": {
             "title": "Verdict Line",
@@ -8291,7 +8258,6 @@
           "guard",
           "headline",
           "verdict",
-          "verdict_absent",
           "contrasts",
           "ratio_reference",
           "verdict_line",
@@ -10905,17 +10871,6 @@
             "title": "Filable",
             "type": "array"
           },
-          "issuer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issuer"
-          },
           "name": {
             "anyOf": [
               {
@@ -10965,7 +10920,6 @@
         "required": [
           "user_id",
           "tenant_id",
-          "issuer",
           "email",
           "name",
           "provider",
@@ -16282,7 +16236,7 @@
       },
       "ServedBackpressure": {
         "additionalProperties": false,
-        "description": "A provider hold as served: the banked reading with both clocks read at the response.",
+        "description": "A provider hold as served: the banked reading's clocks read at the response, never its epochs.",
         "properties": {
           "at_once": {
             "anyOf": [
@@ -16313,18 +16267,6 @@
             "description": "Seconds the provider has been throttling.",
             "title": "Held For S"
           },
-          "resumes_at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Epoch seconds the episode's cooldown ends; past it, one send probes.",
-            "title": "Resumes At"
-          },
           "resumes_in_s": {
             "anyOf": [
               {
@@ -16336,29 +16278,10 @@
             ],
             "description": "Seconds until the cooldown ends; 0 once it has, where one send probes.",
             "title": "Resumes In S"
-          },
-          "sender": {
-            "title": "Sender",
-            "type": "string"
-          },
-          "since": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Epoch seconds the provider began throttling; None once it answers again and only the cap, climbing back, still holds sends.",
-            "title": "Since"
           }
         },
         "required": [
-          "sender",
           "at_once",
-          "since",
-          "resumes_at",
           "detail",
           "held_for_s",
           "resumes_in_s"
@@ -16572,6 +16495,11 @@
             },
             "title": "Line",
             "type": "array"
+          },
+          "live": {
+            "description": "Whether a producer is appending to the cycle now; false on a replay at a moment (`at`). The one liveness: `active`, `walk` and `round_axis.live` follow it.",
+            "title": "Live",
+            "type": "boolean"
           },
           "lookahead": {
             "$ref": "#/components/schemas/SampleLookahead"
@@ -16809,6 +16737,7 @@
           "caps",
           "overshot",
           "fork_remainder",
+          "live",
           "active",
           "successor",
           "line",
@@ -17047,24 +16976,15 @@
       },
       "SetCouponPayload": {
         "additionalProperties": false,
-        "description": "Set an account's coupon face: dollars and tokens, `-` leaving a unit unbounded; `afresh` starts its draw now. Only the host may.",
+        "description": "Set an account's coupon face: dollars and tokens, `unbounded` leaving a unit unbounded; `afresh` starts its draw now. Only the host may.",
         "properties": {
           "afresh": {
             "default": false,
             "title": "Afresh",
             "type": "boolean"
           },
-          "tokens": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Tokens",
-            "type": "string"
-          },
-          "usd": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Usd",
-            "type": "string"
+          "budget": {
+            "$ref": "#/components/schemas/Budget"
           },
           "user_id": {
             "maxLength": 128,
@@ -17075,8 +16995,7 @@
         },
         "required": [
           "user_id",
-          "usd",
-          "tokens"
+          "budget"
         ],
         "title": "SetCouponPayload",
         "type": "object"
@@ -19658,12 +19577,6 @@
                 "type": "null"
               }
             ]
-          },
-          "warming_up": {
-            "const": true,
-            "default": true,
-            "title": "Warming Up",
-            "type": "boolean"
           }
         },
         "required": [

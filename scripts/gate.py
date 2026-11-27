@@ -99,7 +99,16 @@ class Selection:
         if changed:
             _, untracked = git("ls-files", "-o", "--exclude-standard")
             moved = [path for row in _name_status("HEAD") for path in row[1:]]
-            return cls(False, (), (), (*moved, *filter(None, untracked.split("\n"))))
+            fresh = [*filter(None, untracked.split("\n"))]
+            if not moved and not fresh:
+                # A clean tree changed nothing since HEAD, so a committed link is read against
+                # where its branch left `origin/main`.
+                _, base = git("merge-base", "HEAD", "origin/main")
+                print(
+                    f"gate --changed: tree clean, reading against merge-base {base.strip()[:9]} with origin/main"
+                )
+                moved = [path for row in _name_status(base.strip()) for path in row[1:]]
+            return cls(False, (), (), (*moved, *fresh))
         if not staged:
             return cls(False, (), ())
         rows = _name_status("--cached")
@@ -1964,7 +1973,12 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
             sel = dataclasses.replace(sel, narrowed=check.narrow(mine))
         rc, out = check.run(sel)
         narrowed = sel.narrowed is not None or sel.staged
-        if narrowed or (store is not None and check.key(store) != key):
+        # The world stands under the key the gate began on; a tree a generator edited since asks
+        # another, so what was built is for no tree anyone can name.
+        elsewhere = (
+            check.builds == (_WALK_WORLD,) and Path(_WALK_WORLD.format(key=key)) != sel.walk_world
+        )
+        if narrowed or elsewhere or (store is not None and check.key(store) != key):
             key = (
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
@@ -2391,8 +2405,9 @@ def _parser() -> argparse.ArgumentParser:
     scope.add_argument(
         "--changed",
         action="store_true",
-        help="while iterating: the checks that read a file changed since HEAD, and inside "
-        "vitest and eslint only what owns one",
+        help="while iterating: the checks that read a file changed since HEAD (on a clean tree, "
+        "since the merge-base with origin/main, named on stdout), and inside vitest and eslint "
+        "only what owns one",
     )
     parser.add_argument(
         "--only",

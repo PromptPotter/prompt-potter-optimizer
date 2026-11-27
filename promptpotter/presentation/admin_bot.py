@@ -35,6 +35,7 @@ from promptpotter.domain.command_kinds import (
     SetCouponPayload,
     UnblockEmailPayload,
 )
+from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.shared.errors import PayloadInvalidError
@@ -181,10 +182,14 @@ def _set_coupon(argument: str) -> str:
     parts = argument.split()
     if len(parts) not in (3, 4) or parts[3:] not in ([], ["afresh"]):
         return f"Usage: {_COUPON_USAGE}"
-    _file(
-        SetCouponPayload,
-        {"user_id": parts[0], "usd": parts[1], "tokens": parts[2], "afresh": len(parts) == 4},
-    )
+    try:
+        budget = {
+            "usd": UNBOUNDED if parts[1] == "-" else float(parts[1]),
+            "tokens": UNBOUNDED if parts[2] == "-" else int(parts[2]),
+        }
+    except ValueError:
+        return f"Usage: {_COUPON_USAGE}"
+    _file(SetCouponPayload, {"user_id": parts[0], "budget": budget, "afresh": len(parts) == 4})
     return f"Coupon for {parts[0]} set to {parts[1]} usd / {parts[2]} tokens."
 
 

@@ -229,7 +229,6 @@ class MeResponse(StrictModel):
 
     user_id: str
     tenant_id: str
-    issuer: str | None
     email: str | None
     name: str | None
     provider: str | None
@@ -255,7 +254,6 @@ def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeRes
     return MeResponse(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
-        issuer=str(identity.issuer) if identity.issuer else None,
         email=email,
         name=display_name(email),
         provider=provider,

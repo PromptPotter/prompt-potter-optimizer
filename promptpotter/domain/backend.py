@@ -18,9 +18,11 @@ class BackpressureReading(FrozenModel):
     detail: str = Field(description="The provider's own words, from the throttle that opened it.")
 
 
-class ServedBackpressure(BackpressureReading):
-    """A provider hold as served: the banked reading with both clocks read at the response."""
+class ServedBackpressure(FrozenModel):
+    """A provider hold as served: the banked reading's clocks read at the response, never its epochs."""
 
+    at_once: int | None = Field(description="Sends that may be out at once; None: uncapped.")
+    detail: str = Field(description="The provider's own words, from the throttle that opened it.")
     held_for_s: float | None = Field(description="Seconds the provider has been throttling.")
     resumes_in_s: float | None = Field(
         description="Seconds until the cooldown ends; 0 once it has, where one send probes."
@@ -29,7 +31,8 @@ class ServedBackpressure(BackpressureReading):
     @classmethod
     def at(cls, held: BackpressureReading, now: float) -> "ServedBackpressure":
         return cls(
-            **{name: getattr(held, name) for name in BackpressureReading.model_fields},
+            at_once=held.at_once,
+            detail=held.detail,
             held_for_s=None if held.since is None else max(0.0, now - held.since),
             resumes_in_s=None if held.resumes_at is None else max(0.0, held.resumes_at - now),
         )

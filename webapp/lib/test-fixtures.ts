@@ -613,6 +613,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     catch_up_log: [],
     current_round: currentRound(),
     observed: null,
+    live: false,
     walk: null,
     round_axis: { completed: [], live: null, position: null, unfiled: null },
     stop: null,

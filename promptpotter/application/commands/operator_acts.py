@@ -11,8 +11,6 @@ from promptpotter.domain.command_kinds import (
     SetCouponPayload,
     UnblockEmailPayload,
 )
-from promptpotter.domain.layer_fold import UNBOUNDED
-from promptpotter.domain.spend import Budget
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 
@@ -60,10 +58,8 @@ async def revoke_delegation(dispatched: Dispatched[RevokeDelegationPayload]) -> 
 async def set_coupon(dispatched: Dispatched[SetCouponPayload]) -> Applier[object]:
     _host_acts(dispatched)
     payload = dispatched.payload
-    usd, tokens = (UNBOUNDED if v == "-" else v for v in (payload.usd, payload.tokens))
-    face = PayloadInvalidError.validating(Budget, {"usd": usd, "tokens": tokens})
     return Applier.blocking(
         lambda: account.set_coupon(
-            default_projects_root(), payload.user_id, face, afresh=payload.afresh
+            default_projects_root(), payload.user_id, payload.budget, afresh=payload.afresh
         )
     )
