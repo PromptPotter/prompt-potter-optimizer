@@ -28,7 +28,7 @@ from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.store.command_log import Controls, PauseAsk
 from promptpotter.infrastructure.store.io import file_stat
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, scan_last
+from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, last, read_line
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import FileKind
 
@@ -177,7 +177,7 @@ def derive_run_state(
     holder = holder_of(jobs_dir, cycle_dir) if held else None
     hold = None if holder is None or holder.job is None else holder.job.job_id
     return read_run_state(
-        last=scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], RunPhaseRecord),
+        last=read_line([LedgerSpan(CycleLayout(cycle_dir).ledger)], last(RunPhaseRecord)),
         claimed=None if held else _claimed(cycle_dir, jobs_dir),
         asked=inbox.for_hold(hold).pause,
         cycle_held=held,

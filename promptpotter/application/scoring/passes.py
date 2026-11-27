@@ -74,11 +74,8 @@ from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_verify,
-    scan_ledger_walks,
-)
-from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import VERIFY_LEDGER, line_walks
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError, NextAct
@@ -221,7 +218,7 @@ def verify_reading(
 def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Scorer) -> VerifyReading:
     chain = stores.campaigns.chain(hop)
     # A pass is read before it is banked, so it joins the walks whether or not the ledger holds it.
-    walks = [*scan_ledger_walks(chain), banked.walk()]
+    walks = [*line_walks(chain), banked.walk()]
 
     def rows(cells: list[WalkedCell]) -> CellSheet:
         return walked_rows(stores, cells, scorer)
@@ -322,7 +319,12 @@ async def verify_candidate(
         budget = derive_verify_samples(
             round_cell_budget=round_cells,
             rounds_unverified=rounds_since_verified(
-                (banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
+                (
+                    banked.arm.round
+                    for banked, _ in read_line(
+                        [LedgerSpan(ledger_path)], VERIFY_LEDGER
+                    ).graded.values()
+                ),
                 round_num=round_num,
             ),
             unmeasured=len(unmeasured),
@@ -426,7 +428,10 @@ async def verify_on_saturation(
     if budget_stop(require_spend_book("the saturation verify")) is not None:
         return
     ledger_path = stores.campaigns.ledger(at.hop)
-    mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
+    mine = [
+        banked.arm.round
+        for banked, _ in read_line([LedgerSpan(ledger_path)], VERIFY_LEDGER).graded.values()
+    ]
     if mine and rounds_since_verified(mine, round_num=round_num) < _VERIFY_LIFT_CAP:
         return
     try:

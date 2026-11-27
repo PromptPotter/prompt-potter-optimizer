@@ -125,15 +125,15 @@ from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.said import GLYPH
 from promptpotter.domain.sample import sample_tag
 from promptpotter.infrastructure.projections.audit_trail import round_audits
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_spend,
-    scan_resolved_run,
-    scan_standing_rounds,
+    LEDGER_SPEND,
+    RESOLVED_RUN,
+    STANDING_ROUNDS,
 )
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import Projection, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import NotFoundError
@@ -262,9 +262,9 @@ class ReadoutProjection(Projection):
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
         if isinstance(act, InitClosed) and self._hop is not None:
             chain = self._campaigns.chain(self._hop)
-            standing = scan_standing_rounds(chain).rounds
+            standing = read_line(chain, STANDING_ROUNDS).rounds
             self._closed = {n: held.close for n, held in standing.items()}
-            if (resolved := scan_resolved_run(chain)).moved_panel is not None:
+            if (resolved := read_line(chain, RESOLVED_RUN)).moved_panel is not None:
                 self._write(
                     f"  {YELLOW}{GLYPH['warn']} a DIFFERENT panel than cycle "
                     f"{resolved.experiment_cycle_id} measured: its roster stands, and this run's "
@@ -311,7 +311,9 @@ class ReadoutProjection(Projection):
         scale, the optimizer's review and the hard samples."""
         hop, config = self._hop, self._res.config
         assert hop is not None, "a run stops on the readout it opened"
-        for line in render_spend_breakdown(scan_ledger_spend(self._campaigns.chain(hop)).spend):
+        for line in render_spend_breakdown(
+            read_line(self._campaigns.chain(hop), LEDGER_SPEND).spend
+        ):
             self._write(f"{DIM}{line}{RESET}")
         # A run stopped before its origin closed has no round and may have no scorer either.
         if not self._closed:

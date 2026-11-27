@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,10 +79,10 @@ from promptpotter.infrastructure.store.account_spend import (
     campaign_spend,
     unreported_under,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import LEDGER_SPEND
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.io import stamp_of
-from promptpotter.infrastructure.store.read_model import Moment
+from promptpotter.infrastructure.store.read_model import Moment, read_line
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
 
@@ -289,7 +289,7 @@ def cycle_entry(
         else limits.budget.rounds
     )
     spent = MeteredSpend.of(
-        scan_ledger_spend(stores.campaigns.chain(hop, moment=moment)).spend,
+        read_line(stores.campaigns.chain(hop, moment=moment), LEDGER_SPEND).spend,
         ceiling_meter(campaign.declaration.purpose),
     )
     mint: CycleMint = index.minted_as
@@ -531,19 +531,25 @@ def unstarted_entry(
     )
 
 
-def store_version(stores: Stores) -> tuple[object, ...]:
-    """The `store:` subject's version: the stamps its writers left (its campaigns and ledgers, and
-    the account's ruler, datasets, charges and archive it reads), and each producer it holds, whose
-    liveness and beat no write marks, and each definition its campaigns name, which no writer
-    stamps (`dataset_access.py::definition_version`)."""
+def store_version(
+    stores: Stores, campaign_ids: Collection[str] | None = None
+) -> tuple[object, ...]:
+    """The `store:` subject's version, or its *campaign_ids*' alone: the stamps its writers left
+    (its campaigns and ledgers, and the account's ruler, datasets, charges and archive it reads),
+    and each producer it holds, whose liveness and beat no write marks, and each definition its
+    campaigns name, which no writer stamps (`dataset_access.py::definition_version`)."""
     jobs = JobRegistry.attach(stores.jobs_dir)
     return (
-        *stores.stamps(),
-        *(definition_version(stores, name) for name in stores.campaigns.dataset_names()),
+        *stores.stamps(campaign_ids),
+        *(
+            definition_version(stores, name)
+            for name in stores.campaigns.dataset_names(campaign_ids)
+        ),
         *(
             (job.job_id, *producer_stamps(stores.campaigns.cycle_dir(job.hop), stores.jobs_dir))
             for job in jobs.list_holding_spend()
             if job.workspace == str(stores.base_dir)
+            and (campaign_ids is None or job.hop.campaign_id in campaign_ids)
         ),
     )
 
@@ -554,15 +560,18 @@ def account_version(stores: Stores) -> tuple[object, ...]:
     return (stamp_of(stores.account_state_dir), stamp_of(stores.account_drafts_dir))
 
 
-def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
+def entries_version(
+    held: Iterable[Stores], campaigns: Mapping[Path, frozenset[str]] | None = None
+) -> tuple[object, ...]:
     """Every subject an entry in *held* reads, at its version, and its reader's kinds (the acts it
-    is offered), so a client holding it is answered unread."""
+    is offered), so a client holding it is answered unread; *campaigns* names, per store, the
+    campaigns the entries read, so another campaign's write leaves it standing."""
     stores = {s.base_dir: s for s in held}.values()
     return (
         *{str(s.identity.user_id) for s in stores},
         # A grant or a token's scope moves no store, yet every offer the body serves.
         *{filable(s.identity) for s in stores},
-        *(store_version(s) for s in stores),
+        *(store_version(s, None if campaigns is None else campaigns[s.base_dir]) for s in stores),
         *{account_version(s) for s in stores},
         # A Start's stage moves no draft file: its own fact, read only where a draft could be held.
         *(sorted(draft_starts(s).items()) for s in stores if s.drafts.draft_ids()),

@@ -78,6 +78,8 @@ def _long_root(override: str | None) -> Path:
 INSTALL_CACHE_DIR = ".cache"
 # From the data root: `read_model.py::LedgerIndex`'s fold snapshots.
 LEDGER_FOLDS_DIR = f"{INSTALL_CACHE_DIR}/ledger-folds"
+# From the data root: `landing_key.py::landing_key`, filed by the code it was derived from.
+LANDING_KEYS_DIR = f"{INSTALL_CACHE_DIR}/landing-keys"
 
 # From the data root: names the newest terminal launch's `readout.log`.
 READOUT_POINTER = "logs/latest-readout-path.txt"

@@ -11,9 +11,10 @@ from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.run_scope import UNBOUND, run_scope
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import PRICED_KEYS
 from promptpotter.infrastructure.store.io import write_lock
 from promptpotter.infrastructure.store.layout import CampaignLayout, cycle_ledgers
+from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 
 
 def bound_ledger(what: str) -> CycleEventLog | None:
@@ -156,7 +157,9 @@ def token_usage_record(
 
 def campaign_priced(key: str) -> bool:
     campaign = run_scope().priced
-    return campaign is not None and key in scan_ledger_priced_keys(cycle_ledgers(campaign))
+    return campaign is not None and key in read_line(
+        (LedgerSpan(p) for p in cycle_ledgers(campaign)), PRICED_KEYS
+    )
 
 
 def claim_campaign_price(key: str) -> bool:
@@ -167,7 +170,7 @@ def claim_campaign_price(key: str) -> bool:
     if campaign is None:
         return True
     with write_lock(CampaignLayout(campaign).manifest):
-        if key in scan_ledger_priced_keys(cycle_ledgers(campaign)):
+        if key in read_line((LedgerSpan(p) for p in cycle_ledgers(campaign)), PRICED_KEYS):
             return False
         append_record(PricedKeyRecord(priced_key=key))
     return True

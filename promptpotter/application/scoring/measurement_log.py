@@ -69,17 +69,14 @@ from promptpotter.infrastructure.store.archive_queries import (
     list_populations,
     load_population,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_walks,
-    scan_standing_rounds,
-)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import STANDING_ROUNDS, line_walks
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     definition_version,
     resolve_dataset,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import Moment, derived
+from promptpotter.infrastructure.store.read_model import Moment, derived, read_line
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope
@@ -469,8 +466,8 @@ def _cycle_cells(
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
     chain = stores.campaigns.chain(hop, moment=moment)
-    walks = scan_ledger_walks(chain)
-    standing = scan_standing_rounds(chain)
+    walks = line_walks(chain)
+    standing = read_line(chain, STANDING_ROUNDS)
     elected = max(standing.elections, default=None)
     ended_on = None if elected is None else standing.elections[elected].ended_on
     candidates: dict[str, CellCandidate] = {}

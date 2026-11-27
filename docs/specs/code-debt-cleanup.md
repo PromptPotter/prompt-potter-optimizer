@@ -94,20 +94,18 @@ A line's fold is stated once and read by one keyed read `(hop, scope, fold)`. Su
 else is wiped at a landing. The store holds no money rule and no served shape.
 
 **Unexamined:** `store/campaign_store/store.py`, `store/stores.py`, `store/layout.py`,
-`maintenance/archive_maintenance.py`, `maintenance/built_key.py`, `store/io.py`, `store/data_root.py`
+`maintenance/archive_maintenance.py`, `maintenance/landing_key.py`, `store/io.py`, `store/data_root.py`
 
-- **The feed's version spans a whole store**: the writers stamp one version per subject
-  (`io.py::stamp`), but a store is the finest subject: a campaign subtree's version
-  (`hierarchy_subtree.py::subtree_version`) and every evidence and cells view read their store's
-  stamps (`Stores.stamps`), so any run's append or archive write re-asks every mounted tree and view;
-  the feed's tick still lists each store's cycle hops to find its sandboxes
-  (`cycle_reads.py::_store_stats`), and a `store:`-subject read re-runs `feed_versions` over all
-  stores (`presentation/api/routers/reads.py::_endpoint`); `reads.ts::draftRead` follows bare
-  `store:` beside `account`, since Start's refusal reads the wallet every ledger's bill moves, so an
-  inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is one lock over every account's
-  walk. Action: a campaign is a subject its writers stamp, and a sandbox is found off its owner's
-  stamp, never a walk. **Rides with:** a version chain of its own. **Re-test:** a mounted subtree
-  holds its ETag while another campaign of its store appends; `draftRead`'s subject is not `store:`.
+- **The feed's version spans a whole store**: a campaign is a subject its writers stamp
+  (`io.py::stamp`), and a subtree reads its family's campaigns alone (`Stores.stamps`), but every
+  evidence and cells view still reads its store's whole stamp; the feed's tick lists each store's cycle
+  hops to find its sandboxes (`cycle_reads.py::_store_stats`), and a `store:`-subject read re-runs
+  `feed_versions` over all stores (`presentation/api/routers/reads.py::_endpoint`);
+  `reads.ts::draftRead` follows bare `store:` beside `account`, since Start's refusal reads the wallet
+  every ledger's bill moves, so an inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is
+  one lock over every account's walk. Action: a view keys on its campaign's stamp, and a sandbox is
+  found off its owner's stamp, never a walk. **Rides with:** a version chain of its own.
+  **Re-test:** `draftRead`'s subject is not `store:`.
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
@@ -133,20 +131,15 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **A line's fold is stated once and read by one keyed read**: `infrastructure/store/campaign_store/ledger_scan.py`
-  holds 21 `scan_` functions; `for span in spans` is spelled 17/7; `scan_cell_formula` hand-merges the
-  fold `scan_cycle_facts` reads on one ledger. Which ledgers answer for a hop (its cycle, its line,
-  its campaign) is decided at each reader. Root: one read `(hop, scope, fold)`, the fold stating how its
-  values compose. Sits under the launch-steer row and the sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:**
-  `git grep -c "for span in spans" -- promptpotter` falls from 16.
+- **Which ledgers answer for a hop is decided at each reader**: a fold over a line is one
+  `read_model.py::read_line` of a `Line`, but its spans are built at each caller (`CampaignStore.chain`,
+  `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
+  fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
+  sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
 - **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
-  `_Money`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
+  `MoneyFold`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
   its own beside the spend book. **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:**
   `git grep -n "^class Spent\|^def money_on" -- promptpotter/infrastructure/store/read_model.py` is empty.
-- **A protocol with one implementation**: `read_model.py:409 Projected` exists so the index need not import
-  `infrastructure/projections/base.py::Projection`, its only implementer. Root: the index takes `Projection`
-  or the protocol moves to `base.py`. **Rides with:** the money-fold row above.
-  **Re-test:** `git grep -n "class Projected" -- promptpotter` is empty.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -158,43 +151,26 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   run folder stays indented; only `dashboard.json`, which nothing reads back, is a candidate for compact. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
-- **A landing key re-derives per call** (tw-v, tw-v2): `shared/import_walk.py::import_closure`
-  normalizes each module from its own parse (`hashing.py::normalized_tree`), beside
-  `hashing.py::normalized_module`'s memo. That costs 2.16 s for the 329-module closure. On top,
-  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over 90 kinds (0.6–0.85 s), and a
-  memo keyed by the model class is keyed by identity. tw-v2's fix (`arc/tw-v2` 604b03eb2) was not
-  taken: +47 production lines, because a text-keyed memo held 10.5 MB, so it went sha-keyed and
-  zlib-compressed, to save ~2 s on one fact. **Rides with:** after wave 6. **Re-test:** a second
-  `scripts/build_ts_types.py::derived_landing_key()` in one process takes under 0.2 s, with
-  production no larger.
-- **A cell file's version keys on (mtime, size)** (w8-store2, 11-27; items 32, 35):
-  `promptpotter/infrastructure/store/measurement_archive.py::_CellFile.refresh` — it and
-  `_live_rows` key on `(st_mtime_ns, st_size)`, so a same-size rewrite within one tick goes
-  unseen — a per-file version only a writer moves (the stamp's channel) — **Rides with:**
-  `area 02's chain` — **Re-test:** `git grep -n "st_mtime_ns, st_size" -- promptpotter/infrastructure/store/measurement_archive.py` is empty.
+- **A landing key's first derivation costs ~2.3 s per code version** (tw-v, tw-v2): it is derived
+  once per process and filed by the package's bytes in the data root (`landing_key.py::landing_key`),
+  but `shared/import_walk.py::import_closure` normalizes each module from its own parse
+  (`hashing.py::normalized_tree`), beside `hashing.py::normalized_module`'s memo, and
+  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over every kind, so the first
+  entry after a code edit, and a child in a fresh data root, pays it. tw-v2's memo (`arc/tw-v2`
+  604b03eb2) was not taken: +47 production lines. **Rides with:** after wave 6. **Re-test:**
+  `landing_key.py::derived_landing_key()` takes under 0.5 s cold, with production no larger.
 - **The landing key over-keys by module** (bkeys-4, 11-19; items 451, 456, 462):
-  `scripts/build_ts_types.py::loading_modules` — keys the whole import closure of every reader,
+  `promptpotter/application/maintenance/landing_key.py::loading_modules` — keys the whole import closure of every reader,
   so a prose-free edit to any module a load could import re-lands every root, a cost not a
   wipe — key the functions a load calls, not their modules — **Rides with:**
   `area 02's chain` — **Re-test:** an edit to an unreached function in
   `promptpotter/domain/paired_reading.py` leaves `derived_landing_key()` unchanged.
-- **A sandbox delete names its owner twice** (spend-tomb, 11-25):
-  `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.delete_inner_sandbox`
-  — it takes `owner=` while `delete_campaign` and `reaper.py::reclaim_orphan_sandboxes` each
-  read `read_sandbox_owner` first — it reads its own owner file — **Rides with:**
-  `area 02's chain` — **Re-test:** one `read_sandbox_owner` per sandbox delete.
 - **A replay feed spells the prefix-chain keys beside `file_keys`** (store-5a, 11-19):
   `promptpotter/infrastructure/store/measurement_archive.py::ReplayFeed.__init__` — builds
   `config_key(node_configs[:n])` per prefix, beside `file_keys(entry)` and without its
   `entry.config_key` fallback — the file-key chain is a function of `node_configs` alone, one
   spelling — **Rides with:** `area 02's chain` — **Re-test:**
   `git grep -c "config_key(.*\[:n\])" -- promptpotter/infrastructure/store/measurement_archive.py` is 1.
-- **`last_landing` reads an unreadable stamp as none** (land-order, 11-18):
-  `promptpotter/application/maintenance/landing.py::last_landing` — a `ValidationError` returns
-  `None`, so older code reading a reshaped `LandedStamp` lands again and bypasses the
-  newer-version refusal — the stamp's version is read apart from its strict model —
-  **Rides with:** `area 02's chain` — **Re-test:** a stamp with an unknown field still yields its
-  `version`.
 - **`list_campaigns` drops an unreadable manifest into a log** (hubs-2, 11-18):
   `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.list_campaigns` —
   `logger.warning` then `continue`: the account holds a campaign no surface reports — the
@@ -205,18 +181,25 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   is a shallow merge beside `merge_node_blocks` — `source` folds through `fold_layers` —
   **Rides with:** `area 02's chain` — **Re-test:**
   `git grep -c "source |=" -- promptpotter/infrastructure/store/dataset_access.py` is 0.
-- **The capability override's fate is RUN, though it is authored** (lite, 11-14):
-  `promptpotter/infrastructure/store/data_root.py::KINDS` — row "model capability override" is
-  `_RUN` (the landing drops what no model types) while its reader refuses a bad file as
-  operator config (`FileKind.STORED_CONFIG`) — decide whether an authored workspace file is a
-  SURVIVOR (migrated) or RUN — **Rides with:** `area 02's chain` — **Re-test:** the row's
-  `Fate`.
 - **An authored dataset definition has no writer** (w7-ver, 11-27):
   `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — an install or
   research definition edit moves no stamp (those tiers sit off the data root's subjects), so reads
   that depend on it stand until the store's next write or a restart — the definition loader stamps
   its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
   cells ETag moves.
+- **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
+  `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
+  index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
+  ledger's `MoneyFold` meters in a loop of its own — each is a `read_model.py::Line` over its fold —
+  **Rides with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def (fold_cycle_index|_ledger_meters)" -- promptpotter/infrastructure/store/campaign_store/store.py` is 0.
+- **The `Stores` hub holds a cycle's stop machine and the definition writer** (w11-store, 11-28):
+  `promptpotter/infrastructure/store/stores.py::Stores.declare_ended` (with `declare_stop`,
+  `mark_superseded`, `mark_producer_vanished`) runs the producer-lock ending on the hub every
+  bench import reaches, and `Stores.write_own_definition` is the dataset tier's writer — the
+  ending belongs to the campaign store's append door, the writer to the dataset store — **Rides
+  with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def (declare_ended|write_own_definition)" -- promptpotter/infrastructure/store/stores.py` is 0.
 
 ## 03 · Runner, round, bench
 
@@ -297,6 +280,11 @@ read standing rounds off the ledger.
   **Rides with:** `area 03's chain` — **Re-test:** `git grep -n "to_thread, resume_with_divergence_check" --
   promptpotter/application/runner/run_init.py` is empty. (item 79)
 
+- **A line's spent rounds are spelled at three sites** (w11-store, 11-28):
+  `promptpotter/application/runner/bench.py::line_round_budget`, `runner/entry.py` and
+  `runner/inner/spawn.py` each sum or flatten `LineSpan.own` over a line — one function of the
+  line's spans — **Rides with:** `area 03's chain` — **Re-test:**
+  `git grep -c "span.own" -- promptpotter` is 1.
 ## 04 · Scoring, fitness, statistics
 
 **Target:** One scoring gateway (`search_point_scorer.py`); a cell is a fact, never a grade; fitness is
@@ -433,7 +421,7 @@ bill.
   **Re-test:** `factories.spend_book` takes no `enclosing`; `InstrumentMode` carries no `depth`; the
   nested-replay fact calls the production nesting.
 - **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**:
-  `hierarchy.py:302-308` builds the cycle row from `scan_ledger_spend` and passes `None` as
+  `hierarchy.py:302-308` builds the cycle row from `ledger_scan.py::LEDGER_SPEND` and passes `None` as
   unreported (`_spend_row("spend", …, None)`). A send a pause cuts is already filed at the cut as a
   `Lapse` (`spend_book.py::admitted`), but on the charge book, and for a nested run under the ROOT's
   ledger (`Admission`: `held_on((root.ledger or ledger).path)`), so neither the inner row nor the
@@ -1281,13 +1269,6 @@ budgets.
 - **`gate.py --changed` proves nothing for a committed link** (w7-ver2, HO1063): on a clean tree it runs 0
   checks, and its `specs` go red when their generator rewrites. **Rides with:** area 14's chain.
   **Re-test:** `--changed` after a commit checks that commit's files, and a regenerated spec reads green.
-- **walk-world reads the built key absent while ts-types rewrites it** (w7-open): a gate's walk-world fails
-  with `FileNotFoundError` on `application/maintenance/built_key.py` when ts-types regenerates it
-  mid-gate. The key stays committed: computed where read, it would cost every process start ~2.8 s
-  (`landing.py::_landed` reads it at entry; the closure 2.16 s, `row_schema` 0.6–0.85 s), and the other
-  generated files conflict at a merge the same way (orchestrator, 2026-11-27, withdrawing map D-0).
-  Root: a generated file is replaced whole, never absent between two writes. **Rides with:** area 14's
-  chain. **Re-test:** a gate whose ts-types rewrites the key beside walk-world reads it present.
 - **The trace's canonical labels move on a resume into the end pass** (w8-tests3): `offline_run.py::decided`
   reads C0 as `parent@R1` there. **Rides with:** area 14's chain. **Re-test:** a resumed leg's labels
   match its straight twin's.
@@ -1299,11 +1280,6 @@ budgets.
   `gate.py::_branch_base` already names it for `--changed` — **Rides with:** `area 14's chain` —
   **Re-test:** `python scripts/gate.py --only surface-ledger` on a branch off an unlanded
   `release/next` reads green when the chain raised nothing.
-- **The gate stages the landing key in two places** (w8-gate, 11-27): `scripts/gate.py::_ts_types`
-  and `scripts/gate.py::_proven_in` both `git add` the landing key, one in the index's own tree and
-  one copying back from its checkout, following `--staged`'s two modes — one mode, one stage —
-  **Rides with:** `area 14's chain` — **Re-test:** `git grep -c "_LANDING_KEY" -- scripts/gate.py`
-  names one `git add`.
 - **The offline world reports no cached_tokens** (usage-2, 11-19): `scripts/offline_world.py::USAGE`
   — `prompt_tokens_details` holds only `cache_write_tokens`, so every offline prefix reads
   "unreported" where OpenRouter reports a cold 0 — the world's usage carries `cached_tokens` as the

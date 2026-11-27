@@ -41,10 +41,10 @@ from promptpotter.domain.scoring import (
     anchored_criterion_dials,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    STANDING_ROUNDS,
     StandingRounds,
-    scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
@@ -93,7 +93,9 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
         if not (rounds := closed_rounds(stores, hop, scorer, moment=None)):
             continue
         # The cycle's OWN closes: a fork's lifted rounds are its parent's simulations.
-        own = frozenset(scan_standing_rounds([LedgerSpan(stores.campaigns.ledger(hop))]).rounds)
+        own = frozenset(
+            read_line([LedgerSpan(stores.campaigns.ledger(hop))], STANDING_ROUNDS).rounds
+        )
         edges.append((hop.cycle_id, index, own))
         lines.append(rounds)
     cycles: list[SpineCycle] = []

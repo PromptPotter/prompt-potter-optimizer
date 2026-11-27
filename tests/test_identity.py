@@ -362,14 +362,13 @@ from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.producer_lock import cycle_held
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     fold_at,
 )
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import RESOLVED_RUN
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -398,7 +397,13 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    Projection,
+    derived,
+    file_sig,
+    read_line,
+)
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
 from promptpotter.presentation.cli import main as cli_main
@@ -2553,7 +2558,7 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    read = scan_resolved_run(stores.campaigns.chain(root.hop)).read
+    read = read_line(stores.campaigns.chain(root.hop), RESOLVED_RUN).read
     assert read is not None
     recorded = read.knob_layers["l1_generate"]
     sources = {
@@ -3244,7 +3249,7 @@ def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(
         campaigns.write_resolved_run(
             hop, opened.pipeline_read, experiment=panel, model_capabilities={}
         )
-        resolved = scan_resolved_run(campaigns.chain(hop))
+        resolved = read_line(campaigns.chain(hop), RESOLVED_RUN)
         assert resolved.experiment == measured.model_dump(mode="json"), (
             "a later launch's roster displaced the one every round measured"
         )

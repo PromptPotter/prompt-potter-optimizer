@@ -122,14 +122,23 @@ def _from_root(path: Path | str) -> tuple[str, str] | None:
 
 
 def stamp(path: Path | str) -> None:
-    """THE stamp of a write at *path*; a root gone with its tree stamps nothing, never re-made."""
-    if (placed := _from_root(path)) is None or not (subject := _SUBJECT.match(placed[1])):
+    """THE stamp of a write at *path*; a root gone with its tree stamps nothing, never re-made. A
+    campaign is a subject of its own, and its writes stamp its workspace's `campaigns/` beside it,
+    so a store's version still stats one file per subject."""
+    if (placed := _from_root(path)) is None:
         return
-    root = os.path.join(placed[0], subject[0])
-    with _gone_with_root(), _appended(os.path.join(root, STAMP_FILE)) as f:
-        f.write(b".")
-        if f.tell() >= _STAMP_COMPACTS_AT:
-            _compact_stamp(root)
+    if campaign := _CAMPAIGN.match(placed[1]):
+        subjects = [campaign[0], campaign[0].rpartition("/")[0]]
+    elif subject := _SUBJECT.match(placed[1]):
+        subjects = [subject[0]]
+    else:
+        return
+    for subject_root in subjects:
+        root = os.path.join(placed[0], subject_root)
+        with _gone_with_root(), _appended(os.path.join(root, STAMP_FILE)) as f:
+            f.write(b".")
+            if f.tell() >= _STAMP_COMPACTS_AT:
+                _compact_stamp(root)
 
 
 # The stamp truncates at this length, its epoch one byte longer before and after (odd between), so
@@ -334,6 +343,9 @@ _SUBJECT = re.compile(
     rf"(?:{PROJECTS_DIR}/[^/]+(?:/(?:{re.escape(WORKSPACE_STATE_DIR)}|{DRAFTS_DIR}))?"
     rf"|{re.escape(INNER_SANDBOXES_DIR)}/[^/]+/[^/]+|{re.escape(ARCHIVE_HOMES_DIR)}/[^/]+"
     rf"|{JOBS_DIR})(?=/|$)"
+)
+_CAMPAIGN = re.compile(
+    rf"(?:{PROJECTS_DIR}/[^/]+|{re.escape(INNER_SANDBOXES_DIR)}/[^/]+/[^/]+)/{CAMPAIGNS_DIR}/[^/]+(?=/|$)"
 )
 # What a delete removes, by its PLACE from the data root (`paths.py::user_data_root`, the one source),
 # never a segment's name: a campaign, a cycle (`cleanup-empty-cycles` keeps its campaign), a draft.

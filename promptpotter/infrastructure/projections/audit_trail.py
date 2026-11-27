@@ -20,11 +20,16 @@ from promptpotter.domain.round_audit import (
     RoundAudit,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_cycle_facts,
-    scan_standing_rounds,
+    STANDING_ROUNDS,
+    CycleFactsFold,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, RecordClasses
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    RecordClasses,
+    read_line,
+)
 
 type _Record = (
     LLMCallRecord | RoundClosedRecord | RoundEnteredRecord | RoundWarningRecord | RunPhaseRecord
@@ -137,8 +142,8 @@ def _ran_by(cycle_dir: Path, round_num: int) -> Path:
     """The ledger of the cycle that RAN *round_num*: a fork's rounds below its cut are its parent's."""
     while True:
         ledger = CycleLayout(cycle_dir).ledger
-        minted = scan_cycle_facts(ledger).minted
-        entered = scan_standing_rounds([LedgerSpan(ledger)]).entered
+        minted = LedgerIndex.of(ledger).view(CycleFactsFold).minted
+        entered = read_line([LedgerSpan(ledger)], STANDING_ROUNDS).entered
         parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
         if parent is None or (entered is not None and round_num >= entered):
             return ledger

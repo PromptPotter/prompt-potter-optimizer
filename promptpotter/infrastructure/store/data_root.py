@@ -21,6 +21,7 @@ from promptpotter.config.paths import (
     JOBS_DIR,
     JUDGE_REUSE_DIR,
     LANDING_FILE,
+    LANDING_KEYS_DIR,
     LEDGER_FOLDS_DIR,
     LIVE_JOBS_INDEX,
     MACHINE_DIR,
@@ -314,6 +315,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
     Kind("ledger fold snapshot", _INSTALL, f"{LEDGER_FOLDS_DIR}/*.pickle", Fate.CACHE, _PICKLED),
+    Kind("landing key", _INSTALL, f"{LANDING_KEYS_DIR}/*", Fate.CACHE, Opaque("a derived key")),
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("live-jobs index", _INSTALL, f"{JOBS_DIR}/{LIVE_JOBS_INDEX}", _SURVIVOR, LIVE_JOB_IDS),

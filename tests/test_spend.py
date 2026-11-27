@@ -296,7 +296,6 @@ from promptpotter.infrastructure.llm.wallet import (
     sends_draw_coupon,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.run_scope import (
     InnerSpawnContext,
     rescope,
@@ -314,9 +313,9 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_spend,
-    scan_ledger_spend_by_round,
-    scan_standing_rounds,
+    LEDGER_SPEND,
+    SPEND_BY_ROUND,
+    STANDING_ROUNDS,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import (
@@ -337,8 +336,10 @@ from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
+    Projection,
+    last,
     money_on,
-    scan_last,
+    read_line,
 )
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
@@ -942,7 +943,7 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
             skips.append(ArmRecord(round=2, arm=ArmKey(cid), state=arm_state(cid, cut=cut)))
 
     def standing_skips() -> dict[tuple[int, ArmKey], int]:
-        return scan_standing_rounds([LedgerSpan(skips.path)]).skipped
+        return read_line([LedgerSpan(skips.path)], STANDING_ROUNDS).skipped
 
     assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a superseded skip replayed"
     skips.append(RoundEnteredRecord(round=2))
@@ -1104,8 +1105,8 @@ def _seed(log: CycleEventLog, model: str) -> None:
 
 
 def _tailed(log: CycleEventLog) -> tuple[float, int, CycleStart | None]:
-    spend, calls, _worked_s = scan_ledger_spend([LedgerSpan(log.path)])
-    seeded = scan_last([LedgerSpan(log.path)], CycleMintedRecord)
+    spend, calls, _worked_s = read_line([LedgerSpan(log.path)], LEDGER_SPEND)
+    seeded = read_line([LedgerSpan(log.path)], last(CycleMintedRecord))
     return spend.total_used_usd, calls, None if seeded is None else seeded.start
 
 
@@ -1135,7 +1136,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_then_compacted(
     assert _tailed(index) == _cold(index) and _cold(index)[1] == 3 + 2, (
         "the index missed rows appended past its tail"
     )
-    by_round = scan_ledger_spend_by_round([LedgerSpan(index.path)])
+    by_round = read_line([LedgerSpan(index.path)], SPEND_BY_ROUND)
     assert {r: spent.total_used_usd for r, spent in by_round.items()} == {0: 3.0, 2: 2.0}, (
         "the per-round split is the same bill: a call that carries no round banks at the origin's"
     )
@@ -2528,7 +2529,7 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
     assert [r.price.kind for r in _token_bills(benched)] == ["optimizer"], (
         "an inner run filed its own call as the bench pass that spawned it"
     )
-    by_kind = scan_ledger_spend([LedgerSpan(root.path)]).spend.by_kind
+    by_kind = read_line([LedgerSpan(root.path)], LEDGER_SPEND).spend.by_kind
     assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
         "a nested run a bench pass spawned was metered as the search's spend"
     )

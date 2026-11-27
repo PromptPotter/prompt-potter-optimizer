@@ -53,7 +53,8 @@ from promptpotter.infrastructure.llm.pricing import refresh_rates
 from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import rescope, run_scope
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import CycleFactsFold
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -145,7 +146,9 @@ async def open_launch(
         origin=seat_campaign_origin(session, dataset, campaign_config, cycle=cycle),
         campaign_config=campaign_config,
         dataset=dataset,
-        resumed_ending=scan_cycle_facts(campaigns.ledger(session.hop)).resumed_ending,
+        resumed_ending=LedgerIndex.of(campaigns.ledger(session.hop))
+        .view(CycleFactsFold)
+        .resumed_ending,
         optimizer=optimizer,
     )
 

@@ -406,9 +406,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 )
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_walks,
-)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import line_walks
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -3853,7 +3851,7 @@ def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds
                 strict=True,
             ),
         )
-        return scan_ledger_walks(built_stores.campaigns.chain(cycle_hop))
+        return line_walks(built_stores.campaigns.chain(cycle_hop))
 
     first = filed_cycle("cycle_a", dict(enumerate(asks_one_thing)))
     assert len(individual_cells(first, "c0", RoleScope.REPORT)) == 2, "one query, two cells"

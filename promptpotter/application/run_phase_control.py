@@ -26,12 +26,13 @@ from promptpotter.infrastructure.producer_lock import (
     release_cycle,
     release_pass,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_bench_open
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import BenchOpenFold
 from promptpotter.infrastructure.store.command_log import (
     CommandLog,
     Controls,
     PauseAsk,
 )
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -93,7 +94,7 @@ class FlightGauge:
 
 def close_dead_bench(stores: Stores, hop: CycleHop) -> None:
     """Every holder calls it as it takes the cycle: a bench bracket still open is a dead one's."""
-    if scan_bench_open(stores.campaigns.ledger(hop)):
+    if LedgerIndex.of(stores.campaigns.ledger(hop)).view(BenchOpenFold):
         stores.campaigns.append(hop, PhaseRecord(phase=CampaignPhase.BENCH, step="exit"))
 
 

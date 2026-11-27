@@ -47,18 +47,14 @@ def workspace_trees(root: pathlib.Path) -> list[pathlib.Path]:
     return trees
 
 
-def iter_cycle_ledgers(root: pathlib.Path) -> list[pathlib.Path]:
-    return [
-        p for tree in workspace_trees(root) for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))
-    ]
-
-
 def archive_writers(root: pathlib.Path) -> list[str]:
     """Each cycle whose holder can still append to the shared archive (`holders.py::holder_of`),
     named with its holder."""
     jobs = jobs_dir(root)
     named: list[str] = []
-    for ledger_path in iter_cycle_ledgers(root):
+    for ledger_path in (
+        p for t in workspace_trees(root) for p in t.glob("**/.runtime/ledger.jsonl")
+    ):
         cycle_dir = ledger_path.parent.parent
         if (holder := holder_of(jobs, cycle_dir)) is not None:
             who = "its run" if holder.job is None else f"{holder.job.what} ({holder.job.job_id})"

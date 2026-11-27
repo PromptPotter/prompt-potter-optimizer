@@ -12,11 +12,11 @@ from promptpotter.domain.origin_panel import line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_bench_readings,
-    scan_ledger_verify,
-    scan_standing_rounds,
+    BENCH_READINGS,
+    STANDING_ROUNDS,
+    VERIFY_LEDGER,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, read_line
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -161,7 +161,7 @@ def read_cycle(
 ) -> CycleRoundsRead:
     """One cycle's own record: its arms in round and position order, read, and each round's election."""
     spans = _cycle_spans(stores, hop, index, moment=moment)
-    standing = scan_standing_rounds(spans)
+    standing = read_line(spans, STANDING_ROUNDS)
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
     line = line_by_individual(
         next((c.origin_panel.reading for c in closes if overlap_line(c.origin_panel.reading)), None)
@@ -172,10 +172,12 @@ def read_cycle(
         if moment is not None
         else {
             key: read
-            for key, (_, read) in scan_ledger_verify(stores.campaigns.ledger(hop)).graded.items()
+            for key, (_, read) in read_line(
+                [LedgerSpan(stores.campaigns.ledger(hop))], VERIFY_LEDGER
+            ).graded.items()
         }
     )
-    bench = scan_bench_readings(spans)
+    bench = read_line(spans, BENCH_READINGS)
 
     def election_of(rnd: int) -> Election | None:
         if (election := standing.elections.get(rnd)) is not None:

@@ -19,7 +19,7 @@ from promptpotter import connectors
 from promptpotter.application import health, optimizers
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.maintenance.built_key import LANDING_KEY
+from promptpotter.application.maintenance.landing_key import landing_key
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import (
     ResetPlan,
@@ -531,7 +531,7 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
         rows=tuple(rows), runs=tuple(runs), torn=tuple(torn), kept=tuple(kept)
     )
     stamp = LandedStamp(
-        key=None if kept else LANDING_KEY, version=APP_VERSION, at=utcnow_iso(), said=applied.said
+        key=None if kept else landing_key(), version=APP_VERSION, at=utcnow_iso(), said=applied.said
     )
     write_text(_stamp(projects_root), stamp.model_dump_json())
     return applied
@@ -580,7 +580,7 @@ def holding_landing(projects_root: Path) -> Iterator[None]:
 
 
 def _landed(projects_root: Path) -> bool:
-    return (stamp := last_landing(projects_root)) is not None and stamp.key == LANDING_KEY
+    return (stamp := last_landing(projects_root)) is not None and stamp.key == landing_key()
 
 
 def land_at_entry(*, every_treatment: bool) -> None:

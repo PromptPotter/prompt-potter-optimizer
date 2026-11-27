@@ -37,6 +37,12 @@ from pathlib import Path
 from statistics import fmean
 from typing import TYPE_CHECKING, Any, NoReturn, get_args
 
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    STANDING_ROUNDS,
+    WALKED_ANSWERS,
+)
+from promptpotter.infrastructure.store.read_model import read_line
+
 # Its own tree, never the venv's editable one: a child's cwd is its workspace, so a relative
 # PYTHONPATH falls through to whichever tree installed the venv.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -163,10 +169,6 @@ from promptpotter.infrastructure.store.archive_queries import (
     CampaignWalks,
     list_populations,
     load_population,
-)
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_answers,
-    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.campaign_store.store import fold_cycle_index
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
@@ -1607,7 +1609,7 @@ async def run_controlled(
         return CampaignWalks(stores.campaigns, campaign_id)
 
     def filed(campaign_id: str) -> frozenset[str]:
-        return scan_ledger_answers(walks(campaign_id).spans())
+        return read_line(walks(campaign_id).spans(), WALKED_ANSWERS)
 
     bank = stores.tenant_datasets.labelled(DATASET)
     assert bank is not None, "every arm ran on the labelled bank"
@@ -2803,7 +2805,7 @@ def skipped_leg(name: str, home: Path, straight: Future[int], twin: Future[int])
         print(f"{name}: a skip and its resumed twin: FAILED (exit {rcs}) -- {legs[0] / 'run.log'}")
         return False
     complete_registries()
-    skips = [scan_standing_rounds([LedgerSpan(leg_ledger_path(leg))]).skipped for leg in legs]
+    skips = [read_line([LedgerSpan(leg_ledger_path(leg))], STANDING_ROUNDS).skipped for leg in legs]
     cells = [
         (BehaviourTrace.read(leg).decisions["harness"]["backend_cells"], *bought(leg))
         for leg in legs

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -20,7 +21,7 @@ from promptpotter.domain.records.run_records import CycleSupersededRecord, RunPh
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.run_state import derive_run_state
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import CycleFactsFold
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls
 from promptpotter.infrastructure.store.dataset_access import (
@@ -44,12 +45,15 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
+    campaign_root_dir_for,
+    campaigns_root_dir_for,
     drafts_root_dir_for,
     inner_sandbox_dir,
     tenant_workspace,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import UserStore
@@ -105,10 +109,16 @@ class Stores:
     def account_drafts_dir(self) -> Path:
         return drafts_root_dir_for(self.account_dir)
 
-    def stamps(self) -> tuple[object, ...]:
-        """What this store's writers stamped: its campaigns and ledgers, and the account's ruler,
-        datasets and charges and the archive home it reads (`io.py::stamp`); never a walk."""
-        roots = dict.fromkeys((self.base_dir, self.account_dir, self.archive_home.root))
+    def stamps(self, campaign_ids: Iterable[str] | None = None) -> tuple[object, ...]:
+        """What this store's writers stamped: its campaigns and ledgers (*campaign_ids*' alone where
+        named), and the account's ruler, datasets and charges and the archive home it reads
+        (`io.py::stamp`); never a walk."""
+        campaigns = (
+            [campaigns_root_dir_for(self.base_dir)]
+            if campaign_ids is None
+            else [campaign_root_dir_for(self.base_dir, c) for c in sorted(set(campaign_ids))]
+        )
+        roots = dict.fromkeys((*campaigns, self.base_dir, self.account_dir, self.archive_home.root))
         return tuple(stamp_of(root) for root in roots)
 
     @property
@@ -160,7 +170,7 @@ class Stores:
         lock = layout.producer_lock
 
         def ends(*, own_hold: bool) -> bool:
-            facts = scan_cycle_facts(layout.ledger)
+            facts = LedgerIndex.of(layout.ledger).view(CycleFactsFold)
             if facts.minted is None or facts.ended is not None:
                 return False
             if reason is not StopReason.PRODUCER_VANISHED:

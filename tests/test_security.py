@@ -2680,7 +2680,7 @@ def test_a_write_moves_the_version_of_the_subject_at_its_place_never_one_named_l
         (ws / ".workspace" / "events.jsonl", ws / ".workspace"),
         (ws / "drafts" / "d1" / "ledger.jsonl", ws / "drafts"),
         (home / ".archives" / "shared" / "measurements" / "a.json", home / ".archives" / "shared"),
-        (sandbox / "campaigns" / "c1" / "manifest.json", sandbox),
+        (sandbox / "campaigns" / "c1" / "manifest.json", sandbox / "campaigns" / "c1"),
         (home / "jobs" / "j1.json", home / "jobs"),
     ):
         store_io.make_dirs(written.parent)
@@ -2691,6 +2691,8 @@ def test_a_write_moves_the_version_of_the_subject_at_its_place_never_one_named_l
             d for d in written.parents if subject in d.parents if (d / store_io.STAMP_FILE).exists()
         ]
         assert not stray, f"a write at {written} stamped {stray}, under its subject {subject}"
+        if subject.parent.name == "campaigns":
+            assert (subject.parent / store_io.STAMP_FILE).is_file(), "its store's roll-up stood"
 
 
 def test_a_stamp_compacts_and_its_version_never_repeats() -> None:
@@ -2715,7 +2717,7 @@ def test_a_sandbox_emptied_by_a_reset_goes_with_its_stamp() -> None:
     store_io.make_dirs(ledger.parent)
     ledger.write_text("{}", encoding="utf-8")
     store_io.unlink_robust(ledger)
-    assert (sandbox / store_io.STAMP_FILE).is_file(), "the drop moved no stamp"
+    assert (sandbox / "campaigns" / store_io.STAMP_FILE).is_file(), "the drop moved no stamp"
     store_io.prune_empty_dirs(sandbox)
     store_io.remove_bare_dir(sandbox)
     assert not sandbox.exists(), "an emptied sandbox stood on its stamp"
