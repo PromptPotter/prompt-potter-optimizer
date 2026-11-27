@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.scoring import CELL_KEYS, MeasuredCell
+from promptpotter.domain.scoring import CELL_KEYS, MeasuredCell, all_verifier_graded
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -81,6 +81,11 @@ class Bank:
 
     def banked(self) -> list[dict[str, JsonValue]]:
         return [row.banked() for row in self.samples]
+
+    @property
+    def verifier_graded(self) -> bool:
+        """The ONE answer to whether the bank carries no label; its mint records it (`PartitionRecord`)."""
+        return all_verifier_graded(s.ground_truth for s in self.samples)
 
 
 def banked_row(slot: int, row: Mapping[str, object]) -> Sample:

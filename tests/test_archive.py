@@ -49,6 +49,7 @@ from factories import (
     sheet,
     workspace,
 )
+from fastapi import Request
 from offline_run import DATASET
 from offline_world import Router
 from world import Shared, World, shared_run
@@ -82,6 +83,7 @@ from promptpotter.application.hierarchy_subtree import (
     supersede_line,
     unplaced_reason,
 )
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import opening as launch_opening
 from promptpotter.application.jobs.launcher.admission import request_jobs
@@ -155,7 +157,6 @@ from promptpotter.domain.narration import Narration
 from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     ConfigOverrides,
@@ -223,6 +224,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.main import potter_error_handler
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -378,7 +380,7 @@ def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_wou
 # 2. The archive on disk
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> None:
     archive = built_stores.archive
     entry = filed_under(LLM_ONLY, "kept")
@@ -457,7 +459,7 @@ def test_a_reindex_beside_a_run_in_another_process_refuses_until_it_ends(
     assert reindex_measurement_archive(built_stores, apply=True) == {"indexed": 0, "undescribed": 0}
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_named_after(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -483,7 +485,7 @@ def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_na
 
 
 # Each step reads on from where the feed's last advance left it.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -540,7 +542,7 @@ def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     assert archive.detail_lines(file_key), "the cell file stopped reading after a crash"
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_four_writers_on_one_file_at_once_keep_every_row(built_stores: Stores) -> None:
     # Windows runs `O_APPEND` as seek-then-write, so what keeps every row is the lock under
     # `append_jsonl`, taken on a fresh handle per append.
@@ -601,7 +603,7 @@ def compacted_rows(built_stores: Stores) -> _Compacted:
     return _Compacted(compacted, compacted_bank, compacted_refs, whole)
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_compaction_round_trips_every_field_it_moved(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -734,7 +736,7 @@ def test_an_arms_index_refresh_reloads_only_the_populations_its_walks_moved(
 
 
 # The re-cut moves the name the relabel placed on the bank.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -1766,36 +1768,38 @@ def test_a_fork_that_raises_past_its_cut_before_its_take_leaves_no_stub(
         )
 
 
-# A withdraw whose delete fails keeps the stub, and names it on the refusal it rides.
+# A withdraw whose delete fails keeps the stub, and the API's refusal body names it.
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_fork_whose_withdraw_fails_names_its_kept_stub_on_the_refusal(
+def test_a_fork_whose_withdraw_fails_names_its_kept_stub_in_the_served_refusal(
     monkeypatch: pytest.MonkeyPatch, world: World, line: Shared
 ) -> None:
     ran = world.adopt(line)
     stores, store, (hop, _) = ran.stores, ran.stores.campaigns, line.made
     cycles = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)}
 
-    def torn(*_args: object, **_kwargs: object) -> None:
-        raise OSError("the write tore")
+    def taken(*_args: object, **_kwargs: object) -> None:
+        raise ConflictError("the cycle is taken")
 
     def held(*_args: object, **_kwargs: object) -> None:
         raise OSError("the stub is held")
 
-    monkeypatch.setattr(launch_opening, "claim_cycle", torn)
+    monkeypatch.setattr(launch_opening, "claim_cycle", taken)
     monkeypatch.setattr(fork_siblings, "cleanup_stub_fork_if_empty", held)
     asked = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2)
-    with pytest.raises(OSError, match="tore") as refused:
+    with pytest.raises(ConflictError, match="taken") as refused:
         asyncio.run(
             CommandDispatcher(stores, inline=Inline()).dispatch(CommandCall(asked, door=Door.HOST))
         )
     (stub,) = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)} - cycles
-    assert any(stub in note for note in getattr(refused.value, "__notes__", ())), (
-        "the refusal does not name the stub its failed withdraw kept"
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    served = json.loads(bytes(asyncio.run(potter_error_handler(request, refused.value)).body))
+    assert any(stub in note for note in served["notes"]), (
+        f"the API's refusal body does not name the stub its failed withdraw kept: {served}"
     )
 
 
 # The steered forks cut from the applied scenario's fork, and from each other.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
     world: World, line: Shared
 ) -> None:
@@ -1807,7 +1811,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
     assert index.fork.issued_by.id == str(stores.identity.user_id), "the fork names no issuer"
-    assert store.last(applied, PartitionRecord) == store.last(hop, PartitionRecord), (
+    assert drawn_partition(store, applied) == drawn_partition(store, hop), (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
     for kind in (RunPhaseRecord, CycleShareRecord):
@@ -1850,7 +1854,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
 
 # With no edit it steers nothing and stamps no intervention; a field cleared in the panel drops
 # the candidate's value, and the layer below shows.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operators_edit(
     world: World, line: Shared
 ) -> None:
@@ -2226,10 +2230,6 @@ def test_a_superseded_cycle_offers_no_start_and_its_launch_door_refuses_one(
 
     with pytest.raises(ConflictError, match=fork.cycle_id):
         asyncio.run(launch())
-
-
-def _addr(hop: CycleHop, rnd: int, individual: str) -> str:
-    return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(individual)).address
 
 
 def _cycle_of(hop: CycleHop) -> str:

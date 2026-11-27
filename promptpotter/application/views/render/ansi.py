@@ -368,13 +368,14 @@ def to_text(
 
 
 def render_run_spend(v: StopSpend) -> str:
-    spent = v.spent
+    spent = v.metered
     bits = [
-        f"billed {usd_text(spent.billed_usd)} (what the provider reported it charged)",
-        f"{RATE_PRICED_LABEL} {usd_text(spent.rate_priced_usd)} (calls no provider reported a charge for)",
+        f"billed {spent.bill} (what the provider reported it charged)",
+        *([] if spent.rate_priced_line is None else [spent.rate_priced_line]),
         f"incurred {usd_text(spent.incurred_usd)} (every cell priced, replays included)",
+        spent.replay_line,
+        *v.meter_lines(),
     ]
-    bits.extend(v.meter_lines())
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
 
 

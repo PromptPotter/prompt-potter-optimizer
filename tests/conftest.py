@@ -47,12 +47,16 @@ def refused_network() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def own_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def own_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Each fact's data root is its own: a door that resolves the home (`paths.py::user_data_root`)
     lands in this fact's tree, never the session's, which no fact leaves a file in. A directory of
     `tmp_path`, never `tmp_path` itself: a landing proves every file of the data root, and a fact's
-    scratch is none of them; pytest's retention takes it with `tmp_path`."""
+    scratch is none of them; pytest's retention takes it with `tmp_path`. Its account is bound as a
+    sending entry binds the terminal's, so a spend book (`factories.py::spend_book`) draws on it
+    with no network asked for."""
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
+    with scoped(account=workspace()):
+        yield
 
 
 @pytest.fixture

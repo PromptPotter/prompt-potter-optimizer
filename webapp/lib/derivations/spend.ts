@@ -3,12 +3,10 @@ import {
   type KindSpend,
   type MeteredSpend,
   type ServedDashboard,
-  RATE_PRICED_LABEL,
   SPEND_KIND_LABELS,
   type TokenUsageKind,
 } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
-import { fmtUnit, fmtUsd } from "@/lib/format";
 
 interface SpendLine {
   key: TokenUsageKind;
@@ -22,35 +20,6 @@ export function spendLines(m: MeteredSpend): SpendLine[] {
     const kind = m.kinds[key];
     return kind === undefined ? [] : [{ key, label, kind }];
   });
-}
-
-// served: `domain/spend.py::bill_is_floor`
-export function billText(usd: number, isFloor: boolean): string {
-  return `${isFloor ? "≥" : ""}${fmtUsd(usd)}`;
-}
-
-// The served bill leads; `metered_usd` is read only beside a cap.
-export function spendHeadline(m: MeteredSpend): string {
-  return billText(m.billed_usd, m.bill_is_floor);
-}
-
-// Never spent, so it sits beside a bill, never inside one (served: `domain/spend.py::calls_rate_priced`).
-export function ratePricedText(usd: number, callsRatePriced: boolean): string | null {
-  return callsRatePriced ? `${fmtUsd(usd)} ${RATE_PRICED_LABEL}` : null;
-}
-
-export function replayShareLine(m: MeteredSpend): string {
-  return m.replay_share == null
-    ? "The search incurred nothing, so no share of it replayed"
-    : `${fmtUnit("rate", m.replay_share)} of the search replayed`;
-}
-
-export function meteredBucketsLine(m: MeteredSpend): string {
-  const lines = spendLines(m);
-  const part = (l: SpendLine) => `${l.label.toLowerCase()} ${fmtUsd(l.kind.metered_usd)}`;
-  const inside = lines.filter((l) => l.kind.counted).map(part).join(" · ");
-  const beside = lines.filter((l) => !l.kind.counted).map(part).join(" · ");
-  return beside ? `${inside} — beside: ${beside}` : inside;
 }
 
 // The served budget is fully laid over, so an axis it does not name has nothing beneath it; a

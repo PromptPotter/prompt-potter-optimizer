@@ -132,7 +132,7 @@ def try_inherit_fork_origin(
             "role": MeasurementRole.ORIGIN,
             "position": ORIGIN_POSITION,
             "individual": resolved_origin,
-            "sp_hash": sp.sp_hash(session.pipeline_schema),
+            "sp_hash": sp.sp_hash(session.bound_resolution.chain),
             "resolved_params": sp.config_params.dump(),
         }
     )
@@ -207,7 +207,7 @@ def seat_campaign_origin(
         dataset=session.dataset,
         start=cycle.origin,
         pipeline_params=session.pipeline_params,
-        schema=session.pipeline_schema,
+        schema=session.bound_resolution.chain,
     )
     # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset)
@@ -241,7 +241,9 @@ def seat_campaign_origin(
     # The fold of no cell: `total=0`, never a bare 0.0 that reads as a real floor of zero.
     nothing = ScoredWalk(
         NO_CELLS,
-        compute_composite_fitness(NO_CELLS, session.state.scoring.scorer, session.pipeline_schema),
+        compute_composite_fitness(
+            NO_CELLS, session.state.scoring.scorer, session.bound_resolution.chain
+        ),
         signal=None,
         stopped=None,
     )

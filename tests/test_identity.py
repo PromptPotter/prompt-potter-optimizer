@@ -19,7 +19,8 @@ import shutil
 import sys
 import time
 import zipfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -32,6 +33,7 @@ import pytest
 import yaml
 from factories import (
     BENCH_TARGET,
+    L4_PANEL,
     LAUNCHED_DATASET,
     PARENT,
     PROMPT_INFO,
@@ -42,22 +44,24 @@ from factories import (
     inner_cells,
     inner_seat,
     jumping_clock,
+    l4_panel,
     laid_ledger,
     launched_bank,
     ledger_records,
     measurement,
+    on_jumping_clock,
+    opened_round,
     pipeline_schema,
     prompted,
     round_result,
     samples,
-    seat,
     set_cycle,
     sheet,
     spend_book,
     workspace,
 )
 from offline_run import DATASET
-from offline_world import LLM_ONLY_NODE, Router
+from offline_world import LLM_ONLY_NODE, Router, prompt_node
 from pydantic import BaseModel, Field, ValidationError
 from world import Shared, World, shared_run
 
@@ -184,7 +188,9 @@ from promptpotter.application.pipeline_resolve import (
     JUDGE_INSTRUMENT_KEY,
     DraftPipeline,
     ParamLayers,
+    Resolution,
     ServedPipeline,
+    bind_resolution,
     campaign_admits,
     campaign_config_map,
     cycle_config,
@@ -200,9 +206,9 @@ from promptpotter.application.pipeline_resolve import (
     laid_config,
     laid_session,
     permitted_narrowing,
-    recorded_read,
     resolve_pipeline_at,
     resolved_output_schemas,
+    run_resolution,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.preflight import refuse_off_contract
@@ -224,7 +230,6 @@ from promptpotter.application.runner.inner.tasks import (
     ResolvedInnerPanel,
     inner_instrument_config,
 )
-from promptpotter.application.runner.round import run_init
 from promptpotter.application.runner.run_init import enter_cycle
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
@@ -285,7 +290,7 @@ from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBloc
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells
+from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS
 from promptpotter.domain.layer_fold import (
     UNBOUNDED,
     Lay,
@@ -342,7 +347,6 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     ScoringLockedRecord,
 )
-from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
@@ -1058,7 +1062,6 @@ def test_the_unframed_ablation_renders_no_framing_resumed_or_not(built_stores: S
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_task_text_on_the_unframed_ablation_pays_no_framing_and_writes_none(
     built_stores: Stores, decl: _Declared
 ) -> None:
@@ -2526,7 +2529,9 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    recorded = recorded_read(stores, root.hop).knob_layers["l1_generate"]
+    read = scan_resolved_run(stores.campaigns.chain(root.hop)).read
+    assert read is not None
+    recorded = read.knob_layers["l1_generate"]
     sources = {
         knob.path.rsplit(".", 1)[-1]: knob.source
         for group in campaign_config_map(stores, root.campaign.campaign_id).groups
@@ -2630,7 +2635,7 @@ def decl(built_stores: Stores) -> _Declared:
     rows_30 = samples(30, "TRUE", query="claim ")
     _account_dataset(built_stores, "decl", rows_30)
     opened, door = _opened(built_stores, "decl")
-    (solve,) = opened.pipeline_schema.prompt_nodes()
+    (solve,) = opened.pipeline_read.declared_schema().prompt_nodes()
     return _Declared(opened, rows_30, solve, door, declaration_of(opened, door, Optimize()))
 
 
@@ -3019,7 +3024,10 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
     minted = asyncio.run(mint_framed_cycle(opened, door, rows_30, task_text=None))
     campaign = built_stores.campaigns.load_campaign(minted.hop.campaign_id)
     assert campaign is not None, "the mint stored no campaign"
-    bound = opened.bound(campaign.root_cycle)
+    root = opened.bound(campaign.root_cycle)
+    bound = bind_resolution(
+        root, run_resolution(root, cycle_config(built_stores, campaign.root_cycle))
+    )
     assert bound.drawn is not None, "the mint drew no partition"
     bound.state.scoring = scorer_setup(bound, door, partition=bound.drawn)
     return _Held(bound, campaign)
@@ -3082,7 +3090,8 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
     )
     running = select_optimizer(effective_config(declared.spec).optimization)
     runs_under = running.treatment(
-        campaign_admits(effective_config(declared.spec), opened.pipeline_schema), stores.block_packs
+        campaign_admits(effective_config(declared.spec), opened.pipeline_read.declared_schema()),
+        stores.block_packs,
     )
     drift = defaults_drift(stale, running=runs_under)
     assert drift is not None and drift.moved() == ["bench"], (
@@ -3151,7 +3160,10 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
         held_campaign.root_hop,
         opened.pipeline_read,
         experiment=None,
-        model_capabilities={**opened.pipeline_schema.model_capabilities, "": {"m": floored}},
+        model_capabilities={
+            **opened.pipeline_read.declared_schema().model_capabilities,
+            "": {"m": floored},
+        },
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])
@@ -3171,7 +3183,9 @@ def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming
 
     def regraded(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
         out = real(*args, **kwargs)
-        out.setdefault(opened.pipeline_schema.active_steps[-1], {})[JUDGE_INSTRUMENT_KEY] = "moved"
+        out.setdefault(opened.pipeline_read.declared_schema().active_steps[-1], {})[
+            JUDGE_INSTRUMENT_KEY
+        ] = "moved"
         return out
 
     with monkeypatch.context() as moved:
@@ -3179,7 +3193,7 @@ def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming
         with pytest.raises(ConfigDriftError) as refused:
             resolve_resume(opened, held_campaign, decl.rows_30)
     assert refused.value.details["identity_moved"] == [
-        f"{opened.pipeline_schema.active_steps[-1]}.{JUDGE_INSTRUMENT_KEY}"
+        f"{opened.pipeline_read.declared_schema().active_steps[-1]}.{JUDGE_INSTRUMENT_KEY}"
     ], "a resume under another grader than its cells were graded by ran, or named another leaf"
     ran = BackendRevision(expected="r1", reported="r1", unread=None)
     running = select_optimizer(effective_config(decl.declared.spec).optimization)
@@ -3329,7 +3343,9 @@ def test_the_served_bench_offers_no_grade_on_a_moved_connector(
         stores, CampaignCycle(held_campaign, holder.cycle_id)
     ).config.model_copy(update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}})
     bench_read = cycle_bench(
-        stores, CampaignCycle(held_campaign, holder.cycle_id), bench_config
+        stores,
+        CampaignCycle(held_campaign, holder.cycle_id),
+        Resolution(bench_config, verifier_graded=False),
     ).status
     assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
@@ -3372,7 +3388,9 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     steering = CycleStart(pipeline_overlay={"llm_only": NodeCall(temperature=0.3)})
     cycle_id = cut_operator_fork(stores, asked, steering).take(stores)
     opened, _ = _opened(stores, campaign.dataset_name)
-    steered_fork = opened.bound(CampaignCycle(campaign, cycle_id))
+    at = CampaignCycle(campaign, cycle_id)
+    bound = opened.bound(at)
+    steered_fork = bind_resolution(bound, run_resolution(bound, cycle_config(stores, at)))
     steered_fork.record_resolved_run()
     rows = opened.bank.samples
     resolve_resume(steered_fork, campaign, rows)
@@ -4392,7 +4410,7 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
     back = PartitionRecord.of(
-        cell_drawn, dataset_hash="d", cell_identity={}, instrument_id="d"
+        cell_drawn, dataset_hash="d", verifier_graded=False, cell_identity={}, instrument_id="d"
     ).restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
@@ -4565,7 +4583,7 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
         async with checkin_launch.open_checkin(
             built_stores, draft.draft_id, served, overlays=[]
         ) as opened:
-            return opened.session.pipeline_schema
+            return opened.session.pipeline_read.declared_schema()
 
     assert asyncio.run(opened_schema()) == draft_pipeline(built_stores, draft, served).declared, (
         "the run inits on another pipeline than the one its Start was checked against"
@@ -4671,118 +4689,101 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
     assert length_failures(prompted(instruction="x" * 99), main, None) == [], "None bounds nothing"
 
 
-def _two_prompt_origin() -> OptSearchPoint:
-    return OptSearchPoint(
-        prompts={
-            "draft": NodePrompt(fields={"instruction": "Draft it."}),
-            "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
-        }
-    )
-
-
-def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext:
-    reflected_on = seat(
-        stores,
-        schema=_two_prompt_nodes(),
-        bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
-        demo=1,
-        optimization={"optimizer": "gepa"},
-    )
-    set_cycle(
-        reflected_on.cycle,
-        line=[
-            round_result(
-                0,
-                arms=[arm_state("parent", individual=population[0])],
-                selected=population[0].id,
-            )
-        ],
-        population=population,
-    )
-    return reflected_on
-
-
-def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
+@on_jumping_clock
+async def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
     built_stores: Stores, offline: Router
 ) -> None:
     # Each reflection's child joins the population the next reflection reads.
-    origin = _two_prompt_origin()
-    population = [origin]
-    reflected_on = _gepa_seat(built_stores, population)
-
-    # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
-    def measured(*held: OptSearchPoint) -> list[RoundResult]:
-        points = reflected_on.cycle.points
-        arms = [
-            arm_state(
-                "parent",
-                individual=ind,
-                resolved_params=points.job(ind).config_params.dump(),
-                filed=filed_entry(points.job(ind), reflected_on.cycle.session),
-            )
-            for ind in (origin, *held)
-        ]
-        return [round_result(0, arms=arms, selected=origin.id)]
-
-    offline.llm.says = lambda _body: f"```\nRewritten in round {len(population)}.\n```"
-    set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))
-    reflected: list[set[str]] = []
-    for _ in range(3):
-        no_cells = RoundSamples(cells=[], order=[], block_size=0)
-        drawn = RoundContext(reflected_on.cycle, reflected_on.round_num, no_cells)
-        reflecting = NodeContext(drawn, NODE_MEMBERS.get("gepa_reflect"))
-        with (
-            scoped(
-                determinism=reflected_on.cycle.config.optimization.determinism,
-            ),
-            scoped(book=spend_book()),
-            verb_ledger(built_stores, reflected_on.cycle.session.hop),
-        ):
-            reflection = asyncio.run(GepaReflect().propose(reflecting, Proposals([])))
-        (child,) = reflection.proposals
-        reflected.append(
-            {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
-        )
-        population.append(child.individual)
-        set_cycle(
-            reflected_on.cycle,
-            line=measured(reflected_on.cycle.parent, *population),
-            population=population,
-            slices=[ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)],
-        )
+    offline.backend.nodes = {
+        "draft": prompt_node("draft", {"instruction": "Draft it."}),
+        "review": prompt_node("review", {"instruction": "Review it.", "rubric": "Correctness."}),
+    }
+    split = {"bench": 0, "demo": 1}
+    narrowed = {"minibatch": {"config": {"size": 1, "pareto_size": 1}}}
+    gepa = {"optimizer": "gepa", "nodes": narrowed}
+    async with opened_round(
+        built_stores, offline, samples(3, "TRUE"), optimization=gepa, split=split
+    ) as reflected_on:
+        origin = reflected_on.cycle.parent
+        population = [origin]
+        reflected = [await _reflected(reflected_on, offline, origin, population) for _ in range(3)]
     assert reflected == [{"draft"}, {"review"}, {"draft"}], (
         "GEPA's reflection did not round-robin a lineage across the prompt nodes"
     )
 
 
-def _view(
-    stores: Stores,
-    parent: OptSearchPoint,
-    framing: TaskDecomposition,
-    schema: PipelineSchema,
-    node: str = "l1_generate",
-) -> PotterView:
-    """What *node*'s prompt renders from, read off a node context over a cycle started from *parent*."""
-    seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
-    run_init(RoundContext(seated.cycle, 0))
-    return PotterView(NodeContext(seated, NODE_MEMBERS.get(node)), Ladder())
+async def _reflected(
+    reflected_on: RoundContext,
+    offline: Router,
+    origin: OptSearchPoint,
+    population: list[OptSearchPoint],
+) -> set[str]:
+    """The nodes one reflection edits; its child joins *population*, measured as round 0 was."""
+    points = reflected_on.cycle.points
+    arms = [
+        arm_state(
+            "parent",
+            individual=ind,
+            resolved_params=points.job(ind).config_params.dump(),
+            filed=filed_entry(points.job(ind), reflected_on.cycle.session),
+        )
+        for ind in population
+    ]
+    set_cycle(reflected_on.cycle, line=[round_result(0, arms=arms, selected=origin.id)])
+    offline.llm.says = lambda _body: f"```\nRewritten in round {len(population)}.\n```"
+    no_cells = RoundSamples(cells=[], order=[], block_size=0)
+    drawn = RoundContext(reflected_on.cycle, reflected_on.round_num, no_cells)
+    reflecting = NodeContext(drawn, NODE_MEMBERS.get("gepa_reflect"))
+    (child,) = (await GepaReflect().propose(reflecting, Proposals([]))).proposals
+    population.append(child.individual)
+    set_cycle(
+        reflected_on.cycle,
+        population=population,
+        slices=[ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)],
+    )
+    return {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
 
 
-def _outer(cells: InnerCells) -> tuple[PipelineSchema, OptSearchPoint]:
-    """An L4 outer as its run init reads it: the graph the cells serve, and the origin it starts on."""
-    schema = parse_pipeline_response(cells.pipeline())
-    return schema, resolve_origin_opt_search_point(pipeline_params=PipelineParams(), schema=schema)
+@pytest.fixture(scope="module")
+def l4_outer(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """`L4_PANEL`'s outer opened once, its potter and CAPO seats' inner campaigns banked: ~2.2 s
+    once, ~0.3 s a fact re-opening its own copy, each inner cell read back off the archive."""
+
+    async def opened(w: World) -> None:
+        async with _l4_round(w):
+            pass
+
+    return shared_run(tmp_path_factory, opened)
 
 
-def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_origins(
-    built_stores: Stores,
+@asynccontextmanager
+async def _l4_round(world: World) -> AsyncIterator[RoundContext]:
+    """Round 1 of an L4 outer over a mixed panel, opened through run init's door."""
+    l4_panel(world.stores, world.net, world.scratch)
+    async with opened_round(world.stores, world.net, samples(8, "TRUE"), dataset=L4_PANEL) as outer:
+        yield outer
+
+
+def _view(outer: RoundContext, parent: OptSearchPoint, node: str = "l1_generate") -> PotterView:
+    """What *node*'s prompt renders from, round 1 having elected *parent*."""
+    latest = round_result(1, arms=[arm_state("parent", individual=parent)], selected=parent.id)
+    set_cycle(outer.cycle, line=[outer.cycle.origin_round, latest])
+    view = PotterView(NodeContext(outer, NODE_MEMBERS.get(node)), Ladder())
+    assert view.parent.id == parent.id, "vacuous — the subject is not the parent elected"
+    return view
+
+
+@on_jumping_clock
+async def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_origins(
+    built_stores: Stores, offline: Router
 ) -> None:
     # The origin misses rows 0-7; the elected parent ran 0-3 and was topped up on 4, so the frontier
     # keeps the origin's 5-7.
     trace = "\n".join(
         f"step {i}: premise {i * 7 % 13} rules out case {i * 5 % 11}" for i in range(140)
     )
-    bank = samples(8)
+    bank = samples(8, "TRUE")
+    offline.backend.answers = lambda _prompt, _query: False
 
     def ran(sid: int, grade: float) -> GradedCell:
         return measurement(
@@ -4793,53 +4794,50 @@ def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_o
             pipeline_data={"reasoning_trace": trace},
         )
 
-    missed = [ran(sid, 0.0) for sid in range(8)]
     grades = {0: 0.6, 1: 0.1, 2: 0.4, 3: 0.1, 4: 0.3}
     own = [ran(sid, g) for sid, g in grades.items() if sid < 4]
-    seated = seat(
+    unbounded = {"transcripts": "unbounded", "transcript_chars": "unbounded"}
+    optimization = {"optimizer": "potter", "origin_gate": "off"}
+    async with opened_round(
         built_stores,
-        bank=bank,
-        origin=(OptSearchPoint(), lambda _s: sheet(missed)),
-        optimization={
-            "nodes": {
-                "l1_critique": {
-                    "config": {"transcripts": "unbounded", "transcript_chars": "unbounded"}
-                }
-            }
-        },
-    )
-    run_init(RoundContext(seated.cycle, 0))
-    latest = round_result(
-        1,
-        arms=[arm_state("parent")],
-        cells={PARENT: sheet(own)},
-        overlap_results={PARENT: sheet([ran(4, grades[4])])},
-    )
-    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
-    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_critique")), Ladder())
-    assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
-    spans = sorted(clustered_sample_ids(view))
-    assert spans == sorted(view.position_of[bank[sid].key] for sid in grades), (
-        f"the critique may cluster rows {spans}, not every one the parent itself ran"
-    )
-    shown = [k for i in DispatchHub.render_items("sample_transcripts", view) for k in i.quotes]
-    worst = [bank[sid].key for sid in (1, 3, 4, 2, 0)]
-    assert shown == worst, f"transcripts run {shown}, not the parent's worst first"
-    potter = select_optimizer(bench_choice("potter"))
-    critique = running_prompt("l1_critique", potter.node_config("l1_critique"), potter.manifest)
-    with scoped(book=spend_book()):
-        filled = DispatchHub.fill(critique, view)
+        offline,
+        bank,
+        optimization=optimization | {"nodes": {"l1_critique": {"config": unbounded}}},
+    ) as seated:
+        latest = round_result(
+            1,
+            arms=[arm_state("parent")],
+            cells={PARENT: sheet(own)},
+            overlap_results={PARENT: sheet([ran(4, grades[4])])},
+        )
+        set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
+        view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_critique")), Ladder())
+        assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
+        spans = sorted(clustered_sample_ids(view))
+        assert spans == sorted(view.position_of[bank[sid].key] for sid in grades), (
+            f"the critique may cluster rows {spans}, not every one the parent itself ran"
+        )
+        shown = [k for i in DispatchHub.render_items("sample_transcripts", view) for k in i.quotes]
+        worst = [bank[sid].key for sid in (1, 3, 4, 2, 0)]
+        assert shown == worst, f"transcripts run {shown}, not the parent's worst first"
+        potter = select_optimizer(bench_choice("potter"))
+        critique = running_prompt("l1_critique", potter.node_config("l1_critique"), potter.manifest)
+        with scoped(book=spend_book()):
+            filled = DispatchHub.fill(critique, view)
     assert filled.rendered["sample_transcripts"].count(trace) == len(grades), (
         "the critique was not handed every run its knobs declare, whole, past its budget"
     )
 
 
-def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_frontiers(
-    built_stores: Stores,
+@on_jumping_clock
+async def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_frontiers(
+    built_stores: Stores, offline: Router
 ) -> None:
-    # The origin answers "yes" to all 8 rows; the elected parent ran 0-3, so the frontier keeps
+    # The origin answers TRUE to all 8 rows; the elected parent ran 0-3, so the frontier keeps
     # the origin's 4-7.
-    bank = [Sample(id=i, query=f"q{i}", ground_truth=("yes", "no")[i % 2]) for i in range(8)]
+    bank = [Sample(id=i, query=f"q{i}", ground_truth=("TRUE", "FALSE")[i % 2]) for i in range(8)]
+    truths = {s.query: s.ground_truth for s in bank}
+    offline.backend.answers = lambda _prompt, query: truths[query] == "TRUE"
 
     def said(sid: int, answer: str) -> GradedCell:
         hit = float(answer == bank[sid].ground_truth)
@@ -4848,114 +4846,91 @@ def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_
             sid, hit, objective=hit, sample_key=bank[sid].key, predicted=answer, ground_truth=truth
         )
 
-    origin = [said(sid, "yes") for sid in range(8)]
-    own = [said(sid, answer) for sid, answer in enumerate(("yes", "no", "yes", "yes"))]
-    seated = seat(built_stores, bank=bank, origin=(OptSearchPoint(), lambda _s: sheet(origin)))
-    run_init(RoundContext(seated.cycle, 0))
-    latest = round_result(1, arms=[arm_state("parent")], cells={PARENT: sheet(own)})
-    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
-    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
-    assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
-    tally = DispatchHub.render("answer_distribution", view)
-    assert "yes 3 (75%)" in tally and "yes 7" not in tally, (
-        f"the answer tally counts rows the parent never answered: {tally}"
-    )
-    judging, scorer = seated.cycle.difficulty.judging, seated.cycle.session.state.scoring.scorer
-    theta = judging.frontier(scorer.graded(own))
-    frontier = judging.frontier(scorer.graded([*own, *origin[4:]]))
-    assert theta is not None and frontier is not None and theta.theta != frontier.theta, "vacuous"
-    measurand = DispatchHub.render("measurand", view)
+    origin = [said(sid, "TRUE") for sid in range(8)]
+    own = [said(sid, answer) for sid, answer in enumerate(("TRUE", "FALSE", "TRUE", "TRUE"))]
+    async with opened_round(
+        built_stores, offline, bank, optimization={"optimizer": "potter"}
+    ) as seated:
+        latest = round_result(1, arms=[arm_state("parent")], cells={PARENT: sheet(own)})
+        set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
+        view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
+        assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
+        tally = DispatchHub.render("answer_distribution", view)
+        assert "TRUE 3 (75%)" in tally and "TRUE 7" not in tally, (
+            f"the answer tally counts rows the parent never answered: {tally}"
+        )
+        judging, scorer = seated.cycle.difficulty.judging, seated.cycle.session.state.scoring.scorer
+        theta = judging.frontier(scorer.graded(own))
+        frontier = judging.frontier(scorer.graded([*own, *origin[4:]]))
+        assert theta is not None and frontier is not None and theta.theta != frontier.theta, (
+            "vacuous"
+        )
+        measurand = DispatchHub.render("measurand", view)
     assert f"θ {theta.theta:+.3f}" in measurand, f"L1 is told another arm's θ: {measurand}"
 
 
-def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it_rewrites(
-    built_stores: Stores,
+@on_jumping_clock
+async def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it_rewrites(
+    world: World, l4_outer: Shared
 ) -> None:
-    # The INNER campaign's manifest's, as the outer's origin, grown by whole length budgets past
+    # The INNER campaigns' manifests', as the outer's origin, grown by whole length budgets past
     # 16,000 chars, shown whole at each node's own share, and no mandatory panel is refused.
     potter = select_optimizer(bench_choice("potter"))
     budget = potter.knobs_of("l1_generate", L1GenerateKnobs).length_budget
-    schema, start = _outer(inner_cells("potter"))
-    start_chars = sum(len(t) for p in start.prompts.values() for t in p.fields.values())
-    grown_by = budget * -(-(16_001 - start_chars) // budget)
-    fields = start.prompts["l1_generate"].fields
-    grown_text = fields["instruction"] + ("\nRead every panel." * grown_by)[:grown_by]
-    grown = NodePrompt(fields={**fields, "instruction": grown_text})
-    origin = OptSearchPoint(prompts={**start.prompts, "l1_generate": grown})
-    inner = _view(built_stores, origin, TaskDecomposition(), schema)
-    shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", inner))
-    subject_chars = len(shown)
-    assert grown_text in shown and subject_chars > 16_000, (
-        f"a {start_chars + grown_by}c parent the length budget admits renders as {subject_chars}c"
-    )
-    for node in ("l1_generate", "l2_context"):
-        prompt = running_prompt(node, potter.node_config(node), potter.manifest)
-        at_node = _view(built_stores, origin, TaskDecomposition(), schema, node)
-        with scoped(book=spend_book()):
-            filled = DispatchHub.fill(prompt, at_node)
-        assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
-            f"{node} was handed no subject — it acts on text it cannot see"
+    async with _l4_round(world.adopt(l4_outer)) as outer:
+        start = outer.cycle.parent
+        start_chars = sum(len(t) for p in start.prompts.values() for t in p.fields.values())
+        grown_by = budget * -(-(16_001 - start_chars) // budget)
+        fields = start.prompts["l1_generate"].fields
+        grown_text = fields["instruction"] + ("\nRead every panel." * grown_by)[:grown_by]
+        grown = NodePrompt(fields={**fields, "instruction": grown_text})
+        origin = OptSearchPoint(prompts={**start.prompts, "l1_generate": grown})
+        shown = "".join(
+            i.text for i in DispatchHub.render_items("rendered_prompt", _view(outer, origin))
         )
-        refused = set(filled.injections.dropped) & NODE_LAYOUTS[node].mandatory
-        assert not refused, f"{node}: mandatory panel(s) refused by the budget: {sorted(refused)}"
+        subject_chars = len(shown)
+        assert grown_text in shown and subject_chars > 16_000, (
+            f"a {start_chars + grown_by}c parent the length budget admits renders as {subject_chars}c"
+        )
+        for node in ("l1_generate", "l2_context"):
+            prompt = running_prompt(node, potter.node_config(node), potter.manifest)
+            filled = DispatchHub.fill(prompt, _view(outer, origin, node))
+            assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
+                f"{node} was handed no subject — it acts on text it cannot see"
+            )
+            refused = set(filled.injections.dropped) & NODE_LAYOUTS[node].mandatory
+            assert not refused, (
+                f"{node}: mandatory panel(s) refused by the budget: {sorted(refused)}"
+            )
 
 
-class _Mixed(NamedTuple):
-    """A panel mixing two manifests (potter and capo): its outer schema and the origin parent."""
-
-    potter: Any
-    capo: Any
-    panel: Any
-    schema: Any
-    parent: Any
-
-
-@pytest.fixture
-def mixed() -> _Mixed:
-    panel = inner_cells("potter", "capo")
-    schema, parent = _outer(panel)
-    return _Mixed(
-        select_optimizer(bench_choice("potter")),
-        select_optimizer(bench_choice("capo")),
-        panel,
-        schema,
-        parent,
-    )
-
-
-def test_a_mixed_panels_outer_nodes_are_each_shown_as_their_manifests(
-    built_stores: Stores, mixed: _Mixed
+@on_jumping_clock
+async def test_a_mixed_panels_outer_nodes_are_each_shown_as_their_manifests(
+    world: World, l4_outer: Shared
 ) -> None:
-    view = _view(built_stores, mixed.parent, TaskDecomposition(), mixed.schema)
-    shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
-    base_text = base_optimizer_template(mixed.capo, "capo_mutate").instruction
+    async with _l4_round(world.adopt(l4_outer)) as outer:
+        view = _view(outer, outer.cycle.parent)
+        shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
+    capo = select_optimizer(bench_choice("capo"))
+    base_text = base_optimizer_template(capo, "capo_mutate").instruction
     assert f"[capo_mutate.instruction]\n{base_text}" in shown, (
         "a CAPO inner's prompt was never shown"
     )
-    potter_base = base_optimizer_template(mixed.potter, "l1_generate")
+    potter_base = base_optimizer_template(select_optimizer(bench_choice("potter")), "l1_generate")
     assert f"[l1_generate.instruction]\n{potter_base.instruction}" in shown, (
         "the potter cell's prompt was never shown beside the CAPO cell's"
     )
 
 
-def _proposed(stores: Stores, mixed: _Mixed, loci: dict[Locus, str]) -> Any:
-    (node,) = {locus.node for locus in loci}
-    proposing = seat(
-        stores, schema=mixed.schema, optimization={"optimizer": mixed.panel.owners[node].name}
-    )
-    return (
-        NodeContext(proposing, NODE_MEMBERS.get(node))
-        .read(Children)
-        .child([mixed.parent], prompt_loci=loci)
-    )
-
-
-def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_one_severing_a_port_is_refused(
-    built_stores: Stores, offline: Router, mixed: _Mixed
+@on_jumping_clock
+async def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_one_severing_a_port_is_refused(
+    world: World, l4_outer: Shared
 ) -> None:
     # Each step reads the proposals the step before parsed: the edit, then what the inner cell sent.
-    base_text = base_optimizer_template(mixed.capo, "capo_mutate").instruction
-    potter_base = base_optimizer_template(mixed.potter, "l1_generate")
+    base_text = base_optimizer_template(
+        select_optimizer(bench_choice("capo")), "capo_mutate"
+    ).instruction
+    potter_base = base_optimizer_template(select_optimizer(bench_choice("potter")), "l1_generate")
     edit = {Locus("capo_mutate", "instruction"): base_text + " Keep the rewrite under 80 words."}
     severed = {Locus("capo_mutate", "instruction"): "Rewrite the prompt."}
     severed_potter = {
@@ -4964,13 +4939,15 @@ def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_one_se
         if TEMPLATE_TOKEN_RE.findall(str(getattr(potter_base, f) or ""))
     }
     assert severed_potter, "vacuous — no potter field the outer edits carries a placeholder"
-    proposals = parse_population(
-        [_proposed(built_stores, mixed, loci) for loci in (edit, severed, severed_potter)],
-        mixed.parent,
-        PipelineParams(),
-        mixed.schema,
-        runtime_failures=[],
-    )
+    async with _l4_round(world.adopt(l4_outer)) as outer:
+        parent, schema = outer.cycle.parent, outer.cycle.session.bound_resolution.chain
+        proposing = NodeContext(outer, NODE_MEMBERS.get("l1_generate")).read(Children)
+        children = [
+            proposing.child([parent], prompt_loci=loci) for loci in (edit, severed, severed_potter)
+        ]
+        proposals = parse_population(
+            children, parent, PipelineParams(), schema, runtime_failures=[]
+        )
     assert proposals[0].validation_failures == [], "a valid edit of CAPO's prompt was refused"
     for severing in proposals[1:]:
         assert severing.validation_failures, (
@@ -4980,19 +4957,17 @@ def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_one_se
         "the edit's locus is missing from the variation that proposed it"
     )
     sent_point = proposals[0].individual.to_job_search_point(
-        schema=mixed.schema, framing=TaskDecomposition(), demo=()
+        schema=schema, framing=TaskDecomposition(), demo=()
     )
     payload = promptpotter_wire_adapter(
         Sample(id=0, query="justlogic-d234/seed-0", ground_truth=None),
         sent_point.pipeline_params,
     )
-    capo_seat = jumping_clock(
-        inner_seat(
-            workspace(default_identity("outer")),
-            offline,
-            "capo",
-            payload["optimizer_prompt_overrides"],
-        )
+    capo_seat = await inner_seat(
+        workspace(default_identity("outer")),
+        world.net,
+        "capo",
+        payload["optimizer_prompt_overrides"],
     )
     sent = (
         NodeContext(capo_seat, NODE_MEMBERS.get("capo_mutate"))

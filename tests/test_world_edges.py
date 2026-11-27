@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
-from factories import run_init_round, samples, spend_book
+from factories import opened_round, samples, spend_book
 from offline_world import PolicyFault, Router
 
 from promptpotter.application.jobs.machine_status import machine_status
@@ -34,7 +34,8 @@ async def test_a_launch_prices_off_what_upstream_lists_and_leaves_no_refresh_run
     name, body = next(iter(offline.rates.items()))
     offline.rates[name] = body | {"input_cost_per_token": body["input_cost_per_token"] * 2}
     before = set(threading.enumerate())
-    await run_init_round(built_stores, offline, samples(1, "TRUE"))
+    async with opened_round(built_stores, offline, samples(1, "TRUE")):
+        pass
     # The loop's own executor pool aside, which the loop joins at its close.
     outliving = {
         t for t in set(threading.enumerate()) - before if not t.name.startswith("asyncio_")

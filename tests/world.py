@@ -52,10 +52,10 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.pipeline_resolve import laid_session
+from promptpotter.application.pipeline_resolve import bind_resolution, laid_session, run_resolution
 from promptpotter.config.paths import install_datasets_root, optimizer_manifest_path, user_data_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
@@ -113,11 +113,12 @@ class Script:
 
 @dataclass(frozen=True)
 class Shared:
-    """A run several facts read: the home it left, what its act returned, and the script it ran on."""
+    """A run several facts read: the home it left, what its act returned, and the script it ran on,
+    none where its act opened its round through `factories.py::opened_round` on answers it declared."""
 
     home: Path
     made: Any
-    script: Script
+    script: Script | None
 
     @contextmanager
     def reading(self) -> Iterator[Stores]:
@@ -176,10 +177,11 @@ class World:
 
     def adopt(self, shared: Shared) -> World:
         """This fact's own copy of *shared*'s home, read and run on as if this world had run it: the
-        copy holds the run's cut, so only the network is laid."""
+        copy holds the run's cut, so only the network is laid, by its script or by the fact."""
         shutil.copytree(shared.home, user_data_root(), dirs_exist_ok=True)
         adopted = World(workspace(), self.net, self.scratch)
-        adopted._answer(shared.script)
+        if shared.script is not None:
+            adopted._answer(shared.script)
         return adopted
 
     async def campaign(
@@ -342,15 +344,16 @@ class World:
     @asynccontextmanager
     async def opened(self, rows: int = 40) -> AsyncIterator[Session]:
         """A session on the world's dataset as every door opens one, scoring as a pass outside a
-        run does (`scoring_scope.py::arm_diagnostic_scoring`); its client closes as the block exits."""
+        run does (`scoring_scope.py::open_diagnostic`); its client closes as the block exits."""
         config = campaign_config("potter", 1, bench_trigger="at_end")
         self._lay(Script(config, rows, 0))
         async with init_services(
             DATASET, identity=self.stores.identity, stores=self.stores
         ) as session:
             laid, config = laid_session(session, ConfigLayers.stating(stated(config)))
-            with arm_diagnostic_scoring(laid, config):
-                yield laid
+            bound = bind_resolution(laid, run_resolution(laid, CycleConfig.laid(config, ())))
+            with arm_diagnostic_scoring(bound, config):
+                yield bound
 
 
 def shared_run[T](
@@ -370,20 +373,20 @@ def shared_run[T](
     try:
         with pytest.MonkeyPatch.context() as mp:
             mp.setenv("PROMPTPOTTER_HOME", str(home))
-            with offline_network(mp) as net:
+            with offline_network(mp) as net, scoped(account=workspace()):
                 ran = World(workspace(), net, home.parent / "world")
-                if on is not None:
+                if on is not None and on.script is not None:
                     ran._answer(on.script)
                 made = asyncio.run(act(ran))
     finally:
         unrefuse()
-    assert not refused and ran.script is not None, f"a shared run sent {refused} or ran nothing"
+    assert not refused, f"a shared run sent what the world does not answer: {refused}"
     return Shared(home, made, ran.script)
 
 
 @contextmanager
 def offline_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
-    """Its provider caps no rate and binds one account, the terminal's, as a sending entry does."""
+    """Its provider caps no rate; the account it sends on is the one its caller bound."""
     for key in PROVIDER_KEYS:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
@@ -391,8 +394,7 @@ def offline_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     restore = install_network(world)
     send_pacing.cache_clear()
     try:
-        with scoped(account=workspace()):
-            yield world
+        yield world
     finally:
         restore()
         send_pacing.cache_clear()

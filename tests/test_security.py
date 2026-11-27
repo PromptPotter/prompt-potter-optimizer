@@ -48,7 +48,6 @@ from factories import (
     minted_campaign,
     minted_dataset,
     on_jumping_clock,
-    pipeline_schema,
     run_wiring,
     samples,
     stored_campaign,
@@ -241,7 +240,7 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -454,7 +453,6 @@ def _docker_answering(
     return removed
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_container_labelled_with_a_path_deletes_nothing_outside_the_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -470,7 +468,6 @@ async def test_a_container_labelled_with_a_path_deletes_nothing_outside_the_home
     assert removed == [], "a container labelled with no token of ours was removed"
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_sweep_leaves_the_containers_of_a_producer_another_process_holds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -555,7 +552,6 @@ def _tree(stores: Stores) -> list[Path]:
     return sorted(Path(stores.base_dir).rglob("*"))
 
 
-@pytest.mark.usefixtures("offline")
 def test_the_run_process_log_is_the_runtimes_and_never_served(built_stores: Stores) -> None:
     # It holds host paths, the backend URL and tracebacks.
     logged = CycleHop(campaign_id="camp-logged", cycle_id="cycle_logged")
@@ -691,7 +687,6 @@ def _held_slot(tmp_path: Path) -> _HeldSlot:
     return _HeldSlot(registry, ada_hop, held)
 
 
-@pytest.mark.usefixtures("offline")
 def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -715,7 +710,6 @@ def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_its_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -752,7 +746,6 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
     assert registry.claim_next(waiting.job_id), "code on the target refused its own launches"
 
 
-@pytest.mark.usefixtures("offline")
 def test_an_edit_banked_in_one_accounts_block_pack_is_no_snippet_of_anothers() -> None:
     ada_hop = CycleHop(campaign_id="camp-ada", cycle_id="cycle_ada")
     installed = block_packs_root() / "shared" / "pack.json"
@@ -812,7 +805,6 @@ def test_a_draft_is_its_tenant_directorys_whichever_door_of_the_account_made_it(
         owned_draft(eve, drafted.draft_id)
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_stranger_reaches_only_the_routes_mounted_public_by_method(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -838,7 +830,6 @@ def test_a_stranger_reaches_only_the_routes_mounted_public_by_method(
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_hand_written_route_serving_a_read_beside_or_on_its_mount_is_refused() -> None:
     # It would serve the read past its row's params, answer models and framing.
     async def forwarded() -> None: ...
@@ -850,7 +841,6 @@ def test_a_hand_written_route_serving_a_read_beside_or_on_its_mount_is_refused()
         assert _off_catalogue(beside), "a second route serving a read on its mount was admitted"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_body_past_the_largest_any_route_takes_is_refused_before_any_gate_spools_it() -> None:
     # By its declared length, and by its bytes where it declares none.
     for declared in (True, False):
@@ -862,7 +852,6 @@ def test_a_body_past_the_largest_any_route_takes_is_refused_before_any_gate_spoo
 
 
 # The retention step ages out the requests the first step kept.
-@pytest.mark.usefixtures("offline")
 def test_only_a_strangers_visit_is_kept_its_query_only_where_nothing_answered_and_it_ages_out() -> (
     None
 ):
@@ -901,7 +890,6 @@ def test_only_a_strangers_visit_is_kept_its_query_only_where_nothing_answered_an
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_the_data_root_reaches_no_other_user_whoever_launches_under_whatever_umask(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1058,7 +1046,6 @@ def _writer(bundle: IdentityBundle) -> tuple[str, IdentityContext]:
     return session_id, identity_of_session(session_data, bundle)
 
 
-@pytest.mark.usefixtures("offline")
 async def test_the_ceiling_counts_accounts_on_disk_and_never_refuses_an_existing_one_or_the_host(
     sign_up: _SignUp,
 ) -> None:
@@ -1079,7 +1066,6 @@ async def test_the_ceiling_counts_accounts_on_disk_and_never_refuses_an_existing
     assert count_accounts(projects) == 3
 
 
-@pytest.mark.usefixtures("offline")
 async def test_two_first_arrivals_racing_for_the_last_place_open_one_and_refuse_the_other(
     sign_up: _SignUp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1107,7 +1093,6 @@ async def test_two_first_arrivals_racing_for_the_last_place_open_one_and_refuse_
     assert count_accounts(projects) == 4
 
 
-@pytest.mark.usefixtures("offline")
 def test_every_write_a_session_sends_is_metered_and_a_throttle_banks_no_trail_line(
     sign_up: _SignUp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1193,7 +1178,6 @@ async def test_paid_asks_racing_on_one_rate_token_admit_exactly_one(
         assert sorted(admitted) == [False, False, False, True], f"{door.__name__}: one token, many"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_cross_origin_caller_is_offered_only_the_methods_served_and_headers_sent() -> None:
     # Another origin is offered nothing.
     site = "https://site.example"
@@ -1242,7 +1226,6 @@ def exhibit(monkeypatch: pytest.MonkeyPatch, offline: Router, tmp_path: Path) ->
     return _Exhibit(hop, workspace(stranger))
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_follower_reads_the_hosts_exhibit_and_acts_on_none_of_it(exhibit: _Exhibit) -> None:
     # It draws what its follow pick named: an account with nothing launched follows the exhibit.
     hop, follower = exhibit
@@ -1263,7 +1246,6 @@ async def test_a_follower_reads_the_hosts_exhibit_and_acts_on_none_of_it(exhibit
     assert not follower.campaigns.list_campaign_ids(), "an act on the exhibit landed somewhere"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_reads_version_moves_with_the_kinds_its_reader_files(exhibit: _Exhibit) -> None:
     # A grant moves no store, yet every offer the read serves: no 304 serves another reader's acts.
     hop, follower = exhibit
@@ -1285,7 +1267,6 @@ def test_a_reads_version_moves_with_the_kinds_its_reader_files(exhibit: _Exhibit
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_reader_is_offered_only_the_acts_its_capabilities_file(exhibit: _Exhibit) -> None:
     # The gate and the offer are one rule: the follower reads with no capability, the host with all.
     # The run stands where a verb is offered (held, then gone with its definition readable), then
@@ -1331,7 +1312,6 @@ def test_a_reader_is_offered_only_the_acts_its_capabilities_file(exhibit: _Exhib
                     assert refused is not None and refused.code == "read_only", refused
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_scoped_reader_of_a_command_is_offered_only_the_acts_its_scope_files() -> None:
     owner = workspace(dataclasses.replace(_who("owner-1"), capabilities=OWNER_COMMAND_CAPABILITIES))
     refused = _command(
@@ -1567,7 +1547,6 @@ def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim(
     assert (projects / "default" / "campaigns" / scored.campaign_id).is_dir()
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_host_and_its_delegate_read_one_version_of_each_subject(tmp_path: Path) -> None:
     # Each serves the other's view of the machine (the queue, the refusals, `sees_all`): a version
     # counted from a view moves on every feed tick of either tab, so every ack waits on a re-read.
@@ -1640,7 +1619,7 @@ def test_a_filed_command_answers_its_result_when_a_store_vanishes_under_its_ack(
     assert subject not in said, "the ack named a sandbox the walk found gone"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_queued_start_moves_the_read_its_start_control_gates_on(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -1676,7 +1655,6 @@ def test_a_deleted_campaigns_subjects_leave_the_count(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_one_write_moves_a_subject_once_however_its_observers_interleave(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1779,7 +1757,6 @@ def _delegate_of(owner: Stores) -> Stores:
     )
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_delegate_withdraws_only_its_own_queued_launch_never_its_owners(
     built_stores: Stores,
 ) -> None:
@@ -1810,7 +1787,6 @@ async def test_a_delegate_withdraws_only_its_own_queued_launch_never_its_owners(
     assert gone is not None and gone.released, "a delegate could not leave its place"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_delegate_accepts_terms_for_itself_and_leaves_its_delegators_standing(
     built_stores: Stores,
 ) -> None:
@@ -1831,7 +1807,6 @@ def test_a_delegate_accepts_terms_for_itself_and_leaves_its_delegators_standing(
     assert accepted(owner) == TERMS_VERSION, "a delegate's accept overwrote its delegator's"
 
 
-@pytest.mark.usefixtures("offline")
 def test_concurrent_account_edits_and_an_acceptance_all_survive(built_stores: Stores) -> None:
     # Each edit reads and replaces the account under its write lock; the acceptance is appended.
     user = account.account_of(built_stores)
@@ -1859,7 +1834,6 @@ def test_concurrent_account_edits_and_an_acceptance_all_survive(built_stores: St
     assert read.terms_accepted_version == TERMS_VERSION, "an acceptance was lost to an edit"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_survivors_write_and_a_bill_reach_the_disk_before_they_return(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2010,7 +1984,6 @@ async def ada_signed_in(oidc: _Oidc) -> _SignedIn:
     return _SignedIn(request, set_by_sign_in, session, identity, stores)
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_callback_is_honoured_only_in_the_browser_that_started_its_flow(
     oidc: _Oidc,
 ) -> None:
@@ -2142,7 +2115,6 @@ async def test_a_deleted_sandboxs_run_stop_is_banked_at_its_cycles_address_in_it
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_delegate_acts_for_its_owner_under_its_own_id_in_the_owners_workspace(
     ada_signed_in: _SignedIn,
 ) -> None:
@@ -2197,7 +2169,6 @@ def test_an_unreadable_file_costs_the_trail_survey_only_what_it_holds(
     assert set(ada_trail.datasets) == {whole.campaign_id}, "an unreadable manifest named a dataset"
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_sign_in_the_trail_cannot_record_is_refused_and_leaves_no_session(
     monkeypatch: pytest.MonkeyPatch, oidc: _Oidc, ada_signed_in: _SignedIn
 ) -> None:
@@ -2215,7 +2186,6 @@ async def test_a_sign_in_the_trail_cannot_record_is_refused_and_leaves_no_sessio
     assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_session_file_that_signs_nobody_in_leaves_the_disk(
     oidc: _Oidc, ada_signed_in: _SignedIn
 ) -> None:
@@ -2305,7 +2275,7 @@ def _pass_started(stores: Stores, on: CycleHop) -> tuple[JobRegistry, Job]:
     return since_jobs, since
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_before_all_else(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
@@ -2343,7 +2313,7 @@ def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_befo
         refusing.release(spare.job_id)
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_never_crashed(
     built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
@@ -2394,7 +2364,7 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
     ), f"an admitted job's campaign refusal read as {handed_back}"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_full_box_queues_it(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2434,7 +2404,7 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
     refuse_taken_cycle(built_stores, hop)
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_pass_registers_under_the_gate_and_the_delete_sees_it_before_it_holds_its_cycle(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2447,7 +2417,7 @@ def test_a_pass_registers_under_the_gate_and_the_delete_sees_it_before_it_holds_
     delete_refused(passes)
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_a_silent_producer_holding_its_cycle_reads_wedged_and_only_the_dashboard_pins_it(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2475,7 +2445,7 @@ async def test_a_silent_producer_holding_its_cycle_reads_wedged_and_only_the_das
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_the_dashboard_offers_a_skip_while_its_walk_appends_and_refuses_it_once_it_died(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2492,7 +2462,7 @@ async def test_the_dashboard_offers_a_skip_while_its_walk_appends_and_refuses_it
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_a_terminals_act_by_an_id_prefix_reports_the_campaign_it_acted_on_never_the_prefix(
     monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
@@ -2539,7 +2509,7 @@ def test_a_follower_shows_the_running_run_and_a_verb_naming_no_cycle_acts_on_the
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cycle_named_alone_is_the_active_campaigns_by_an_id_prefix(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2578,7 +2548,7 @@ def test_a_sandbox_emptied_by_a_reset_goes_with_its_stamp(tmp_path: Path) -> Non
     assert not sandbox.exists(), "an emptied sandbox stood on its stamp"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_delete(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2603,7 +2573,7 @@ async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_
     assert not campaigns.cycle_dir(stub).is_dir(), "a stub no one holds survived its delete"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
@@ -2647,7 +2617,7 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
 
 
 # Each step reads the producer state the step before it left on the one cycle.
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycle(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
@@ -2742,7 +2712,7 @@ def test_only_a_producer_that_stopped_appending_while_it_still_owes_the_run_pins
         assert pins(PRODUCER_STATE_INFO[state].tone) == raises, f"{state}: {raises}"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner_record(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2759,7 +2729,7 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_orphan_sandbox_the_sweep_cannot_delete_stands_in_machine_status(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2818,7 +2788,7 @@ def test_two_campaigns_on_one_origin_share_no_sandbox_so_deleting_one_spares_the
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_resets_plan_carries_its_refusal_of_a_held_draft_or_cycle_so_a_dry_run_shows_it(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2848,7 +2818,7 @@ def test_a_resets_plan_carries_its_refusal_of_a_held_draft_or_cycle_so_a_dry_run
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows replaces only a closed file")
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reset_racing_a_write_before_its_replace_is_refused_and_the_write_lands_whole(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2867,7 +2837,7 @@ def test_a_reset_racing_a_write_before_its_replace_is_refused_and_the_write_land
     assert raced and target.read_bytes() == b"whole", "a reset in a write's gap cut the write"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reset_asks_again_at_its_act_and_never_refills_the_daily_launch_quota(
     built_stores: Stores, held_cycle: _HeldCycle
 ) -> None:
@@ -2894,7 +2864,7 @@ def test_a_reset_asks_again_at_its_act_and_never_refills_the_daily_launch_quota(
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_row_names_refuses_it(
     built_stores: Stores,
 ) -> None:
@@ -2920,7 +2890,7 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_landing_drops_each_archived_answer_its_one_reader_refuses_by_name_and_keeps_the_rest(
     built_stores: Stores,
 ) -> None:
@@ -2976,7 +2946,7 @@ def test_a_landing_drops_each_archived_answer_its_one_reader_refuses_by_name_and
     assert all(name in applied.tally for name in retired), f"a drop went untallied: {applied.tally}"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     built_stores: Stores,
 ) -> None:
@@ -2995,7 +2965,7 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     assert fold.exists(), "older code dropped a file the newer code landed"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_dry_run_landing_at_a_root_older_code_landed_writes_nothing(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3059,7 +3029,7 @@ def test_an_entry_finding_a_landing_in_flight_says_so_and_waits_it_out(
     assert capsys.readouterr().err, "an entry waited on a landing in flight unsaid"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_landing_drops_a_charge_book_whose_settle_another_writer_split(
     built_stores: Stores,
 ) -> None:
@@ -3090,7 +3060,7 @@ def test_a_landing_drops_a_charge_book_whose_settle_another_writer_split(
     assert not found.refused, "a run file no live run reaches refused the landing"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_job_file_that_does_not_load_is_named_in_machine_status_and_the_rest_listed(
     tmp_path: Path,
 ) -> None:
@@ -3175,7 +3145,7 @@ def unread(built_stores: Stores, offline: Router, tmp_path: Path) -> _Unread:
     return _Unread(built_stores, kept_hop, events)
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_file_no_row_names_refuses_a_landing_asked_to_reset_or_not_and_it_writes_nothing(
     unread: _Unread,
 ) -> None:
@@ -3192,7 +3162,7 @@ def test_a_file_no_row_names_refuses_a_landing_asked_to_reset_or_not_and_it_writ
 
 
 # One landing: planned, a run started since, applied (kept), the run released, applied again.
-@pytest.mark.usefixtures("optimizing_memory", "offline")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_landing_keeps_the_files_of_a_run_started_since_its_plan_and_drops_them_once_it_ends(
     unread: _Unread,
 ) -> None:
@@ -3597,7 +3567,6 @@ async def _drafted(
 
 
 # The Start's retry and its draft's edit are read after the mint and close that consumed both.
-@pytest.mark.usefixtures("offline")
 async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retry_answers_it(
     monkeypatch: pytest.MonkeyPatch, command_log: _Log
 ) -> None:
@@ -3609,9 +3578,13 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
         {"pipeline": {"connector": "termnorm"}, "campaign": unframed},
     )
     rows = samples(30)
-    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
+    declaration = {"nodes": {"solve": {"prompt_info": PROMPT_INFO.model_dump(mode="json")}}}
     starting = loop_session(
-        stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
+        stores,
+        parse_pipeline_response(declaration),
+        rows,
+        dataset=resolve_dataset(stores, "acts"),
+        declaration=declaration,
     )
     declared = declaration_of(starting, defaulted_config(unframed), Optimize())
     plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)
@@ -4043,7 +4016,6 @@ async def test_a_head_to_head_start_withdrawn_unrun_closes_the_client_its_arms_o
     )
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_knob_sent_at_its_default_is_another_act_than_the_knob_unsent(
     host_tenant: _HostTenant,
 ) -> None:
@@ -4063,7 +4035,6 @@ async def test_a_knob_sent_at_its_default_is_another_act_than_the_knob_unsent(
         )
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_caller_without_the_rung_is_refused_at_the_dispatchers_gate_whatever_the_door(
     host_tenant: _HostTenant,
 ) -> None:
@@ -4105,7 +4076,6 @@ def launches(host_tenant: _HostTenant) -> _Launches:
     return _Launches(registry, launch, read)
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_task_reads_what_its_run_returned(launches: _Launches) -> None:
     # A stepped pause done, a spent budget failed, an asked pause cancelled, a dead producer
     # failed, a gate's hold waiting on its caller.
@@ -4124,7 +4094,6 @@ def test_a_task_reads_what_its_run_returned(launches: _Launches) -> None:
         assert read(job) == status, f"a run that returned {reason} (stepped={stepped}) misread"
 
 
-@pytest.mark.usefixtures("offline")
 def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
     tmp_path: Path, host_tenant: _HostTenant, launches: _Launches
 ) -> None:
@@ -4159,7 +4128,6 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
 
 
 # The quota reads the launch whose run died beside the launches after it.
-@pytest.mark.usefixtures("offline")
 def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_what_spent(
     host_tenant: _HostTenant, launches: _Launches
 ) -> None:
@@ -4189,7 +4157,6 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_older_one(
     host_tenant: _HostTenant, launches: _Launches
 ) -> None:
@@ -4215,7 +4182,6 @@ def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_
     )
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_jobs_own_ending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
 ) -> None:
@@ -4309,7 +4275,6 @@ _ARM = {"prompt_fields": {"solve": {"instruction": "Held."}}, "changes_descripti
 
 # One journey: the hold's elicitation is answered, that answer filed, and the task's result
 # then reads the run that went on past it.
-@pytest.mark.usefixtures("offline")
 async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
 ) -> None:
@@ -4369,7 +4334,6 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     await queuing.close_detached()
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answer_by_update(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
 ) -> None:
@@ -4405,7 +4369,6 @@ async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answe
 
 
 # An act a refusal serves is pressed as served: its value is the field's own JSON type.
-@pytest.mark.usefixtures("offline")
 def test_a_served_from_round_act_pressed_through_the_api_is_admitted_by_its_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4433,7 +4396,6 @@ def test_a_served_from_round_act_pressed_through_the_api_is_admitted_by_its_payl
 
 
 # The flags refuse in the sentence the refused start-run's value carries.
-@pytest.mark.usefixtures("offline")
 async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_renders(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4548,7 +4510,6 @@ def token_box(sign_up: _SignUp, monkeypatch: pytest.MonkeyPatch) -> _TokenBox:
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_token_is_kept_as_its_hash_and_served_once_and_never_outranks_its_account(
     token_box: _TokenBox,
 ) -> None:
@@ -4616,7 +4577,6 @@ def test_a_command_a_bearer_filed_reads_back_under_its_token(token_box: _TokenBo
     assert read == [minted["token"]["id"], None], "a bearer's act read as its account's own"
 
 
-@pytest.mark.usefixtures("offline")
 def test_no_bearer_holds_its_accounts_tokens_keys_terms_or_preferences(
     token_box: _TokenBox,
 ) -> None:
@@ -4636,7 +4596,6 @@ def test_no_bearer_holds_its_accounts_tokens_keys_terms_or_preferences(
     assert owned.status_code == 200, "the account's own session was refused its own act"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_mint_past_an_accounts_live_tokens_is_refused_naming_the_revoke(
     token_box: _TokenBox,
 ) -> None:
@@ -4651,7 +4610,6 @@ def test_a_mint_past_an_accounts_live_tokens_is_refused_naming_the_revoke(
     _minted(token_box.browser, "step")
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_revoked_token_or_one_of_a_revoked_sub_principal_acts_on_nothing_and_its_stream_ends(
     token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4709,7 +4667,6 @@ def test_a_tokens_row_naming_a_scope_no_grant_may_carry_never_loads() -> None:
     }
 
 
-@pytest.mark.usefixtures("offline")
 def test_no_launched_jobs_spec_holds_the_credential_its_caller_came_by(
     token_box: _TokenBox,
 ) -> None:
@@ -4726,7 +4683,6 @@ def test_no_launched_jobs_spec_holds_the_credential_its_caller_came_by(
         )
 
 
-@pytest.mark.usefixtures("offline")
 async def test_a_hosts_token_is_refused_auth_on_or_off_and_two_credentials_at_once_are_refused(
     sign_up: _SignUp, token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4780,7 +4736,6 @@ _MCP_HELLO = {
 
 
 # One door's journey: the session a bearer opens answers it, and no other caller.
-@pytest.mark.usefixtures("offline")
 async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened_it_alone(
     sign_up: _SignUp, token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4866,7 +4821,6 @@ async def _mcp_opened(http: httpx.AsyncClient, who: int) -> dict[str, str]:
     return {**headers, "mcp-session-id": opened.headers["mcp-session-id"]}
 
 
-@pytest.mark.usefixtures("offline")
 async def test_the_mcp_doors_managers_leave_once_their_sessions_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4878,7 +4832,6 @@ async def test_the_mcp_doors_managers_leave_once_their_sessions_end(
         assert not door._managers, "the door kept a manager for each token whose session ended"
 
 
-@pytest.mark.usefixtures("offline")
 @on_jumping_clock
 async def test_an_mcp_session_the_sdk_expired_idle_leaves_the_doors_table(
     monkeypatch: pytest.MonkeyPatch,
@@ -4968,7 +4921,7 @@ async def _provider_error_callback(query: bytes, flow: bytes) -> str:
     return (await auth.callback(request, BackgroundTasks(), "google")).headers["location"]
 
 
-@pytest.mark.usefixtures("offline", "sign_up")
+@pytest.mark.usefixtures("sign_up")
 async def test_a_provider_error_files_one_refusal_in_fixed_words_only_on_a_live_flow() -> None:
     # A stranger's `?error=` writes nothing of the box's trail.
     flow = f"{auth.OAUTH_FLOW_COOKIE_NAME}=google.st.n".encode()
@@ -4995,7 +4948,6 @@ async def _filed(stores: Stores, payload: CommandPayload, door: Door = Door.API)
     await CommandDispatcher(stores).dispatch(CommandCall(payload, uuid.uuid4().hex, door=door))
 
 
-@pytest.mark.usefixtures("offline")
 async def test_only_the_host_posts_a_bulletin_and_a_dismissal_is_its_accounts_alone() -> None:
     host, ada, bo = workspace(), _uploader("ada"), _uploader("bo")
     board = default_identity_paths().bulletins
@@ -5043,7 +4995,6 @@ async def test_the_hosts_claim_carries_the_terminals_dismissals_to_the_host() ->
     assert read_board(default_identity_paths().bulletins).dismissed == {"owner-9": (posted.id,)}
 
 
-@pytest.mark.usefixtures("offline")
 async def test_an_account_reads_its_bulletins_at_the_api_and_only_its_session_dismisses_one(
     token_box: _TokenBox,
 ) -> None:

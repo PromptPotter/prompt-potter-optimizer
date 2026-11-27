@@ -22,16 +22,18 @@ from promptpotter.application.free_tier import (
     outside_free_tier,
     refuse_outside_free_tier,
 )
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import paid_call
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
+    bind_resolution,
     campaign_admits,
-    configure_and_apply_pipeline,
     cycle_config,
     defaults_drift,
     laid_session,
     mint_facts,
+    run_resolution,
 )
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
@@ -271,16 +273,17 @@ def _planned(
     cycle: CycleConfig,
 ) -> CyclePlan:
     """What *cycle* RUNS, as the configure lays it."""
-    schema = session.pipeline_schema
-    configured = configure_and_apply_pipeline(session, cycle)
+    res = run_resolution(session, cycle)
+    schema = res.declared
+    configured = bind_resolution(session, res)
     pipeline_params = configured.pipeline_params
-    selected = select_optimizer(cycle.config.optimization)
+    selected = res.optimizer
     partition = refuse_unrunnable(
         cycle.config,
         selected,
         dataset,
         pipeline_params,
-        configured.pipeline_schema,
+        res.chain,
         stores=session.store,
         connector=spec.environment.connector,
     )
@@ -297,12 +300,13 @@ def _planned(
         ),
         framing=campaign_framing(session.store, cycle.config, session.dataset),
         optimizer=selected,
-        admits=campaign_admits(cycle.config, configured.pipeline_schema),
+        admits=campaign_admits(cycle.config, res.chain),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=PartitionRecord.of(
             partition,
             dataset_hash=session.bank.dataset_hash,
+            verifier_graded=session.bank.verifier_graded,
             instrument_id=configured.instrument_id,
             cell_identity=configured.cell_identity,
         ),
@@ -398,20 +402,18 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     campaigns = session.store.campaigns
     recorded = scan_resolved_run(campaigns.chain(campaign.root_hop))
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
-    drawn = campaigns.last(campaign.root_hop, PartitionRecord)
+    drawn = drawn_partition(campaigns, campaign.root_hop)
     drift = ConfigDriftError(
         campaign,
         current_hash=checked.origin_hash,
         drift=defaults_drift(campaign, running=checked.treatment),
         capabilities_moved=_capabilities_moved(
-            recorded.model_capabilities, checked.session.pipeline_schema.model_capabilities
+            recorded.model_capabilities, checked.session.bound_resolution.chain.model_capabilities
         ),
         revision_moved=_revision_moved(
             None if wired is None else wired.backend_revision, checked.session.backend_revision
         ),
-        identity_moved=[]
-        if drawn is None
-        else moved_leaves(drawn.cell_identity, checked.session.cell_identity),
+        identity_moved=moved_leaves(drawn.cell_identity, checked.session.cell_identity),
     )
     if campaign.root_content_hash == checked.origin_hash and not drift.moved:
         return plan
@@ -584,7 +586,7 @@ def _prompt_axes_only(
         node.name: campaign_config.optimizer_narrowing.get(
             node.name, NodeSearchNarrowing()
         ).model_copy(update={"param_keys": []})
-        for node in session.pipeline_schema.declared_nodes
+        for node in session.pipeline_read.declared_schema().declared_nodes
     }
 
 
@@ -755,7 +757,7 @@ async def _mint_after_framing(
                     description,
                     prompt_fields=(
                         f
-                        for node in session.pipeline_schema.prompt_nodes()
+                        for node in session.pipeline_read.declared_schema().prompt_nodes()
                         for f in node.prompt_fields
                     ),
                 )

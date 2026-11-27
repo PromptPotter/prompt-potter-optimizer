@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, NamedTuple, assert_never, get_args
+from typing import Any, NamedTuple, Self, assert_never, get_args
 
 from pydantic import BaseModel, ValidationError
 
@@ -29,7 +29,7 @@ from promptpotter.application.datasets.prompts import (
     has_dataset_prompts,
     pipeline_node_overlay,
 )
-from promptpotter.application.datasets.startability import draft_samples
+from promptpotter.application.datasets.startability import draft_bank
 from promptpotter.application.free_tier import (
     FreeFence,
     free_fence,
@@ -37,7 +37,7 @@ from promptpotter.application.free_tier import (
     free_tier_layers,
     free_tier_overlay,
 )
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import Session, drawn_partition
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import MintFacts
@@ -51,10 +51,11 @@ from promptpotter.application.pipeline_responses import (
 )
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
+    compile_scorer,
     split_scoring_block,
 )
 from promptpotter.application.scoring.formula.matchers import admits, matcher_of
-from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.application.scoring.judges.registry import judge_instrument, two_valued_terms
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arms import Concluded
@@ -101,7 +102,6 @@ from promptpotter.domain.pipeline_schema import (
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     KnobLayer,
-    KnobLayers,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -113,15 +113,14 @@ from promptpotter.domain.pipeline_schema import (
     running_only,
 )
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     DefaultsDrift,
     DefaultsPin,
     PipelineRead,
     ScoringLockedRecord,
 )
-from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import ScoringFormulaError
+from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.scoring import Scorer, ScoringFormulaError
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.treatment import Treatment
@@ -590,13 +589,16 @@ def laid_config(
 
 def laid_session(session: Session, layers: ConfigLayers) -> tuple[Session, CampaignConfig]:
     """The mint's `laid_config`: *session* records which layer set each knob, its mint writes."""
-    laid = laid_config(
-        session.store,
-        layers,
-        connector=session.backend_client.connector.name,
-        schema=session.pipeline_schema,
+    declared = session.pipeline_read.declared_schema()
+    connector = session.backend_client.connector.name
+    laid = laid_config(session.store, layers, connector=connector, schema=declared)
+    fence = free_fence(session.store, connector)
+    read = session.pipeline_read.model_copy(
+        update={
+            "knob_layers": laid.knob_layers,
+            "free_tier_overlay": free_tier_overlay(laid.config, declared, fence),
+        }
     )
-    read = session.pipeline_read.model_copy(update={"knob_layers": laid.knob_layers})
     return replace(session, pipeline_read=read), laid.config
 
 
@@ -649,6 +651,125 @@ def cycle_config(stores: Stores, at: CampaignCycle) -> CycleConfig:
     )
 
 
+@dataclass(frozen=True)
+class Resolution:
+    """What a run grades by: its config and its bank's recorded answer to whether it carries no
+    label (`sample.py::Bank.verifier_graded`). The ONE compile of a scorer."""
+
+    config: CampaignConfig
+    verifier_graded: bool
+
+    @functools.cached_property
+    def scorer(self) -> Scorer:
+        spec = split_scoring_block(self.config.scoring, judge_instrument=None)
+        return compile_scorer(
+            spec.per_sample,
+            spec.per_cell,
+            verifier_graded=self.verifier_graded,
+            judge_instrument=judge_instrument(self.config.judges),
+            two_valued_terms=two_valued_terms(self.config.judges),
+        )
+
+    def overlaid(self, *layers: Layer[str]) -> Self:
+        return replace(self, config=self.config.overlaid(*layers))
+
+
+@dataclass(frozen=True)
+class RunResolution(Resolution):
+    """One run's whole resolution: its grading, and its schema, params and optimizer selection as
+    the ONE fold (`ParamLayers`) lays its line over *read*. *read* is its mint's record
+    (`resolved`), or a launch's own read, which `Session.bound` lays the mint's layers into
+    (`run_resolution`). *menu_at*: where a run reads today's menu; a read off records reads none.
+    A ledger that lost its read still grades: only its pipeline refuses."""
+
+    recorded: PipelineRead | FileUnreadableError
+    cycle: CycleConfig
+    workspace: Path
+    menu_at: Path | None
+    # A merge outside a run's own parse of *recorded* (`merge_outside_run`); any other parses it.
+    parsed: PipelineSchema | None = None
+
+    @property
+    def read(self) -> PipelineRead:
+        if isinstance(self.recorded, FileUnreadableError):
+            raise self.recorded
+        return self.recorded
+
+    @functools.cached_property
+    def declared(self) -> PipelineSchema:
+        return self.parsed or self.read.declared_schema()
+
+    @functools.cached_property
+    def layers(self) -> ParamLayers:
+        return ParamLayers(
+            schema=_resolve_active_schema(
+                self.declared,
+                exclude=list(self.config.exclude_nodes),
+                narrowing=self.config.optimizer_narrowing,
+                workspace=self.menu_at,
+            ),
+            workspace=self.workspace,
+            dataset=self.read.dataset_overlay,
+            campaign=self.config.pipeline_overlay,
+            free_tier=self.read.free_tier_overlay,
+            start=self.cycle.start_overlay,
+        )
+
+    @property
+    def schema(self) -> PipelineSchema:
+        """The running chain, narrowed and excluded as the line declares."""
+        return self.layers.schema
+
+    @functools.cached_property
+    def folded(self) -> FoldedParams:
+        return self.layers.fold()
+
+    @property
+    def params(self) -> PipelineParams:
+        return self.folded.params
+
+    @functools.cached_property
+    def chain(self) -> PipelineSchema:
+        """The chain as run (`schema_as_run`): each node on its laid provider and model. A
+        launch's starting prompts lay no route, so its chain is this one."""
+        return schema_as_run(self.schema, self.params, self.workspace)
+
+    @functools.cached_property
+    def optimizer(self) -> SelectedOptimizer:
+        return select_optimizer(self.config.optimization)
+
+    @property
+    def knob_layers(self) -> dict[str, dict[str, KnobLayer]]:
+        return self.cycle.knob_layers(self.read.knob_layers)
+
+
+def resolved(stores: Stores, at: CampaignCycle) -> RunResolution:
+    """*at*'s resolution off its records alone: its line, the bank its mint drew and its read."""
+    hop = at.hop
+    cycle = cycle_config(stores, at)
+    return RunResolution(
+        cycle.config,
+        drawn_partition(stores.campaigns, hop).verifier_graded,
+        recorded=_recorded_read(scan_resolved_run(stores.campaigns.chain(hop)), hop),
+        cycle=cycle,
+        workspace=stores.base_dir,
+        menu_at=None,
+    )
+
+
+def run_resolution(session: Session, cycle: CycleConfig) -> RunResolution:
+    """What a launch runs *cycle* by: its own read, over the bank it holds."""
+    workspace = session.store.base_dir
+    return RunResolution(
+        cycle.config,
+        session.bank.verifier_graded,
+        recorded=session.pipeline_read,
+        cycle=cycle,
+        workspace=workspace,
+        menu_at=workspace,
+    )
+
+
 def declared_config(stores: Stores, campaign: Campaign) -> CycleConfig:
     """The declaration alone, which no start moved, its root's criterion lock laid on."""
     root_lock = stores.campaigns.last(campaign.root_hop, ScoringLockedRecord)
@@ -669,128 +790,88 @@ def _declared(stores: Stores, campaign: Campaign) -> CampaignConfig:
         ) from exc
 
 
-@dataclass(frozen=True)
-class _Merge:
-    declared: PipelineSchema
-    filtered: PipelineSchema
-    cfg: CampaignConfig
-    layers: ParamLayers
+@dataclass(frozen=True, kw_only=True)
+class DraftPipeline(RunResolution):
+    """A resolution before a Start commits any of it, as its mint would lay it (a draft's, or a
+    head-to-head arm's): what its nodes run with, their rows, the chain they run in as its mint holds
+    it (`schema_as_run`: each node on its laid provider and model), the layers its mint lays, the
+    definition an upload's Start writes (`local`), and the backend that serves it."""
+
+    config_layers: ConfigLayers
+    local: dict[str, Any]
+    connector: Connector
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
-    # Whether a steer binds the reader to what `pickable` leaves it: a campaign read by
-    # an account without `campaign.babysit`; never a draft, which sets what it permits.
-    steer_bound: bool
-    knob_layers: KnobLayers
 
     @functools.cached_property
-    def optimizer(self) -> SelectedOptimizer:
-        """`cfg`'s one selection, made where a read takes it: one that only folds the params
-        (`_runs_with`) stands on a config whose overlay no longer selects."""
-        return select_optimizer(self.cfg.optimization)
+    def rows(self) -> dict[str, list[NodeConfigParam]]:
+        # A draft sets what it permits, so no steer binds its reader.
+        return _rows(self, self.folded, self.chain, free=self.free, steer_bound=False)
 
-
-@dataclass(frozen=True)
-class _CampaignMerge(_Merge):
-    hop: CycleHop
-    # The panel its mint recorded run init measured.
-    experiment: dict[str, Any] | None
-    # The connector endpoint its run init read (`PipelineRead.endpoint`).
-    endpoint: str | None
-
-
-@dataclass(frozen=True)
-class OutsideRunMerge(_Merge):
-    # The definition an upload's Start writes (`DraftPipeline`).
-    local: dict[str, Any]
-    config_layers: ConfigLayers
-
-
-def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> OutsideRunMerge:
-    return merge_outside_run(
-        stores, _draft_local(stores, draft), draft_layers(stores, draft), served
-    )
+    @functools.cached_property
+    def criterion(self) -> DraftCriterion:
+        """``config.scoring`` as a check-in picks it, its dials over this backend's terms."""
+        return draft_criterion(self.config.scoring, campaign_terms(self.connector))
 
 
 def merge_outside_run(
-    stores: Stores, local: dict[str, Any], config_layers: ConfigLayers, served: ServedPipeline
-) -> OutsideRunMerge:
+    stores: Stores,
+    local: dict[str, Any],
+    config_layers: ConfigLayers,
+    served: ServedPipeline,
+    *,
+    verifier_graded: bool,
+) -> DraftPipeline:
     """*config_layers* over *local* as a mint would lay them, opening no session."""
     templated = with_node_templates(local)
-    declared = parse_pipeline_response(served.over(templated))
+    declaration = served.over(templated)
+    declared = parse_pipeline_response(declaration)
     laid = laid_config(stores, config_layers, connector=served.connector.name, schema=declared)
-    cfg = laid.config
     fence = free_fence(stores, served.connector.name)
-    filtered = _resolve_active_schema(
-        declared, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
-    )
-    return OutsideRunMerge(
-        # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
-        declared=declared,
-        filtered=filtered,
-        cfg=cfg,
-        layers=ParamLayers(
-            schema=filtered,
-            workspace=stores.base_dir,
-            dataset=pipeline_node_overlay(templated),
-            campaign=cfg.pipeline_overlay,
-            free_tier=free_tier_overlay(cfg, declared, fence),
+    return DraftPipeline(
+        laid.config,
+        verifier_graded,
+        recorded=PipelineRead(
+            declaration=declaration,
+            dataset_overlay=pipeline_node_overlay(templated),
+            free_tier_overlay=free_tier_overlay(laid.config, declared, fence),
+            knob_layers=laid.knob_layers,
         ),
-        free=_task_fenced(fence),
-        steer_bound=False,
-        knob_layers=laid.knob_layers,
-        local=local,
+        cycle=CycleConfig.laid(laid.config, ()),
+        workspace=stores.base_dir,
+        menu_at=None,
+        # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
+        parsed=declared,
         config_layers=config_layers,
+        local=local,
+        connector=served.connector,
+        free=_task_fenced(fence),
     )
+
+
+def _draft_pipeline(
+    stores: Stores, draft: DraftFile, served: ServedPipeline, bank: Bank | None
+) -> DraftPipeline:
+    return merge_outside_run(
+        stores,
+        _draft_local(stores, draft),
+        draft_layers(stores, draft),
+        served,
+        verifier_graded=bank is not None and bank.verifier_graded,
+    )
+
+
+def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
+    return _draft_pipeline(stores, draft, served, draft_bank(stores, draft))
 
 
 def _task_fenced(fence: FreeFence | None) -> bool:
     return fence is not None and fence.task
 
 
-def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _CampaignMerge:
-    """Off its mint's records alone, so a campaign outlives its dataset dir."""
-    on = CampaignCycle(campaign, at.cycle_id or campaign.root_cycle_id)
-    resolved = scan_resolved_run(stores.campaigns.chain(on.hop))
-    read = _recorded_read(resolved, on.hop)
-    schema = parse_pipeline_response(read.declaration)
-    cycle = cycle_config(stores, on)
-    cfg = cycle.config
-    filtered = _resolve_active_schema(
-        schema, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
-    )
-    return _CampaignMerge(
-        declared=schema,
-        filtered=filtered,
-        cfg=cfg,
-        layers=ParamLayers(
-            schema=filtered,
-            workspace=stores.base_dir,
-            dataset=read.dataset_overlay,
-            campaign=cfg.pipeline_overlay,
-            free_tier=read.free_tier_overlay,
-            start=cycle.start_overlay,
-        ),
-        free=_task_fenced(free_fence(stores, campaign.connector)),
-        steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
-        knob_layers=cycle.knob_layers(read.knob_layers),
-        hop=on.hop,
-        experiment=resolved.experiment,
-        endpoint=read.endpoint,
-    )
-
-
-def recorded_schema(stores: Stores, hop: CycleHop) -> PipelineSchema:
-    """What *hop* ran, as its mint recorded run init read it; never today's files or backend."""
-    return parse_pipeline_response(recorded_read(stores, hop).declaration)
-
-
-def recorded_read(stores: Stores, hop: CycleHop) -> PipelineRead:
-    return _recorded_read(scan_resolved_run(stores.campaigns.chain(hop)), hop)
-
-
-def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
+def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead | FileUnreadableError:
     if resolved.read is None:
-        raise FileUnreadableError(
+        return FileUnreadableError(
             FileKind.LEDGER,
             path=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
             reason="it holds no resolved run, which its mint appends before the campaign exists",
@@ -810,44 +891,48 @@ def mint_facts(
     return MintFacts(demo, campaign_admits(cfg, schema), shelf)
 
 
-def _draft_mint(stores: Stores, draft: DraftFile, m: _Merge) -> MintFacts | None:
+def _draft_mint(stores: Stores, res: RunResolution, bank: Bank | None) -> MintFacts | None:
     """The demo split the draft's Start will draw, so its pool offers the keys before Start."""
-    samples = draft_samples(stores, draft)
-    if samples is None:
+    if bank is None:
         return None
-    demo = partition_bank(samples, m.cfg.dataset_split, seed=m.cfg.run_seed).demo
-    return mint_facts(m.cfg, demo, m.filtered, stores.block_packs)
+    cfg = res.config
+    demo = partition_bank(bank.samples, cfg.dataset_split, seed=cfg.run_seed).demo
+    return mint_facts(cfg, demo, res.schema, stores.block_packs)
 
 
-def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
-    drawn = stores.campaigns.last(m.hop, PartitionRecord)
-    bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
-    if drawn is None or bank is None:
+def _cycle_mint(stores: Stores, hop: CycleHop, res: RunResolution) -> MintFacts | None:
+    """``None`` where the bank the cycle drew is no longer held."""
+    drawn = drawn_partition(stores.campaigns, hop)
+    if (bank := stores.tenant_datasets.bank(drawn.dataset_hash)) is None:
         return None
-    return mint_facts(m.cfg, drawn.restored(bank.samples).demo, m.filtered, stores.block_packs)
+    return mint_facts(res.config, drawn.restored(bank.samples).demo, res.schema, stores.block_packs)
 
 
-def _rows(m: _Merge, folded: FoldedParams, ran: PipelineSchema) -> dict[str, list[NodeConfigParam]]:
-    return m.filtered.node_config_schema(
-        steer_bound=m.steer_bound,
+def _rows(
+    res: RunResolution, folded: FoldedParams, ran: PipelineSchema, *, free: bool, steer_bound: bool
+) -> dict[str, list[NodeConfigParam]]:
+    """*steer_bound*: whether a steer binds the reader to what `pickable` leaves it, a campaign
+    read by an account without `campaign.babysit`."""
+    return res.schema.node_config_schema(
+        steer_bound=steer_bound,
         values=folded.params.laid_nodes,
         sources=folded.provenance,
-        model_menu=_admitted_menu(m, ran),
-        declared=m.declared,
+        model_menu=_admitted_menu(res, ran, free=free),
+        declared=res.declared,
     )
 
 
-def _admitted_menu(m: _Merge, ran: PipelineSchema) -> list[str]:
+def _admitted_menu(res: RunResolution, ran: PipelineSchema, *, free: bool) -> list[str]:
     """Offers no model the Start would refuse: one no rate prices under a dollar ceiling, or one
     the free tier does not list for a free account. A model is priced on the provider *ran* lays
     its node on, never the one the backend declares. A served read never fetches a price list: a
     route's answer is the last any process's fetch gave (`pricing.remembered_priced`), kept fresh by
     the API's sweep, and a route none answered stays offered, as through an outage."""
-    models = m.filtered.selectable_models()
-    if m.free:
+    models = res.schema.selectable_models()
+    if free:
         models = [model for model in models if model in free_task_models()]
     providers = {n.provider for n in ran.declared_nodes if n.provider}
-    if not providers or m.cfg.optimization.budget.usd is None:
+    if not providers or res.config.optimization.budget.usd is None:
         return models
     return [
         model
@@ -857,18 +942,27 @@ def _admitted_menu(m: _Merge, ran: PipelineSchema) -> list[str]:
 
 
 def _response(
-    m: _Merge,
+    stores: Stores,
+    res: RunResolution,
     folded: FoldedParams,
-    workspace: Path,
     *,
+    steer_bound: bool,
     campaign_id: str,
     cycle_id: str,
     dataset_name: str,
     connector: Connector,
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
-    ran = schema_as_run(m.filtered, folded.params, workspace)
-    rows = _rows(m, folded, ran)
+    workspace = stores.base_dir
+    filtered = res.schema
+    ran = schema_as_run(filtered, folded.params, workspace)
+    rows = _rows(
+        res,
+        folded,
+        ran,
+        free=_task_fenced(free_fence(stores, connector.name)),
+        steer_bound=steer_bound,
+    )
     return CampaignPipelineResponse(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
@@ -876,78 +970,35 @@ def _response(
         connector=connector.name,
         self_optimization=connector.self_optimization,
         cell_terms=list(connector.cell_terms),
-        optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace, m.knob_layers),
+        optimizer=res.config.optimization.optimizer,
+        optimizer_setup=optimizer_setup(res.optimizer, mint, filtered, workspace, res.knob_layers),
         params=folded.params.dump(),
         node_config_schema=rows,
-        view=m.filtered.view,
-        node_output_schema=resolved_output_schemas(m.filtered, folded.params),
+        view=filtered.view,
+        node_output_schema=resolved_output_schemas(filtered, folded.params),
         model_capabilities=resolve_schema_menu(ran, workspace=workspace),
         reach=reach_map(rows),
-        nests=_nests(m.declared),
-        is_single_node=m.filtered.is_single_node,
+        nests=_nests(res.declared),
+        is_single_node=filtered.is_single_node,
     )
 
 
 def resolve_pipeline_for_draft(
     stores: Stores, draft: DraftFile, served: ServedPipeline
 ) -> CampaignPipelineResponse:
-    m = _draft_merge(stores, draft, served)
+    bank = draft_bank(stores, draft)
+    pipeline = _draft_pipeline(stores, draft, served, bank)
     return _response(
-        m,
-        m.layers.fold(),
-        stores.base_dir,
+        stores,
+        pipeline,
+        pipeline.folded,
+        steer_bound=False,
         # A draft is no campaign and runs no cycle until its Start mints both.
         campaign_id=draft.draft_id,
         cycle_id="",
         dataset_name=draft.slug,
         connector=served.connector,
-        mint=_draft_mint(stores, draft, m),
-    )
-
-
-@dataclass(frozen=True)
-class DraftPipeline:
-    """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
-    the chain they run in as its mint holds it (`schema_as_run`: each node on its laid provider and
-    model), the chain as declared before the draft narrowed it, its config as this
-    account runs it, the layers its mint lays, the definition an upload's Start writes (`local`),
-    and the backend that serves it."""
-
-    params: PipelineParams
-    rows: dict[str, list[NodeConfigParam]]
-    chain: PipelineSchema
-    declared: PipelineSchema
-    config: CampaignConfig
-    layers: ConfigLayers
-    local: dict[str, Any]
-    connector: Connector
-
-    @functools.cached_property
-    def optimizer(self) -> SelectedOptimizer:
-        """`config`'s selection, made only where a read takes it: a draft whose overlay no
-        longer selects still folds, rows and gates."""
-        return select_optimizer(self.config.optimization)
-
-    @functools.cached_property
-    def criterion(self) -> DraftCriterion:
-        """``config.scoring`` as a check-in picks it, its dials over this backend's terms."""
-        return draft_criterion(self.config.scoring, campaign_terms(self.connector))
-
-
-def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
-    m = _draft_merge(stores, draft, served)
-    folded = m.layers.fold()
-    ran = schema_as_run(m.filtered, folded.params, stores.base_dir)
-    return DraftPipeline(
-        folded.params,
-        _rows(m, folded, ran),
-        ran,
-        m.declared,
-        m.cfg,
-        m.config_layers,
-        m.local,
-        served.connector,
+        mint=_draft_mint(stores, pipeline, bank),
     )
 
 
@@ -957,18 +1008,21 @@ def resolve_pipeline_for_campaign(
     *,
     at: Subject,
 ) -> CampaignPipelineResponse:
-    """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
-    m = _campaign_merge(stores, campaign, at)
-    folded = replace(m.layers, evolved=_evolved_overlay(stores, at)).fold()
+    """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first.
+    Off its mint's records alone, so a campaign outlives its dataset dir."""
+    on = CampaignCycle(campaign, at.cycle_id or campaign.root_cycle_id)
+    res = resolved(stores, on)
+    folded = replace(res.layers, evolved=_evolved_overlay(stores, at)).fold()
     return _response(
-        m,
+        stores,
+        res,
         folded,
-        stores.base_dir,
+        steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
         campaign_id=campaign.campaign_id,
-        cycle_id=m.hop.cycle_id,
+        cycle_id=on.cycle_id,
         dataset_name=campaign.dataset_name,
         connector=connectors.CONNECTORS.get(campaign.connector),
-        mint=_cycle_mint(stores, m),
+        mint=_cycle_mint(stores, on.hop, res),
     )
 
 
@@ -1002,15 +1056,10 @@ def permitted_narrowing(
     """What each node permits *at* a cycle, or a campaign's root: its recorded schema's value spaces
     narrowed by the line, never the campaign's own layer alone, which holds none of the dataset's
     optimizer blocks. A steer outside them is the babysit act (decisions.md § 0005)."""
-    if isinstance(at, CampaignCycle):
-        return _permitted(_campaign_merge(stores, at.campaign, Subject.of((at.hop,))).filtered)
-    return _permitted(_campaign_merge(stores, at, Subject(at.campaign_id)).filtered)
-
-
-def _permitted(filtered: PipelineSchema) -> dict[str, NodeSearchNarrowing]:
+    on = at if isinstance(at, CampaignCycle) else at.root_cycle
     return {
         n.name: NodeSearchNarrowing(param_allowed_values=dict(n.param_allowed_values))
-        for n in filtered.declared_nodes
+        for n in resolved(stores, on).schema.declared_nodes
         if n.param_allowed_values
     }
 
@@ -1033,9 +1082,8 @@ def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> F
 
 
 def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
-    campaign = stores.campaigns.campaign(campaign_id)
-    m = _campaign_merge(stores, campaign, Subject(campaign_id))
-    return config_map(m.cfg, m.optimizer, m.knob_layers)
+    res = resolved(stores, stores.campaigns.campaign(campaign_id).root_cycle)
+    return config_map(res.config, res.optimizer, res.knob_layers)
 
 
 async def resolve_pipeline_for_dataset(
@@ -1146,13 +1194,13 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
 
 
 def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
-    m = _campaign_merge(stores, campaign, Subject(campaign.campaign_id))
-    folded = m.layers.fold()
+    res = resolved(stores, campaign.root_cycle)
+    folded = res.folded
     stripped = strip_rendered_prompt(folded.params)
-    nodes = {n.name: n for n in m.filtered.declared_nodes}
+    nodes = {n.name: n for n in res.schema.declared_nodes}
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
-    for name in m.filtered.running:
+    for name in res.schema.running:
         if (cfg := stripped.laid_nodes.get(name)) is None:
             continue
         for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
@@ -1171,8 +1219,8 @@ def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     return CampaignRunsWith(
         params=out,
         vendors=[VendorModels(vendor=v, models=ms) for v, ms in by_vendor.items()],
-        optimizer=m.cfg.optimization.optimizer,
-        budget_rounds=m.cfg.optimization.budget.rounds,
+        optimizer=res.config.optimization.optimizer,
+        budget_rounds=res.config.optimization.budget.rounds,
     )
 
 
@@ -1180,40 +1228,13 @@ def _vendor_of(model: str) -> str:
     return normalize_model_id(model).partition("/")[0]
 
 
-def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Session:
-    campaign_config = cycle.config
-    exclude = list(campaign_config.exclude_nodes)
+def bind_resolution(session: Session, res: RunResolution) -> Session:
+    """*session* bound to what *res* resolved, the dataset's starting prompts laid over its params:
+    the definition a launch measures, which a read off records outlives."""
     dataset_name = session.measured_dataset
     dataset = session.dataset
-
-    filtered = _resolve_active_schema(
-        session.pipeline_schema,
-        exclude=exclude,
-        narrowing=campaign_config.optimizer_narrowing,
-        workspace=session.store.base_dir,
-    )
-    # Laid at the mint, then read off its record: an account leaving the tier moves no minted run.
-    if session.cycle_id:
-        recorded = recorded_read(session.store, session.hop)
-        minted = {
-            "free_tier_overlay": recorded.free_tier_overlay,
-            "knob_layers": recorded.knob_layers,
-        }
-    else:
-        fence = free_fence(session.store, session.backend_client.connector.name)
-        minted = {
-            "free_tier_overlay": free_tier_overlay(campaign_config, session.pipeline_schema, fence),
-        }
-    read = session.pipeline_read.model_copy(update=minted)
-    folded = ParamLayers(
-        schema=filtered,
-        workspace=session.store.base_dir,
-        dataset=read.dataset_overlay,
-        campaign=campaign_config.pipeline_overlay,
-        free_tier=read.free_tier_overlay,
-        start=cycle.start_overlay,
-    ).fold()
-    pipeline_params = folded.params
+    filtered = res.schema
+    pipeline_params = res.params
 
     ships_prompts = dataset is not None and has_dataset_prompts(dataset)
     _validate_prompt_reach(
@@ -1236,8 +1257,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
 
     return replace(
         session,
-        pipeline_schema=schema_as_run(filtered, pipeline_params, session.store.base_dir),
-        pipeline_read=read,
+        resolution=res,
         pipeline_params=pipeline_params,
         cell_identity={
             node: keys
@@ -1245,7 +1265,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
                 session.store,
                 session.backend_client.connector,
                 session.backend_client.workload.experiment,
-                campaign_config.judges,
+                res.config.judges,
                 filtered.active_steps,
                 base_url=session.backend_client.base_url,
             ).items()

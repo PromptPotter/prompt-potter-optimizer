@@ -26,8 +26,7 @@ from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -101,12 +100,12 @@ def check_cap_funds_round(
 
 
 def _check_labels_have_ranker(
-    schema: PipelineSchema, samples: Sequence[Sample], connector: Connector | None
+    schema: PipelineSchema, bank: Bank, connector: Connector | None
 ) -> NoRanker | None:
     """After the samples, never before: the invariant is about the schema AND the bank together."""
-    if not schema.running_nodes or not samples or schema.emits_ranking:
+    if not schema.running_nodes or not bank.samples or schema.emits_ranking:
         return None
-    if all_verifier_graded(s.ground_truth for s in samples):
+    if bank.verifier_graded:
         return None
     return None if connector is not None and connector.answer_key else NoRanker()
 
@@ -155,7 +154,7 @@ def run_preflight_checks(
         if novel and instrument is not None
         else None,
         _check_labels_have_ranker(
-            session.pipeline_schema, session.bank.samples, session.backend_client.connector
+            session.bound_resolution.chain, session.bank, session.backend_client.connector
         ),
         SurveyUnread(campaigns=tuple(unread), reason=str(next(iter(unread.values()))))
         if unread

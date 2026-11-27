@@ -15,7 +15,8 @@ from promptpotter.application.hierarchy import account_version, store_version
 from promptpotter.application.hierarchy_subtree import subtree_cycle
 from promptpotter.application.jobs.machine_status import machine_version
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
+from promptpotter.application.pipeline_resolve import resolved
+from promptpotter.application.scoring.closed_rounds import closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
 from promptpotter.application.views.render.export import ExportFiles, ExportProvenance, export_files
 from promptpotter.config.settings import APP_VERSION
@@ -119,7 +120,7 @@ class RoundView(StrictModel):
 def _closed(
     stores: Stores, at: CampaignCycle, round_num: int, *, moment: Moment | None
 ) -> RoundResult | None:
-    scorer = campaign_scorer(stores, at.campaign)
+    scorer = resolved(stores, at.campaign.root_cycle).scorer
     return closed_round(stores, at.hop, round_num, scorer, moment=moment)
 
 

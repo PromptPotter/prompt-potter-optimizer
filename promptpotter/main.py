@@ -66,7 +66,6 @@ from promptpotter.presentation.terminal.server_banner import render_server_banne
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ContentTooLargeError,
-    NextAct,
     PayloadInvalidError,
     PotterError,
     UnauthorizedError,
@@ -189,18 +188,16 @@ def _bank_refusal(request: Request, subject: str, status: int) -> None:
 # The ONE flat envelope; no route raises HTTPException, so routing alone does.
 def _error_response(
     request: Request,
+    refused: Refusal,
     *,
     status: int,
-    code: str,
-    message: str,
-    details: dict[str, object] | None = None,
-    next_acts: tuple[NextAct, ...] = (),
     headers: Mapping[str, str] | None = None,
     exc_info: bool = False,
     banked: bool = True,
 ) -> JSONResponse:
     error_id = uuid.uuid4().hex[:12]
-    reason = f"/{details['reason']}" if details and "reason" in details else ""
+    code, details = refused.code, refused.details
+    reason = f"/{details['reason']}" if "reason" in details else ""
     # A refusal is the server doing its job, as loud as the access line it repeats; a 5xx is a failure.
     logger.log(
         logging.ERROR if status >= 500 else logging.INFO,
@@ -215,35 +212,25 @@ def _error_response(
     )
     facts = "".join(
         f" {key}={value}"
-        for key, value in (details or {}).items()
+        for key, value in details.items()
         if key != "reason" and isinstance(value, (str, int))
     )
     if banked:
         _bank_refusal(
             request,
-            f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
+            f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {refused.message}",
             status,
         )
-    body = ErrorEnvelope(
-        code=code,
-        message=message,
-        error_id=error_id,
-        details=details or {},
-        next_acts=next_acts,
-    )
+    body = ErrorEnvelope(**dict(refused), error_id=error_id)
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
 
 @app.exception_handler(PotterError)
 async def potter_error_handler(request: Request, exc: PotterError) -> JSONResponse:
-    refused = Refusal.of(exc)
     return _error_response(
         request,
+        Refusal.of(exc),
         status=exc.http_status,
-        code=refused.code,
-        message=refused.message,
-        details=refused.details,
-        next_acts=refused.next_acts,
         headers=(
             {"Retry-After": str(math.ceil(exc.retry_after_s))}
             if isinstance(exc, RateLimitedError)
@@ -278,17 +265,14 @@ async def routing_error_handler(request: Request, exc: HTTPException) -> JSONRes
         return await potter_error_handler(request, cause)
     asked = request.url.path.removeprefix(_COMMANDS)
     if request.url.path.startswith(_COMMANDS) and asked not in CommandKind:
+        unknown = f"No command kind {asked!r}; the kinds are {', '.join(CommandKind)}."
         return _error_response(
-            request,
-            status=404,
-            code="command_kind_unknown",
-            message=f"No command kind {asked!r}; the kinds are {', '.join(CommandKind)}.",
+            request, Refusal(code="command_kind_unknown", message=unknown, details={}), status=404
         )
     return _error_response(
         request,
+        Refusal(code=HTTPStatus(exc.status_code).name.lower(), message=exc.detail, details={}),
         status=exc.status_code,
-        code=HTTPStatus(exc.status_code).name.lower(),
-        message=exc.detail,
         headers=exc.headers,
     )
 
@@ -298,9 +282,8 @@ async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSON
     # `exc_info` logs the traceback beside the `error_id`, the only way back to it.
     return _error_response(
         request,
+        Refusal(code="internal_error", message="Internal server error", details={}),
         status=500,
-        code="internal_error",
-        message="Internal server error",
         exc_info=True,
     )
 
@@ -509,9 +492,8 @@ _TOO_LARGE = f"A request body holds at most {MAX_REQUEST_BYTES} bytes."
 def _too_large(scope: Scope) -> JSONResponse:
     return _error_response(
         Request(scope),
+        Refusal(code=ContentTooLargeError.code, message=_TOO_LARGE, details={}),
         status=ContentTooLargeError.http_status,
-        code=ContentTooLargeError.code,
-        message=_TOO_LARGE,
     )
 
 

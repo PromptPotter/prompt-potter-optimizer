@@ -734,7 +734,6 @@ class SpendBucket(StrictModel):
     # SUBSETS of ``input_tokens``; a cached CALL reached no provider, these price part of one that did.
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
-    rate_known: bool = False
     # No wire cost AND no rate on file: >0 means the USD cap is blind here and the token cap backstops.
     unpriced_tokens: int = 0
 
@@ -792,17 +791,13 @@ class SpendBucket(StrictModel):
                 self.used_usd = round(self.used_usd + price.cost_usd, 6)
             elif price.rate_priced_usd is not None:
                 self.rate_priced_usd = round(self.rate_priced_usd + price.rate_priced_usd, 6)
-            if usd is not None:
-                self.rate_known = True
-            elif in_tok or out_tok:
+            if usd is None and (in_tok or out_tok):
                 self.unpriced_tokens += in_tok + out_tok
 
     def absorb(self, other: SpendBucket) -> None:
         for name in SpendBucket.model_fields:
             held, added = getattr(self, name), getattr(other, name)
-            if isinstance(held, bool):
-                setattr(self, name, held or added)
-            elif isinstance(held, float):
+            if isinstance(held, float):
                 setattr(self, name, round(held + added, 6))
             else:
                 setattr(self, name, held + added)
@@ -942,7 +937,7 @@ class SpendRollup(StrictModel):
 
     def billed_beside_incurred(self) -> str:
         share = self.search_replay_share
-        replayed = "" if share is None else f" · {share:.0%} of the search replayed"
+        replayed = "" if share is None else f" · {replay_text(share)}"
         return (
             f"billed {usd_text(self.total_used_usd)} · "
             f"{RATE_PRICED_LABEL} {usd_text(self.total_rate_priced_usd)} · "
@@ -987,7 +982,7 @@ class KindSpend(StrictModel):
 
 
 class MeteredSpend(StrictModel):
-    """What a run's spend caps have counted, in the units they meter, by kind."""
+    """What a run's spend caps have counted, in the units they meter, by kind, and its words."""
 
     meter: CeilingMeter
     metered_usd: float
@@ -995,42 +990,70 @@ class MeteredSpend(StrictModel):
     billed_usd: float
     # Never spent, and counted by every cap.
     rate_priced_usd: float
-    calls_rate_priced: bool
-    # `False` ⇒ no USD figure here says anything, and a kind reads in tokens.
-    rate_known: bool
-    bill_is_floor: bool
     incurred_usd: float
     billed_tokens: int
-    unpriced_tokens: int
     kinds: dict[TokenUsageKind, KindSpend]
     replay_share: float | None
+    bill: str = Field(description="The bill as a person reads it: `≥` where it is a floor.")
+    rate_priced_line: str | None = Field(
+        description="What our rate priced, said beside the bill; null where no call was."
+    )
+    replay_line: str = Field(description="What share of the search a replay served free.")
+    buckets_line: str = Field(
+        description="Each kind in the meter's units: those inside the caps, then those beside."
+    )
 
     @classmethod
     def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
         counted = METER_KINDS[meter]
+        kinds = {
+            kind: KindSpend.of(b, meter, counted=kind in counted)
+            for kind, b in spend.by_kind.items()
+        }
+        share = spend.search_replay_share
         return cls(
             meter=meter,
             metered_usd=spend.metered(meter).usd_amount,
             billed_usd=spend.total_used_usd,
             rate_priced_usd=spend.total_rate_priced_usd,
-            calls_rate_priced=calls_rate_priced(spend.total_rate_priced_usd),
-            rate_known=any(b.rate_known for b in spend.by_kind.values()),
-            bill_is_floor=bill_is_floor(spend.unpriced_tokens),
             incurred_usd=spend.total_incurred_usd,
             billed_tokens=spend.total_tokens_used,
-            unpriced_tokens=spend.unpriced_tokens,
-            kinds={
-                kind: KindSpend.of(b, meter, counted=kind in counted)
-                for kind, b in spend.by_kind.items()
-            },
-            replay_share=spend.search_replay_share,
+            kinds=kinds,
+            replay_share=share,
+            bill=bill_text(spend.total_used_usd, floor=bill_is_floor(spend.unpriced_tokens)),
+            rate_priced_line=rate_priced_text(
+                spend.total_rate_priced_usd,
+                priced=calls_rate_priced(spend.total_rate_priced_usd),
+            ),
+            replay_line="The search incurred nothing, so no share of it replayed"
+            if share is None
+            else replay_text(share),
+            buckets_line=_buckets_line(meter, kinds),
         )
+
+
+def replay_text(share: float) -> str:
+    return f"{level_text(share, 'rate')} of the search replayed"
+
+
+def _buckets_line(meter: CeilingMeter, kinds: Mapping[TokenUsageKind, KindSpend]) -> str:
+    def said(inside: bool) -> str:
+        return " · ".join(
+            f"{label.lower()} {usd_text(kinds[key].metered_usd)}"
+            for key, label in SPEND_KIND_LABELS.items()
+            if kinds[key].counted is inside
+        )
+
+    inside, beside = said(True), said(False)
+    return f"{CEILING_METER_LABELS[meter]}: {inside}" + (f" — beside: {beside}" if beside else "")
 
 
 class StopSpend(FrozenModel):
     """A stop's spend: the caps bound the CAMPAIGN, so they pair with its count; the cycle's beside."""
 
-    spent: MeteredSpend
+    # The run's facts, banked: a read meters them (`metered`), so no word is banked.
+    spent: SpendRollup
+    meter: CeilingMeter
     # The stopping cycle's book, and its campaign's: every cycle's (`served_dashboard.spend_counts`).
     cycle: SpendCount
     campaign: SpendCount
@@ -1038,10 +1061,14 @@ class StopSpend(FrozenModel):
     # This cycle's part of the caps, what its run's book bound at the stop.
     share: Budget
 
+    @property
+    def metered(self) -> MeteredSpend:
+        return MeteredSpend.of(self.spent, self.meter)
+
     def meter_lines(self) -> list[str]:
         """The metered line, the cycle's count, then a line per cap the CAMPAIGN's count (every
         cycle's book) is set against."""
-        meter, cap = self.spent.meter, self.cap
+        meter, cap = self.meter, self.cap
         label, counted = CEILING_METER_LABELS[meter], self.campaign.counted
         lines = [metered_line(meter, count=self.cycle, cap=cap, share=self.share)]
         if cap.usd is not None:

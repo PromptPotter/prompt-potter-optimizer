@@ -305,7 +305,15 @@ BASELINE = {
     # w7-rows5 (+2): a fork's failed withdraw names the stub it kept, as a note on the refusal it rides.
     # w7-rows4 link 3 backed out (+5): the stamp subject read off the path by name is unsound (a dataset
     # named `jobs` takes its workspace's stamps), so `stamped_subject` declares each root again.
-    "package_lines": 113651,
+    # w7-res (+43): one `pipeline_resolve.py::Resolution` compiles the scorer off the bank's recorded
+    # `PartitionRecord.verifier_graded`, and the `--set` grammar moves to `application/path_patch.py`.
+    # w7-res2 (+17): one `RunResolution` is the fold the read and the run call; it replaces
+    # `configure_and_apply_pipeline`, `ParamLayers.of_cycle`, `recorded_schema` and `_CampaignMerge`.
+    # w7-spend (+20): `MeteredSpend.of` serves the spend words the browser composed (bill, rate-priced,
+    # replay and buckets lines); the stop record banks `SpendRollup`, and four unread fields go.
+    # w7-res3 (-7): a draft's merge is a `RunResolution`, and `Session.pipeline_schema` goes.
+    # w7-rows6 (-31): a Refusal carries its notes; every read of a cycle's draw is `drawn_partition`.
+    "package_lines": 113693,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -373,7 +381,8 @@ BASELINE = {
     # w7-rows2 (−1): `WarmingDashboard.warming_up`, a discriminator no door read.
     # w7-web2 (−6): `ServedBackpressure`'s epochs and sender, `Evidence.generated_at`,
     # `HeadToHead.verdict_absent`, `MeResponse.issuer`.
-    "p_served": 200,
+    # w7-spend (−3): `MeteredSpend`'s rate and floor flags no reader read.
+    "p_served": 197,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

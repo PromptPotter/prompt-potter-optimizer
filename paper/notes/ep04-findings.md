@@ -141,7 +141,7 @@ Run 1 of this validation surfaced the truncation-as-hole halt (fixed; see sample
    `current_config.model` = the schema's declared model — so mercury/qwen/gemma were offered
    gpt-oss's effort ladder (no `none`, their own floor). `pipeline_resolve.py::schema_as_run` stamps
    each active node with the model it runs + resolves its capabilities; the floor and
-   `session.pipeline_schema` both read it, so every model-dependent query answers for the runner.
+   `session.bound_resolution.chain` both read it, so every model-dependent query answers for the runner.
 4h. Audit leads, not acted on (v0.8.13→HEAD): L1 may now switch the answer schema off
    (`response_format` toggle, 18f1d12f5) — a slot spent on a 3-label task; the generate instruction
    lost "a small model drowns in rigor it cannot execute" (f28dd1903); misses read raw fitness, not

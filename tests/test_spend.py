@@ -131,7 +131,12 @@ from promptpotter.application.maintenance.archive_maintenance import purge_cold_
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
+from promptpotter.application.pipeline_resolve import (
+    Resolution,
+    cycle_config,
+    laid_config,
+    laid_session,
+)
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
@@ -675,7 +680,7 @@ def test_a_cache_read_reprices_inside_input_and_a_row_with_no_cache_tier_bills_i
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_wire_cost_reaches_the_reply_and_a_bill_sums_the_parts_that_named_one() -> None:
     # OpenRouter's real shape: `cost` rides as an EXTRA on the usage object.
     def wired(usage: dict[str, Any] | None, usd: float | None = None) -> ChatReply:
@@ -758,7 +763,7 @@ async def test_a_truncated_attempt_keeps_its_token_split_past_the_reask_that_hea
     ] == [("length", (16000, 15000), 16)], "a truncated attempt's split was lost to its re-ask"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows_price(
     tmp_path: Path,
 ) -> None:
@@ -862,7 +867,7 @@ def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     entry = archive_entry(
         sp,
         dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.pipeline_schema,
+        pipeline_schema=session.bound_resolution.chain,
         cell_identity=session.cell_identity,
     )
     return ReplayFeed(stores.archive, entry.node_configs)
@@ -959,7 +964,7 @@ def _dataset() -> list[Sample]:
     return [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_budget_equality_is_over_the_axes_each_names() -> None:
     # A lift is no bound, and an omitted axis no lift.
     for one, other, same in (
@@ -1030,7 +1035,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     assert rebuilt.base_dir == stores.base_dir, "the spawned run billed another tenant's tree"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_ceiling_refuses_the_send_its_calls_out_would_carry_past_it() -> None:
     # A walk plans no more than the ceiling fits; a send past a wrong plan is refused at its hold.
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
@@ -1051,7 +1056,7 @@ def test_a_ceiling_refuses_the_send_its_calls_out_would_carry_past_it() -> None:
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_search_ceiling_meters_its_search_and_prices_a_reread_once_per_campaign(
     tmp_path: Path,
 ) -> None:
@@ -1077,7 +1082,7 @@ def test_a_search_ceiling_meters_its_search_and_prices_a_reread_once_per_campaig
         )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drops_it(
     tmp_path: Path,
 ) -> None:
@@ -1111,7 +1116,7 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
 
 
 # The second walk resumes the first's skipped individual.
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 @on_jumping_clock
 async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
     built_stores: Stores,
@@ -1227,7 +1232,7 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
     assert not opened, "a seat refused at its admission opened its observers"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 @on_jumping_clock
 async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
@@ -1301,7 +1306,7 @@ def _cold(log: CycleEventLog) -> tuple[float, int, CycleStart | None]:
 
 
 # The compaction cuts the file the grown index has already read.
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_ledger_index_serves_the_file_as_it_stands_grown_then_compacted(
     ledger_index: CycleEventLog,
 ) -> None:
@@ -1326,7 +1331,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_then_compacted(
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill(
     ledger_index: CycleEventLog,
 ) -> None:
@@ -1355,7 +1360,7 @@ def test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill(
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_ledger_file_shared_by_two_writers_loses_no_bill_to_the_index(
     ledger_index: CycleEventLog,
 ) -> None:
@@ -1380,7 +1385,7 @@ def test_a_ledger_file_shared_by_two_writers_loses_no_bill_to_the_index(
 
 
 # The refused purge reads the cell the named home carried.
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1618,7 +1623,6 @@ def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     assert moved_book.allotment.usd is None, "a lifted ceiling still bounds the running share"
 
 
-@pytest.mark.usefixtures("offline")
 def test_an_offshoot_takes_the_rounds_its_parent_left_and_names_no_money_of_its_own() -> None:
     # A cap the fork's seed names is the operator's.
     left = ForkRemainder.of(rounds_closed=3, rounds=5)
@@ -1939,7 +1943,6 @@ def test_a_ceiling_its_campaign_has_spent_admits_nothing(
         launch(race[1], 3.0)
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
     monkeypatch: pytest.MonkeyPatch,
     built_stores: Stores,
@@ -1980,7 +1983,6 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
     shared.release(stamped.job_id, StopReason.TARGET_HIT)
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_busy_admission_gate_refuses_a_launch_and_never_a_running_jobs_stamp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
@@ -2282,7 +2284,7 @@ def test_a_credit_refusal_is_the_providers_on_any_4xx() -> None:
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_every_level_holds_a_sends_whole_bound_whatever_such_sends_billed_before() -> None:
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
     for reserve in (0.5, None, 1.0):
@@ -2393,7 +2395,7 @@ def test_a_launch_standing_its_held_budget_keeps_the_pause_its_allowance_declare
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_sends_room_is_the_ceiling_less_bills_unpriced_sends_and_the_set_aside() -> None:
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
     owed = spend_book(0.5)
@@ -2410,7 +2412,7 @@ def test_a_sends_room_is_the_ceiling_less_bills_unpriced_sends_and_the_set_aside
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_free_send_fits_at_exactly_nothing_left_and_never_once_overdrawn() -> None:
     free = SendBound(input_tokens=0, output_tokens=0, usd=0.0)
     book = spend_book(0.25)
@@ -2439,7 +2441,7 @@ sys.exit("no outage")
 """
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2479,7 +2481,7 @@ def _replay(usd: float) -> TokenUsageRecord:
     return billed_call(usd, kind="backend", node="n", input_tokens=10, output_tokens=5, replay=True)
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost_a_replay_spends_no_bill(
     tmp_path: Path,
 ) -> None:
@@ -2497,7 +2499,7 @@ def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost_a_replay_spends_
 
 
 # The replays that spend the share read on from the bench pass's bill.
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_bench_pass_eats_none_of_an_arms_search_budget_and_replays_spend_it(
     tmp_path: Path,
 ) -> None:
@@ -2618,7 +2620,7 @@ def test_a_killed_hold_stays_out_of_a_bursts_spend_while_its_job_holds_and_is_un
     assert _unreported_sends(burst_ledger) == unreported + 1, "a killed send's hold went unread"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_held(
     tmp_path: Path,
 ) -> None:
@@ -2644,7 +2646,7 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_settled_call_leaves_the_money_fold_at_the_next_line(tmp_path: Path) -> None:
     book = spend_book(1.0)
     bound = SendBound(input_tokens=0, output_tokens=100, usd=0.01)
@@ -2665,7 +2667,7 @@ def test_a_settled_call_leaves_the_money_fold_at_the_next_line(tmp_path: Path) -
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
     tmp_path: Path, built_stores: Stores
 ) -> None:
@@ -2823,7 +2825,7 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -> None:
     silent = SpendRollup()
     silent.bank(billed_call(node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02))
@@ -2956,7 +2958,7 @@ def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(offline: R
     wire.down = False
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_repaired_nodes_resend_is_in_its_sums_never_held_again() -> None:
     # Holding it again halted runs short of their cap.
     repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
@@ -3067,7 +3069,7 @@ def test_a_reply_names_its_category_the_parameter_it_refused_and_whether_it_may_
             )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3403,7 +3405,7 @@ def test_an_episodes_row_counts_the_tokens_its_sends_billed_and_no_reported_pric
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_resume_counts_each_prior_bill_as_its_send_did(tmp_path: Path) -> None:
     # An own key's off the coupon, a kind its meter skips on the box's key.
     prior = CycleEventLog(tmp_path / "prior.jsonl")
@@ -3825,7 +3827,7 @@ def test_a_grant_file_without_its_start_does_not_load() -> None:
         stores.grant.load()
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     book = spend_book(None, usd_reserve=0.05)
     send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
@@ -3840,7 +3842,7 @@ def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     book.hold(send, _OPTIMIZER, what="o", paid_by="user", ledger="o")
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_compare_arms_uncounted_bench_sends_still_draw_the_coupons_reserve(
     tmp_path: Path,
 ) -> None:
@@ -3861,7 +3863,7 @@ def test_a_compare_arms_uncounted_bench_sends_still_draw_the_coupons_reserve(
     assert unpriced.value.category is ErrorCategory.NO_RATE, "an unpriced bench send went out"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_the_free_tier_holds_an_ungranted_web_account_and_no_other() -> None:
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     hand_set = Budget(usd=50.0, tokens=50_000)
@@ -3939,7 +3941,7 @@ def test_a_dollar_ceiling_admits_only_a_route_a_rate_prices(offline: Router) -> 
     ), "a dollar ceiling would admit a route no rate prices"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_free_check_in_measures_on_twenty_cells_at_its_models_lowest_rung(
     free_fence: _FreeFence,
 ) -> None:
@@ -3953,7 +3955,7 @@ def test_a_free_check_in_measures_on_twenty_cells_at_its_models_lowest_rung(
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_searched_model_axis_offers_and_starts_the_tiers_models_alone(
     free_fence: _FreeFence,
 ) -> None:
@@ -4025,7 +4027,7 @@ def test_start_refuses_on_the_free_tier_what_its_fence_leaves_outside(
         free_tier.refuse_outside_free_tier(off)
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_later_layer_naming_another_model_drops_the_earlier_layers_route() -> None:
     routed: dict[str, object] = {
         "pipeline_overlay": {"llm_only": {"model": "a/x", "route_order": ["Groq"]}}
@@ -4098,7 +4100,7 @@ def _web_account(sub: str) -> Stores:
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside_it() -> None:
     passing = _web_account("sub-8")
     passing.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
@@ -4885,7 +4887,7 @@ def test_a_retry_under_the_acts_key_at_the_rest_door_answers_the_arms_it_minted(
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_hold_on_the_accounts_own_key_holds_back_what_its_host_paid_children_keep() -> None:
     charges = _charges()
     holds: tuple[tuple[str, str | None, KeySource, float], ...] = (
@@ -4909,7 +4911,7 @@ def test_a_hold_on_the_accounts_own_key_holds_back_what_its_host_paid_children_k
     )
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_host_paid_send_in_an_own_key_cell_asks_the_reserve_its_whole_bound() -> None:
     book = spend_book(None, usd_reserve=0.4)
     book.charges.append(
@@ -5228,7 +5230,11 @@ def test_a_campaign_a_delete_tore_admits_no_pass_and_serves_its_bench_as_not_act
     )
     torn_read = stores.campaigns.load_campaign(root_hop.campaign_id)
     assert torn_read is not None
-    served = cycle_bench(stores, CampaignCycle(torn_read, root_hop.cycle_id), graded_under).status
+    served = cycle_bench(
+        stores,
+        CampaignCycle(torn_read, root_hop.cycle_id),
+        Resolution(graded_under, verifier_graded=False),
+    ).status
     assert (served.can_run, served.refusal) == (False, PassRefusal.NOT_ACTIVE), (
         "the served bench offers a grade the pass's admission refuses"
     )
@@ -5365,7 +5371,7 @@ def unframed_session(built_stores: Stores, offline: Router) -> _Framing:
     return _Framing(framing, declared, list(framing.bank.samples))
 
 
-@pytest.mark.usefixtures("account_bound", "offline")
+@pytest.mark.usefixtures("account_bound")
 def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mint(
     built_stores: Stores,
     monkeypatch: pytest.MonkeyPatch,
@@ -5393,7 +5399,7 @@ def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mi
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
 
-@pytest.mark.usefixtures("account_bound", "offline")
+@pytest.mark.usefixtures("account_bound")
 def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bill(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch, unframed_session: _Framing
 ) -> None:

@@ -9,21 +9,18 @@ from typing import Any
 
 from promptpotter.application.bench.difficulty import judging_ruler, restamped
 from promptpotter.application.datasets.authored import (
-    dataset_scorer,
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import held_bank
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.intelligence.hard_sample_sorter import (
     arm_thetas,
     build_hard_samples,
     rank_hard_samples,
 )
 from promptpotter.application.intelligence.rasch import Observation, build_observations
-from promptpotter.application.pipeline_resolve import (
-    cycle_config,
-)
+from promptpotter.application.pipeline_resolve import Resolution, cycle_config, resolved
 from promptpotter.application.scoring.closed_rounds import (
-    campaign_scorer,
     closed_rounds,
     cycle_bank,
     walked_rows,
@@ -194,7 +191,14 @@ def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         raise NotFoundError(f"Answer '{answer}' is filed under a bank no longer held")
     position = bank.position_of[filed.cell.sample_key]
     filed = stores.archive.whole(filed)
-    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), position)
+    return _assemble(
+        described,
+        filed,
+        Resolution(load_dataset_campaign_config(dataset), bank.verifier_graded).scorer.grade(
+            filed.cell
+        ),
+        position,
+    )
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
@@ -289,12 +293,8 @@ def cells_scope(
     return CellsScope(stores, art_store, name, scope, hop, at)
 
 
-def _drawn_rows(
-    cells: CellsScope, drawn: PartitionRecord | None, slots: list[int]
-) -> dict[int, Sample]:
+def _drawn_rows(cells: CellsScope, drawn: PartitionRecord, slots: list[int]) -> dict[int, Sample]:
     """A cycle reads the bank it DREW, by hash, and only the rows a page shows."""
-    if drawn is None:
-        return {}
     rows = cells.stores.tenant_datasets.rows(drawn.dataset_hash, slots)
     if rows is None:
         raise PayloadInvalidError(
@@ -340,7 +340,7 @@ def cycle_hard_samples(
 
 
 def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
-    scorer = dataset_scorer(resolve_dataset(stores, name))
+    scorer = Resolution(_dataset_campaign_config(stores, name), bank.verifier_graded).scorer
     knobs = _dataset_campaign_config(stores, name).optimization
     n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
 
@@ -426,21 +426,22 @@ def _leaderboard_page(
         selected = _selected(view, range(len(bank.samples)), max_unmeasured, limit)
         shown = {sid: bank.samples[sid] for sid in selected}
         wanted = {shown[sid].key: sid for sid in selected}
-        graded_under = dataset_scorer(resolve_dataset(art_store, cells.name))
+        graded_under = Resolution(
+            _dataset_campaign_config(art_store, cells.name), bank.verifier_graded
+        ).scorer
         candidates, rows, headline = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
-        drawn = art_store.campaigns.last(hop, PartitionRecord)
+        drawn = drawn_partition(art_store.campaigns, hop)
         at = art_store.campaigns.campaign_cycle(hop)
-        graded_under = campaign_scorer(art_store, at.campaign)
+        graded_under = resolved(art_store, at.campaign.root_cycle).scorer
         rounds = closed_rounds(art_store, hop, graded_under, moment=None)
         view = cycle_hard_samples(art_store, hop, rounds, cycle_config(art_store, at).config)
-        members = frozenset() if drawn is None else drawn.bank_ids
-        selected = _selected(view, members, max_unmeasured, limit)
+        selected = _selected(view, drawn.bank_ids, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
         candidates, rows, headline = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
-    resolved, ranked = rank_hard_samples(
+    sorted_by, ranked = rank_hard_samples(
         view,
         wanted,
         measured={shown[c.position].key for c in rows if c.fitness is not None},
@@ -452,7 +453,7 @@ def _leaderboard_page(
         candidates=candidates,
         cells=rows,
         headline=headline,
-        order=resolved,
+        order=sorted_by,
         ranked=[wanted[key] for key in ranked],
         fitness_unit=graded_under.fitness_unit,
     )

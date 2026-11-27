@@ -53,8 +53,8 @@ from promptpotter.application.pipeline_resolve import (
     draft_pipeline,
     draft_served,
     permitted_narrowing,
-    recorded_schema,
     resolve_pipeline_for_campaign,
+    resolved,
     steer_verdict,
 )
 from promptpotter.domain.campaign import CampaignCycle
@@ -151,7 +151,7 @@ def parse_cycle_start(sent: ForkStart, stores: Stores, at: CampaignCycle) -> Cyc
     verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.laid)
     if verdict == "refused":
         raise NotFoundError("Not found", code="not_found")
-    overlay = _typed_steer(sent.laid, recorded_schema(stores, hop)) if sent.laid else {}
+    overlay = _typed_steer(sent.laid, resolved(stores, at).declared) if sent.laid else {}
     for node, call in overlay.items():
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
         for param, value in call.laid_keys().items():

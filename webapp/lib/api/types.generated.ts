@@ -16,6 +16,9 @@ export interface ErrorEnvelope {
    * terminal's verb and flag, the browser's control, the MCP tool its kind
    * names). */
   next_acts: NextAct[];
+  /** What the refusal's path left past its sentence, each line as said (a fork stub
+   * its withdrawal kept, the datasets a name could have been). */
+  notes: string[];
   /** Names the server log line that holds this failure. */
   error_id: string;
 }
@@ -480,6 +483,9 @@ export interface Refusal {
    * terminal's verb and flag, the browser's control, the MCP tool its kind
    * names). */
   next_acts: NextAct[];
+  /** What the refusal's path left past its sentence, each line as said (a fork stub
+   * its withdrawal kept, the datasets a name could have been). */
+  notes: string[];
 }
 
 export interface BackendResponse {
@@ -967,20 +973,25 @@ export interface TestFamily {
   p_adjusted: number;
 }
 
-/** What a run's spend caps have counted, in the units they meter, by kind. */
+/** What a run's spend caps have counted, in the units they meter, by kind, and
+ * its words. */
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
   metered_usd: number;
   billed_usd: number;
   rate_priced_usd: number;
-  calls_rate_priced: boolean;
-  rate_known: boolean;
-  bill_is_floor: boolean;
   incurred_usd: number;
   billed_tokens: number;
-  unpriced_tokens: number;
   kinds: Record<string, KindSpend>;
   replay_share: number | null;
+  /** The bill as a person reads it: `≥` where it is a floor. */
+  bill: string;
+  /** What our rate priced, said beside the bill; null where no call was. */
+  rate_priced_line: string | null;
+  /** What share of the search a replay served free. */
+  replay_line: string;
+  /** Each kind in the meter's units: those inside the caps, then those beside. */
+  buckets_line: string;
 }
 
 /** One spend kind as every surface reads it: metered, billed, rate-priced and
@@ -3023,7 +3034,6 @@ export interface SpendBucket {
   reasoning_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
-  rate_known: boolean;
   unpriced_tokens: number;
   incurred_usd: number;
   incurred_unpriced_tokens: number;
@@ -5847,7 +5857,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "dc7ad283e12ee81e";
+export const SERVED_CONTRACT = "1aefc37254a88169";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6697,14 +6707,14 @@ export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
 
 // Mirror of domain/phases.py::RUN_PHASE_INFO, in display order.
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, refusal: { code: "run_queued", message: "Queued — it starts by itself when a slot frees.", details: {}, next_acts: [] } },
-  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, refusal: { code: "run_starting", message: "Starting up…", details: {}, next_acts: [] } },
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, refusal: { code: "run_queued", message: "Queued — it starts by itself when a slot frees.", details: {}, next_acts: [], notes: [] } },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, refusal: { code: "run_starting", message: "Starting up…", details: {}, next_acts: [], notes: [] } },
   "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", refusal: null },
   "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", refusal: null },
-  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", refusal: { code: "run_stopping", message: "Stopping at its next checkpoint.", details: {}, next_acts: [] } },
-  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, refusal: { code: "run_held", message: "Holding for you — the chat says what it waits on.", details: {}, next_acts: [{"kind": "submit-arms", "field": "keep", "value": "the draft indexes to measure", "reads": ""}] } },
-  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_detached", message: "Producer gone.", details: {}, next_acts: [] } },
-  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_ending", message: "Writing its last files.", details: {}, next_acts: [] } },
+  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", refusal: { code: "run_stopping", message: "Stopping at its next checkpoint.", details: {}, next_acts: [], notes: [] } },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, refusal: { code: "run_held", message: "Holding for you — the chat says what it waits on.", details: {}, next_acts: [{"kind": "submit-arms", "field": "keep", "value": "the draft indexes to measure", "reads": ""}], notes: [] } },
+  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_detached", message: "Producer gone.", details: {}, next_acts: [], notes: [] } },
+  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_ending", message: "Writing its last files.", details: {}, next_acts: [], notes: [] } },
 };
 
 // Mirror of domain/phases.py::STOP_REASON_INFO, in display order.

@@ -9,15 +9,12 @@ from pydantic import ValidationError
 
 from promptpotter.application.datasets.tabular_ingest import read_answer_terms_file
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
-from promptpotter.application.scoring.judges.registry import judge_instrument, two_valued_terms
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.domain.campaign import Environment, RunSpec
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
 from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.layer_fold import UNBOUNDED, Folded, Layer, fold_layers, patch_between
 from promptpotter.domain.pipeline_schema import KnobLayer
-from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     DEFAULTS_FILE,
@@ -211,22 +208,6 @@ def selected_config(document: Mapping[str, Any]) -> CampaignConfig:
         ) from exc
     select_optimizer(out.optimization)
     return out
-
-
-def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
-    """``verifier_graded`` is the bank's fact; a reader holding no bank passes ``False``."""
-    spec = split_scoring_block(config.scoring, judge_instrument=None)
-    return compile_scorer(
-        spec.per_sample,
-        spec.per_cell,
-        verifier_graded=verifier_graded,
-        judge_instrument=judge_instrument(config.judges),
-        two_valued_terms=two_valued_terms(config.judges),
-    )
-
-
-def dataset_scorer(dataset: ResolvedDataset) -> Scorer:
-    return scorer_of(load_dataset_campaign_config(dataset), verifier_graded=False)
 
 
 def read_authored_dataset(dataset: ResolvedDataset) -> AuthoredDataset:

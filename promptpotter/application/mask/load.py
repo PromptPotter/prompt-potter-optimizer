@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from promptpotter import connectors
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
     MaskCandidate,
     MaskCycle,
@@ -13,7 +12,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.pipeline_resolve import cycle_config, declared_config
+from promptpotter.application.pipeline_resolve import declared_config, resolved
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
@@ -192,10 +191,7 @@ def load_mask_record(
         cid = hop.cycle_id
         indexes[cid] = index
         lines[cid] = stores.campaigns.standing_rounds(hop, moment=None)
-        own = scorer_of(
-            cycle_config(stores, CampaignCycle(campaign, hop.cycle_id)).config,
-            verifier_graded=False,
-        )
+        own = resolved(stores, CampaignCycle(campaign, hop.cycle_id)).scorer
         files[cid] = {
             closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)
         }
@@ -222,10 +218,7 @@ def load_mask_record(
         crowns = lines[cid].crowns
         at = CampaignCycle(campaign, cid)
         hop = at.hop
-        scorer = scorer_of(
-            cycle_config(stores, at).config.overlaid(start_layer(overrides)),
-            verifier_graded=False,
-        )
+        scorer = resolved(stores, at).overlaid(start_layer(overrides)).scorer
         # The mask names slots in the bank the cycle drew; its rows pair on keys.
         keys = (
             None

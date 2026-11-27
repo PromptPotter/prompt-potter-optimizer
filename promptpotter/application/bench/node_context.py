@@ -320,7 +320,7 @@ class Lineage(CycleRead):
             cells=held.cells,
             overlap_results=held.overlap_results,
             priors=cycle.rounds,
-            schema=session.pipeline_schema,
+            schema=session.bound_resolution.chain,
             overlap=ReadingState.NOT_ASKED,
         )
         rr = held.model_copy(
@@ -486,7 +486,7 @@ class Target(CycleRead):
 
     @property
     def schema(self) -> PipelineSchema:
-        return self._cycle.session.pipeline_schema
+        return self._cycle.session.bound_resolution.chain
 
     @property
     def prompt_node(self) -> PipelineNode:
@@ -628,7 +628,7 @@ class Children(CycleRead):
         hosted_by: str | None = None,
     ) -> Proposal:
         """*overlay* lays config over the FIRST parent's. *hosted_by* names the LLM node whose reply decided the child."""
-        schema = self._cycle.session.pipeline_schema
+        schema = self._cycle.session.bound_resolution.chain
         variation = (
             self._variation
             if hosted_by is None
@@ -669,7 +669,7 @@ class Children(CycleRead):
         changes_description: str | None = None,
     ) -> Proposal:
         """*overlay* lays config over the proposal's own; *take* names each locus's donor by position in its parents."""
-        schema = self._cycle.session.pipeline_schema
+        schema = self._cycle.session.bound_resolution.chain
         asked = {node: dict(keyed) for node, keyed in (overlay or {}).items()}
         prompt_loci = dict(prompt_loci or {})
         donors = _parents(self._cycle, proposal.individual) if take else []

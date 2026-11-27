@@ -6982,6 +6982,15 @@
             },
             "title": "Next Acts",
             "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "description": "What the refusal's path left past its sentence, each line as said (a fork stub its withdrawal kept, the datasets a name could have been).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
           }
         },
         "required": [
@@ -11125,11 +11134,12 @@
       },
       "MeteredSpend": {
         "additionalProperties": false,
-        "description": "What a run's spend caps have counted, in the units they meter, by kind.",
+        "description": "What a run's spend caps have counted, in the units they meter, by kind, and its words.",
         "properties": {
-          "bill_is_floor": {
-            "title": "Bill Is Floor",
-            "type": "boolean"
+          "bill": {
+            "description": "The bill as a person reads it: `≥` where it is a floor.",
+            "title": "Bill",
+            "type": "string"
           },
           "billed_tokens": {
             "title": "Billed Tokens",
@@ -11139,9 +11149,10 @@
             "title": "Billed Usd",
             "type": "number"
           },
-          "calls_rate_priced": {
-            "title": "Calls Rate Priced",
-            "type": "boolean"
+          "buckets_line": {
+            "description": "Each kind in the meter's units: those inside the caps, then those beside.",
+            "title": "Buckets Line",
+            "type": "string"
           },
           "incurred_usd": {
             "title": "Incurred Usd",
@@ -11169,13 +11180,26 @@
             "title": "Metered Usd",
             "type": "number"
           },
-          "rate_known": {
-            "title": "Rate Known",
-            "type": "boolean"
+          "rate_priced_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What our rate priced, said beside the bill; null where no call was.",
+            "title": "Rate Priced Line"
           },
           "rate_priced_usd": {
             "title": "Rate Priced Usd",
             "type": "number"
+          },
+          "replay_line": {
+            "description": "What share of the search a replay served free.",
+            "title": "Replay Line",
+            "type": "string"
           },
           "replay_share": {
             "anyOf": [
@@ -11187,10 +11211,6 @@
               }
             ],
             "title": "Replay Share"
-          },
-          "unpriced_tokens": {
-            "title": "Unpriced Tokens",
-            "type": "integer"
           }
         },
         "required": [
@@ -11198,14 +11218,14 @@
           "metered_usd",
           "billed_usd",
           "rate_priced_usd",
-          "calls_rate_priced",
-          "rate_known",
-          "bill_is_floor",
           "incurred_usd",
           "billed_tokens",
-          "unpriced_tokens",
           "kinds",
-          "replay_share"
+          "replay_share",
+          "bill",
+          "rate_priced_line",
+          "replay_line",
+          "buckets_line"
         ],
         "title": "MeteredSpend",
         "type": "object"
@@ -14995,6 +15015,15 @@
             },
             "title": "Next Acts",
             "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "description": "What the refusal's path left past its sentence, each line as said (a fork stub its withdrawal kept, the datasets a name could have been).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
           }
         },
         "required": [
@@ -17160,11 +17189,6 @@
             "default": 0,
             "title": "Output Tokens",
             "type": "integer"
-          },
-          "rate_known": {
-            "default": false,
-            "title": "Rate Known",
-            "type": "boolean"
           },
           "rate_priced_usd": {
             "default": 0.0,

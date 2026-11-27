@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.datasets.draft_campaign import draft_criterion
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import (
@@ -134,7 +133,7 @@ async def plan_draft_patch(
         laid = draft_pipeline(stores, draft.patch(**changes, config=config), served)
         if "scoring" in sent:
             # Compiled here, so a criterion no cell could be graded by is refused, never stored.
-            scorer_of(laid.config, verifier_graded=False)
+            _ = laid.scorer
         changes["config"] = _narrowing_follows_schema(
             config, _description_keys(was), _description_keys(laid)
         )

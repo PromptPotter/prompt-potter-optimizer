@@ -4035,55 +4035,6 @@
         "title": "KeepDraftsAction",
         "type": "object"
       },
-      "KindSpend": {
-        "additionalProperties": false,
-        "description": "One spend kind as every surface reads it: metered, billed, rate-priced and incurred.",
-        "properties": {
-          "billed_usd": {
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "counted": {
-            "title": "Counted",
-            "type": "boolean"
-          },
-          "incurred_usd": {
-            "title": "Incurred Usd",
-            "type": "number"
-          },
-          "metered_usd": {
-            "title": "Metered Usd",
-            "type": "number"
-          },
-          "prefix": {
-            "$ref": "#/components/schemas/PrefixReading"
-          },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "sent": {
-            "title": "Sent",
-            "type": "boolean"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "counted",
-          "sent",
-          "metered_usd",
-          "billed_usd",
-          "rate_priced_usd",
-          "incurred_usd",
-          "tokens",
-          "prefix"
-        ],
-        "title": "KindSpend",
-        "type": "object"
-      },
       "LLMCallProgressRecord": {
         "additionalProperties": false,
         "description": "Heartbeat while the provider call is blocked; cache replays skip it.",
@@ -4861,93 +4812,6 @@
           "pass_role"
         ],
         "title": "MemberAddress",
-        "type": "object"
-      },
-      "MeteredSpend": {
-        "additionalProperties": false,
-        "description": "What a run's spend caps have counted, in the units they meter, by kind.",
-        "properties": {
-          "bill_is_floor": {
-            "title": "Bill Is Floor",
-            "type": "boolean"
-          },
-          "billed_tokens": {
-            "title": "Billed Tokens",
-            "type": "integer"
-          },
-          "billed_usd": {
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "calls_rate_priced": {
-            "title": "Calls Rate Priced",
-            "type": "boolean"
-          },
-          "incurred_usd": {
-            "title": "Incurred Usd",
-            "type": "number"
-          },
-          "kinds": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/KindSpend"
-            },
-            "propertyNames": {
-              "$ref": "#/components/schemas/TokenUsageKind"
-            },
-            "title": "Kinds",
-            "type": "object"
-          },
-          "meter": {
-            "enum": [
-              "bill",
-              "search_incurred"
-            ],
-            "title": "Meter",
-            "type": "string"
-          },
-          "metered_usd": {
-            "title": "Metered Usd",
-            "type": "number"
-          },
-          "rate_known": {
-            "title": "Rate Known",
-            "type": "boolean"
-          },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "replay_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Replay Share"
-          },
-          "unpriced_tokens": {
-            "title": "Unpriced Tokens",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "meter",
-          "metered_usd",
-          "billed_usd",
-          "rate_priced_usd",
-          "calls_rate_priced",
-          "rate_known",
-          "bill_is_floor",
-          "incurred_usd",
-          "billed_tokens",
-          "unpriced_tokens",
-          "kinds",
-          "replay_share"
-        ],
-        "title": "MeteredSpend",
         "type": "object"
       },
       "ModelCapability": {
@@ -5859,10 +5723,15 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "verifier_graded": {
+            "title": "Verifier Graded",
+            "type": "boolean"
           }
         },
         "required": [
           "dataset_hash",
+          "verifier_graded",
           "instrument_id",
           "cell_identity",
           "split",
@@ -6307,46 +6176,6 @@
           "dataset_overlay"
         ],
         "title": "PipelineRead",
-        "type": "object"
-      },
-      "PrefixReading": {
-        "additionalProperties": false,
-        "description": "A provider's prefix-cache discount as every surface reads it, served whole.",
-        "properties": {
-          "badge": {
-            "description": "`c39%` / `c0%` / `c?`, and empty on a replay, whose line already carries 📖.",
-            "title": "Badge",
-            "type": "string"
-          },
-          "share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null on `unreported` and `replayed`.",
-            "title": "Share"
-          },
-          "state": {
-            "enum": [
-              "discounted",
-              "cold",
-              "unreported",
-              "replayed"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "share",
-          "badge"
-        ],
-        "title": "PrefixReading",
         "type": "object"
       },
       "PricedKeyRecord": {
@@ -8744,11 +8573,6 @@
             "title": "Output Tokens",
             "type": "integer"
           },
-          "rate_known": {
-            "default": false,
-            "title": "Rate Known",
-            "type": "boolean"
-          },
           "rate_priced_usd": {
             "default": 0.0,
             "title": "Rate Priced Usd",
@@ -9125,15 +8949,24 @@
           "cycle": {
             "$ref": "#/components/schemas/SpendCount"
           },
+          "meter": {
+            "enum": [
+              "bill",
+              "search_incurred"
+            ],
+            "title": "Meter",
+            "type": "string"
+          },
           "share": {
             "$ref": "#/components/schemas/Budget"
           },
           "spent": {
-            "$ref": "#/components/schemas/MeteredSpend"
+            "$ref": "#/components/schemas/SpendRollup"
           }
         },
         "required": [
           "spent",
+          "meter",
           "cycle",
           "campaign",
           "cap",

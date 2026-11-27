@@ -23,9 +23,9 @@ from factories import (
     jumping_clock,
     level_series,
     measurement,
+    opened_round,
     pipeline_schema,
     round_result,
-    run_init_round,
     samples,
     scorer_of,
     sheet,
@@ -33,6 +33,7 @@ from factories import (
 )
 from offline_world import Router
 
+from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.difficulty import (
     JudgingRuler,
     calibrate_delta_ruler,
@@ -382,16 +383,13 @@ class _Warm(NamedTuple):
 @pytest.fixture
 def warm(offline: Router) -> _Warm:  # ~0.5 s a fact
     graded_pool = samples(40, "TRUE", query="d")
-    answered = offline.backend.matches
+    offline.backend.answers = lambda _prompt, query: int(query.removeprefix("d")) < 16
 
-    def hits_easiest(payload: dict[str, Any]) -> dict[str, Any]:
-        answer = answered(payload)
-        hit = int(payload["query"].removeprefix("d")) < 16
-        answer["data"]["final_ranking"][0]["candidate"] = "TRUE" if hit else "FALSE"
-        return answer
+    async def opened() -> RoundContext:
+        async with opened_round(workspace(), offline, graded_pool) as ctx:
+            return ctx
 
-    offline.backend.matches = hits_easiest  # type: ignore[method-assign]
-    drawing = jumping_clock(run_init_round(workspace(), offline, graded_pool))
+    drawing = jumping_clock(opened())
     session = drawing.cycle.session
     made = _Warm(
         drawing,

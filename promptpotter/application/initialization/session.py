@@ -12,7 +12,6 @@ from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize, Purp
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
@@ -25,14 +24,17 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import HeldBudget
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import MINT_FRESH, ConflictError
+from promptpotter.shared.errors import MINT_FRESH, ConflictError, FileKind, FileUnreadableError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
+    from promptpotter.application.pipeline_resolve import RunResolution
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 @dataclass(frozen=True)
@@ -82,11 +84,24 @@ class LaunchState:
         return self.clock
 
 
+def drawn_partition(campaigns: CampaignStore, hop: CycleHop) -> PartitionRecord:
+    """THE read of what *hop*'s chain drew: its mint draws one and a fork stands on its parent's.
+    Never tolerant: the mint appends the draw before it writes the campaign, so a cycle a reader
+    can address has drawn, and one without its draw is a torn mint, refused as unreadable."""
+    drawn = campaigns.last(hop, PartitionRecord)
+    if drawn is None:
+        raise FileUnreadableError(
+            FileKind.LEDGER,
+            path=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
+            reason="it holds no bank partition, which its mint appends",
+        )
+    return drawn
+
+
 @dataclass(frozen=True)
 class Session:
     store: Stores
     backend_client: BackendClient
-    pipeline_schema: PipelineSchema
     # Recorded whole by `record_resolved_run`, at the mint and at every `init_cycle`.
     pipeline_read: PipelineRead
     # What init read of the backend's revision; `None` where its connector checks none.
@@ -99,6 +114,8 @@ class Session:
     dataset_name: str | None = None
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
+    # What `pipeline_resolve.py::bind_resolution` bound: it owns the schema; `None` until then.
+    resolution: RunResolution | None = None
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
     cell_identity: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -119,7 +136,7 @@ class Session:
             self.hop,
             self.pipeline_read,
             experiment=self.backend_client.workload.experiment,
-            model_capabilities=self.pipeline_schema.model_capabilities,
+            model_capabilities=self.bound_resolution.chain.model_capabilities,
         )
 
     def act(self, act: ArmAct) -> None:
@@ -128,15 +145,10 @@ class Session:
         self.state.human_intervened |= act.babysits
 
     def bound(self, at: CampaignCycle) -> Session:
-        """The bank and partition are what *at*'s chain drew."""
+        """The bank and partition are what *at*'s chain drew, and the mint's own layers of the read
+        what its mint laid: an account leaving the tier moves no minted run."""
         hop = at.hop
-        drawn = self.store.campaigns.last(hop, PartitionRecord)
-        if drawn is None:
-            raise ConflictError(
-                f"cycle {hop.cycle_id} holds no drawn partition over its chain: its mint draws "
-                "one and a fork stands on its parent's, so this cycle stands on neither.",
-                next_acts=(MINT_FRESH,),
-            )
+        drawn = drawn_partition(self.store.campaigns, hop)
         bank = (
             self.bank
             if drawn.dataset_hash == self.bank.dataset_hash
@@ -148,12 +160,21 @@ class Session:
                 code="campaign_roster_unreadable",
                 next_acts=(MINT_FRESH,),
             )
+        minted = scan_resolved_run(self.store.campaigns.chain(hop)).read
         return replace(
             self,
             campaign=at.campaign,
             cycle_id=at.cycle_id,
             bank=bank,
             drawn=drawn.restored(bank.samples),
+            pipeline_read=self.pipeline_read
+            if minted is None
+            else self.pipeline_read.model_copy(
+                update={
+                    "free_tier_overlay": minted.free_tier_overlay,
+                    "knob_layers": minted.knob_layers,
+                }
+            ),
         )
 
     @property
@@ -165,6 +186,14 @@ class Session:
         if self.campaign is None:
             raise RuntimeError("this session is bound to no campaign: `bound` binds one.")
         return self.campaign
+
+    @property
+    def bound_resolution(self) -> RunResolution:
+        if self.resolution is None:
+            raise RuntimeError(
+                "this session is bound to no resolution: `bind_resolution` binds one."
+            )
+        return self.resolution
 
     @property
     def at(self) -> CampaignCycle:
@@ -194,7 +223,7 @@ class Session:
 
     def points(self, framing: TaskDecomposition) -> PointContext:
         return PointContext(
-            schema=self.pipeline_schema,
+            schema=self.bound_resolution.chain,
             framing=framing,
             demo=self.state.scoring.partition.demo,
         )

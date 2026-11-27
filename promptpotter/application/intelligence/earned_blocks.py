@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, assert_never
 
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleHop
@@ -37,8 +38,8 @@ class CampaignSurvey:
         return self._read(hop, lambda: self._store.standing_rounds(hop, moment=None))
 
     def drawn(self, hop: CycleHop) -> PartitionRecord | None:
-        """What *hop*'s chain measured on and was graded under, where it drew a bank."""
-        return self._read(hop, lambda: self._store.last(hop, PartitionRecord))
+        """What *hop*'s chain measured on and was graded under; ``None`` where its ledger faulted."""
+        return self._read(hop, lambda: drawn_partition(self._store, hop))
 
     def _read[V](self, hop: CycleHop, read: Callable[[], V | None]) -> V | None:
         if hop.campaign_id in self.faulted:

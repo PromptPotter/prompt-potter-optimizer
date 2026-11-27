@@ -58,7 +58,8 @@ def declare_run_stop(
         session.store, session.hop, meter, hold_id=None if book is None else book.hold_id
     )
     spend = StopSpend(
-        spent=observers.dashboard.live.spend_metered(meter),
+        spent=observers.dashboard.spend,
+        meter=meter,
         cycle=cycle,
         campaign=campaign,
         cap=Budget(usd=budget.usd, tokens=budget.tokens),
@@ -95,7 +96,7 @@ def declare_run_wiring(
             defaults_drift=defaults_drift(
                 campaign,
                 running=selected.treatment(
-                    campaign_admits(campaign_config, session.pipeline_schema),
+                    campaign_admits(campaign_config, session.bound_resolution.chain),
                     session.store.block_packs,
                 ),
             ),
@@ -202,7 +203,7 @@ def _bind_observers(
     readout = projecting.add(readout)
     projecting.add(CycleIndexProjection(cycle_dir))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
-    projecting.add(ExportProjection(session, campaign_config))
+    projecting.add(ExportProjection(session.store, session.at, session.dataset))
     return RunObservers(
         store=session.store,
         hop=session.hop,
