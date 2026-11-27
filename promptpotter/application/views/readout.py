@@ -156,7 +156,7 @@ class ReadoutProjection(Projection):
         self._session, self._config = session, config
         self._round_num = 0
         self._sink = sink
-        self._schema = session.pipeline_schema
+        self._schema = session.bound_resolution.chain
         self._display_tags = display_tags(self._schema)
         # The round's opening, whose proposer and parent its population's table reads.
         self._opened: ProposeOpened | None = None

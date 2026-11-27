@@ -1115,17 +1115,12 @@ def main() -> None:
             # One stream: the refusal is the answer, and stderr stays empty of it.
             print(json.dumps(refused.model_dump(mode="json")))
         else:
-            # Its acts in this terminal's verbs and flags, then what this terminal alone can do
-            # about it, riding the refusal as a note.
+            # Its acts in this terminal's verbs and flags, then its notes.
             acts = cast(
                 "Callable[[Sequence[NextAct]], list[str]]",
                 imported("promptpotter.application.views.render", "phase:acts_line"),
             )
-            said = [
-                f"Error: {refused.message}",
-                *acts(refused.next_acts),
-                *getattr(exc, "__notes__", ()),
-            ]
+            said = [f"Error: {refused.message}", *acts(refused.next_acts), *refused.notes]
             print("\n\n".join(said), file=sys.stderr)
         # A pause that reached a paid pass banked its cells, so it exits paused, as a run's does.
         stopped = cast(

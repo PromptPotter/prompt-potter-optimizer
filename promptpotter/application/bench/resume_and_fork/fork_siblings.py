@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.decisions import decision
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
@@ -23,7 +24,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     FORK_DIRECTION,
     CycleMintedRecord,
@@ -197,12 +197,7 @@ def cut_fork(
             f"cut_fork({trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
-    if campaign_store.last(parent, PartitionRecord) is None:
-        raise ConflictError(
-            f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
-            "so no fork can stand on it",
-            next_acts=(MINT_FRESH,),
-        )
+    drawn_partition(campaign_store, parent)
     standing = campaign_store.standing_rounds(parent, moment=None)
     # A rewind in place refuses past its last close (`rewind_enters`); so does the cut.
     if (

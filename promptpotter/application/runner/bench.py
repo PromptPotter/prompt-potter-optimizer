@@ -8,6 +8,7 @@ from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import campaign_refusal
 from promptpotter.application.pipeline_resolve import Resolution, resolved
 from promptpotter.application.runner.termination import run_stop_reason
@@ -74,7 +75,6 @@ from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import LaunchClockRecord, PhaseRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.run_standing import LineOutlay, declared_selection
@@ -531,7 +531,7 @@ async def _send_on_bench(
                 verification=MeasurementRole.BENCH,
                 subject=subject,
                 arm=arm,
-                sp_hash=search_point.sp_hash(session.pipeline_schema),
+                sp_hash=search_point.sp_hash(session.bound_resolution.chain),
                 rows=len(session.state.scoring.partition.bench),
                 strategy=None,
             ),
@@ -561,7 +561,7 @@ async def _send_on_bench(
                 else None,
             )
         )
-        sp_hash = search_point.sp_hash(session.pipeline_schema)
+        sp_hash = search_point.sp_hash(session.bound_resolution.chain)
         taken = _bench_pass(session, sp_hash, arm, scored.cells, stop, reads_before)
         if scored.halt is not None:
             graded(session, taken, subject=subject)
@@ -693,7 +693,9 @@ async def bench_selection(
     for key, (arm, sp) in roster.items():
         held = banked.pass_of(key)
         if held is not None and held.answers(
-            sp.sp_hash(session.pipeline_schema), origin.sample_keys, session.state.scoring.scorer.id
+            sp.sp_hash(session.bound_resolution.chain),
+            origin.sample_keys,
+            session.state.scoring.scorer.id,
         ):
             continue
         taken, stop = await _send_on_bench(session, sp, arm=arm, subject="selected")
@@ -786,7 +788,7 @@ async def bench_origin(
         return None
     held = line_passes(stores, session.bound_campaign)
     if held is not None and held.origin.answers(
-        origin_sp.sp_hash(session.pipeline_schema),
+        origin_sp.sp_hash(session.bound_resolution.chain),
         [s.key for s in session.state.scoring.partition.bench],
         session.state.scoring.scorer.id,
     ):
@@ -877,7 +879,7 @@ def bench_line(
 ) -> BenchLine:
     campaign, hop = at.campaign, at.hop
     holder = stores.campaigns.live_cycle(campaign.root_hop)
-    drawn = stores.campaigns.last(hop, PartitionRecord)
+    drawn = drawn_partition(stores.campaigns, hop)
     return BenchLine(
         hop=hop,
         on_live_cycle=holder == hop,
@@ -885,8 +887,8 @@ def bench_line(
         refused=_refused(stores, campaign),
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
-        held_out=len(drawn.bench_ids) if drawn is not None else config.dataset_split.bench,
-        instrument_id=None if drawn is None else drawn.instrument_id,
+        held_out=len(drawn.bench_ids),
+        instrument_id=drawn.instrument_id,
         run=run,
         spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
         files=CommandKind.HELD_OUT in filable(stores.identity),

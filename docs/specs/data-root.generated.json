@@ -2831,6 +2831,15 @@
                 },
                 "title": "Next Acts",
                 "type": "array"
+              },
+              "notes": {
+                "default": [],
+                "description": "What the refusal's path left past its sentence, each line as said (a fork stub its withdrawal kept, the datasets a name could have been).",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Notes",
+                "type": "array"
               }
             },
             "required": [

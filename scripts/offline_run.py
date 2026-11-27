@@ -1014,7 +1014,7 @@ async def banked(
         raise SystemExit(f"offline run: {name} ended {result.stop_reason}")
     beside = sorted(
         f"{node.name}.{key}"
-        for node in session.pipeline_schema.declared_nodes
+        for node in session.bound_resolution.chain.declared_nodes
         for key in node.param_keys
         if key not in node.prompt_fields
     )

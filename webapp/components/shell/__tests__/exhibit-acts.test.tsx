@@ -43,7 +43,7 @@ function tree(campaignId: string, cycleId: string, filable: Filable[]) {
     ? { offers: "pause" as const, refusal: null, payload: {}, stop_acts: [] }
     : {
         offers: null,
-        refusal: { code: "read_only", message: READ_ONLY, details: {}, next_acts: [] },
+        refusal: { code: "read_only", message: READ_ONLY, details: {}, next_acts: [], notes: [] },
         payload: {},
         stop_acts: [],
       };

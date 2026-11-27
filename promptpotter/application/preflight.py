@@ -154,7 +154,7 @@ def run_preflight_checks(
         if novel and instrument is not None
         else None,
         _check_labels_have_ranker(
-            session.pipeline_schema, session.bank, session.backend_client.connector
+            session.bound_resolution.chain, session.bank, session.backend_client.connector
         ),
         SurveyUnread(campaigns=tuple(unread), reason=str(next(iter(unread.values()))))
         if unread

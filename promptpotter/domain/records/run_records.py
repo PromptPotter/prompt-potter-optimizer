@@ -56,11 +56,13 @@ from promptpotter.domain.pipeline_params import (
     laid_calls,
     lay_nodes,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
     KnobLayer,
     ManifestNodeOverlay,
     NodeSearchNarrowing,
+    PipelineSchema,
 )
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
@@ -1192,6 +1194,10 @@ class PipelineRead(FrozenModel):
     free_tier_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Per optimizer-node knob the declaration holds, the last layer that set it (`laid_config`).
     knob_layers: dict[str, dict[str, KnobLayer]] = Field(default_factory=dict)
+
+    def declared_schema(self) -> PipelineSchema:
+        """The chain as declared, before a line narrows it or a node is laid on its route."""
+        return parse_pipeline_response(self.declaration)
 
 
 class ResolvedRunRecord(CycleRecord):

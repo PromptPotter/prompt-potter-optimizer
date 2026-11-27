@@ -126,7 +126,7 @@ def _land_draft(
     for overlay in overlays:
         config = laid_config(
             stores,
-            pipeline.layers.over(overlay),
+            pipeline.config_layers.over(overlay),
             connector=basis.connector,
             schema=pipeline.declared,
         ).config
@@ -170,4 +170,4 @@ async def open_checkin(
     async with init_services(
         dataset_name=draft.dataset_name, identity=stores.identity, stores=stores, served=served
     ) as session:
-        yield OpenedCheckin(draft, session, pipeline.layers, origin_override)
+        yield OpenedCheckin(draft, session, pipeline.config_layers, origin_override)

@@ -49,9 +49,19 @@ export function withActs(said: string, acts: readonly NextAct[]): string {
   return spelled.length > 0 ? `${said} Next: ${spelled.join("; ")}.`.trim() : said;
 }
 
-/** A served refusal in the browser's words: its sentence, then its acts; null where none stands. */
-export function refusalText(refusal: Refusal | null): string | null {
-  return refusal === null ? null : withActs(refusal.message, refusal.next_acts);
+type RefusalSaid = Readonly<{
+  message: Refusal["message"];
+  next_acts: readonly NextAct[];
+  notes: readonly string[];
+}>;
+
+/** A served refusal in the browser's words: its sentence, its acts, then its notes; null where
+ * none stands. */
+export function refusalText(refusal: RefusalSaid): string;
+export function refusalText(refusal: RefusalSaid | null): string | null;
+export function refusalText(refusal: RefusalSaid | null): string | null {
+  if (refusal === null) return null;
+  return [withActs(refusal.message, refusal.next_acts), ...refusal.notes].join(" ");
 }
 
 /** A stop as served, then its step and the acts past it the cycle's admission offers its reader

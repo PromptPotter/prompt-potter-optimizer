@@ -52,7 +52,7 @@ def _render_export(stores: Stores, at: CampaignCycle, dataset: ResolvedDataset |
         return
     # Off the records, as every reader grades it: the cycle's resolution and the bank it drew.
     res = resolved(stores, at)
-    drawn = drawn_partition(stores, hop)
+    drawn = drawn_partition(stores.campaigns, hop)
     bank = stores.tenant_datasets.bank(drawn.dataset_hash)
     if bank is None:
         return

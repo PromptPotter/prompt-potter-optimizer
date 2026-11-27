@@ -8,6 +8,7 @@ from pydantic import Field, computed_field
 
 from promptpotter.application.datasets.authored import defaults_config
 from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import cycle_config, resolved
@@ -49,7 +50,6 @@ from promptpotter.domain.paired_reading import (
     MeasuredLift,
     ReadingState,
 )
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import ArmAct
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
@@ -567,27 +567,23 @@ def _read(
         (None, None) if passes is None else bench_members(stores, passes, scorer, line=line)
     )
 
-    drawn = stores.campaigns.last(hop, PartitionRecord)
+    drawn = drawn_partition(stores.campaigns, hop)
     rounds = stores.campaigns.standing_rounds(hop, moment=None).rounds
     origin_round = rounds.get(0)
     pick = run.selection
     electing = None if pick is None else rounds.get(pick.round)
     election = None if electing is None else electing.close.election
     fit = None if electing is None or pick is None else electing.close.fit(pick.key)
-    bench_set = (
-        None
-        if drawn is None
-        else bench_set_of(
-            dataset_hash=drawn.dataset_hash,
-            split=drawn.split,
-            bench_rows=drawn.bench_rows,
-            scorer_id=scorer.id,
-            instrument_id=drawn.instrument_id,
-            origin_params=None
-            if origin_round is None
-            else origin_round.close.origin.individual.pipeline_params,
-            origin=campaign.root_content_hash,
-        )
+    bench_set = bench_set_of(
+        dataset_hash=drawn.dataset_hash,
+        split=drawn.split,
+        bench_rows=drawn.bench_rows,
+        scorer_id=scorer.id,
+        instrument_id=drawn.instrument_id,
+        origin_params=None
+        if origin_round is None
+        else origin_round.close.origin.individual.pipeline_params,
+        origin=campaign.root_content_hash,
     )
     budget = next_launch_budget(config, stores=stores, at=at)
     optimization = config.optimization

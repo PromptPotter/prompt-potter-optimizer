@@ -867,7 +867,7 @@ def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     entry = archive_entry(
         sp,
         dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.pipeline_schema,
+        pipeline_schema=session.bound_resolution.chain,
         cell_identity=session.cell_identity,
     )
     return ReplayFeed(stores.archive, entry.node_configs)

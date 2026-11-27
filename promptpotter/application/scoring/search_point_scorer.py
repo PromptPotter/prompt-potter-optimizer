@@ -90,14 +90,16 @@ class _ArchiveRecorder:
 
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
         return compute_composite_fitness(
-            self.sheet(results), self.session.state.scoring.scorer, self.session.pipeline_schema
+            self.sheet(results),
+            self.session.state.scoring.scorer,
+            self.session.bound_resolution.chain,
         )
 
     def provenance(self, facts: MeasuredCell) -> str:
         return grade_answer(
             self.kind,
             facts,
-            self.session.pipeline_schema,
+            self.session.bound_resolution.chain,
             human_intervened=self.session.state.human_intervened,
         )
 
@@ -111,7 +113,8 @@ class _ArchiveRecorder:
             role=self.kind,
             created_at=utcnow_iso(),
             output_keys={
-                n.name: tuple(n.output_keys) for n in self.session.pipeline_schema.running_nodes
+                n.name: tuple(n.output_keys)
+                for n in self.session.bound_resolution.chain.running_nodes
             },
         )
         return cell.filed(replace(cell.facts, answer=answer))
@@ -199,7 +202,7 @@ def filed_entry(search_point: JobSearchPoint, session: Session) -> ArchiveEntry:
     return archive_entry(
         search_point,
         dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.pipeline_schema,
+        pipeline_schema=session.bound_resolution.chain,
         cell_identity=session.cell_identity,
     )
 

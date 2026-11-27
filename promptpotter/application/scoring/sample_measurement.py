@@ -253,7 +253,7 @@ def _node_spends(
 ) -> list[tuple[PipelineNode, NodeCall, NodeSpendBound | None]]:
     client = session.backend_client
     spends = []
-    for node in session.pipeline_schema.running_nodes:
+    for node in session.bound_resolution.chain.running_nodes:
         cfg = calls.get(node.name) or NodeCall()
         spends.append((node, cfg, client.node_spend_bound(node, cfg)))
     return spends
@@ -477,7 +477,7 @@ async def measure_sample(
     """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
     # A verifier-graded cell carries `""`, which no answer matches.
     ground_truth = sample.ground_truth or ""
-    pipeline_schema = session.pipeline_schema
+    pipeline_schema = session.bound_resolution.chain
     try:
         wire_params = interpolate_pipeline_params(pipeline_params, sample.model_dump())
         calls = wire_params.nodes
@@ -575,7 +575,7 @@ async def _send_cell(
                     bound=bound,
                     pairs=pairs,
                     billed=cell_billing(
-                        session.pipeline_schema,
+                        session.bound_resolution.chain,
                         pairs,
                         await attempt_bounds(session, calls),
                     ),

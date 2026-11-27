@@ -227,7 +227,7 @@ def cycle_result_command(session: Session, cycle_result: CycleResult) -> Command
         data=cycle_result.model_dump(),
         human=render_completion(
             cycle_result,
-            pipeline_schema=session.pipeline_schema,
+            pipeline_schema=session.bound_resolution.chain,
             dataset_name=session.dataset_name,
             campaign_dir=session.store.campaigns.campaign_root_dir(session.campaign_id),
         ),

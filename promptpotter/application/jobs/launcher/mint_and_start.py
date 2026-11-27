@@ -328,7 +328,7 @@ def commit_upload_definition(
         draft.slug,
         source=source,
         pipeline=pipeline.local,
-        campaign=pipeline.layers.block(),
+        campaign=pipeline.config_layers.block(),
         description=draft.confirmed_task(),
         framing=draft_task_context(draft),
         origin=draft.committed_prompts(pipeline.chain),
