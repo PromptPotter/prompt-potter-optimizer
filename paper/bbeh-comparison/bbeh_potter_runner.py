@@ -8,6 +8,7 @@ Colab and must stay import-safe there (no ``promptpotter.*`` imports).
 from pathlib import Path
 from typing import Any
 
+from promptpotter.presentation.terminal.completion import report_completion
 from shared_config import Record, export_results
 
 from promptpotter.application.datasets.authored import (
@@ -20,7 +21,7 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import bind_resolution, run_resolution
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.sample_measurement import (
@@ -37,7 +38,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, resolve_dataset
-from promptpotter.presentation.terminal.completion import report_completion
 from promptpotter.shared.measurement_context import MeasurementRole
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
@@ -117,7 +117,8 @@ async def run_bbeh_campaign(
         mode=RunMode(),
     )
     # Read only: the session the run answers, configured under the campaign as the mint did.
-    configured = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
+    cycle = CycleConfig.laid(campaign_config, [])
+    configured = bind_resolution(session, run_resolution(session, cycle))
     pipeline_params = configured.pipeline_params
     # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
     # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather

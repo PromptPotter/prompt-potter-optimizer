@@ -31,7 +31,6 @@ from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBas
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
     ResolvedDataset,
@@ -80,11 +79,11 @@ def labelled_rows(samples: Sequence[Sample]) -> list[dict[str, str]]:
     ]
 
 
-def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
+def rows_block(bank: Bank) -> StartBlock | None:
     """The one reading of whether a check-in can hold these rows."""
-    if all_verifier_graded(s.ground_truth for s in samples):
+    if bank.verifier_graded:
         return StartBlock.VERIFIER_GRADED
-    return None if labelled_rows(samples) else StartBlock.EMPTY
+    return None if labelled_rows(bank.samples) else StartBlock.EMPTY
 
 
 def _connector(dataset: ResolvedDataset) -> Connector | None:
@@ -116,7 +115,7 @@ def _held_block(dataset: ResolvedDataset, held: Bank | None) -> StartBlock | Non
     """Over the rows the account HOLDS; one not held opens on a fetch, which needs a source and
     the extra that source reads through."""
     if held is not None:
-        return rows_block(held.samples)
+        return rows_block(held)
     if not builds_bank(dataset):
         return StartBlock.EMPTY
     return None if _absent(source_extra(dataset)) is None else StartBlock.MISSING_EXTRA
@@ -162,7 +161,7 @@ def checkin_bank(stores: Stores, name: str) -> Bank:
     if held is not None:
         return held
     fetched = fetch_bank(stores, dataset)
-    if (block := rows_block(fetched.samples)) is not None:
+    if (block := rows_block(fetched)) is not None:
         raise DatasetUnstartableError(name, block)
     return fetched
 
@@ -177,17 +176,16 @@ def upload_source(draft: DraftFile, upload: UploadBasis) -> dict[str, Any]:
     }
 
 
-def draft_samples(stores: Stores, draft: DraftFile) -> Sequence[Sample] | None:
+def draft_bank(stores: Stores, draft: DraftFile) -> Bank | None:
     """What the draft's Start partitions; ``None`` while it has none to read: a read never fetches
     a bank, and never cuts an upload by columns the gate has not confirmed."""
     match draft.basis:
         case UploadBasis() as upload:
             if not columns_confirmed(draft):
                 return None
-            return cut_bank(stores, upload_source(draft, upload))
+            return Bank.of(cut_bank(stores, upload_source(draft, upload)))
         case DatasetBasis(dataset=name):
-            held = held_bank(stores, resolve_dataset(stores, name))
-            return None if held is None else held.samples
+            return held_bank(stores, resolve_dataset(stores, name))
         case _:
             assert_never(draft.basis)
 

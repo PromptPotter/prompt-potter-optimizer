@@ -25,10 +25,11 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import HeldBudget
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import MINT_FRESH, ConflictError
+from promptpotter.shared.errors import MINT_FRESH, ConflictError, FileKind, FileUnreadableError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -82,6 +83,18 @@ class LaunchState:
         return self.clock
 
 
+def drawn_partition(stores: Stores, hop: CycleHop) -> PartitionRecord:
+    """THE read of what *hop*'s chain drew: its mint draws one and a fork stands on its parent's."""
+    drawn = stores.campaigns.last(hop, PartitionRecord)
+    if drawn is None:
+        raise FileUnreadableError(
+            FileKind.LEDGER,
+            path=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
+            reason="it holds no bank partition, which its mint appends",
+        )
+    return drawn
+
+
 @dataclass(frozen=True)
 class Session:
     store: Stores
@@ -128,15 +141,10 @@ class Session:
         self.state.human_intervened |= act.babysits
 
     def bound(self, at: CampaignCycle) -> Session:
-        """The bank and partition are what *at*'s chain drew."""
+        """The bank and partition are what *at*'s chain drew, and the mint's own layers of the read
+        what its mint laid: an account leaving the tier moves no minted run."""
         hop = at.hop
-        drawn = self.store.campaigns.last(hop, PartitionRecord)
-        if drawn is None:
-            raise ConflictError(
-                f"cycle {hop.cycle_id} holds no drawn partition over its chain: its mint draws "
-                "one and a fork stands on its parent's, so this cycle stands on neither.",
-                next_acts=(MINT_FRESH,),
-            )
+        drawn = drawn_partition(self.store, hop)
         bank = (
             self.bank
             if drawn.dataset_hash == self.bank.dataset_hash
@@ -148,12 +156,21 @@ class Session:
                 code="campaign_roster_unreadable",
                 next_acts=(MINT_FRESH,),
             )
+        minted = scan_resolved_run(self.store.campaigns.chain(hop)).read
         return replace(
             self,
             campaign=at.campaign,
             cycle_id=at.cycle_id,
             bank=bank,
             drawn=drawn.restored(bank.samples),
+            pipeline_read=self.pipeline_read
+            if minted is None
+            else self.pipeline_read.model_copy(
+                update={
+                    "free_tier_overlay": minted.free_tier_overlay,
+                    "knob_layers": minted.knob_layers,
+                }
+            ),
         )
 
     @property

@@ -3,10 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
-from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
@@ -28,10 +25,6 @@ from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
-
-
-def campaign_scorer(stores: Stores, campaign: Campaign) -> Scorer:
-    return scorer_of(cycle_config(stores, campaign.root_cycle).config, verifier_graded=False)
 
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:

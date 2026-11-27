@@ -5,9 +5,8 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.datasets.draft_campaign import draft_criterion
-from promptpotter.application.datasets.startability import checkin_rows
+from promptpotter.application.datasets.startability import checkin_rows, draft_bank
 from promptpotter.application.datasets.tabular_ingest import (
     answer_terms_from_rows,
     parse_answer_terms,
@@ -20,6 +19,7 @@ from promptpotter.application.free_tier import (
 )
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
+    Resolution,
     ServedPipeline,
     draft_pipeline,
     draft_served,
@@ -134,7 +134,8 @@ async def plan_draft_patch(
         laid = draft_pipeline(stores, draft.patch(**changes, config=config), served)
         if "scoring" in sent:
             # Compiled here, so a criterion no cell could be graded by is refused, never stored.
-            scorer_of(laid.config, verifier_graded=False)
+            bank = draft_bank(stores, draft)
+            _ = Resolution(laid.config, bank is not None and bank.verifier_graded).scorer
         changes["config"] = _narrowing_follows_schema(
             config, _description_keys(was), _description_keys(laid)
         )

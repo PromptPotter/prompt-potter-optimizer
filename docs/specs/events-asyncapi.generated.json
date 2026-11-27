@@ -5859,10 +5859,15 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "verifier_graded": {
+            "title": "Verifier Graded",
+            "type": "boolean"
           }
         },
         "required": [
           "dataset_hash",
+          "verifier_graded",
           "instrument_id",
           "cell_identity",
           "split",
