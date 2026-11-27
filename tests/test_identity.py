@@ -207,7 +207,6 @@ from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.preflight import refuse_off_contract
 from promptpotter.application.run_observers import (
     RunObservers,
-    build_run_observers,
     declare_run_stop,
     declare_run_wiring,
 )
@@ -225,6 +224,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
 )
 from promptpotter.application.runner.round import run_init
+from promptpotter.application.runner.run_init import enter_cycle
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
@@ -2998,7 +2998,7 @@ class _Held(NamedTuple):
 @pytest.fixture
 def held(built_stores: Stores, decl: _Declared) -> _Held:
     # The door's campaign as the mint every entry takes lands it, its session bound to the root and
-    # scoring as its launch's run init sets it (`runner/mint.py`).
+    # scoring as its launch's run init sets it (`runner/run_init.py`).
     opened, rows_30, _, door, _ = decl
     minted = asyncio.run(mint_framed_cycle(opened, door, rows_30, task_text=None))
     campaign = built_stores.campaigns.load_campaign(minted.hop.campaign_id)
@@ -3421,7 +3421,7 @@ def test_a_pause_filed_while_a_launch_claims_or_folds_its_cycle_is_that_launchs_
 
     with monkeypatch.context() as filing:
         filing.setattr(Stores, "void_inbox", void_after_a_pause)
-        observers = build_run_observers(session=opened, campaign_config=launch.config)
+        observers = enter_cycle(opened, launch.config)
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
     )
@@ -3440,7 +3440,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     # index nor its cycle held once released.
     stores, opened, ledger_path = launch.stores, launch.opened, launch.ledger.path
     root = launch.campaign.root_hop
-    observers = build_run_observers(session=opened, campaign_config=launch.config)
+    observers = enter_cycle(opened, launch.config)
     with LedgerIndex.of(ledger_path).projecting() as joiner:
         assert joiner.add(DashboardCheckout(launch.root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
@@ -3475,14 +3475,14 @@ def test_a_build_that_raises_past_its_projections_checkout_lets_go_of_them(
 ) -> None:
     with monkeypatch.context() as broken, pytest.raises(OSError, match="no observers"):
         broken.setattr(RunObservers, "__init__", Mock(side_effect=OSError("no observers")))
-        build_run_observers(session=launch.opened, campaign_config=launch.config)
+        enter_cycle(launch.opened, launch.config)
     assert launch.let_go(), "a build that raised kept its ledger's projections or its cycle"
 
 
 def test_a_run_whose_exit_unwound_on_an_error_drains_nothing_and_lets_go(
     monkeypatch: pytest.MonkeyPatch, launch: _Launch, offline: Router
 ) -> None:
-    observers = build_run_observers(session=launch.opened, campaign_config=launch.config)
+    observers = enter_cycle(launch.opened, launch.config)
     # An exit on an error drains nothing: a drain's own fault would replace the error in flight.
     drained = Mock()
     monkeypatch.setattr(DashboardCheckout, "drain", drained)
@@ -3619,7 +3619,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     sibling = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_sibling")
     stores.campaigns.mint_cycle(sibling)
     declare_run_wiring(opened, launched, selected=select_optimizer(launched.optimization))
-    observers = build_run_observers(session=opened, campaign_config=launched)
+    observers = enter_cycle(opened, launched)
     with scoped(account=stores):
         book = spend_book(1.0, metered_on=ledger.path)
     bound = Budget(usd=0.25, tokens=0)
@@ -3685,7 +3685,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
         (job,) = request_jobs(
             stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=opened.hop
         )
-        return job.job_id, build_run_observers(session=opened, campaign_config=launched)
+        return job.job_id, enter_cycle(opened, launched)
 
     def pause(key: str) -> Opened[object, Any]:
         call = CommandCall(PauseCyclePayload(**address), key, door=Door.HOST)

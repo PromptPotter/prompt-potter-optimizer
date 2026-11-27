@@ -98,15 +98,13 @@ from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
     admit_and_share,
-    admit_slotless,
-    claim_cycle,
-    open_spend_book,
     paid_call,
     paid_pass,
     request_jobs,
+    slotless_opening,
 )
+from promptpotter.application.jobs.launcher.opening import Opening, claim_cycle, open_spend_book
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
@@ -114,14 +112,18 @@ from promptpotter.application.jobs.quota import (
     RateLimitedError,
     account_wallet,
     admit_launch,
-    change_budget,
     coupon_status,
-    cycle_share,
-    hold_moved,
-    hold_run,
+    declare_run_budget,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import (
+    change_budget,
+    cycle_share,
+    hold_moved,
+    hold_run,
+    stand_held_budget,
+)
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
@@ -133,7 +135,6 @@ from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
-from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -1000,7 +1001,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     held_job = spawned.get(held.job_id)
     assert held_job is not None
     launched = HeldRun(
-        start=RunStart(stores, spawned, held_job),
+        opening=Opening(stores, spawned, held_job),
         session=_minted(stores, offline),
         cycle=CycleConfig.laid(launched_config, []),
         budget=held,
@@ -1204,12 +1205,12 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
     )
     opened: list[object] = []
-    monkeypatch.setattr(run_job_mod, "build_run_observers", lambda **kw: opened.append(kw))
+    monkeypatch.setattr(run_job_mod, "enter_cycle", lambda *a, **_kw: opened.append(a))
 
     def _refused(*_a: object, **_kw: object) -> NoReturn:
         raise MachineBusyError(holding="", holder_user="", started_at=None)
 
-    monkeypatch.setattr(spawn, "admit_slotless", _refused)
+    monkeypatch.setattr(spawn, "admit", _refused)
     with (
         scoped(account=built_stores),
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -1769,19 +1770,33 @@ def test_an_embedded_run_holds_a_share_at_admission_and_gives_it_back_at_its_exi
         )
         return None, cycle_result([], None, [])
 
-    async def embedded() -> None:
-        start, held = await asyncio.to_thread(
-            admit_slotless,
-            _budgeted(Budget(usd=1.0)),
+    def admit_embedded(opening: Opening) -> HeldBudget:
+        at = _at(built_stores, fork_c)
+        declared, asked = declare_run_budget(
+            _budgeted(Budget(usd=1.0)).optimization.budget,
             stores=built_stores,
-            holder=EmbeddedRun("ds1"),
-            at=_at(built_stores, fork_c),
+            at=at,
             requested=Budget(),
+        )
+        return admit_and_share(
+            declared,
+            asked,
+            stores=built_stores,
+            job_registry=opening.job_registry,
+            job=opening.job,
+            at=at,
             step_rounds=None,
             sends=_CELLS,
         )
-        _, ended = await held_embedded(held)
-        await asyncio.to_thread(start.release, ended)
+
+    async def embedded() -> None:
+        opening = await asyncio.to_thread(
+            slotless_opening, built_stores, shared, EmbeddedRun("ds1"), fork_c
+        )
+        async with contextlib.AsyncExitStack() as closing:
+            closing.push_async_exit(opening)
+            held = await asyncio.to_thread(admit_embedded, opening)
+            _, opening.ended = await held_embedded(held)
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
@@ -4641,7 +4656,8 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
     )
     stamped = billing.get(live.job_id)
     assert stamped is not None
-    RunStart(biller, billing, stamped).release(RuntimeError("the run raised"))
+    with pytest.raises(RuntimeError), Opening(biller, billing, stamped):
+        raise RuntimeError("the run raised")
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.15), (
         "an ended run kept its reserve, or the send it left open went unread"
     )
@@ -4716,7 +4732,10 @@ def duel(monkeypatch: pytest.MonkeyPatch) -> _Duel:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec()
         detached.append(spec)
-        await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.TARGET_HIT)
+        await asyncio.to_thread(
+            held.opening.job_registry.release, spec.job_id, StopReason.TARGET_HIT
+        )
+        held.opening.hand_off()
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)

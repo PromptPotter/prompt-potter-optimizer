@@ -3,27 +3,32 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
+from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
+from promptpotter.application.jobs.launcher.opening import (
+    Opening,
+    claim_cycle,
+    open_spend_book,
+)
 from promptpotter.application.jobs.quota import (
     admit_launch,
     call_book,
     check_launch_quotas,
     declare_run_budget,
-    hold_moved,
-    hold_run,
-    move_campaign_money,
     next_launch_budget,
-    release_run,
     sends_on,
-    share_campaign_ceiling,
     slot_rate,
 )
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
+from promptpotter.application.jobs.shares import (
+    hold_moved,
+    hold_run,
+    move_campaign_money,
+    share_campaign_ceiling,
+)
 from promptpotter.application.pipeline_resolve import cycle_config, experiment_outside_run
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.domain.bench import CampaignRefusal
@@ -33,11 +38,9 @@ from promptpotter.domain.campaign import (
     CampaignRefusedError,
     ceiling_meter,
 )
-from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import filable
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.hierarchy import RunAdmission
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
@@ -55,13 +58,8 @@ from promptpotter.domain.phases import (
     PauseCause,
     RunPhase,
     RunState,
-    StopOutcome,
-    StopReason,
-    stop_reason_outcome,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import (
     MONEY_AXES,
@@ -70,7 +68,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
+from promptpotter.infrastructure.llm.spend_book import SpendBook, draws_on
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.dataset_access import (
@@ -92,76 +90,7 @@ from promptpotter.shared.identity import acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.jobs.launcher.launch import LaunchRequest
-
-
-@dataclass(frozen=True, slots=True)
-class RunStart:
-    """A job's slot, from its admission to its one release: every launch, arm, slotless share and
-    paid pass holds one."""
-
-    stores: Stores
-    job_registry: JobRegistry
-    job: Job
-
-    @property
-    def job_id(self) -> str:
-        return self.job.job_id
-
-    def release(
-        self, ended: CycleResult | BaseException | None = None, *, stamps: CycleHop | None = None
-    ) -> None:
-        """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``); a result is
-        what the run returned; nothing, a pass that returned. Every hold the job holds closes with
-        it: its hold on the account by a `Release`, filed first so a crash before the job's stamp
-        leaves an unreleased job the reaper still ends; its claim of a cycle as it reads released."""
-        held = self.job_registry.get(self.job_id)
-        if held is not None and held.admitted and not held.released:
-            release_run(self.stores, self.job_id)
-        match ended:
-            case BaseException():
-                job = self.job_registry.release(self.job_id, ended)
-            case None:
-                job = self.job_registry.release(self.job_id)
-            case _:
-                job = self.job_registry.release(
-                    self.job_id, ended.stop_reason, stepped=ended.stepped
-                )
-        if isinstance(ended, BaseException):
-            self._fail(job, ended, stamps)
-
-    def land(self, hop: CycleHop, held: HeldBudget) -> None:
-        """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
-        cycle."""
-        land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
-
-    def _fail(self, job: Job | None, exc: BaseException, stamps: CycleHop | None) -> None:
-        """Off a cycle the job's release is its claim's: nothing more to stamp."""
-        if stamps is None:
-            return
-        stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
-        stores = self.stores
-        # Best-effort — it must never mask *exc*.
-        try:  # noqa: SIM105
-            stores.declare_stop(
-                stamps,
-                RunPhaseRecord.stop(
-                    stop_reason,
-                    cause=(
-                        PauseCause.CANCELLED
-                        if isinstance(exc, asyncio.CancelledError)
-                        else PauseCause.INTERRUPT
-                    ),
-                    detail="the launch was interrupted before it held a run",
-                ),
-                error=(
-                    None
-                    if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
-                    else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
-                ),
-            )
-        except Exception:  # noqa: BLE001
-            pass
+    from promptpotter.application.jobs.launcher.mint_and_start import LaunchRequest
 
 
 async def probe_backend(
@@ -327,23 +256,6 @@ def request_jobs(
         return jobs
 
 
-def claim_cycle(stores: Stores, hop: CycleHop, job_id: str) -> None:
-    """The job's hold on *hop*, on the cycle's ledger, filed where the job first names the cycle:
-    it lives and dies with the job (`holders.py::holder_of`)."""
-    stores.campaigns.append(hop, Hold.of_job(job_id, Budget(), parent=None))
-
-
-def land_job(
-    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
-) -> None:
-    """THE LAND of a launch: onto the cycle its mint named, or a running one onto its fork; its
-    share, its job's hop and its claim of the cycle together under the gate."""
-    with job_registry.admission_gate():
-        hold_moved(stores, hop, allotment)
-        job_registry.move(job_id, LaunchMove.LAND, hop=hop)
-        claim_cycle(stores, hop, job_id)
-
-
 @contextmanager
 def destroying(
     stores: Stores, job_registry: JobRegistry, campaign_id: str, *, cycle_id: str | None = None
@@ -413,9 +325,9 @@ def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
     )
 
 
-async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
+async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget:
     """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
-    stores, job_registry, job = start.stores, start.job_registry, start.job
+    stores, job_registry, job = opening.stores, opening.job_registry, opening.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     at = request.at
     if job.queued:
@@ -428,6 +340,10 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
     await refuse_unreachable(
         stores, request.dataset_name, request.connector(stores), request.endpoint(stores)
     )
+    # An inner run's share is of what the enclosing run's book has left at its spawn.
+    enclosing = run_scope().book if isinstance(request.holder, InnerRun) else None
+    if isinstance(request.holder, InnerRun) and enclosing is None:
+        raise RuntimeError("an inner run spawns only under its enclosing run's book")
     declared, asked = declare_run_budget(
         request.declared_budget(stores), stores=stores, at=at, requested=request.budget
     )
@@ -442,6 +358,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
         at=at,
         step_rounds=request.step_rounds,
         sends=request.sends(stores),
+        enclosing=enclosing,
     )
     return held
 
@@ -515,34 +432,34 @@ def admit_arms(
     stores: Stores,
     job_registry: JobRegistry,
     holder: CampaignLaunch | EmbeddedRun,
-) -> list[tuple[Job, HeldBudget]]:
-    """Every arm's job and share, each at its budget and sends, or none, under one gate. An
-    embedded host holds no slot (`admit_slotless`)."""
-    with job_registry.admission_gate(launching=True):
-        jobs: list[Job] = []
-        try:
-            jobs = _arm_jobs(stores, job_registry, holder, count=len(declared))
-            admitted = [
-                (
-                    job,
-                    admit_and_share(
-                        budget,
-                        Budget(),
-                        stores=stores,
-                        job_registry=job_registry,
-                        job=job,
-                        at=None,
-                        step_rounds=None,
-                        sends=sends,
-                    ),
-                )
-                for job, (budget, sends) in zip(jobs, declared, strict=True)
-            ]
-        except BaseException as exc:
-            # Inside the gate, so no admission between reads the arms a refusal takes back.
-            for refused in jobs:
-                RunStart(stores, job_registry, refused).release(exc)
-            raise
+) -> list[tuple[Opening, HeldBudget]]:
+    """Every arm's opening and share, each at its budget and sends, or none, under one gate. An
+    embedded host holds no slot (`slotless_opening`)."""
+    # Inside the gate, so no admission between reads the arms a refusal takes back.
+    with job_registry.admission_gate(launching=True), ExitStack() as refused:
+        openings = [
+            Opening.of(stores, job_registry, job)
+            for job in _arm_jobs(stores, job_registry, holder, count=len(declared))
+        ]
+        for opening in openings:
+            refused.push(opening)
+        admitted = [
+            (
+                opening,
+                admit_and_share(
+                    budget,
+                    Budget(),
+                    stores=stores,
+                    job_registry=job_registry,
+                    job=opening.job,
+                    at=None,
+                    step_rounds=None,
+                    sends=sends,
+                ),
+            )
+            for opening, (budget, sends) in zip(openings, declared, strict=True)
+        ]
+        refused.pop_all()
     return admitted
 
 
@@ -560,17 +477,36 @@ def _arm_jobs(
             return jobs
         case EmbeddedRun():
             return [
-                job_registry.create(
-                    user_id=str(stores.identity.user_id),
-                    principal_id=acting_principal(stores.identity).id,
-                    workspace=stores.campaigns.workspace,
-                    hop=UNRESOLVED_HOP,
-                    holder=holder,
-                )
-                for _ in range(count)
+                _slotless_job(stores, job_registry, holder, UNRESOLVED_HOP) for _ in range(count)
             ]
         case _:
             assert_never(holder)
+
+
+def _slotless_job(
+    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop
+) -> Job:
+    return job_registry.create(
+        user_id=str(stores.identity.user_id),
+        principal_id=acting_principal(stores.identity).id,
+        workspace=stores.campaigns.workspace,
+        hop=hop,
+        holder=holder,
+    )
+
+
+def slotless_opening(
+    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop
+) -> Opening:
+    """THE door with no slot, the declared exemption (an embedded host's run, an inner seat): its
+    job ASKED and entered, claiming *hop*'s cycle where it names one. Its admission is `hold`'s."""
+    opening = Opening.of(stores, job_registry, _slotless_job(stores, job_registry, holder, hop))
+    if hop != UNRESOLVED_HOP:
+        with ExitStack() as refused:
+            refused.push(opening)
+            claim_cycle(stores, hop, opening.job_id)
+            refused.pop_all()
+    return opening
 
 
 def _within(declared: Budget, enclosing: Budget) -> Budget:
@@ -579,92 +515,14 @@ def _within(declared: Budget, enclosing: Budget) -> Budget:
     return Budget(usd=min(usd, default=None), tokens=min(tokens, default=None))
 
 
-def open_spend_book(
-    held: HeldBudget,
-    *,
-    stores: Stores,
-    hop: CycleHop | None,
-    meters: CeilingMeter,
-    opened: float,
-    live: bool,
-) -> SpendBook:
-    """On a cycle its share is read live off the cycle's record, which a reshare moves, and meters
-    the cycle's ledger; off one, as admitted, metering its job's hold. Its reserve is its hold's on
-    the account, which a set-limits restates. A *live* book reads the cycle's standing axes too."""
-    ledger = None if hop is None else stores.campaigns.ledger(hop)
-    book = SpendBook(
-        declared=held.admitted,
-        share=held.share if hop is None else LiveCycle(stores.campaigns, hop),
-        charges=stores.charges,
-        hold_id=held.job_id,
-        headroom=Budget(),
-        metered_on=ledger,
-        meters=meters,
-        opened=opened,
-        cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
-    )
-    return book
-
-
-def admit_slotless(
-    config: CampaignConfig,
-    *,
-    stores: Stores,
-    holder: EmbeddedRun | InnerRun,
-    at: CampaignCycle | None,
-    requested: Budget,
-    step_rounds: int | None,
-    sends: tuple[Send, ...],
-) -> tuple[RunStart, HeldBudget]:
-    """THE admission with no slot, taken BEFORE anything paid: the job ASKED, then ADMITTED under
-    its hold (HELD on *at*'s cycle); a refusal releases it. An inner run's share is of what the
-    enclosing run's book has left at its spawn. It waits on the gate: an async door offloads it."""
-    hop = None if at is None else at.hop
-    enclosing = run_scope().book if isinstance(holder, InnerRun) else None
-    if isinstance(holder, InnerRun) and enclosing is None:
-        raise RuntimeError("an inner run spawns only under its enclosing run's book")
-    job_registry = JobRegistry.attach(stores.jobs_dir)
-    start = RunStart(
-        stores,
-        job_registry,
-        job_registry.create(
-            user_id=str(stores.identity.user_id),
-            principal_id=acting_principal(stores.identity).id,
-            workspace=stores.campaigns.workspace,
-            hop=UNRESOLVED_HOP if hop is None else hop,
-            holder=holder,
-        ),
-    )
-    if hop is not None:
-        claim_cycle(stores, hop, start.job_id)
-    try:
-        declared, asked = declare_run_budget(
-            config.optimization.budget, stores=stores, at=at, requested=requested
-        )
-        held = admit_and_share(
-            declared,
-            asked,
-            stores=stores,
-            job_registry=job_registry,
-            job=start.job,
-            at=at,
-            step_rounds=step_rounds,
-            sends=sends,
-            enclosing=enclosing,
-        )
-    except BaseException as exc:
-        start.release(exc)
-        raise
-    return start, held
-
-
-def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:
+def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[Opening, SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
     with (
         job_registry.admission_gate(launching=True),
         slot_rate(stores, holder, UNRESOLVED_HOP, asked=1),
+        ExitStack() as refused,
     ):
-        start = RunStart(
+        opening = Opening.of(
             stores,
             job_registry,
             job_registry.create(
@@ -675,15 +533,13 @@ def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunSta
                 holder=holder,
             ),
         )
-        try:
-            book = call_book(stores, provider, job_registry=job_registry, hold_id=start.job_id)
-            # Unbounded: it holds what its calls out hold (`Money.held_back`), and closes with its job.
-            hold_run(stores, start.job_id, Budget(), parent=None)
-            job_registry.move(start.job_id, LaunchMove.ADMIT)
-        except BaseException as exc:
-            start.release(exc)
-            raise
-    return start, book
+        refused.push(opening)
+        book = call_book(stores, provider, job_registry=job_registry, hold_id=opening.job_id)
+        # Unbounded: it holds what its calls out hold (`Money.held_back`), and closes with its job.
+        hold_run(stores, opening.job_id, Budget(), parent=None)
+        job_registry.move(opening.job_id, LaunchMove.ADMIT)
+        refused.pop_all()
+    return opening, book
 
 
 @asynccontextmanager
@@ -693,14 +549,11 @@ async def paid_call(
     """ONE LLM call on *provider*, on no cycle, slotless so a chat turn never queues behind
     campaigns: a job whose hold its sends draw on, closed with it or by its dead producer's reap."""
     # Offloaded: admission globs every cycle ledger.
-    start, book = await asyncio.to_thread(_admit_call, stores, PaidCall(bucket), provider)
-    try:
+    opening, book = await asyncio.to_thread(_admit_call, stores, PaidCall(bucket), provider)
+    async with AsyncExitStack() as closing:
+        closing.push_async_exit(opening)
         with scoped(account=stores, book=book):
             yield book
-    except BaseException as exc:
-        await asyncio.to_thread(start.release, exc)
-        raise
-    await asyncio.to_thread(start.release)
 
 
 class PassStoppedError(ConflictError):
@@ -722,7 +575,7 @@ async def paid_pass(
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops
     it; *acting* is the command it acts for, whose `cancel` stops it too. Opened and closed off
     the loop: both wait on the gate."""
-    start, holding, book = await asyncio.to_thread(
+    opening, holding, book = await asyncio.to_thread(
         _open_pass,
         stores=stores,
         pass_kind=pass_kind,
@@ -731,25 +584,35 @@ async def paid_pass(
         sends=sends,
         acting=acting,
     )
+    taken: tuple[PauseCause, str] | None = None
     try:
-        with scoped(
-            account=stores,
-            book=book,
-            # The rate-limit and slot waits poll the cycle's pause too, as a loop's do.
-            abort_check=run_scope().abort_check
-            if holding is None
-            else holding.control.pause_requested,
-        ):
-            yield book
-    except BaseException as exc:
-        taken = await asyncio.to_thread(_close_pass, start, holding, exc)
+        async with AsyncExitStack() as closing:
+            # The cycle let go last, past its job's release.
+            if holding is not None:
+                closing.push_async_callback(asyncio.to_thread, holding.release)
+            closing.push_async_exit(opening)
+            try:
+                with scoped(
+                    account=stores,
+                    book=book,
+                    # The rate-limit and slot waits poll the cycle's pause too, as a loop's do.
+                    abort_check=run_scope().abort_check
+                    if holding is None
+                    else holding.control.pause_requested,
+                ):
+                    yield book
+            except BaseException as exc:
+                # Taken only on the stop it made on it, while its job still holds.
+                if holding is not None and launch_interrupted(exc):
+                    taken = await asyncio.to_thread(holding.control.take_pause)
+                raise
+    except BaseException:
         if taken is not None:
             raise PassStoppedError(
-                f"The {pass_kind} pass stopped: {taken}. Every cell it measured is banked, and a "
-                "rerun replays them."
+                f"The {pass_kind} pass stopped: {taken[1]}. Every cell it measured is banked, and "
+                "a rerun replays them."
             ) from None
         raise
-    await asyncio.to_thread(_close_pass, start, holding, None)
 
 
 def _open_pass(
@@ -760,7 +623,7 @@ def _open_pass(
     declared: Budget,
     sends: tuple[Send, ...],
     acting: str | None,
-) -> tuple[RunStart, ProducerHold | None, SpendBook]:
+) -> tuple[Opening, ProducerHold | None, SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
     (job,) = request_jobs(
         stores=stores,
@@ -770,9 +633,10 @@ def _open_pass(
     )
     if job.queued:
         refuse_as_busy(job_registry, job)
-    start = RunStart(stores, job_registry, job)
+    opening = Opening.of(stores, job_registry, job)
     holding: ProducerHold | None = None
-    try:
+    with ExitStack() as refused:
+        refused.push(opening)
         meters: CeilingMeter = (
             "bill" if at is None else ceiling_meter(at.campaign.declaration.purpose)
         )
@@ -780,6 +644,7 @@ def _open_pass(
             holding = ProducerHold(
                 stores, at.hop, scoring_pass=True, acting=() if acting is None else (acting,)
             )
+            refused.callback(holding.release)
             # What a producer gone since was asked stands no more, as a launch's RUNNING record voids it.
             stores.void_inbox(at.hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
@@ -806,28 +671,8 @@ def _open_pass(
             live=False,
         )
         job_registry.move(job.job_id, LaunchMove.START)
-    except BaseException as exc:
-        _close_pass(start, holding, exc)
-        raise
-    return start, holding, book
-
-
-def _close_pass(
-    start: RunStart, holding: ProducerHold | None, exc: BaseException | None
-) -> str | None:
-    """The pass's job released and its cycle let go; the pause it stopped on, if it was one."""
-    if holding is None:
-        start.release(exc)
-        return None
-    try:
-        # Taken only on the stop it made on it, while its job still holds; the release voids any other.
-        taken = (
-            holding.control.take_pause() if exc is not None and launch_interrupted(exc) else None
-        )
-    finally:
-        start.release(exc)
-        holding.release()
-    return None if taken is None else taken[1]
+        refused.pop_all()
+    return opening, holding, book
 
 
 def campaign_sends(stores: Stores, at: CampaignCycle) -> tuple[Send, ...]:

@@ -5,8 +5,8 @@ import functools
 from collections.abc import Callable
 from pathlib import Path
 
-from promptpotter.application.jobs.quota import reap_dead_runs
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import reap_dead_runs
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.llm.pricing import refresh_rates, refresh_route_answers

@@ -8,7 +8,7 @@ from pathlib import Path
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
-from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
+from promptpotter.application.run_phase_control import ProducerHold
 from promptpotter.application.runner.output import ExportProjection
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.served_dashboard import spend_counts
@@ -23,9 +23,7 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.records.run_records import (
-    ArmsGate,
     CycleShareRecord,
-    Running,
     RunPhaseRecord,
     RunWiringRecord,
 )
@@ -36,7 +34,6 @@ from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjec
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
-from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -163,8 +160,7 @@ def build_run_observers(
     hold = ProducerHold(session.store, session.hop, scoring_pass=False)
     projecting = LedgerIndex.of(session.store.campaigns.ledger(session.hop)).projecting()
     try:
-        prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
-        observers = _bind_observers(
+        return _bind_observers(
             cycle_dir,
             projecting,
             hold,
@@ -173,21 +169,10 @@ def build_run_observers(
             forked_from=forked_from,
             readout_sink=readout_sink,
         )
-        # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-        session.store.campaigns.append(session.hop, RunPhaseRecord(state=Running()))
-        # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
-        # included; the run a gate held resumes, what it was asked standing.
-        if prior is None or not isinstance(prior.state, ArmsGate):
-            session.store.void_inbox(session.hop, sparing=hold.control.hold)
-        # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
-        save_active_pointer(session.store.base_dir, session.hop)
     except BaseException:
         projecting.close(drain=False)
         hold.release()
         raise
-    session.state.observers = observers
-    close_dead_bench(session.store, session.hop)
-    return observers
 
 
 def _bind_observers(

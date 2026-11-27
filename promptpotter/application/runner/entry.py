@@ -9,6 +9,7 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
 from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.shares import declare_round_allowance
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
 from promptpotter.application.runner.bench import (
@@ -21,16 +22,15 @@ from promptpotter.application.runner.bench import (
     read_curve,
 )
 from promptpotter.application.runner.loop import open_origin_round, run_round_loop
-from promptpotter.application.runner.mint import (
+from promptpotter.application.runner.round import flush_pending_decisions
+from promptpotter.application.runner.run_init import (
     PreparedRun,
     close_init,
-    declare_round_allowance,
     onto_fork,
     open_cycle,
     open_launch,
     start_launch,
 )
-from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
     RUN_STOPS,
@@ -294,7 +294,12 @@ async def _run_single_cycle(
     try:
         cycle, observers = await open_line(prep, session=session, observers=observers, mode=mode)
         session = cycle.session
-        declare_round_allowance(session, step_rounds)
+        declare_round_allowance(
+            session.store,
+            session.hop,
+            resumed_from_round=session.state.resumed_from_round,
+            step_rounds=step_rounds,
+        )
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
             cycle, dataset, resumed_ending=prep.resumed_ending

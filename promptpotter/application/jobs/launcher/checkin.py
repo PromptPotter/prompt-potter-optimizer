@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import JsonValue
@@ -13,6 +13,7 @@ from promptpotter.application.datasets.loaders import Source, cut_bank, definiti
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.mint_and_start import (
+    LaunchRequest,
     commit_upload_definition,
     persist_origin_answer_terms,
 )
@@ -49,25 +50,17 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class CheckinStart:
+class CheckinStart(LaunchRequest):
     """Carries the claim, never the draft: the claim refuses every edit until the mint closes."""
 
     verb: ClassVar[str] = "start-checkin"
 
     claim: DraftClaim
     # The queue's label alone (`DraftFile.dataset_name`); every decision reads the draft.
-    dataset_name: str
+    dataset_name: str = field()  # a field: the shape's inherited name is no default
     budget: Budget
     # The Start's one backend read, taken where its origin's readiness was checked.
     served: ServedPipeline
-
-    @property
-    def at(self) -> None:
-        return None
-
-    @property
-    def step_rounds(self) -> None:
-        return None
 
     @property
     def holder(self) -> CampaignLaunch:

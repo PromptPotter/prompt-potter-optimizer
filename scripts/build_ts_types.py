@@ -582,7 +582,7 @@ def loading_modules() -> dict[str, str]:
         _ran([TypeAdapter(one).core_schema for one in table.registered().values()], modules)
     _ran(list(MIGRATIONS.values()), modules)
     closure = import_closure(modules)
-    del closure[built_key.__name__]
+    closure.pop(built_key.__name__, None)
     return closure
 
 

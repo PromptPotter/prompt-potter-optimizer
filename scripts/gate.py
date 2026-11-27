@@ -241,7 +241,7 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/evidence/read.py::_at::(BadRequestError, NotFoundError, ValueError)": (
         "an address that names nothing answers None, by contract"
     ),
-    "application/jobs/launcher/admission.py::RunStart._fail::Exception": (
+    "application/jobs/launcher/opening.py::Opening._stamp::Exception": (
         "the stop's stamp never masks the fault being released"
     ),
     "application/jobs/launcher/admission.py::deletable_stubs::CycleBusyError": (

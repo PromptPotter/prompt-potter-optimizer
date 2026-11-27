@@ -421,7 +421,7 @@ CAP_BOOK_WORDS: Worded[CapBook, str] = Worded(
     {"campaign": "campaign book", "cycle": "this cycle", "launch": "this launch"}
 )
 
-#: Why a cap is armed below what was asked: the account's allowance (`quota.py::_clamped`).
+#: Why a cap is armed below what was asked: the account's allowance (`quota.py::clamped_change`).
 CapClamp = Literal["allowance"]
 
 CAP_CLAMP_WORDS: Worded[CapClamp, str] = Worded({"allowance": "allowance"})

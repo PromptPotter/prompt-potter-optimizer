@@ -1,28 +1,28 @@
-"""Run init, one module in one order: the launch opens (`open_launch`: clock, control, the held
-budget and its book, the scorer, the origin), then each cycle its line runs on opens
-(`open_cycle`: the cycle's records, preflight and INIT, the replay and its fork) and closes INIT
-(`close_init`). A rebase's fork re-arms the launch's book on its own cycle (`onto_fork`).
-
-Two ``new`` calls on one measured declaration share a root cycle id under different campaign
-ids: ``measurements/`` pools their origin scores."""
+"""Run init, one module in one order: a held run crosses its boundary (`enter_cycle`), the launch
+opens (`open_launch`: clock, control, the held budget and its book, the scorer, the origin), then
+each cycle its line runs on opens (`open_cycle`: the cycle's records, preflight and INIT, the replay
+and its fork) and closes INIT (`close_init`). A rebase's fork re-arms the launch's book on its own
+cycle (`onto_fork`)."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
-from promptpotter.application.config_map import measured_address
 from promptpotter.application.initialization.scoring_scope import cycle_partition, scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.jobs.launcher.admission import land_job, open_spend_book
-from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
+from promptpotter.application.jobs.launcher.opening import land_job, open_spend_book
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import (
+    cycle_share,
+    move_campaign_money,
+    stand_held_budget,
+)
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
@@ -31,22 +31,26 @@ from promptpotter.application.run_observers import (
     build_run_observers,
     declare_run_wiring,
 )
-from promptpotter.application.run_phase_control import FlightGauge, RunControl
+from promptpotter.application.run_phase_control import FlightGauge, RunControl, close_dead_bench
 from promptpotter.application.runner.inner.tasks import retarget_inner_spawn
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
-from promptpotter.domain.arms import PointContext
-from promptpotter.domain.campaign import CampaignCycle, RunDeclaration, ceiling_meter
+from promptpotter.application.views.readout import StatusFn
+from promptpotter.domain.campaign import CampaignCycle, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
-from promptpotter.domain.records.run_records import PhaseRecord, StandingBudgetRecord
+from promptpotter.domain.records.run_records import (
+    ArmsGate,
+    PhaseRecord,
+    Running,
+    RunPhaseRecord,
+)
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import refresh_rates
@@ -54,28 +58,11 @@ from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
-
-
-def origin_content_hash(
-    origin: OptSearchPoint,
-    points: PointContext,
-    dataset: list[Sample],
-    *,
-    answer_terms: Collection[str],
-) -> str:
-    """What the origin SENDS over its rows: a cell's identity is not in it, and is checked beside it
-    off the cycle's drawn record (`CampaignSurvey.drawn`)."""
-    return points.job(origin).content_hash(dataset, answer_terms=answer_terms)[:12]
-
-
-def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
-    """Each arm of a head-to-head is its own run; declarations differing only in spend or display are one."""
-    return f"cycle_{stable_hash([origin_hash, measured_address(declaration)], length=12)}"
 
 
 @dataclass(frozen=True)
@@ -189,11 +176,38 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
     rescope(abort_check=session.state.control.pause_requested)
 
 
-def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
-    """This cycle's own axes; its money is the campaign's (``move_campaign_money``), its hold the job's."""
-    cycle = held.standing.only(CYCLE_AXES)
-    if stores.campaigns.read_standing_budget(hop).budget != cycle:
-        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle))
+def enter_cycle(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    readout_sink: StatusFn | None = None,
+    forked_from: RunObservers | None = None,
+) -> RunObservers:
+    """THE run boundary on *session*'s cycle, a launch's and a fork's: its observers bound, the
+    cycle declared running, its inbox voided and its pointer the latest."""
+    observers = build_run_observers(
+        session=session,
+        campaign_config=campaign_config,
+        readout_sink=readout_sink,
+        forked_from=forked_from,
+    )
+    store = session.store
+    try:
+        prior = store.campaigns.last(session.hop, RunPhaseRecord)
+        # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
+        store.campaigns.append(session.hop, RunPhaseRecord(state=Running()))
+        # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
+        # included; the run a gate held resumes, what it was asked standing.
+        if prior is None or not isinstance(prior.state, ArmsGate):
+            store.void_inbox(session.hop, sparing=observers.hold.control.hold)
+        # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
+        save_active_pointer(store.base_dir, session.hop)
+    except BaseException:
+        observers.release()
+        raise
+    session.state.observers = observers
+    close_dead_bench(store, session.hop)
+    return observers
 
 
 def _rebased_observers(
@@ -202,9 +216,7 @@ def _rebased_observers(
     # The cut's last step: everything the fork stands on landed before it supersedes its parent.
     cut.take(session.store)
     _rebase_held(session, cut.parent)
-    return build_run_observers(
-        session=session, campaign_config=prep.campaign_config, forked_from=observers
-    )
+    return enter_cycle(session, prep.campaign_config, forked_from=observers)
 
 
 def _rebase_held(session: Session, parent: CycleHop) -> None:
@@ -243,16 +255,6 @@ async def onto_fork(
     # Held through the fork's mint, which moves the campaign's holds off it.
     parent.release()
     return session, observers
-
-
-def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
-    """A launch with no allowance clears the last launch's."""
-    campaigns = session.store.campaigns
-    pause_at_round = (
-        None if step_rounds is None else max(session.state.resumed_from_round - 1, 0) + step_rounds
-    )
-    if campaigns.read_standing_budget(session.hop).pause_at_round != pause_at_round:
-        campaigns.append(session.hop, StandingBudgetRecord(pause_at_round=pause_at_round))
 
 
 def _init_cycle(session: Session, *, resume_from_round_override: int | None) -> None:
