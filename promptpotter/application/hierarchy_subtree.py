@@ -660,7 +660,7 @@ class _Build:
             label=reading.arm.label,
             tags=tags,
             figures=candidate_figures(reading),
-            lines=candidate_lines(reading, standing),
+            lines=candidate_lines(standing),
             children=list(c.inner),
             facts=facts,
         )

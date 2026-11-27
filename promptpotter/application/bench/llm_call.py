@@ -254,7 +254,6 @@ def _announce(call: _Call) -> None:
         call_id=call.call_id,
         node=label,
         round=context.round_num,
-        candidate_idx=context.candidate_idx,
         model=call.merged.model,
         prompt_chars=prompt_chars,
         injection_chars=dict(injections.chars),

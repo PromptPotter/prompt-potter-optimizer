@@ -1,5 +1,4 @@
 import { metricInkToken } from "./series";
-import { AbilityHelp } from "./AbilityInfo";
 import type { CandidatesModel } from "./useCandidatesModel";
 import { setCandidatesState } from "@/lib/state/candidates";
 import {
@@ -177,25 +176,6 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
                 Compare this searchpoint
               </MenuCheck>
             </HoverCard>
-            {m.wonOnTheta && (
-              <>
-                <MenuSep />
-                <MenuCheck
-                  on={m.showTheta}
-                  discloses
-                  onClick={m.toggleTheta}
-                  title="Why a lower-fitness candidate can win"
-                >
-                  How candidates are ranked
-                </MenuCheck>
-              </>
-            )}
-            {m.wonOnTheta && m.showTheta && (
-              <AbilityHelp
-                model={m.ability?.calibration_model ?? null}
-                caveat={m.ability?.caveat ?? null}
-              />
-            )}
           </>
         }
       />

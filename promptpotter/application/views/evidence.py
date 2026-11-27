@@ -369,10 +369,6 @@ _CONTRASTS = (
 _ELECTIONS = (
     Column("campaign", 24, text=True),
     Column("elects on", 9, text=True),
-    Column("θ", 7),
-    Column("95% CI", 18),
-    Column("caveat", 18, text=True),
-    Column("quote on", 12, text=True),
 )
 
 
@@ -494,26 +490,12 @@ def _contrast_row(c: ArmContrast) -> Row:
 
 
 def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
-    elected = [(r, r.election) for r in rows if r.election is not None]
-    if not elected:
+    table: list[Row] = [(r.campaign_id, r.elects_on) for r in rows if r.elects_on is not None]
+    if not table:
         return []
-    table: list[Row] = []
-    for r, election in elected:
-        ability = election.ability
-        table.append(
-            (
-                r.campaign_id,
-                election.elects_on,
-                _point(None if ability is None else ability.theta),
-                _band(None if ability is None else ability.theta),
-                _ABSENT if ability is None or ability.caveat is None else ability.caveat.value,
-                election.reads_on,
-            )
-        )
     return [
         "",
-        "  Each selection's election, and the column to quote it on: an `ability` election is "
-        "won on θ unless its θ carries a caveat, where θ is not ability and it reads on fitness:",
+        "  The column each selection's electing round chose it on:",
         *_table(_ELECTIONS, table, indent="  "),
     ]
 

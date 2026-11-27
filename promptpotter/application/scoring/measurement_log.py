@@ -14,7 +14,6 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.loaders import held_bank
 from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.intelligence.hard_sample_sorter import (
-    arm_thetas,
     build_hard_samples,
     rank_hard_samples,
 )
@@ -307,13 +306,15 @@ def _drawn_rows(cells: CellsScope, drawn: PartitionRecord, slots: list[int]) -> 
 def cycle_hard_samples(
     stores: Stores, hop: CycleHop, rounds: list[RoundResult], config: CampaignConfig
 ) -> HardSamples:
-    """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp,
-    re-fit. It resolves nothing: the caller hands the closed rounds and config it already holds."""
+    """A cycle's scale, folded off its ledger: its closed rounds read on the scale its last close's
+    level series was read on, re-fit. It resolves nothing: the caller hands the closed rounds and
+    config it already holds."""
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
     knobs = config.optimization
     bank = cycle_bank(stores, hop) if rounds else Bank.of(())
-    stamp = next((rr.election.ruler for rr in reversed(rounds) if rr.election is not None), None)
+    series = stores.campaigns.standing_rounds(hop, moment=None).level_series
+    stamp = None if series is None else series.stamp
     judging = (
         None
         if stamp is None or stamp.cold
@@ -332,7 +333,6 @@ def cycle_hard_samples(
         build_observations(rounds),
         None if judging is None else judging.ruler,
         frontier=None if frontier is None else (frontier.theta, frontier.se),
-        arm_theta=arm_thetas(rounds),
         slots=bank.position_of,
         cycle_id=hop.cycle_id,
     )
@@ -366,7 +366,6 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
             observations,
             judging.ruler,
             frontier=None,
-            arm_theta={},
             slots=bank.position_of,
             cycle_id=None,
         )

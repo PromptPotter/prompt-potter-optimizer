@@ -35,7 +35,7 @@ export function ChannelMap({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);
 
-  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, "fitness"), [index]);
+  const { valueByKey } = useMemo(() => nodeOverlays(index, "fitness"), [index]);
 
   const viewedKey = useMemo(
     () => (reading ? encodeCyclePath(readingPath(reading)) : null),
@@ -101,7 +101,6 @@ export function ChannelMap({
           <Forest
             tree={root}
             valueByKey={valueByKey}
-            thetaByKey={thetaByKey}
             metric="fitness"
             expanded={expanded}
             onLaneActivate={onLaneActivate}

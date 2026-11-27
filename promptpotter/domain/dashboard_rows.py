@@ -8,7 +8,6 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed
-from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.opt_search_point import EvidenceGrounding, NodePrompt
@@ -22,7 +21,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, Readin
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
-from promptpotter.domain.ruler import AbilityReading, LevelSeries
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import (
@@ -428,8 +427,6 @@ class RoundSummary(FrozenModel):
     # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
     panel_precision: PanelPrecision | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
-    # The noise walk: the generator's N(μ0, τ²) off this round's own arm-vs-parent θ lifts.
-    lift_prior: LiftPrior | None = None
 
 
 class ServedRound(RoundSummary):
@@ -445,13 +442,9 @@ class ServedRound(RoundSummary):
     measured: list[int] = Field(
         description="The samples `selection` holds, each once, in id order."
     )
-    series_reading: AbilityReading | None = Field(
-        description="This round's level on the cycle's `LevelSeries`, under its own round's "
-        "caveat; null where no scored cell sits on the scale."
-    )
     hold_up: Estimate | None = Field(
         description="This round's promotion over the parent it beat, each read on every row it met "
-        "in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift "
+        "in the cycle on the `LevelSeries`' one scale, its later rows as parent included: the lift "
         "that held beside the one it was crowned on. Null on a round that promoted nothing."
     )
 
@@ -535,7 +528,6 @@ def served_rounds(
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
             measured=sorted(set(closed.selection)),
-            series_reading=None if series is None else series.levels[closed.round],
             hold_up=None
             if series is None or closed.ending is None or not closed.ending.moves_line
             else series.hold(closed.round),

@@ -157,7 +157,7 @@ def build_candidate_rows(
                 leading=None if election is None else election.leading,
                 electable=None if election is None else election.electable,
             ),
-            fit=None if election is None else election.fit.get(key),
+            vs_reference=None if election is None else election.vs_reference.get(key),
         )
         rows.append(
             LiveCandidate.in_flight(

@@ -36,13 +36,10 @@ The **origin panel's top-up is one more stretch of the same race** (`runner/roun
 
 **The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election, with what the origin panel's line bought after it (`results.py::RoundResult.closed_rows`), which no race read.
 
-**The `posterior` bar** admits an arm on
-
-a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND its
-`P(θ_arm > θ_parent)` bounded by what the DISCORDANT pairs support (`shared/statistics.py::sign_posterior`; directional, so contradicting pairs collapse the claim to 0.5; **discordance counts VERDICTS, `Grade.fitness`, never the objective**) above potter's `theta_election` `admission` — never PoBB's ε, which
-says when to stop BUYING an arm, not when to promote one. An `admission` below `sign_posterior(1, 0)`
-= 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
-the unbounded posterior (bounding it moved a banked crown across a 0.0007 gap). **A pick's crowning
+**Admission** (potter's `theta_election` `admission`) is the confidence `sign_test` and `e_process`
+read a separation at — never PoBB's ε, which says when to stop BUYING an arm, not when to promote
+one. An `admission` below `sign_posterior(1, 0)` = 0.75 is refused, so one discordant cell never
+promotes. **A pick's crowning
 cells are its discordant wins over its bar**: there its rows are the luck the selection kept, so they
 stay out of every race it judges; a cell it tied on stays in the pool. They are read off the pairing
 the round banked (`results.py::Election.deciding_pair`, `selection.py::crowning_cells`), on a crowned
@@ -67,18 +64,13 @@ vote's cells (`potter/election.py::RoundWinner.pairings`): its lift is the green
 `FlipCounts` the cells won and lost; an arm read on fewer than two shared cells is no subject.
 `paired_point` (the default) crowns that lift above zero, ranked on it: its interval is
 information, which the advance reads, so a point crown whose interval spans
-zero closes `NOT_SEPARATED` and the line moves all the same. `posterior` is the bar above. The θ
-crowns (`posterior`, `empirical_bayes`) elect on ability and floor coverage on θ cells, the others on
-the fitness column and the pairing's scored cells (`ThetaElection.elects_on`). Ablation switches of potter's crown only:
+zero closes `NOT_SEPARATED` and the line moves all the same. Every crown elects on the fitness
+column and floors coverage on the pairing's scored cells (`ThetaElection.elects_on`): no θ rides
+the round's statement. Ablation switches of potter's crown only:
 `sign_test`, the exact
 paired sign test on the discordant verdicts, Holm-corrected across the round's arms; `e_process`, a
-uniform-mixture e-value on the same discordance at `arms / α`, valid wherever the race stops;
-`empirical_bayes`, the θ lift shrunk toward the tenant's banked arm-vs-parent lifts on the dataset
-(`selection.py::banked_lift_prior`: τ² = observed variance less mean noise variance, floored at 0),
-its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on μ0's sign
-(`crowning_bar.py::LiftPrior.shrunk`). No reading crowns an arm its paired verdicts contradict. The
-paper's earlier behaviour is `crown: posterior`, `next_parent: crowned`,
-`optimization.not_separated_stall: resets`.
+uniform-mixture e-value on the same discordance at `arms / α`, valid wherever the race stops. No
+reading crowns an arm its paired verdicts contradict.
 
 **Which rows the bar pairs on is potter's `theta_election` `vote`**, which the bench never reads:
 the election banks the cells on its replay inputs (`RoundWinner.cells`), so the crown and the replay

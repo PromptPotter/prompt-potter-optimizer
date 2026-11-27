@@ -8,7 +8,6 @@ from typing import Any, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
-from promptpotter.domain.paired_reading import ArmKey, Estimate
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     CalibrationModel,
@@ -16,7 +15,6 @@ from promptpotter.domain.ruler import (
     Ruler,
     anchor_id_of,
     ruler_entry,
-    theta_lift,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_hit
@@ -96,17 +94,6 @@ class RaschPosterior:
             calibration_model=calibration_model,
             anchor_id=anchor_id_of(self.delta, self.mu_delta, self.sigma_delta, calibration_model),
         )
-
-
-@dataclass(frozen=True)
-class RoundAbilities:
-    """``bar`` is, per arm, the parent's ``(θ, se)`` it is judged against; an arm absent from it
-    has no bar, never a logit-0 floor. ``cells`` counts each θ's ``theta_cells``."""
-
-    theta: dict[ArmKey, float]
-    theta_se: dict[ArmKey, float]
-    bar: dict[ArmKey, tuple[float, float]]
-    cells: dict[ArmKey, int]
 
 
 def _map_fit(
@@ -529,36 +516,6 @@ def theta_cells[V](
     """The cells an arm's θ is read on, which every coverage floor counts: warm, those the ruler carries; cold, those the parent answered too."""
     carried: Collection[str] = parent if ruler is None else ruler.delta
     return {key: value for key, value in own.items() if key in carried}
-
-
-def candidate_abilities(
-    results_by_id: Mapping[ArmKey, CellSheet],
-    parent_results: CellSheet,
-    ruler: DeltaRuler | None,
-) -> RoundAbilities:
-    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
-    entries = ruler.entries() if ruler is not None else None
-    parent, binary = responses_of(parent_results), responses_binary(parent_results)
-    abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
-    for cid, sheet in results_by_id.items():
-        own = theta_cells(responses_of(sheet), parent, ruler)
-        bar_cells = parent if entries is not None else {k: parent[k] for k in own}
-        # Both sides centred on the parent's own read: the prior sits on the lift, never on each side.
-        first = fit_theta(bar_cells, entries, binary=binary)
-        center = 0.0 if first is None else first[0]
-        if (read := fit_theta(own, entries, binary=responses_binary(sheet), center=center)) is None:
-            continue
-        (abilities.theta[cid], abilities.theta_se[cid]), abilities.cells[cid] = read, len(own)
-        if (against := fit_theta(bar_cells, entries, binary=binary, center=center)) is not None:
-            abilities.bar[cid] = against
-    return abilities
-
-
-def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: ArmKey) -> Estimate | None:
-    bar = abilities.bar.get(candidate_id)
-    if bar is None:
-        return None
-    return theta_lift(abilities.theta[candidate_id], abilities.theta_se[candidate_id], *bar)
 
 
 def build_round_order(

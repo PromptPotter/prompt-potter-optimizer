@@ -27,7 +27,7 @@ from promptpotter.application.scoring.paired import (
     in_family,
     read_arms,
 )
-from promptpotter.domain.arm_reading import ArmAbility, ElectionColumn
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BENCH_HEADLINE, COLUMN_GRADE, BenchColumn, BenchScore
 from promptpotter.domain.campaign import (
     BenchSet,
@@ -287,9 +287,9 @@ class HeadToHeadRow(StrictModel):
     spend_metered: MeteredSpend | None
     human_intervened: bool
     status: RunStatus
-    election: ElectionColumn | None = Field(
+    elects_on: DisplayMetric | None = Field(
         description="The column the selection's electing round chose it on; null before a round "
-        "selects. Quote an `ability` pick on θ unless its caveat is served."
+        "selects."
     )
     bench: BenchScore
     bench_set: BenchSet | None
@@ -481,7 +481,7 @@ def head_to_head(
             elected_apart=[
                 g.row.campaign_id
                 for g in graded
-                if g.row.election is not None and g.row.election.reads_on != BENCH_HEADLINE
+                if g.row.elects_on is not None and g.row.elects_on != BENCH_HEADLINE
             ],
         ),
     )
@@ -573,7 +573,6 @@ def _read(
     pick = run.selection
     electing = None if pick is None else rounds.get(pick.round)
     election = None if electing is None else electing.close.election
-    fit = None if electing is None or pick is None else electing.close.fit(pick.key)
     bench_set = bench_set_of(
         dataset_hash=drawn.dataset_hash,
         split=drawn.split,
@@ -628,12 +627,7 @@ def _read(
             else MeteredSpend.of(spend, ceiling_meter(campaign.declaration.purpose)),
             human_intervened=reading.human_intervened,
             status=_status(stores, campaign),
-            election=None
-            if election is None
-            else ElectionColumn.of(
-                election.elects_on,
-                None if fit is None else ArmAbility.of(fit.theta, fit.theta_se, fit.theta_caveat),
-            ),
+            elects_on=None if election is None else election.elects_on,
             bench=bench,
             bench_set=bench_set,
             spend=spend,

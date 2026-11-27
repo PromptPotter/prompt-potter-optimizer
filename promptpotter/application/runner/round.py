@@ -26,10 +26,6 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.intelligence.rasch import (
-    candidate_abilities,
-    theta_lift_over_parent,
-)
 from promptpotter.application.optimizers.nodes import (
     OPERATOR_SEAT,
     MeasuredRound,
@@ -49,7 +45,6 @@ from promptpotter.application.scoring.arm_states import (
     cut_past_draw,
     measuring,
 )
-from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.paired import (
     MemberRows,
     RoundPairs,
@@ -58,16 +53,21 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_on_saturation
-from promptpotter.application.scoring.query_loop import Turn, Walk, run_walks
+from promptpotter.application.scoring.query_loop import (
+    CatchUps,
+    Turn,
+    Walk,
+    filed_entry,
+    open_walk,
+    run_walks,
+)
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
-    filed_entry,
-    open_walk,
     reread_cells,
     score_search_points,
 )
-from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import (
     ArmState,
     Concluded,
@@ -566,12 +566,10 @@ async def measure_population(
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
     seat = NodeContext(ctx, selector)
-    # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
-    ruler = cycle.difficulty.ruler
 
     def readable(key: ArmKey, parent: CellSheet) -> bool:
         answered = {cell.key for cell in parent.scoreable}
-        return selector.covered(cycle.optimizer, rows[key], answered, ruler) >= coverage_floor
+        return selector.covered(cycle.optimizer, rows[key], answered) >= coverage_floor
 
     # The REPLICATION cohort, deliberately the looser predicate: the election admits on `is_electable`.
     scored = [key for key, arm in arms.items() if is_leader_eligible(arm)]
@@ -656,20 +654,6 @@ async def measure_population(
             continue
         electable.append(key)
 
-    # Fixed δ decouples the arms; the election reads this fit, never one of its own.
-    abilities = candidate_abilities(
-        {key: raced[key] for key in electable}, raced[parent.key], ruler
-    )
-    fit = {
-        key: ArmFit(
-            theta=abilities.theta.get(key),
-            theta_se=abilities.theta_se.get(key),
-            theta_caveat=cycle.difficulty.judging.caveat(raced[key].cells),
-            vs_reference=readings.get(key),
-            lift=theta_lift_over_parent(abilities, key),
-        )
-        for key in arms
-    }
     filed = {key: ctx.walks[key].arm for key in arms} | {
         key: walk.arm for key, walk in ctx.walks.items() if key not in arms
     }
@@ -684,8 +668,7 @@ async def measure_population(
             cycle.session.state.scoring.scorer,
             cycle.session.bound_resolution.chain,
         ),
-        fit=fit,
-        abilities=abilities,
+        vs_reference={key: read for key in arms if (read := readings.get(key)) is not None},
         electable=electable,
         coverage_floor=coverage_floor,
         cut=cut,
@@ -826,20 +809,19 @@ async def _walk_population(
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
-    pool: CatchUpPool | None = None
+    catch_ups: CatchUps | None = None
     if eliminator is not None and race is not None:
         if (parent := ArmKey(cycle.parent.id)) not in proposed:
             # Announced before the walks, so its catch-up is its arm's pass, which its read continues.
             at = walked_position(cycle.rounds, parent)
             state = Proposed(role=MeasurementRole.PARENT, position=at, individual=cycle.parent)
             append_record(ArmRecord(round=round_num, arm=parent, state=state))
-        pool = CatchUpPool(
+        catch_ups = CatchUps(
             race,
-            cycle.session,
-            cycle.sample_index,
             eliminator.name,
             {parent: (cycle.parent_point, MeasurementRole.PARENT)}
             | {key: (sp, MeasurementRole.PANEL) for key, sp in sps.items()},
+            cycle.sample_index,
         )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
@@ -886,18 +868,17 @@ async def _walk_population(
         ctx.walked(ReadArm(key, arm, results), asked[key])
         append_record(ArmRecord(round=round_num, arm=key, state=arm))
 
-    cut = await run_walks(
+    cut, caught = await run_walks(
         walks,
         cycle.session,
         keep_cut=keep_cut,
-        backfills=pool,
+        catch_ups=catch_ups,
         race=race,
         on_turn=on_turn,
         on_decided=on_decided,
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one
     # sheet; the parent's are handed on to its read, which continues its arm.
-    caught = {} if pool is None else pool.caught
     for key, cells in caught.items():
         if key in concluded:
             taken = replace(rows[key], cells=tuple(cells))
@@ -1015,11 +996,10 @@ def _round_result(
             # A round ending on its parent headlines it RE-SCORED on this panel, never a union.
             parent=reference,
             electable=selection.electable,
-            fit=measured.fit,
+            vs_reference=measured.vs_reference,
             elects_on=elects_on,
             deciding_pair=selection.deciding_pair,
             verdict_reason=selection.verdict_reason,
-            ruler=cycle.difficulty.stamp,
         ),
         priors=cycle.rounds,
         panel=ReadingState.PENDING,

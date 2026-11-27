@@ -229,8 +229,7 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
             continue
         parent, parent_pp = head.individual.prompts, head.individual.pipeline_params
         for key, arm in rr.proposed.items():
-            fold, fit = rr.folds.get(key), rr.fit(key)
-            reading = None if fit is None else fit.vs_reference
+            fold, reading = rr.folds.get(key), rr.vs_reference(key)
             if not (fold and fold.total and reading and reading.state is ReadingState.READ):
                 continue
             if reading.headline.side != "below":

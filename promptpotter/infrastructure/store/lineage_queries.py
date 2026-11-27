@@ -224,7 +224,7 @@ def read_cycle(
                 leading=election.leading,
                 electable=election.electable,
             ),
-            fit=None if election is None else election.fit.get(key),
+            vs_reference=None if election is None else election.vs_reference.get(key),
         )
         arms.append(
             CycleArm(

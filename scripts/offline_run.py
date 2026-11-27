@@ -1278,7 +1278,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     if not any(L2_STEER.items() <= request.items() for request in sent):
         raise SystemExit(f"offline run: L2's steer {L2_STEER} reached no L1 send")
     print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
-    await noise_walk_doors(stores, session.hop, list(cycles))
+    await hold_up_doors(stores, session.hop, list(cycles))
     spread_reads_the_selection(
         stores, [hop for c in banked for hop, _ in stores.campaigns.campaign_cycles(c)]
     )
@@ -1333,11 +1333,10 @@ def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None
     print(f"the spread read {only_c0} samples only C0 measured as none of the selection's")
 
 
-async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
-    """The line's warm ruler separates arms, so each door reads the noise walk and the hold off
-    one served round: the readouts of *line* name μ0 and τ, *hop*'s stop every hold the last
-    close's series reads (a close's round block reads its own), the embedded and MCP reads of
-    *hop* serve both."""
+async def hold_up_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
+    """The line's warm ruler separates arms, so each door reads the promotion's hold off one
+    served round: the readouts of *line* name every hold the last close's series reads (a close's
+    round block reads its own), the embedded and MCP reads of *hop* serve it."""
     embedded = await answer_read(
         CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id), stores
     )
@@ -1345,22 +1344,18 @@ async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) 
     asked = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
     mcp = await HostSession(Caller(stores)).answer(CallTool(ReadKind.CYCLE_DASHBOARD, asked))
     readout = "".join(stores.campaigns.layout(at).readout.read_text("utf-8") for at in line)
-    walk = {"lift_prior", "hold_up"}
-    served = [r.model_dump(mode="json", include=walk) for r in embedded.rounds]
+    served = [r.model_dump(mode="json", include={"hold_up"}) for r in embedded.rounds]
     hosted = json.loads(json.dumps(mcp.value))["rounds"]
-    if served != [{k: r[k] for k in walk} for r in hosted]:
-        raise SystemExit("offline run: the MCP and embedded doors read two noise walks")
+    if served != [{"hold_up": r["hold_up"]} for r in hosted]:
+        raise SystemExit("offline run: the MCP and embedded doors read two holds")
     held = [r.hold_up for r in embedded.rounds if r.hold_up is not None]
     said = {
-        "lift_prior": any(r["lift_prior"] for r in served),
         "hold_up": bool(held),
-        "μ0": "noise walk: μ0 " in readout,
-        "τ": ", τ " in readout,
         "held up": all(f"held up: the promotion holds {h.text} " in readout for h in held),
     }
     if missing := [name for name, read in said.items() if not read]:
         raise SystemExit(f"offline run: the separating round's doors read no {missing}")
-    print(f"noise walk read at every door: {len(held)} promotions held up")
+    print(f"hold read at every door: {len(held)} promotions held up")
 
 
 async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
@@ -1639,7 +1634,7 @@ async def run_controlled(
         hop = CycleHop(campaign_id=cid, cycle_id=cycle.name)
         standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.values()
         own = RulerOwn(campaign=cid, since=record.ruler_version)
-        read = {None if (s := r.close.ruler) is None else s.own for r in standing}
+        read = {r.close.level_series.stamp.own for r in standing}
         if read != {own}:
             raise SystemExit(
                 f"offline run: arm {name} read ruler reaches {read}, its head-to-head froze "

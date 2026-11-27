@@ -246,8 +246,7 @@ class CycleEntryFacts(FrozenModel):
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
     elects_on: DisplayMetric | None = Field(
-        description="The column the cycle's newest election elected on; null before its first. "
-        "`ability`: its rounds are won on θ, not on fitness."
+        description="The column the cycle's newest election elected on; null before its first."
     )
     spend: MeteredSpend = Field(
         description="Its line's bill at the moment: its fork prefix's, then its own ledger's "
@@ -344,7 +343,7 @@ class RoundFacts(FrozenModel):
     round: int
     elects_on: DisplayMetric | None = Field(
         description="The column the round's election elected on (`Election.elects_on`); null on "
-        "a round never elected. `ability`: the round is won on θ, not on fitness."
+        "a round never elected."
     )
 
 
@@ -458,7 +457,6 @@ type FigureKey = Literal[
     "lives",
     "fitness",
     "fitness_terms",
-    "ability",
 ]
 
 
@@ -518,8 +516,7 @@ class HierarchyCycle(_RunEntry):
     climb: Said | None = Field(
         description="The lead line (`RunStanding.climb`): the selection's lift vs origin and vs "
         "parent, then per search dollar, per candidate tested and in worked time per unit. Its "
-        "detail is what they all read in: the measurand and, under an ability election, that "
-        "rounds are won on θ. Null until the lift vs origin is read."
+        "detail is the measurand they all read in. Null until the lift vs origin is read."
     )
     said: Said | None = Field(
         description="The run's pinned line from what no clock reads (`run_said`): a producer's "

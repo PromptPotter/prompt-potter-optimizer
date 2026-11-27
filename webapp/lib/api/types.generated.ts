@@ -569,7 +569,7 @@ export interface HierarchyTag {
  * by. */
 export interface Figure {
   /** Which figure, for code to look up; never shown. */
-  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'fitness' | 'fitness_terms' | 'ability';
+  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'fitness' | 'fitness_terms';
   tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
   label: string;
   value: string | null;
@@ -724,9 +724,8 @@ export interface HierarchyCycle {
   facts: CycleEntryFacts;
   /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
    * parent, then per search dollar, per candidate tested and in worked time
-   * per unit. Its detail is what they all read in: the measurand and, under
-   * an ability election, that rounds are won on θ. Null until the lift vs
-   * origin is read. */
+   * per unit. Its detail is the measurand they all read in. Null until the
+   * lift vs origin is read. */
   climb: Said | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
@@ -746,9 +745,8 @@ export interface CycleEntryFacts {
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
-  /** The column the cycle's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on fitness. */
-  elects_on: 'fitness' | 'composite' | 'ability' | null;
+  /** The column the cycle's newest election elected on; null before its first. */
+  elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
    * (`CampaignStore.chain`), what its dashboard's spend folds. */
   spend: MeteredSpend;
@@ -1332,9 +1330,8 @@ export interface SubtreeCycle {
   facts: SubtreeCycleEntryFacts;
   /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
    * parent, then per search dollar, per candidate tested and in worked time
-   * per unit. Its detail is what they all read in: the measurand and, under
-   * an ability election, that rounds are won on θ. Null until the lift vs
-   * origin is read. */
+   * per unit. Its detail is the measurand they all read in. Null until the
+   * lift vs origin is read. */
   climb: Said | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
@@ -1357,9 +1354,8 @@ export interface SubtreeCycleEntryFacts {
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
-  /** The column the cycle's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on fitness. */
-  elects_on: 'fitness' | 'composite' | 'ability' | null;
+  /** The column the cycle's newest election elected on; null before its first. */
+  elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
    * (`CampaignStore.chain`), what its dashboard's spend folds. */
   spend: MeteredSpend;
@@ -1422,8 +1418,8 @@ export interface HierarchyRound {
 export interface RoundFacts {
   round: number;
   /** The column the round's election elected on (`Election.elects_on`); null on a
-   * round never elected. `ability`: the round is won on θ, not on fitness. */
-  elects_on: 'fitness' | 'composite' | 'ability' | null;
+   * round never elected. */
+  elects_on: 'fitness' | 'composite' | null;
 }
 
 /** One candidate a round proposed; its children are the inner campaigns it
@@ -1573,8 +1569,6 @@ export interface ArmReading {
   /** The provider's prefix-cache reading of `tokens.input`; null beside a null
    * `tokens`. */
   prefix: PrefixReading | null;
-  /** Null outside the round's election fit. */
-  ability: ArmAbility | null;
   /** This arm (`b`) over the individual it was judged against (`a`), on the cells
    * both scored. Null on the origin and until the election stamps it. */
   vs_reference: ReadPair | UnreadPair | null;
@@ -1619,14 +1613,6 @@ export interface TokenAccount {
   reasoning: number | null;
   cache_read: number | null;
   cache_write: number | null;
-}
-
-/** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
-export interface ArmAbility {
-  /** Null where the round's fit read no θ for the arm. */
-  theta: Estimate | null;
-  /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -1737,7 +1723,7 @@ export interface ServedDashboard {
    * flight or ended; its rows are no round's cells. */
   verification: VerificationMark[];
   composite_fitness_formula: string | null;
-  display_metric: 'fitness' | 'composite' | 'ability';
+  display_metric: 'fitness' | 'composite';
   recent_backend_warnings: BackendWarning[];
   current_query_payload: string | null;
   backpressure: ServedBackpressure | null;
@@ -1869,7 +1855,6 @@ export interface ServedRound {
   panel_reading: OverlapReading;
   panel_precision: PanelPrecision | null;
   optimizer_facts: OptimizerFact[];
-  lift_prior: LiftPrior | null;
   /** Which lever `panel_precision` calls for, null where it is. */
   panel_precision_verdict: 'noise' | 'spread' | null;
   /** How each sample of `selection` moved against the round before it that measured
@@ -1877,11 +1862,8 @@ export interface ServedRound {
   selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
   /** The samples `selection` holds, each once, in id order. */
   measured: number[];
-  /** This round's level on the cycle's `LevelSeries`, under its own round's caveat;
-   * null where no scored cell sits on the scale. */
-  series_reading: AbilityReading | null;
   /** This round's promotion over the parent it beat, each read on every row it met
-   * in the cycle on `series_reading`'s one scale, its later rows as parent
+   * in the cycle on the `LevelSeries`' one scale, its later rows as parent
    * included: the lift that held beside the one it was crowned on. Null on a
    * round that promoted nothing. */
   hold_up: Estimate | null;
@@ -1961,57 +1943,6 @@ export interface OptimizerFact {
   text: string;
   value: number | null;
   kind: 'stat' | 'note';
-}
-
-/** The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean
- * (its own error *mu0_se*), τ² their observed variance less their mean noise
- * variance, floored at 0. */
-export interface LiftPrior {
-  mu0: number;
-  tau: number;
-  pairs: number;
-  mu0_se: number;
-}
-
-/** A Rasch θ and the δ scale it was read on, held as one value because apart they
- * mean nothing. */
-export interface AbilityReading {
-  theta: number;
-  se: number;
-  ruler: RulerStamp;
-  cells: number;
-  ruler_span: number | null;
-  round_span: number | null;
-  calibration_model: '1PL' | '2PL' | null;
-  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
-  unlinked: number;
-  pinned_share: number | null;
-}
-
-/** The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed
- * by ``own``) less the rows of ``excluded``, the parent line it held. A cold
- * stamp's ``id`` is flat. */
-export interface RulerStamp {
-  id: string;
-  version: number;
-  own: RulerOwn | null;
-  scope: RulerScope;
-  excluded: string[];
-}
-
-/** A compare arm's or an L4 cell's reach past its pin: its own campaign's lines
- * alone, which is what a fresh run of itself would read. */
-export interface RulerOwn {
-  campaign: string;
-  since: number;
-}
-
-/** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale
- * only through cells they share, and two datasets share none, so a δ is never
- * compared across datasets. */
-export interface RulerScope {
-  scorer: string;
-  dataset: string;
 }
 
 /** The latest verify or bench pass on one arm, as its records left it. */
@@ -2614,14 +2545,13 @@ export interface Election {
    * 0, which reads none. */
   parent: RoundArm | null;
   electable: number;
-  fit: Record<string, ArmFit>;
-  elects_on: 'fitness' | 'composite' | 'ability';
+  vs_reference: Record<string, ReadPair | UnreadPair>;
+  elects_on: 'fitness' | 'composite';
   /** `leading` (`b`) over `parent` (`a`) on the cells its selector paired them on:
    * the reading the round was decided on. Null where the selector banks none. */
   deciding_pair: ReadPair | UnreadPair | null;
   verdict_reason: string | null;
   reelection: Reelection | null;
-  ruler: RulerStamp;
 }
 
 /** One arm of one round, by its record's own address: an id alone names no
@@ -2629,15 +2559,6 @@ export interface Election {
 export interface RoundArm {
   round: number;
   arm: string;
-}
-
-/** What the election read of one arm: θ lives here and nowhere else. */
-export interface ArmFit {
-  theta: number | null;
-  theta_se: number | null;
-  theta_caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
-  vs_reference: ReadPair | UnreadPair | null;
-  lift: Estimate | null;
 }
 
 /** A layer restating a round as electing another arm than its selector's, and
@@ -2885,6 +2806,47 @@ export interface WinnerChainPoint {
   n_cells: number;
 }
 
+/** A Rasch θ and the δ scale it was read on, held as one value because apart they
+ * mean nothing. */
+export interface AbilityReading {
+  theta: number;
+  se: number;
+  ruler: RulerStamp;
+  cells: number;
+  ruler_span: number | null;
+  round_span: number | null;
+  calibration_model: '1PL' | '2PL' | null;
+  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  unlinked: number;
+  pinned_share: number | null;
+}
+
+/** The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed
+ * by ``own``) less the rows of ``excluded``, the parent line it held. A cold
+ * stamp's ``id`` is flat. */
+export interface RulerStamp {
+  id: string;
+  version: number;
+  own: RulerOwn | null;
+  scope: RulerScope;
+  excluded: string[];
+}
+
+/** A compare arm's or an L4 cell's reach past its pin: its own campaign's lines
+ * alone, which is what a fresh run of itself would read. */
+export interface RulerOwn {
+  campaign: string;
+  since: number;
+}
+
+/** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale
+ * only through cells they share, and two datasets share none, so a δ is never
+ * compared across datasets. */
+export interface RulerScope {
+  scorer: string;
+  dataset: string;
+}
+
 /** One side channel's mean over a point's cells, worded once for every reader. */
 export interface CellMean {
   /** The channel, for code to pair two points' means on. */
@@ -2944,8 +2906,8 @@ export interface HeadToHeadRow {
   human_intervened: boolean;
   status: RunStatus;
   /** The column the selection's electing round chose it on; null before a round
-   * selects. Quote an `ability` pick on θ unless its caveat is served. */
-  election: ElectionColumn | null;
+   * selects. */
+  elects_on: 'fitness' | 'composite' | null;
   bench: BenchScore;
   bench_set: BenchSet | null;
   spend: SpendRollup | null;
@@ -3024,17 +2986,6 @@ export interface DeterminismClamp {
    * makes a measurement whose producer nothing can name. `None` (default)
    * lets the gateway re-rank per call. */
   route_order: Record<string, string[]> | null;
-}
-
-/** The column a pick's election is quoted on: θ where it was won on θ, unless θ
- * is unread or withheld (`ThetaCaveat.withholds`): there θ is not ability,
- * and the election reads on fitness. */
-export interface ElectionColumn {
-  /** What the electing round's selector ranked on. */
-  elects_on: 'fitness' | 'composite' | 'ability';
-  /** The pick's θ on its electing round. */
-  ability: ArmAbility | null;
-  reads_on: 'fitness' | 'composite' | 'ability';
 }
 
 /** The bench set and grader behind a headline; two compare only where every field
@@ -3518,7 +3469,7 @@ export interface CampaignLayer {
    * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'fitness' | 'composite' | 'ability' | null;
+  display_metric: 'fitness' | 'composite' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
    * by the queue mechanism's acquisition score (`pick_value`: decision-
@@ -3946,7 +3897,7 @@ export interface CampaignConfig {
    * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'fitness' | 'composite' | 'ability';
+  display_metric: 'fitness' | 'composite';
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
    * by the queue mechanism's acquisition score (`pick_value`: decision-
@@ -4659,7 +4610,7 @@ export interface ConfigEdit {
    * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'fitness' | 'composite' | 'ability' | null;
+  display_metric: 'fitness' | 'composite' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
    * by the queue mechanism's acquisition score (`pick_value`: decision-
@@ -5928,7 +5879,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "9b40f3c98ba732e6";
+export const SERVED_CONTRACT = "d548bfd32119270c";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6145,7 +6096,7 @@ export type AccountTab = 'profile' | 'usage' | 'keys' | 'activity' | 'preference
 export type CandidateCount = 'replayed';
 
 // promptpotter.domain.arm_reading::DisplayMetric
-export type DisplayMetric = 'fitness' | 'composite' | 'ability';
+export type DisplayMetric = 'fitness' | 'composite';
 
 // promptpotter.domain.paired_reading::MeasurandUnit
 export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
@@ -6569,7 +6520,6 @@ export const CANDIDATE_COUNT_WORDS: Record<CandidateCount, string> = {
 // Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO, in display order.
 export const DISPLAY_METRIC_INFO: Record<DisplayMetric, DisplayMetricInfo> = {
   "fitness": { label: "fitness", glyph: "ƒ", title: "Mean per-cell fitness under the scoring formula, over the candidate's measured subset (subset-relative).", unit: "score" },
-  "ability": { label: "ability θ", glyph: "θ", title: "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.", unit: "theta" },
   "composite": { label: "composite", glyph: "∑", title: "Composite fitness under the active scoring formula (equals fitness when no formula is set).", unit: "score" },
 };
 
@@ -7001,7 +6951,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [ACCOUNT_TAB_INFO, ["profile", "usage", "keys", "activity", "preferences", "storage", "about"]],
   [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],
   [CANDIDATE_COUNT_WORDS, ["replayed"]],
-  [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
+  [DISPLAY_METRIC_INFO, ["fitness", "composite"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "refused", "eliminated", "locked_in"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
   [PASS_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection", "read_only"]],

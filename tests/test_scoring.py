@@ -123,10 +123,7 @@ from promptpotter.application.initialization.scoring_scope import (
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.rasch import (
-    RoundAbilities,
-    candidate_abilities,
     responses_of,
-    theta_lift_over_parent,
 )
 from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher.admission import (
@@ -240,8 +237,6 @@ from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
     crowning_cells,
-    ranked_first,
-    readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
@@ -366,7 +361,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import RulerScope, RulerStamp, p_better
+from promptpotter.domain.ruler import RulerScope, RulerStamp
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -1441,26 +1436,6 @@ def _easy_low_hard_high() -> Any:
     return delta_ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
 
 
-def _level_parent() -> tuple[Any, CellSheet]:
-    """A flat 28-cell ruler, and a parent that solved half of it."""
-    return delta_ruler(dict.fromkeys(range(28), 0.0)), sheet(measurements([1.0] * 14 + [0.0] * 14))
-
-
-def _elect(
-    keys: list[ArmKey],
-    rows: dict[ArmKey, CellSheet],
-    parent: CellSheet,
-    coverage_floor: int,
-    ruler: Any,
-    *,
-    bar: CrowningBar,
-) -> tuple[ArmKey | None, RoundAbilities]:
-    """The election on the fit the round measures of the same rows."""
-    abilities = candidate_abilities(rows, parent, ruler)
-    vote = _winner(keys, ArmKey("p"), bar=bar, coverage_floor=coverage_floor)
-    return _crown(vote, rows, parent, abilities), abilities
-
-
 _PAIRS = RoundPairs(
     path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
     instrument_id="bank",
@@ -1496,109 +1471,14 @@ def _winner(
 
 
 def _decide(
-    vote: RoundWinner,
-    rows: Mapping[ArmKey, CellSheet],
-    parent: CellSheet,
-    abilities: RoundAbilities,
+    vote: RoundWinner, rows: Mapping[ArmKey, CellSheet], parent: CellSheet
 ) -> RoundDecision:
-    pairings = vote.pairings({**rows, vote.parent: parent}, {})
-    return vote.decide(vote.subjects(pairings, abilities), abilities)
+    return vote.decide(vote.subjects(vote.pairings({**rows, vote.parent: parent}, {})))
 
 
-def _crown(
-    vote: RoundWinner,
-    rows: Mapping[ArmKey, CellSheet],
-    parent: CellSheet,
-    abilities: RoundAbilities,
-) -> ArmKey | None:
-    decided = _decide(vote, rows, parent, abilities)
+def _crown(vote: RoundWinner, rows: Mapping[ArmKey, CellSheet], parent: CellSheet) -> ArmKey | None:
+    decided = _decide(vote, rows, parent)
     return decided.leading if decided.ending is RoundEnding.CROWNED else None
-
-
-def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
-    ruler = _easy_low_hard_high()
-    bar = CrowningBar(statistic="posterior", admission=election_knobs().admission)
-    with pytest.raises(ValidationError):
-        # One discordant cell supports 0.75.
-        election_knobs().model_validate(election_knobs().model_dump() | {"admission": 0.70})
-    weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
-    able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
-    by_id = {
-        ArmKey("weak_on_easy"): sheet(weak_on_easy),
-        ArmKey("able_on_hard"): sheet(able_on_hard),
-    }
-    assert sum(r.hit for r in weak_on_easy) > sum(r.hit for r in able_on_hard)
-    winner_id, abilities = _elect(
-        list(by_id),
-        by_id,
-        sheet(measurement(i, float(i < 20)) for i in range(40)),
-        4,
-        ruler,
-        bar=bar,
-    )
-    assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
-    assert abilities.theta[ArmKey("able_on_hard")] > abilities.theta[ArmKey("weak_on_easy")]
-    # 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
-    spread = delta_ruler(
-        {**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)}
-    )
-    one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
-    parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
-    assert _elect(list(one_cell), one_cell, parent_six, 6, spread, bar=bar)[0] is (None), (
-        "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
-    )
-
-
-def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
-    # `coverage_floor` IS PoBB's `n_min`.
-    ruler, bar = (
-        _easy_low_hard_high(),
-        CrowningBar(statistic="posterior", admission=election_knobs().admission),
-    )
-    flat, half = _level_parent()
-    deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
-    shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
-    deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
-    thin_arms = {deep_key: deep, shallow_key: shallow}
-    ab = candidate_abilities(thin_arms, half, flat)
-    lifts = {c: theta_lift_over_parent(ab, c) for c in thin_arms}
-    p = {c: p_better(lift) for c, lift in lifts.items() if lift is not None}
-    assert ab.theta[shallow_key] > ab.theta[deep_key], "the thin arm's POINT lift is the larger"
-    assert ab.theta_se[shallow_key] > 1.8 * ab.theta_se[deep_key], "on nearly twice the SE"
-    assert p[deep_key] > p[shallow_key], "so it demonstrated less"
-    assert _elect(list(thin_arms), thin_arms, half, 6, flat, bar=bar)[0] == ("deep"), (
-        "a thin arm won"
-    )
-    assert _elect([shallow_key], {shallow_key: shallow}, half, 6, flat, bar=bar)[0] == (
-        "shallow"
-    ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
-    behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
-    b = ArmKey("b")
-    behind_lift = theta_lift_over_parent(candidate_abilities({b: behind}, half, flat), b)
-    assert behind_lift is not None and behind_lift.value > 0.0
-    assert _elect([b], {b: behind}, half, 6, flat, bar=bar)[0] is None, (
-        "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
-    )
-    swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
-    assert (
-        _elect(
-            [ArmKey("s")],
-            {ArmKey("s"): swapped},
-            sheet(measurement(i, float(i < 20)) for i in range(40)),
-            4,
-            ruler,
-            bar=bar,
-        )[0]
-        is None
-    ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
-    longer, terse_parent = _charged_by_length()
-    level = delta_ruler(dict.fromkeys(range(34), 0.0))
-    l_key = ArmKey("l")
-    lengthy = _winner([l_key], ArmKey("p"), bar=bar, scorer_id=terse_parent.scorer_id)
-    abilities = candidate_abilities({l_key: longer}, terse_parent, level)
-    assert _crown(lengthy, {l_key: longer}, terse_parent, abilities) == "l", (
-        "a cost term's tie-break was counted as a verdict lost"
-    )
 
 
 def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
@@ -1658,17 +1538,14 @@ def test_an_overlap_vote_elects_on_the_origin_panel_an_arm_its_draw_held_back() 
     rows = sheet(measurements([1.0] * 7 + [0.0] * 8 + [1.0] * 10))
     bar = sheet(measurements([0.0] * 7 + [1.0] * 18))
     panel = sorted(str(i) for i in range(10))
-    abilities = RoundAbilities(
-        theta={c53: 0.504}, theta_se={c53: 0.458}, bar={c53: (0.0, 0.0)}, cells={c53: 25}
-    )
-    crowning = CrowningBar(statistic="posterior", admission=election_knobs().admission)
+    crowning = CrowningBar(statistic="paired_point", admission=election_knobs().admission)
     for cells, elected, why in (
         (None, None, "the draw elected an arm that lost more of its cells than it won"),
         (panel, c53, "the overlap vote held back an arm that won its panel rows 7-3"),
     ):
         vote = _winner([c53], parent, bar=crowning, cells=cells)
         # The banked inputs are what a replay re-elects on: the live vote is this same call.
-        assert _crown(vote, {c53: rows}, bar, abilities) == elected, why
+        assert _crown(vote, {c53: rows}, bar) == elected, why
 
 
 def test_a_point_reading_crowns_the_green_bar_its_interval_spans() -> None:
@@ -1683,23 +1560,13 @@ def test_a_point_reading_crowns_the_green_bar_its_interval_spans() -> None:
         b: sheet(measurements([*held[:15], 0.0, 1.0, 1.0, *held[18:], *draw])),
     }
     panel = sorted(str(i) for i in range(34))
-    abilities = RoundAbilities(
-        theta={a: 0.092, b: 0.593},
-        theta_se={a: 0.18, b: 0.18},
-        bar={a: (0.093, 0.18), b: (0.093, 0.18)},
-        cells={a: 68, b: 68},
-    )
-    admission = election_knobs().admission
+    bar = CrowningBar(statistic="paired_point", admission=election_knobs().admission)
     flipped = {**rows, a: rows[parent], parent: rows[a]}
-    for bar, both, alone in (
-        (CrowningBar(statistic="paired_point", admission=admission), a, a),
-        (CrowningBar(statistic="posterior", admission=admission), None, None),
-    ):
-        for arms, on, crowned in (([a, b], rows, both), ([a], rows, alone), ([a], flipped, None)):
-            vote = _winner(arms, parent, bar=bar, cells=panel)
-            assert _crown(vote, on, on[parent], abilities) == crowned, (
-                f"{bar.statistic} over {arms}: a net panel loss, a level θ or the rank moved"
-            )
+    for arms, on, crowned in (([a, b], rows, a), ([a], rows, a), ([a], flipped, None)):
+        vote = _winner(arms, parent, bar=bar, cells=panel)
+        assert _crown(vote, on, on[parent]) == crowned, (
+            f"over {arms}: a net panel loss or the rank moved"
+        )
 
 
 def test_a_round_crowning_none_moves_on_only_to_a_leader_its_parent_did_not_beat() -> None:
@@ -1713,7 +1580,6 @@ def test_a_round_crowning_none_moves_on_only_to_a_leader_its_parent_did_not_beat
         lost: sheet(measurements([0.0, 0.0, *base[2:10], 1.0, *base[11:]])),
         won: sheet(measurements([*base[:10], 1.0, *base[11:]])),
     }
-    flat = delta_ruler(dict.fromkeys(range(20), 0.0))
     bar = CrowningBar(statistic="paired_point", admission=election_knobs().admission)
     crowned, moved, held = RoundEnding.CROWNED, RoundEnding.MOVED, RoundEnding.HELD
     table: tuple[tuple[list[ArmKey], NextParent, RoundEnding, ArmKey | None], ...] = (
@@ -1725,9 +1591,8 @@ def test_a_round_crowning_none_moves_on_only_to_a_leader_its_parent_did_not_beat
     )
     for arms, next_parent, ending, stands_on in table:
         on = {k: rows[k] for k in arms}
-        abilities = candidate_abilities(on, rows[parent], flat)
         vote = _winner(arms, parent, bar=bar, next_parent=next_parent)
-        decided = _decide(vote, on, rows[parent], abilities)
+        decided = _decide(vote, on, rows[parent])
         assert decided.ending is ending, f"{next_parent} over {arms}"
         assert vote.stands_on([decided.ending, decided.leading]) == stands_on, (
             "a replay's counterfactual is not the arm the round ends on"
@@ -1801,41 +1666,6 @@ def test_an_epsilon_a_tied_field_reaches_is_named_before_it_cuts_the_leader() ->
         assert any(c.severity == "collision" for c in named) is collides, (
             f"ε {epsilon} over {n_variants} arms and their parent: the tie the check reads moved"
         )
-
-
-def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads() -> None:
-    bar, deep_key = (
-        CrowningBar(statistic="posterior", admission=election_knobs().admission),
-        ArmKey("deep"),
-    )
-    flat, half = _level_parent()
-    twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
-    near_key = ArmKey("near")
-    arms = {
-        near_key: sheet(measurements([1.0] * 11 + [0.0] * 5)),  # closest to the bar, on a wide SE
-        deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
-        ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
-    }
-    held_id, held_abilities = _elect(list(arms), arms, twenty, 6, flat, bar=bar)
-    reads = readable_lifts(list(arms), 6, held_abilities)
-    assert held_id is None, "no arm cleared the bar"
-    thin = ArmKey("thin")
-    assert held_abilities.theta[thin] > held_abilities.bar[thin][0], "the floor, not θ, bars thin"
-    assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
-    assert reads[deep_key].value < reads[near_key].value <= 0.0
-    vote = _winner(list(arms), ArmKey("p"), bar=bar)
-    subjects = vote.subjects(vote.pairings({**arms, vote.parent: twenty}, {}), held_abilities)
-    cells = {key: vote.covered(key, s, held_abilities) for key, s in subjects.items()}
-    assert ranked_first(bar, subjects, cells) == "near", "the lead is named on the bar's rank"
-    off = ArmKey("off")
-    cold = candidate_abilities({off: sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
-    assert cold.cells[off] == 2 and not readable_lifts([off], 6, cold), (
-        "cold, the floor counts the cells θ was READ on — those shared with the parent"
-    )
-    warm = candidate_abilities({off: sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
-    assert warm.cells[off] == 4, "warm, the floor counts only the cells the ruler carries"
-    del subjects[near_key]
-    assert ranked_first(bar, subjects, cells) == "deep"
 
 
 def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:

@@ -316,7 +316,6 @@ export function armReading(
     own: null,
     tokens: null,
     prefix: null,
-    ability: null,
     vs_reference: null,
     vs_reference_name: null,
     bench: null,
@@ -397,7 +396,7 @@ export function roundsOf(
       parent: cycle,
       children,
       entry_kind: "round",
-      facts: { round, elects_on: "ability" },
+      facts: { round, elects_on: "fitness" },
     }));
 }
 
@@ -447,7 +446,7 @@ export function subtreeCycle(
       bench: null,
       curve: null,
       verify: null,
-      elects_on: "ability",
+      elects_on: "fitness",
       lens_criterion: null,
       lens_shift: null,
       origin: null,
@@ -651,9 +650,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     panel_precision_verdict: null,
     selection_movement: [],
     measured: [],
-    series_reading: null,
     optimizer_facts: [],
-    lift_prior: null,
     hold_up: null,
     ...over,
   };

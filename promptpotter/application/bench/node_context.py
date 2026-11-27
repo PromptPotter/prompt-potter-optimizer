@@ -36,12 +36,12 @@ from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
 from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
+from promptpotter.application.scoring.query_loop import filed_entry
 from promptpotter.application.scoring.sample_measurement import interpolate_pipeline_params
-from promptpotter.application.scoring.search_point_scorer import filed_entry, score_search_point
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import (
@@ -386,10 +386,6 @@ class Bounds(CycleRead):
     @property
     def admission(self) -> float | None:
         return self._cycle.optimizer.admission
-
-    def lift_prior(self) -> LiftPrior | None:
-        """The tenant's banked lift prior on this dataset (`Cycle.lift_prior`)."""
-        return self._cycle.lift_prior()
 
     @property
     def budget_rounds(self) -> int | None:

@@ -373,7 +373,9 @@ BASELINE = {
     # (−5): `IdentityContext.issuer`, which nothing read, and the host predicate's second spelling.
     # w10-jobs (+162): a queued launch waits on disk and the freed slot's holder runs it in its own
     # process (`queued_launch.py`, `spawning.py` out of `run_job.py`); the live-jobs migration goes.
-    "package_lines": 114575,
+    # w10-records (−625): a race's catch-ups are walks of the one loop; θ leaves the round's statement.
+    # Set to the measured count at the w10 landing.
+    "package_lines": 113950,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -450,7 +452,9 @@ BASELINE = {
     # no browser preview sends.
     # w8-web2 (+1): `Variation.donated`, read server-side now (`hierarchy_subtree.py` serves the
     # loci a donor gave as `donated_loci`).
-    "p_served": 200,
+    # w10-records (+1): θ left the browser with the round's statement; `AbilityReading` stays
+    # served to the CLI and MCP readers (evidence, export).
+    "p_served": 201,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

@@ -20,7 +20,8 @@ from promptpotter.application.scoring.formula.compiler import (
     parse_dials,
     realize_dials,
 )
-from promptpotter.application.scoring.search_point_scorer import ScoredWalk, filed_entry
+from promptpotter.application.scoring.query_loop import filed_entry
+from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 from promptpotter.domain.arms import ArmPosition, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop

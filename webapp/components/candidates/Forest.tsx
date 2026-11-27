@@ -55,7 +55,6 @@ function SpawnGlyph({ kind, spawn }: { kind: CycleMint; spawn: CycleSpawn | null
 const CandidateNode = memo(function CandidateNode({
   n,
   level,
-  theta,
   metric,
   selected,
   onPick,
@@ -68,7 +67,6 @@ const CandidateNode = memo(function CandidateNode({
 }: {
   n: RoundNodePos;
   level: number | null;
-  theta: number | null;
   metric: DisplayMetric;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
@@ -80,7 +78,6 @@ const CandidateNode = memo(function CandidateNode({
   d: Density;
 }) {
   const retiredBy = n.retiredBy;
-  const wonOnTheta = n.electsOn === "ability";
   return (
     <g
       className={cx(
@@ -103,9 +100,6 @@ const CandidateNode = memo(function CandidateNode({
         {invalidated
           ? "unknown"
           : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
-        {!invalidated && metric !== "ability" && typeof theta === "number"
-          ? ` · ${fmtUnit(DISPLAY_METRIC_INFO.ability.unit, theta)}`
-          : ""}
         {n.node.facts.variations
           .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
           .join("")}
@@ -113,7 +107,7 @@ const CandidateNode = memo(function CandidateNode({
           ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
         {n.crown === "elected"
-          ? `\nround winner${wonOnTheta ?" — elected on difficulty-adjusted ability θ, not raw fitness" : ""}`
+          ? "\nround winner"
           : n.crown === "uncontested"
             ? "\nthe round's only arm — it advances without an election"
             : n.isWinner
@@ -169,7 +163,6 @@ const CandidateNode = memo(function CandidateNode({
 export function Forest({
   tree,
   valueByKey,
-  thetaByKey,
   metric,
   expanded,
   onLaneActivate,
@@ -177,7 +170,6 @@ export function Forest({
 }: {
   tree: SubtreeCampaign;
   valueByKey: ReadonlyMap<string, number | null>;
-  thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   expanded: ReadonlySet<string>;
   onLaneActivate: (cycleKey: string) => void;
@@ -188,8 +180,6 @@ export function Forest({
   const { viewedKey, isPicked, onPickCandidate, channels, clip } = ctx;
   const valOf = (n: RoundNodePos): number | null =>
     valueByKey.get(n.candKey) ?? null;
-  const thetaOf = (n: RoundNodePos): number | null =>
-    thetaByKey.get(n.candKey) ?? null;
   const { laneByKey, ends, width, totalLaneRows, maxCol, d, nodes, segs } = useMemo(
     () => layout({ freed: tree, expanded, keep: clip && extentKeys(tree, clip), boxW }),
     [tree, expanded, clip, boxW],
@@ -374,9 +364,6 @@ export function Forest({
                   )}
                   <title>
                     {nodeCycleId} · R{n.round} · {fmtUnit(DISPLAY_METRIC_INFO[metric].unit,valOf(n))}
-                    {metric !== "ability" && typeof thetaOf(n) === "number"
-                      ? ` · ${fmtUnit(DISPLAY_METRIC_INFO.ability.unit, thetaOf(n))}`
-                      : ""}
                     {n.label ? `\n${n.label}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
@@ -393,7 +380,6 @@ export function Forest({
                 key={`c-${n.candKey}`}
                 n={n}
                 level={valOf(n)}
-                theta={thetaOf(n)}
                 metric={metric}
                 selected={isPicked(n)}
                 onPick={onPickCandidate}

@@ -1,12 +1,9 @@
 import type {
-  ArmAbility,
   ArmReading,
   HierarchyCandidate,
   HierarchyCycle,
   VerificationMark,
 } from "@/lib/api/types";
-
-export type ThetaCaveat = NonNullable<ArmAbility["caveat"]>;
 
 interface BarBase {
   // `node.address`

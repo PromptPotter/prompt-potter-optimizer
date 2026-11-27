@@ -55,7 +55,7 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.crowning_bar import CROWNING_RULE, THETA_CROWNS
+from promptpotter.domain.crowning_bar import CROWNING_RULE
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -436,10 +436,6 @@ class PotterView:
     def crowning_rule(self) -> str:
         """How the round's election crowns, in words (`crowning_bar.py::CROWNING_RULE`)."""
         return CROWNING_RULE[self.ctx.knobs(ElectionKnobs).crown]
-
-    @property
-    def crown_reads_theta(self) -> bool:
-        return self.ctx.knobs(ElectionKnobs).crown in THETA_CROWNS
 
     @property
     def budget_rounds(self) -> int | None:

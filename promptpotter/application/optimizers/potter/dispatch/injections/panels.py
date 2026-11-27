@@ -792,8 +792,7 @@ class _Edit:
 
     @property
     def reading(self) -> PairedReading | None:
-        fit = self.round.fit(self.key)
-        return None if fit is None else fit.vs_reference
+        return self.round.vs_reference(self.key)
 
     @property
     def verdict(self) -> bool:
@@ -976,10 +975,7 @@ def _r_measurand(b: PotterView) -> list[Item]:
         ]
     body = render_composite_fitness_block(fitness, b.evaluators, b.composite_formula)
     on = (
-        "θ fit on each cell's composite under the formula below, not on fitness"
-        if b.crown_reads_theta
-        else "a verdict being the cell's correctness alone: the formula below reaches θ, never "
-        "the crown"
+        "a verdict being the cell's correctness alone: the formula below reaches θ, never the crown"
     )
     lines = [
         f"ELECTION — a round is won {b.crowning_rule}, {on}{theta}.",

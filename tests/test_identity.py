@@ -234,7 +234,7 @@ from promptpotter.application.runner.run_init import enter_cycle
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
-from promptpotter.application.scoring.search_point_scorer import filed_entry
+from promptpotter.application.scoring.query_loop import filed_entry
 from promptpotter.config import paths
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (

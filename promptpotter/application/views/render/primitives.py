@@ -237,11 +237,11 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
     """In the round's own rank; Δ is blank where a row has no matched floor."""
     if not ranked:
         return ""
-    w = 108
+    w = 96
 
     hdr = (
         f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Fitness':>8s}   {'95% CI':>16s}   "
-        f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>12s}"
+        f"{'Composite':>9s}   {'Delta':>12s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
@@ -258,8 +258,6 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        theta = None if s.ability is None else s.ability.theta
-        theta_str = "---" if theta is None else theta.point
         cells = (
             f"{s.samples.scored}/{s.samples.expected}"
             if s.samples.expected and s.samples.scored is not None
@@ -269,7 +267,7 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {fitness_str:>8s}   {ci_str:>16s}   "
             f"{fmt_fitness(None if composite is None else composite.value):>9s}   "
-            f"{theta_str:>9s}   {delta_str:>12s}{winner_mark}"
+            f"{delta_str:>12s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
 

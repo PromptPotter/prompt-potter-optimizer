@@ -39,7 +39,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
-from promptpotter.domain.ruler import PLATEAU_ROUNDS, AbilityReading, LevelSeries
+from promptpotter.domain.ruler import AbilityReading, LevelSeries
 from promptpotter.domain.run_standing import CEILING_FRACTION
 from promptpotter.shared.errors import NextAct
 
@@ -124,20 +124,6 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
         )
         lines.append(_node_line(row))
 
-    # Plateau advice is for a run whose rounds are won on θ; a peer's θ series decides nothing.
-    last = rounds[-1].election
-    if (
-        last is not None
-        and last.elects_on == "ability"
-        and (flat_at := series.plateau()) is not None
-    ):
-        lines.append(
-            _node_line(
-                f"{YELLOW}-- Plateau: ability flat at {flat_at:+.3f} "
-                f"for {PLATEAU_ROUNDS} rounds{RESET}"
-            )
-        )
-
     lines.append(_node_line(""))
     return "\n".join(lines)
 
@@ -147,8 +133,7 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     # The verdict line's point estimate reads the same on a round that resolved nothing; the interval separates them.
     election = round_result.election
     selected = None if election is None else election.selected
-    fit = None if selected is None else round_result.fit(selected)
-    reading = None if fit is None else fit.vs_reference
+    reading = None if selected is None else round_result.vs_reference(selected)
     if reading is not None and reading.state is ReadingState.READ:
         lift = reading.headline
         verdict = (
@@ -228,18 +213,12 @@ def render_advance_status(overlap: OverlapReading, stall: int) -> str:
 
 def render_round_block(served: ServedRound) -> list[str]:
     """The round's text off the round as the dashboard serves it: the optimizer's stats and notes,
-    the noise walk and its promotion's hold."""
+    and its promotion's hold."""
     facts = served.optimizer_facts
     lines = [f"{f.label}: {f.text}" for f in facts if f.kind == "stat"]
     lines += [
         f"{f.label}: {line}" for f in facts if f.kind == "note" for line in f.text.splitlines()
     ]
-    if (walk := served.lift_prior) is not None:
-        mu0 = Estimate.normal(walk.mu0, walk.mu0_se, unit="theta", form="lift", n=walk.pairs)
-        lines.append(
-            f"noise walk: μ0 {mu0.text} over the parent, τ {walk.tau:.2f} logits across "
-            f"{walk.pairs} pairs"
-        )
     if (held := served.hold_up) is not None:
         lines.append(held_up_line(held))
     return [_node_line(line) for line in lines]

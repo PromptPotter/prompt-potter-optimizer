@@ -174,15 +174,12 @@ export function originAt(index: LineageIndex, path: CyclePath | null): Hierarchy
 
 interface NodeOverlays {
   valueByKey: ReadonlyMap<string, number | null>;
-  thetaByKey: ReadonlyMap<string, number | null>;
 }
 
 export function nodeOverlays(index: LineageIndex, metric: DisplayMetric): NodeOverlays {
   const valueByKey = new Map<string, number | null>();
-  const thetaByKey = new Map<string, number | null>();
   for (const arm of index.candidates) {
     valueByKey.set(arm.address, metricLevel(metric, arm.facts.reading));
-    thetaByKey.set(arm.address, metricLevel("ability", arm.facts.reading));
   }
-  return { valueByKey, thetaByKey };
+  return { valueByKey };
 }

@@ -314,7 +314,7 @@ def is_leader_eligible(arm: ArmState) -> bool:
 
 
 def is_electable(arm: ArmState, rows: Sequence[GradedCell], parent: CellSheet) -> bool:
-    """NOT the whole election rule: the coverage floor is `scoring/selection.py::readable_lifts`."""
+    """NOT the whole election rule: the coverage floor is `potter/election.py::covered`."""
     return is_leader_eligible(arm) and bool(rows) and not is_answer_collapsed(rows, parent)
 
 

@@ -29,7 +29,6 @@ interface LineageCleanup {
 interface CampaignForest {
   tree: SubtreeCampaign | null;
   valueByKey: ReadonlyMap<string, number | null>;
-  thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   // The forks cut from each of the viewed cycle's candidates, by candidate address.
   forkedFrom: ReadonlyMap<string, HierarchyCycle>;
@@ -110,7 +109,7 @@ export function useCampaignForest({
     return m;
   }, [index, path]);
 
-  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, metric), [index, metric]);
+  const { valueByKey } = useMemo(() => nodeOverlays(index, metric), [index, metric]);
 
   const viewedHasRounds = candidatesAtPath(index, path).length > 0;
   const spawn = cycleAt(index, path)?.facts.spawn ?? null;
@@ -151,7 +150,6 @@ export function useCampaignForest({
   return {
     tree,
     valueByKey,
-    thetaByKey,
     metric,
     forkedFrom,
     expanded,

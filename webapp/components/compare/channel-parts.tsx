@@ -123,16 +123,6 @@ export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   );
 }
 
-function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
-  if (!election) return PLACEHOLDER;
-  const ability = election.ability;
-  if (election.reads_on === "ability" && ability) {
-    return ability.theta ? fmtMetric(ability.theta) : "θ unread";
-  }
-  if (election.reads_on === election.elects_on) return election.reads_on;
-  return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;
-}
-
 function LiftPerUsd({ bench }: { bench: HeadToHeadRow["bench"] }) {
   const { lift_per_usd: per, absent } = bench.cost;
   const lift = liftOf(bench.vs_origin);
@@ -148,9 +138,7 @@ export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
           <Term
             content={
               <p className="cmp-line-key">
-                The column the pick&rsquo;s round elected it on, and the one to quote it on: a pick
-                won on ability is quoted on θ unless a caveat withholds its θ — there θ is not
-                ability, and the election reads on fitness.
+                The column the pick&rsquo;s round elected it on.
               </p>
             }
           >
@@ -158,7 +146,7 @@ export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
           </Term>
         </dt>
         <dd>
-          <ElectedOn election={row.election} />
+          {row.elects_on ?? PLACEHOLDER}
         </dd>
       </div>
       {row.swapped_in.length > 0 && (

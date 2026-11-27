@@ -23,7 +23,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     parent_grades,
     stratum_shares,
 )
-from promptpotter.application.intelligence.rasch import build_round_order, theta_cells
+from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import (
@@ -68,7 +68,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     build_l3_response_model,
     proposed_fork,
 )
-from promptpotter.application.optimizers.potter.election import elect_on_theta
+from promptpotter.application.optimizers.potter.election import elect_on_pairings
 from promptpotter.application.optimizers.potter.escalation import (
     ESCALATION_RULES,
     Fire,
@@ -112,7 +112,6 @@ from promptpotter.application.optimizers.potter.validators import l3_plan_breach
 from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.crowning_bar import THETA_CROWNS
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
@@ -128,7 +127,6 @@ from promptpotter.domain.pool import BlockPool, DemoPool, Pool
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet
@@ -327,32 +325,24 @@ class ThetaElection(nodes.Selector):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ElectionKnobs
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Ruler, Replay})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Replay})
     elects_partial: ClassVar[bool] = True
 
-    def elects_on(self, selected: SelectedOptimizer) -> DisplayMetric:
-        """The θ crowns elect on ability, the verdict crowns on the fitness column."""
-        crown = selected.knobs_of(self.name, ElectionKnobs).crown
-        return "ability" if crown in THETA_CROWNS else "fitness"
+    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
+        """Every crown reads the paired fitness verdicts."""
+        return "fitness"
 
     def admission(self, selected: SelectedOptimizer) -> float:
         return selected.knobs_of(self.name, ElectionKnobs).admission
 
     def covered(
-        self,
-        selected: SelectedOptimizer,
-        cells: CellSheet,
-        parent: Collection[str],
-        ruler: DeltaRuler | None,
+        self, _selected: SelectedOptimizer, cells: CellSheet, parent: Collection[str]
     ) -> int:
-        """A θ crown counts the cells θ is read on, a verdict crown those the parent answered too:
-        all its pairing can read (`RoundWinner.covered`)."""
-        reads_theta = selected.knobs_of(self.name, ElectionKnobs).crown in THETA_CROWNS
-        scored = {cell.key: cell for cell in cells if cell.scored}
-        return len(theta_cells(scored, parent, ruler if reads_theta else None))
+        """The cells the parent answered too: all its pairing can read (`election.py::covered`)."""
+        return sum(1 for cell in cells if cell.scored and cell.key in parent)
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
-        return elect_on_theta(ctx, measured)
+        return elect_on_pairings(ctx, measured)
 
 
 class L1Critique(LayoutNode, nodes.Adapter):

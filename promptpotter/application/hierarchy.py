@@ -63,7 +63,6 @@ from promptpotter.domain.paired_reading import (
     lift_versus,
 )
 from promptpotter.domain.phases import RUN_PHASE_INFO, LaunchStage
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, withheld
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import (
@@ -168,13 +167,7 @@ def _cycle_climb(facts: CycleEntryFacts) -> Said | None:
     climb = None if facts.standing is None else facts.standing.climb
     if climb is None:
         return None
-    theta = ["rounds are won on θ"] if facts.elects_on == "ability" else []
-    return Said(
-        key="climb",
-        tone="quiet",
-        label=climb.line,
-        detail=" · ".join([f"lift in {climb.measurand}", *theta]),
-    )
+    return Said(key="climb", tone="quiet", label=climb.line, detail=f"lift in {climb.measurand}")
 
 
 def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
@@ -239,16 +232,12 @@ def _cycle_said_lines(root: RootRunsWith, line: LineConfig) -> list[Said]:
     return []
 
 
-def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Said]:
-    lines = [Said(key="standing", tone="quiet", label=CANDIDATE_STANDING_INFO[standing])]
-    if reading.ability is None or (theta := reading.ability.caveat) is None:
-        return lines
-    info = THETA_CAVEAT_INFO[theta]
-    return [*lines, Said(key="theta_caveat", tone=info.tone, label=info.label, detail=info.detail)]
+def candidate_lines(standing: CandidateStanding) -> list[Said]:
+    return [Said(key="standing", tone="quiet", label=CANDIDATE_STANDING_INFO[standing])]
 
 
 def candidate_figures(reading: ArmReading) -> list[Figure]:
-    samples, ability, own = reading.samples, reading.ability, reading.own
+    samples, own = reading.samples, reading.own
     rows = [
         _figure(
             "fitness",
@@ -261,15 +250,6 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
     ]
     if terms := fitness_terms_text(reading.fitness_terms):
         rows.append(_figure("fitness_terms", "Formula terms", terms))
-    if ability is not None and (ability.theta is not None or withheld(ability.caveat)):
-        rows.append(
-            _figure(
-                "ability",
-                "Ability θ",
-                "—" if ability.theta is None else ability.theta.text,
-                "not ability — see below" if withheld(ability.caveat) else None,
-            )
-        )
     if reading.vs_reference is not None:
         rows.append(_lift_row("lift", reading.vs_reference, "parent"))
     return rows

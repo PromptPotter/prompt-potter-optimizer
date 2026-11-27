@@ -65,7 +65,6 @@ function lit(picked: string | null) {
     <Forest
       tree={tree}
       valueByKey={new Map()}
-      thetaByKey={new Map()}
       metric="fitness"
       expanded={new Set([ROOT, FORK])}
       onLaneActivate={() => {}}

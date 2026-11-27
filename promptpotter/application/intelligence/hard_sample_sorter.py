@@ -1,4 +1,4 @@
-"""It fits nothing: a δ here is the ruler's, a θ an election's or the frontier's, read on it."""
+"""It fits nothing: a δ here is the ruler's, a θ the frontier's, read on it."""
 
 from __future__ import annotations
 
@@ -12,19 +12,8 @@ from promptpotter.domain.cells import (
     HardSamples,
     SampleDifficulty,
 )
-from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler, RulerStanding
 from promptpotter.shared.clock import utcnow_iso
-
-
-def arm_thetas(rounds: Sequence[RoundResult]) -> dict[str, float]:
-    return {
-        key: fit.theta
-        for rr in rounds
-        if rr.election is not None
-        for key, fit in rr.election.fit.items()
-        if fit.theta is not None
-    }
 
 
 def build_hard_samples(
@@ -32,7 +21,6 @@ def build_hard_samples(
     ruler: DeltaRuler | None,
     *,
     frontier: tuple[float, float] | None,
-    arm_theta: Mapping[str, float],
     slots: Mapping[str, int],
     cycle_id: str | None,
 ) -> HardSamples:
@@ -59,17 +47,13 @@ def build_hard_samples(
     def rank(key: str) -> tuple[int, float, int]:
         return (0, -carried[key][0], slots[key]) if key in carried else (1, 0.0, slots[key])
 
-    def candidate_key(cid: str) -> tuple[int, float, str]:
-        return (0, -arm_theta[cid], cid) if cid in arm_theta else (1, 0.0, cid)
-
-    candidate_order = sorted({o.candidate_id for o in observations}, key=candidate_key)
+    candidate_order = sorted({o.candidate_id for o in observations})
     held = sorted({*carried, *measured}, key=slots.__getitem__)
     return HardSamples(
         cycle_id=cycle_id,
         generated_at=utcnow_iso(),
         ruler=standing,
         candidate_order=candidate_order,
-        theta={cid: arm_theta[cid] for cid in candidate_order if cid in arm_theta},
         positions={key: slots[key] for key in held},
         ranked_keys=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},

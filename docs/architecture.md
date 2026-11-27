@@ -225,7 +225,12 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
   ([`methods/verdict-resolution.md`](methods/verdict-resolution.md) § The round order).
 - **`RoundResult.proposed` means "proposed in THIS round"** — a retained individual read off every
   cell would be counted k+1 times.
-- **One tenant δ ruler, one clock** — every θ is read on it, less the parent line's rows.
+- **One tenant δ ruler, one clock** — every θ is read on it, less the parent line's rows. Its case:
+  a sweep finds two readers, PoBB's race and L4's `level_series` on `round_closed`, and no θ on a
+  round's statement, since the round is won on paired verdicts. Yet those two readers are the
+  instrument. PoBB cuts an arm across subsets its rivals never shared, so only a fixed δ makes
+  "a better arm" one claim on that field. L4 compares levels across rounds, forks and inner
+  campaigns, and two scales would let UCB sum across them. Delete the ruler and both go blind.
 - **The discoverability injections**, **the `new` verb + `/potter-run` onboarding**, and
   **check-in's one `task_context` decomposition**.
 - **Per-dataset configs are the source of truth** — a default goes in the dataset's file, never code.

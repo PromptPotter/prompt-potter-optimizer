@@ -30,7 +30,7 @@ from promptpotter.domain.ruler import (
     flat_ruler_id,
     theta_caveat,
 )
-from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.infrastructure.store.archive_queries import ArmOf, OpenAt, memory_scope
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.ruler_store import RulerStore
@@ -164,33 +164,6 @@ def ruler_rows(
     return out
 
 
-def regraded_ruler(
-    stores: Stores, stamp: RulerStamp, scorer: Scorer, *, n_min: int, enable_2pl: bool
-) -> DeltaRuler | None:
-    """The whole scale *stamp* names, other campaigns' rows included, re-graded under *scorer*: the
-    rows as filed under the stamp's own (`ruler.jsonl` outlives the archive answers behind them),
-    else each row off its address's latest grade-A archive answer."""
-    if scorer.id == stamp.scope.scorer:
-        return restamped(stores.ruler, stamp, n_min=n_min, enable_2pl=enable_2pl).ruler
-    entries = {entry.config_key: entry for entry in stores.archive.list_all()}
-    asked: dict[str, set[str]] = {}
-    for address, key, _ in stores.ruler.rows(stamp.scope, stamp.reach):
-        if address not in stamp.excluded:
-            asked.setdefault(address, set()).add(key)
-    held: list[Observation] = []
-    for address, keys in asked.items():
-        if (entry := entries.get(address)) is None:
-            continue
-        latest = {
-            filed.cell.sample_key: filed
-            for filed in stores.archive.measured(entry, frozenset(keys))
-            if meets_grade(filed.provenance, _RULER_GRADE)
-        }
-        sheet = scorer.sheet(stores.archive.whole(filed).cell for filed in latest.values())
-        held += [Observation(address, cell.key, graded_response(cell)) for cell in sheet.scoreable]
-    return calibrate_delta_ruler(held, n_min, enable_2pl=enable_2pl)
-
-
 def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
     """The origin and every arm a round ended on since, by archive address: the individuals each
     round judges against, a held round's re-read parent and an uncrowned leader included."""
@@ -232,22 +205,6 @@ class DifficultyView:
         """At the round's open, before its draw: the parent line is what the round judges so far."""
         self.judged = frozenset(parent_line(rounds))
         self.judging = self._read(reach, self.judged)
-
-    def ruler_of(self, stamp: RulerStamp | None) -> DeltaRuler | None:
-        """None for an unelected round."""
-        if stamp is None or stamp.cold:
-            return None
-        return self._restamped(stamp).ruler
-
-    def seat(self, stamp: RulerStamp) -> None:
-        """Back onto the scale a banked round read, as a replay of it stands."""
-        self.judged = frozenset(stamp.excluded)
-        self.judging = self._restamped(stamp)
-
-    def _restamped(self, stamp: RulerStamp) -> JudgingRuler:
-        return restamped(
-            self.session.store.ruler, stamp, n_min=self.n_min, enable_2pl=self.enable_2pl
-        )
 
     def fold(self, rr: RoundResult) -> None:
         """After the round's election, which read the scale as the round opened: every cell the

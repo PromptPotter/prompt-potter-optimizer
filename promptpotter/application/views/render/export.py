@@ -187,12 +187,7 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
     composite = (
         "" if own is None or own.composite is None else f" · composite {own.composite.point}"
     )
-    ability = r.ability
-    theta = ""
-    if ability is not None and ability.theta is not None:
-        caveat = f" ({ability.caveat})" if ability.caveat else ""
-        theta = f" · {ability.theta.text}{caveat}"
-    out.append(f"  {walk}{cells} · {fitness}{composite}{theta}")
+    out.append(f"  {walk}{cells} · {fitness}{composite}")
 
     if r.vs_reference is not None:
         out.append(f"  {_pair_line(r.vs_reference, unit)}")

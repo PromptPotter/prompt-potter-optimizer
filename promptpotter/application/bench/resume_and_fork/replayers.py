@@ -8,7 +8,6 @@ from typing import Any, NamedTuple
 
 from promptpotter.domain.records.run_records import DecisionInputs, DecisionRecord
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import DeltaRuler
 
 
 class ReplayMismatch(NamedTuple):
@@ -28,7 +27,6 @@ class ReplayContext(NamedTuple):
 
     round_data: RoundResult
     decisions: list[DecisionRecord]
-    ruler: DeltaRuler | None
 
 
 class Replayed(DecisionInputs, kind=None):
@@ -62,6 +60,5 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
 def replay_all_mismatches(
     round_data: RoundResult,
     decisions: list[DecisionRecord],
-    ruler: DeltaRuler | None = None,
 ) -> list[ReplayMismatch]:
-    return list(_iter_mismatches(ReplayContext(round_data, decisions, ruler)))
+    return list(_iter_mismatches(ReplayContext(round_data, decisions)))

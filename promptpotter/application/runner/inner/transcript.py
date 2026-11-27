@@ -75,9 +75,8 @@ def _arm_line(close: RoundStatement, key: ArmKey) -> str:
     outcome = (arm.kind if isinstance(arm, Cut) else arm.state) + flagged
     if arm.invalid:
         return f"  {arm.label} {outcome} — {mechanism}"
-    fit = close.fit(key)
     # A lift read short of the parent's whole set stands on cells its stop selected.
-    whole = None if fit is None or fit.vs_reference is None else fit.vs_reference.on_whole_set
+    whole = None if (pair := close.vs_reference(key)) is None else pair.on_whole_set
     measured = f"fitness {fold_fitness_text(close.folds.get(key))}"
     if whole is not None:
         flips = whole.flips

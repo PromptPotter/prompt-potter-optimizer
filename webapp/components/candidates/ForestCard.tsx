@@ -43,7 +43,6 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
   const {
     tree,
     valueByKey,
-    thetaByKey,
     metric,
     expanded,
     onLaneActivate,
@@ -109,7 +108,6 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
             <Forest
               tree={tree}
               valueByKey={valueByKey}
-              thetaByKey={thetaByKey}
               metric={metric}
               expanded={expanded}
               onLaneActivate={onLaneActivate}

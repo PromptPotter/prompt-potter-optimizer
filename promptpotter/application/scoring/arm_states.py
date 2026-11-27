@@ -78,7 +78,7 @@ def measuring(
     n_priors: int = 0,
     block: Mapping[str, int] | None = None,
 ) -> Measuring:
-    """*entry* is the one *sp*'s cells are filed under (`search_point_scorer.py::filed_entry`):
+    """*entry* is the one *sp*'s cells are filed under (`query_loop.py::filed_entry`):
     ``sp_hash`` what it sends, ``config_key`` its archive address."""
     return Measuring(
         role=arm.role,

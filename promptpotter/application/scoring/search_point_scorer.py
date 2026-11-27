@@ -6,24 +6,20 @@ from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_stop import StopLoop
-from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
+from promptpotter.application.scoring.query_loop import Walk, open_walk, run_walks
 from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.sample import ArchiveEntry, Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, WalkedCell
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
-from promptpotter.infrastructure.run_scope import run_scope, scope_context, scoped
-from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
-from promptpotter.shared.clock import utcnow_iso
+from promptpotter.domain.validators import BrokenSignal, StopSignal
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.shared.errors import SendRefusedError
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -77,42 +73,6 @@ def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
     return _build_scoring_error_signal(batch.results)
 
 
-@dataclass
-class _ArchiveRecorder:
-    session: Session
-    search_point: JobSearchPoint
-    kind: MeasurementRole
-    entry: ArchiveEntry
-
-    def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
-        return self.session.state.scoring.basis.fold(results)
-
-    def provenance(self, facts: MeasuredCell) -> str:
-        return grade_answer(
-            self.kind,
-            facts,
-            self.session.bound_resolution.chain,
-            human_intervened=self.session.state.human_intervened,
-        )
-
-    def take(self, cell: GradedCell) -> GradedCell:
-        """Files a cell once, at whichever of its claim or take meets it first."""
-        if cell.facts.answer is not None:
-            return cell
-        (answer,) = self.session.store.archive.file_answers(
-            self.entry,
-            [(cell.facts, self.provenance(cell.facts))],
-            role=self.kind,
-            created_at=utcnow_iso(),
-            output_keys={
-                n.name: tuple(n.output_keys)
-                for n in self.session.bound_resolution.chain.running_nodes
-            },
-            grading=self.session.state.scoring.grading,
-        )
-        return cell.filed(replace(cell.facts, answer=answer))
-
-
 async def score_search_point(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -159,7 +119,7 @@ async def score_search_points[K: Hashable](
             for key, (search_point, dataset, measured) in points.items()
         }
         try:
-            cut = await run_walks(walks, session, keep_cut=row.keeps, race=race)
+            cut = (await run_walks(walks, session, keep_cut=row.keeps, race=race)).stop
         except (KeyboardInterrupt, asyncio.CancelledError, StopLoop, SendRefusedError) as halt:
             if not row.keeps:
                 raise
@@ -182,59 +142,6 @@ def reread_cells(
     ctx = open_walk(search_point, dataset, session, kind=kind, measured=None).ctx
     return ctx.scorer.sheet(
         replay.replayed() for s in dataset if ctx.rereads(s) and (replay := ctx.replay(s))
-    )
-
-
-def filed_entry(search_point: JobSearchPoint, session: Session) -> ArchiveEntry:
-    """The entry *search_point*'s cells are filed under in *session*: its dataset, schema and cell
-    identity."""
-    return archive_entry(
-        search_point,
-        dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.bound_resolution.chain,
-        cell_identity=session.cell_identity,
-    )
-
-
-def open_walk(
-    search_point: JobSearchPoint,
-    dataset: list[Sample],
-    session: Session,
-    *,
-    kind: MeasurementRole,
-    checks: Sequence[StopRule] = (),
-    sample_index: SampleIndex | None = None,
-    measured: str | None,
-    skip_at: int | None = None,
-    budget: int | None = None,
-) -> Walk:
-    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
-    It takes *budget* of *dataset*'s rows (all, unset), in the order its race chooses."""
-    store = session.store
-    entry = filed_entry(search_point, session)
-    row = PASSES[kind]
-    node_configs = [] if row.fresh else entry.node_configs
-    # No node configs, no cell identity: every such searchpoint would share one claim per sample.
-    feed = ReplayFeed(store.archive, node_configs) if node_configs else None
-    measuring = None if measured is None else MeasuredPass(measured, kind)
-    ctx = QueryLoopState(
-        search_point=search_point,
-        session=session,
-        kind=kind,
-        feed=feed,
-        recorded=measuring,
-        sample_index=sample_index,
-        recorder=_ArchiveRecorder(
-            session=session, search_point=search_point, kind=kind, entry=entry
-        ),
-    )
-    return Walk(
-        order=dataset,
-        budget=len(dataset) if budget is None else budget,
-        ctx=ctx,
-        checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
-        context=scope_context(measured=measuring),
-        skip_at=skip_at,
     )
 
 

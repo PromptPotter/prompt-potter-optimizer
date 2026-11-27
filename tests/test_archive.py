@@ -31,7 +31,6 @@ from factories import (
     arm_key,
     arm_state,
     arm_walk,
-    defaulted_config,
     degradation_health,
     delta_ruler,
     filed,
@@ -54,7 +53,7 @@ from offline_run import DATASET
 from offline_world import Router
 from world import Shared, World, shared_run
 
-from promptpotter.application.bench.difficulty import judging_ruler, regraded_ruler, ruler_rows
+from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.resume_and_fork import fork_siblings
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -1393,7 +1392,7 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
             RoundWinner(
                 arms=[unwalked],
                 coverage_floor=1,
-                bar=CrowningBar(statistic="posterior", admission=0.5),
+                bar=CrowningBar(statistic="paired_point", admission=0.75),
                 next_parent="not_lost",
                 parent=bar_arm,
                 cells=None,
@@ -1523,38 +1522,6 @@ def test_a_round_the_archive_lost_or_a_rewind_past_the_ledger_offers_a_resume_th
         ("resume", last - 1),
         ("resume", None),
     ], "a lost round's act resumed past it, or an act was spelled in a flag the terminal lacks"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
-    world: World, line: Shared
-) -> None:
-    # The election's scale re-read off the archive: unchanged under its own formula, moved under
-    # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
-    stores, (hop, scorer) = world.adopt(line).stores, line.made
-    last = stores.campaigns.standing_rounds(hop, moment=None).last_closed
-    closed = closed_round(stores, hop, last or 0, scorer, moment=None)
-    assert closed is not None and closed.election is not None
-    stamp, opt = closed.election.ruler, defaulted_config({}).optimization
-    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
-    read = judging_ruler(
-        stores.ruler,
-        stamp.scope,
-        stamp.reach,
-        stamp.excluded,
-        objective_id=stamp.scope.scorer,
-        n_min=n_min,
-        enable_2pl=two_pl,
-    ).ruler
-    same = regraded_ruler(stores, stamp, scorer, n_min=n_min, enable_2pl=two_pl)
-    assert read is not None and same is not None and same.delta == read.delta, (
-        "ab re-fit the election's scale differently under the formula the election read it with"
-    )
-    edited = scorer_of("label_match(predicted, ground_truth)", "1.0 - fitness")
-    moved = regraded_ruler(stores, stamp, edited, n_min=n_min, enable_2pl=two_pl)
-    assert moved is not None and moved.delta != read.delta, (
-        "ab replayed an edited formula on the scale the old formula fit"
-    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

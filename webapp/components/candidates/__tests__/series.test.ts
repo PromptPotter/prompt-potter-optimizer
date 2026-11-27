@@ -30,14 +30,14 @@ function bar(
 }
 
 const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
-  metrics: new Set(["fitness", "ability"]),
+  metrics: new Set(["fitness", "composite"]),
   showMask: false,
   showCache: false,
   showOverlap: false,
   views: [],
   overlapBasis: null,
   unit: "sample",
-  displayMetric: "ability",
+  displayMetric: "fitness",
   ...over,
 });
 
@@ -55,8 +55,8 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     }
   });
 
-  it("never floors θ, overlap or verify — not even on a started bar", () => {
-    for (const key of ["ability", "overlap", "verify"]) {
+  it("never floors overlap or verify — not even on a started bar", () => {
+    for (const key of ["overlap", "verify"]) {
       expect(seriesColumn(spec(key), started)).toEqual([null]);
     }
   });
@@ -65,38 +65,28 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     const v = bar(
       {
         own: ownLevel(0.7),
-        ability: { theta: estimate(-1.5, [-1.9, -1.1], { unit: "theta", se: 0.2 }), caveat: null },
         samples: { cached: 3, scored: 6, cached_share: 0.25 },
       },
       { overlap: { rate: 0.5, n: 4 } },
     );
     expect(seriesColumn(spec("fitness"), [v])).toEqual([0.7]);
-    expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
     expect(seriesColumn(spec("overlap"), [v])).toEqual([0.5]);
     // 0.25, not 3/6: the served share, never the two counts beside it divided here.
     expect(seriesColumn(spec("cached"), [v])).toEqual([0.25]);
     expect(seriesColumn(spec("cached"), [bar()])).toEqual([null]);
-    const band = whiskerBands(ctx({ metrics: new Set(["ability"]), views: [v] }));
-    expect(band).toEqual([{ anchor: "ability", lo: [-1.9], hi: [-1.1] }]);
   });
 });
 
-describe("the axis and sign facts the chart cannot re-derive", () => {
-  it("puts exactly θ on its own logit axis, and only θ is signed", () => {
-    expect(CANDIDATE_SERIES.filter((s) => s.axis === "y1").map((s) => s.key)).toEqual(["ability"]);
-    expect(CANDIDATE_SERIES.filter((s) => s.signed).map((s) => s.key)).toEqual(["ability"]);
-  });
-
+describe("the series facts the chart cannot re-derive", () => {
   it("keeps provenance a line, drawn last", () => {
     const lines = CANDIDATE_SERIES.filter((s) => s.kind === "line");
     expect(lines.map((s) => s.key)).toEqual(["cached"]);
     expect(CANDIDATE_SERIES.at(-1)?.key).toBe("cached");
   });
 
-  it("gives a chip only to the three metric channels", () => {
+  it("gives a chip only to the metric channels", () => {
     expect(CANDIDATE_SERIES.filter((s) => s.metric).map((s) => s.key)).toEqual([
       "fitness",
-      "ability",
       "composite",
     ]);
     for (const s of CANDIDATE_SERIES) {
@@ -118,14 +108,13 @@ describe("what is on screen", () => {
 describe("the confidence band", () => {
   it("draws the served band only on the bar that produced it", () => {
     const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
-    expect(anchors({ displayMetric: "ability" })).toEqual(["fitness", "ability"]);
+    expect(anchors({})).toEqual(["fitness"]);
     const both: Partial<SeriesCtx> = {
       displayMetric: "composite",
       metrics: new Set(["fitness", "composite"]),
     };
     expect(anchors(both)).toEqual(["fitness"]);
     expect(anchors({ displayMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
-    expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
   });
 
   it("puts a verify on its fresh cells alone, under the band those cells produced", () => {

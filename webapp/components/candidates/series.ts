@@ -5,7 +5,6 @@ import type { CandidateBar } from "@/lib/types";
 
 type SeriesKey =
   | "fitness"
-  | "ability"
   | "composite"
   | "mask"
   | "overlap"
@@ -32,9 +31,7 @@ interface SeriesSpec {
   ink: (ctx: SeriesCtx) => string;
   // A mark is a diamond at its candidate's slot: a check on the bar, never a second bar.
   kind: "bar" | "line" | "mark";
-  axis: "y" | "y1";
   gap: "floor-when-started" | "sparse";
-  signed?: true;
   mark?: { of: (v: CandidateBar) => VerificationMark | null; filled: boolean };
   valueOf: (v: CandidateBar) => number | null;
   applies: (ctx: SeriesCtx) => boolean;
@@ -62,29 +59,15 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     metric: "fitness",
     ink: metricInk("fitness"),
     kind: "bar",
-    axis: "y",
     gap: "floor-when-started",
     valueOf: (v) => barLevel("fitness", v),
     applies: (c) => c.metrics.has("fitness"),
-  },
-  {
-    key: "ability",
-    metric: "ability",
-    ink: metricInk("ability"),
-    kind: "bar",
-    axis: "y1",
-    // θ is a logit: a floored 0 would be a fabricated middling ability.
-    gap: "sparse",
-    signed: true,
-    valueOf: (v) => barLevel("ability", v),
-    applies: (c) => c.metrics.has("ability"),
   },
   {
     key: "composite",
     metric: "composite",
     ink: metricInk("composite"),
     kind: "bar",
-    axis: "y",
     gap: "floor-when-started",
     valueOf: (v) => barLevel("composite", v),
     applies: (c) => c.metrics.has("composite"),
@@ -96,7 +79,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
       "Every score re-read under the criterion you built — the on-disk composite is untouched.",
     ink: () => "--series-counterfactual",
     kind: "bar",
-    axis: "y",
     gap: "floor-when-started",
     valueOf: (v) => (v.reading ? v.node.facts.lens_value : null),
     applies: (c) => c.showMask,
@@ -108,7 +90,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
       `Read on the same ${c.overlapBasis == null ? "cells" : unitCount(c.overlapBasis, c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and each new best since all answered; pin your own with the set below.`,
     ink: () => "--color-overlap",
     kind: "bar",
-    axis: "y",
     gap: "sparse",
     valueOf: (v) => (v.reading ? (v.overlap?.rate ?? null) : null),
     applies: (c) =>
@@ -122,7 +103,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     ink: () => "--color-accent",
     kind: "mark",
     mark: { of: verifyOf, filled: false },
-    axis: "y",
     gap: "sparse",
     valueOf: (v) => markLevel(verifyOf(v)),
     applies: (c) => c.views.some((v) => markLevel(verifyOf(v)) != null),
@@ -135,7 +115,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     ink: () => "--color-accent",
     kind: "mark",
     mark: { of: benchOf, filled: true },
-    axis: "y",
     gap: "sparse",
     valueOf: (v) => markLevel(benchOf(v)),
     applies: (c) => c.views.some((v) => markLevel(benchOf(v)) != null),
@@ -147,7 +126,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
       "Share of each candidate's scored panel that was replayed from the archive rather than measured.",
     ink: () => "--color-cache",
     kind: "line",
-    axis: "y",
     gap: "sparse",
     valueOf: (v) => v.reading?.samples.cached_share ?? null,
     applies: (c) => c.showCache,
@@ -197,14 +175,6 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
       anchor: spec.key,
       lo: ctx.views.map((v) => mark.of(v)?.level?.ci_lo ?? null),
       hi: ctx.views.map((v) => mark.of(v)?.level?.ci_hi ?? null),
-    });
-  }
-  if (ctx.metrics.has("ability")) {
-    bands.push({
-      anchor: "ability",
-      lo: ctx.views.map((v) => v.reading?.ability?.theta?.ci_lo ?? null),
-      hi: ctx.views.map((v) => v.reading?.ability?.theta?.ci_hi ?? null),
-
     });
   }
   return bands;

@@ -212,13 +212,11 @@ class ElectionKnobs(StrictModel):
         ge=sign_posterior(1, 0),
         lt=1.0,
         description=(
-            "The confidence a separation over the parent is read at: the posterior "
-            "P(θ_arm > θ_parent), capped by what its discordant cells support, an arm must "
-            "exceed to be crowned under ``crown: posterior``; the confidence of ``sign_test``, "
-            "``e_process`` and ``empirical_bayes``; under every crown, escalation's layer reading "
-            "and L1's detectable move. The point crown reads none. Never below what one "
-            "discordant cell supports (0.75), so no reading of it separates on one cell. Higher "
-            "→ fewer separations."
+            "The confidence a separation over the parent is read at: the confidence of "
+            "``sign_test`` and ``e_process``; under every crown, escalation's layer reading and "
+            "L1's detectable move. The point crown reads none. Never below what one discordant "
+            "cell supports (0.75), so no reading of it separates on one cell. Higher → fewer "
+            "separations."
         ),
     )
     vote: Annotated[Vote, Knob(Estimand.GATE)] = Field(
@@ -226,7 +224,7 @@ class ElectionKnobs(StrictModel):
             "Which rows the crowning bar pairs an arm with its parent on, for the election and "
             "the promotion alike. ``draw``: every cell the round raced. ``overlap``: the origin "
             "panel's cells alone, and only an arm the panel trigger seats there is electable. "
-            "The θ lift and the statistic are the same under both."
+            "The statistic is the same under both."
         ),
     )
     crown: Annotated[CrowningStatistic, Knob(Estimand.SELECTION)] = Field(
@@ -234,12 +232,10 @@ class ElectionKnobs(StrictModel):
             "What an arm is crowned on over its parent, on the vote's cells "
             "(`crowning_bar.py::CrowningBar`); every reading needs more cells won than lost. "
             "``paired_point``: its mean paired verdict lift, the green bar's point, above zero; "
-            "its interval is information, which the advance reads. ``posterior``: the θ "
-            "posterior past ``admission``. "
+            "its interval is information, which the advance reads. "
             "``sign_test``: an exact sign test on the discordant cells, Holm-corrected across "
             "the round's arms. ``e_process``: an anytime-valid e-process on the paired "
-            "discordance. ``empirical_bayes``: its θ lift shrunk to the tenant's banked lift "
-            "prior, past ``admission``."
+            "discordance."
         ),
     )
     next_parent: Annotated[NextParent, Knob(Estimand.SELECTION)] = Field(

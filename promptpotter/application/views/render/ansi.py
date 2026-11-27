@@ -19,7 +19,7 @@ from promptpotter.application.views.render.primitives import (
     fmt_coverage,
     fmt_fitness,
 )
-from promptpotter.domain.arm_reading import DisplayMetric, fold_fitness_text
+from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmState, Concluded
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
@@ -53,7 +53,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.results import RoundOutcome
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading
 from promptpotter.domain.spend import (
     RATE_PRICED_LABEL,
     SpendBucket,
@@ -209,7 +209,6 @@ def render_round_verdict(
     level: AbilityReading | None,
     *,
     cell_formula: CellFormula | None,
-    display_metric: DisplayMetric,
 ) -> str:
     """Never re-chosen by a point estimate here, which could name another arm than the one kept."""
     # Less the proposals an invariant collapsed: they burned no call.
@@ -234,15 +233,8 @@ def render_round_verdict(
         else ""
     )
 
-    fitness_txt = fold_fitness_text(fold)
-    # A cold θ is logit-fitness, so the headline stays fitness.
-    theta = (
-        level.theta
-        if display_metric == "ability" and level is not None and not level.ruler.cold
-        else None
-    )
-    headline = fitness_txt if theta is None else f"θ {theta:+.3f}"
-    detail = [] if theta is None else [fitness_txt]
+    headline = fold_fitness_text(fold)
+    detail: list[str] = []
 
     selected = next((s.vs_reference for s in arms if s.election.selected), None)
     ending = None if v.election is None else v.election.ending
@@ -272,16 +264,9 @@ def render_round_verdict(
     if (election := v.election) is not None and election.verdict_reason:
         out.append(f"  {DIM}why: {election.verdict_reason}{RESET}")
     # Every number above still renders under a SILENT caveat: this line is the terminal's only notice.
-    caveats: dict[ThetaCaveat, list[str]] = {}
-    if level is not None and level.caveat is not None:
-        caveats[level.caveat] = []
-    for arm in arms:
-        if arm.ability is not None and arm.ability.caveat is not None:
-            caveats.setdefault(arm.ability.caveat, []).append(arm.arm.label)
-    for caveat, labels in caveats.items():
-        scope = f" ({', '.join(labels)})" if labels else ""
+    if level is not None and (caveat := level.caveat) is not None:
         out.append(
-            f"  {YELLOW}⚠ θ caveat{scope}: {THETA_CAVEAT_INFO[caveat].label}{RESET}"
+            f"  {YELLOW}⚠ θ caveat: {THETA_CAVEAT_INFO[caveat].label}{RESET}"
             f" {DIM}[{caveat.value}]{RESET}"
         )
     out.extend(f"  {line}" for line in basis)

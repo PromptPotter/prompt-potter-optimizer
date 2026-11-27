@@ -118,7 +118,7 @@ class ThetaCaveat(StrEnum):
 
     @property
     def withholds(self) -> bool:
-        """The one fact: θ under this caveat is not ability, so no level, lift or plateau reads it."""
+        """The one fact: θ under this caveat is not ability, so no level or lift reads it."""
         return self is not ThetaCaveat.UNMEASURED_DELTA
 
 
@@ -402,11 +402,6 @@ class AbilityReading(FrozenModel):
         return f"{name}{self.cells} cells, {self.calibration_model}"
 
 
-# Well inside one round's θ SE: a plateau advises stopping, and a false stop costs more than a miss.
-PLATEAU_THETA_BAND = 0.05
-PLATEAU_ROUNDS = 3
-
-
 class LevelSeries(FrozenModel):
     """Every round's ended-on individual read on ONE δ scale, so any two of its levels difference."""
 
@@ -435,11 +430,3 @@ class LevelSeries(FrozenModel):
         every row it met in the cycle: the lift that held beside the one it was crowned on."""
         now, then = self.level(rnd), self.level(rnd - 1)
         return None if now is None or then is None else now.lift_over(then)
-
-    def plateau(self) -> float | None:
-        recent = [self.level(r) for r in self.rounds[-PLATEAU_ROUNDS:]]
-        levels = [r.theta for r in recent if r is not None]
-        if len(levels) < PLATEAU_ROUNDS:
-            return None
-        mean = sum(levels) / len(levels)
-        return mean if all(abs(level - mean) < PLATEAU_THETA_BAND for level in levels) else None

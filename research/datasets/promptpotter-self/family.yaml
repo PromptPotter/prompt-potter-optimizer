@@ -49,7 +49,7 @@ campaign:
   # Re-check here, not by intuition, once a banked corpus exists under this measurand.
   scoring:
     per_sample: 0.0 if floored else max(0.0, min(1.0, held_out_lift + 0.5))
-  display_metric: ability
+  display_metric: fitness
   # The bench is the seats a panel declares `held_out` (`defaults.yaml`'s zero split), which the
   # outer search never draws; the origin and each outer adoption are graded on them once.
   bench_trigger: every_adoption

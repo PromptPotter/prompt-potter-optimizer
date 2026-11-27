@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.intelligence.rasch import RoundAbilities, theta_lift_over_parent
-from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior, lift_prior
-from promptpotter.domain.paired_reading import ArmKey, CellSetName, Estimate, ReadingState
+from promptpotter.domain.crowning_bar import BarSubject, CrowningBar
+from promptpotter.domain.paired_reading import ArmKey, CellSetName, ReadingState
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.scoring import ROW_GRADES
 
@@ -45,20 +43,6 @@ def crowning_cells(
     return frozenset(crowned)
 
 
-def readable_lifts(
-    keys: Sequence[ArmKey], coverage_floor: int, abilities: RoundAbilities
-) -> dict[ArmKey, Estimate]:
-    reads: dict[ArmKey, Estimate] = {}
-    for key in keys:
-        # PoBB's `n_min` IS this floor: both count `theta_cells`.
-        if abilities.cells.get(key, 0) < coverage_floor:
-            continue
-        lift = theta_lift_over_parent(abilities, key)
-        if lift is not None:
-            reads[key] = lift
-    return reads
-
-
 def ranked_first(
     bar: CrowningBar, subjects: Mapping[ArmKey, BarSubject], cells: Mapping[ArmKey, int]
 ) -> ArmKey | None:
@@ -73,18 +57,3 @@ def crowned(
     """The arm *bar* ranks first among those it clears, read over every readable arm at once."""
     clears = bar.clears(subjects)
     return ranked_first(bar, {k: s for k, s in subjects.items() if clears[k]}, cells)
-
-
-def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:
-    """The generator's lift prior off the tenant's banked arm-vs-parent θ lifts on *dataset*:
-    the archive is filed by the dataset a row measured, never the campaign that paid."""
-    return lift_prior(
-        fit.lift
-        for campaign in survey.campaigns
-        if campaign.dataset_name == dataset
-        for standing in survey.cycles(campaign)
-        for held in standing.rounds.values()
-        if held.close.round > 0 and (election := held.close.election) is not None
-        for key in held.close.proposed
-        if (fit := election.fit.get(key)) is not None and fit.lift is not None
-    )

@@ -8,7 +8,6 @@ from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.arm_reading import (
     ArmElection,
-    ArmFit,
     ArmReading,
     DisplayMetric,
     ScoreboardRankKey,
@@ -29,7 +28,6 @@ from promptpotter.domain.origin_panel import (
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
 from promptpotter.domain.round_health import DegradationHealth
-from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.scoring import (
     NO_CELLS,
     CellSheet,
@@ -107,7 +105,8 @@ class Election(FrozenModel):
     )
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
-    fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
+    # Each arm (`b`) over the individual it was judged against (`a`): the round carries its pairings.
+    vs_reference: dict[ArmKey, PairedReading] = Field(default_factory=dict)
     # `Selector.elects_on`: the column of `RoundView.candidates` the round was WON on.
     elects_on: DisplayMetric
     deciding_pair: PairedReading | None = Field(
@@ -119,8 +118,6 @@ class Election(FrozenModel):
     verdict_reason: str | None = None
     # ``None`` where the selector's pick stands; ``verdict_reason`` stays the selector's.
     reelection: Reelection | None = None
-    # The δ scale the election read, whether or not a θ was fit on it.
-    ruler: RulerStamp
 
     @model_validator(mode="after")
     def _ends_on_an_arm(self) -> Self:
@@ -194,10 +191,6 @@ class RoundOutcome(FrozenModel):
         return self.election is not None and self.election.ending is RoundEnding.CROWNED
 
     @property
-    def ruler(self) -> RulerStamp | None:
-        return None if self.election is None else self.election.ruler
-
-    @property
     def proposed(self) -> dict[ArmKey, ArmState]:
         """The arms the round PROPOSED, in slot order: no reference it re-read."""
         return {key: arm for key, arm in self.arms.items() if arm.role.is_proposal}
@@ -212,8 +205,8 @@ class RoundOutcome(FrozenModel):
         assert self.round == 0 and head is not None, "round 0 ends on the origin"
         return head
 
-    def fit(self, key: ArmKey) -> ArmFit | None:
-        return None if self.election is None else self.election.fit.get(key)
+    def vs_reference(self, key: ArmKey) -> PairedReading | None:
+        return None if self.election is None else self.election.vs_reference.get(key)
 
     def arm_readings(self) -> list[ArmReading]:
         e = self.election
@@ -235,23 +228,20 @@ class RoundOutcome(FrozenModel):
                 election=ArmElection.of(
                     key, held=e is not None, selected=selected, leading=leading, electable=electable
                 ),
-                fit=self.fit(key),
+                vs_reference=self.vs_reference(key),
             ).on_line(line)
             for key, arm in self.arms.items()
         ]
 
     def ranked(self) -> list[ScoreboardRow]:
-        """THE rank: the leading arm first, then θ where the round was won on it, then composite."""
+        """THE rank: the leading arm first, then composite, then fitness."""
         leading = None if self.election is None else self.election.leading
-        on_theta = self.election is not None and self.election.elects_on == "ability"
 
         def rank(reading: ArmReading) -> ScoreboardRankKey:
             own = reading.own
-            ability = reading.ability
             return scoreboard_rank_key(
                 None if own is None or own.composite is None else own.composite.value,
                 None if own is None or own.fitness is None else own.fitness.value,
-                ability.theta.value if on_theta and ability is not None and ability.theta else None,
                 is_leading=reading.arm.key == leading,
                 is_partial=reading.end == "skipped",
             )
@@ -280,8 +270,8 @@ class RoundResult(RoundOutcome):
         return self.cells.get(key, NO_CELLS)
 
     def raced(self, key: ArmKey) -> CellSheet:
-        """The ONE row set the race and the election's θ read: the draw, then the origin-panel
-        cells it lacks that the election pooled."""
+        """The ONE row set the race and the election read: the draw, then the origin-panel cells
+        it lacks that the election pooled."""
         pooled = key in self.origin_panel.raced
         return self.rows(key).merged(self.panel_rows.get(key, NO_CELLS) if pooled else NO_CELLS)
 
@@ -298,8 +288,8 @@ class RoundResult(RoundOutcome):
 
     def reference_rows(self, key: ArmKey) -> CellSheet:
         """The rows of the arm *key* was judged against, re-read on this round's cells."""
-        fit = self.fit(key)
-        against = None if fit is None or fit.vs_reference is None else fit.vs_reference.a
+        pair = self.vs_reference(key)
+        against = None if pair is None else pair.a
         return NO_CELLS if against is None else self.rows(ArmKey(against.address.individual_id))
 
     def addresses(self) -> dict[ArmKey, list[WalkedCell]]:

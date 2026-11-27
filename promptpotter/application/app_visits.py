@@ -30,7 +30,7 @@ _DIGEST_HOUR = 7
 _WINDOW_S = 24 * 3600
 _DAYS_SHOWN = 7
 _FIELD_CHARS = 300
-# The app's page calls its API as it opens; an address that never did fetched a page nobody opened.
+# The app's page calls its API as it loads; an address that never did fetched a page no browser loaded.
 _PAGE_CALL = "/api/"
 
 # What a scanner hunts, by family, worded for someone who never ran a server; a request matching
@@ -220,11 +220,11 @@ def visits_digest(records: Iterable[VisitRecord], *, day: str, now: float) -> Vi
         reached = sum(1 for a in people if any(p.startswith("/login") for p in a.paths))
         started = sum(1 for a in people if any("/auth/login/" in p for p in a.paths))
         lines.append(
-            f"People who opened the app: {len(people)}, from {_top(_countries(people), 4)}. "
+            f"People who visited the page: {len(people)}, from {_top(_countries(people), 4)}. "
             f"{reached} reached the sign-in page, {started} started signing in."
         )
     else:
-        lines.append("People who opened the app: none.")
+        lines.append("People who visited the page: none.")
     lines.append(_trend(days, now=now, began=began))
 
     others = [a for a in seen if a.kind != "person"]
@@ -242,7 +242,7 @@ def visits_digest(records: Iterable[VisitRecord], *, day: str, now: float) -> Vi
         )
     if fetchers := kinds["fetcher"]:
         lines.append(
-            f"· Fetched a page but never opened it (link previews, checkers, unnamed bots): "
+            f"· Fetched a page no browser loaded (link previews, checkers, unnamed bots): "
             f"{len(fetchers)} — from {_top(_countries(fetchers), 4)}"
         )
     if scanners:

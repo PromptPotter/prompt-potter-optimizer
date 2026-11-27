@@ -123,9 +123,8 @@ class HardSamples(StrictModel):
     cycle_id: str | None
     generated_at: str
     ruler: RulerStanding
-    # Stamped θ descending; an individual no round stamped trails, by id.
+    # Every individual the scope measured, by id: the heatmap's rows.
     candidate_order: list[str]
-    theta: dict[str, float]
     positions: dict[str, int]
     # The samples this scope measured: δ descending, then the ones off the ruler; ties by row.
     ranked_keys: list[str]

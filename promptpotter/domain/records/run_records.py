@@ -26,7 +26,6 @@ from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmRole, ArmState, Proposal, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.crowning_bar import lift_prior
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.dashboard_rows import (
@@ -316,9 +315,6 @@ class RoundStatement(RoundOutcome):
             panel_reading=self.origin_panel.reading,
             panel_precision=self.panel_precision,
             optimizer_facts=self.optimizer_facts,
-            lift_prior=None
-            if election is None
-            else lift_prior(f.lift for f in election.fit.values() if f.lift is not None),
         )
 
     def walks(self) -> list[IndividualWalk[WalkedCell]]:
@@ -683,7 +679,6 @@ class LLMCallStartRecord(CycleRecord):
     call_id: str
     node: str
     round: int | None = None
-    candidate_idx: int | None = None
     model: str | None = None
     prompt_chars: int = 0
     # Injection name → rendered chars. Empty for a node composing no layout and on a cache replay.

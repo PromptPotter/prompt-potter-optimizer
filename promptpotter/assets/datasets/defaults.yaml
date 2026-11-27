@@ -8,8 +8,7 @@ campaign:
   sp_budget_origin: 40
   task_framing: committed
   scoring: label_match(predicted, ground_truth)
-  # θ, as the default optimizer resubsets each round (`couplings.py`); a selector stamping none shows fitness.
-  display_metric: ability
+  display_metric: fitness
   hard_sample_order: info_gain
   dataset_split: {bench: 0, demo: 0, tolerance: 0}
   run_seed: 0

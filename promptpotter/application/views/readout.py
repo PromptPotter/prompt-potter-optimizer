@@ -62,7 +62,7 @@ from promptpotter.application.views.render.review import (
     schema_repairs,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import DisplayMetric, ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.arms import (
     Concluded,
     Cut,
@@ -176,7 +176,6 @@ class ReadoutProjection(Projection):
         self.sample_counter = 0
         # Folded off the launch's INIT, and the wiring's display metric.
         self._formula: CellFormula | None = None
-        self._display_metric: DisplayMetric | None = None
         # The look-ahead last read: cells per candidate, candidates at once.
         self._sample_lookahead: tuple[int, int | Literal["all"]] | None = None
         self._round_best_key: ScoreboardRankKey | None = None
@@ -372,7 +371,6 @@ class ReadoutProjection(Projection):
         self._write(render_bench_scored(record))
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
-        self._display_metric = record.display_metric
         if (drift := record.defaults_drift) is not None:
             self._write(
                 f"  {YELLOW}⚠ what this campaign's declaration is a delta over moved since it was "
@@ -617,14 +615,12 @@ class ReadoutProjection(Projection):
         # Round 0 is the origin's read, no election's verdict.
         verdict = rn > 0
         if verdict:
-            assert self._display_metric is not None, "a round closes under its launch's wiring"
             self._write(
                 render_round_verdict(
                     round_result,
                     round_verdict_basis(round_result),
                     series.levels[rn],
                     cell_formula=self._formula,
-                    display_metric=self._display_metric,
                 )
             )
         self._write("")
@@ -657,9 +653,8 @@ class ReadoutProjection(Projection):
                 formula_short or formula_full,
                 reference=None
                 if election.selected is None
-                or (fit := round_result.fit(election.selected)) is None
-                or fit.vs_reference is None
-                else fit.vs_reference.reference_level("objective"),
+                or (pair := round_result.vs_reference(election.selected)) is None
+                else pair.reference_level("objective"),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

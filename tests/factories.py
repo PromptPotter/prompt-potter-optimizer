@@ -985,14 +985,7 @@ def election(
         else RoundEnding.HELD,
         "parent": RoundArm(round=parent_round, arm=ArmKey(parent)),
         "electable": int(pick is not None),
-        "elects_on": "ability",
-        "ruler": RulerStamp(
-            id=flat_ruler_id("acc"),
-            version=0,
-            own=None,
-            scope=RulerScope(scorer="acc", dataset="ds"),
-            excluded=(),
-        ),
+        "elects_on": "fitness",
     } | overrides
     return Election(**fields)
 

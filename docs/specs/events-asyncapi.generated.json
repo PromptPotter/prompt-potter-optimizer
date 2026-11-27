@@ -285,71 +285,6 @@
         "title": "ArmActRecord",
         "type": "object"
       },
-      "ArmFit": {
-        "additionalProperties": false,
-        "description": "What the election read of one arm: θ lives here and nowhere else.",
-        "properties": {
-          "lift": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Estimate"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Theta"
-          },
-          "theta_caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "theta_se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Theta Se"
-          },
-          "vs_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairedReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          }
-        },
-        "title": "ArmFit",
-        "type": "object"
-      },
       "ArmName": {
         "additionalProperties": false,
         "description": "One arm of the run: its key, and where it was walked (a re-read: its latest walk).",
@@ -3039,8 +2974,7 @@
       "DisplayMetric": {
         "enum": [
           "fitness",
-          "composite",
-          "ability"
+          "composite"
         ],
         "type": "string"
       },
@@ -3070,13 +3004,6 @@
           "ending": {
             "$ref": "#/components/schemas/RoundEnding",
             "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
-          },
-          "fit": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ArmFit"
-            },
-            "title": "Fit",
-            "type": "object"
           },
           "leading": {
             "anyOf": [
@@ -3112,9 +3039,6 @@
             ],
             "default": null
           },
-          "ruler": {
-            "$ref": "#/components/schemas/RulerStamp"
-          },
           "verdict_reason": {
             "anyOf": [
               {
@@ -3126,6 +3050,13 @@
             ],
             "default": null,
             "title": "Verdict Reason"
+          },
+          "vs_reference": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PairedReading"
+            },
+            "title": "Vs Reference",
+            "type": "object"
           }
         },
         "required": [
@@ -3133,8 +3064,7 @@
           "ending",
           "parent",
           "electable",
-          "elects_on",
-          "ruler"
+          "elects_on"
         ],
         "title": "Election",
         "type": "object"
@@ -3165,13 +3095,6 @@
           "ending": {
             "$ref": "#/components/schemas/RoundEnding",
             "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
-          },
-          "fit": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ArmFit"
-            },
-            "title": "Fit",
-            "type": "object"
           },
           "leading": {
             "anyOf": [
@@ -3217,9 +3140,6 @@
             "title": "Round",
             "type": "integer"
           },
-          "ruler": {
-            "$ref": "#/components/schemas/RulerStamp"
-          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -3235,6 +3155,13 @@
             ],
             "default": null,
             "title": "Verdict Reason"
+          },
+          "vs_reference": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PairedReading"
+            },
+            "title": "Vs Reference",
+            "type": "object"
           }
         },
         "required": [
@@ -3243,7 +3170,6 @@
           "parent",
           "electable",
           "elects_on",
-          "ruler",
           "round"
         ],
         "title": "ElectionRecord",
@@ -4296,18 +4222,6 @@
           "call_id": {
             "title": "Call Id",
             "type": "string"
-          },
-          "candidate_idx": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Candidate Idx"
           },
           "injection_chars": {
             "additionalProperties": {

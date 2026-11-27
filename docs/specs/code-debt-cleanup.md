@@ -38,18 +38,53 @@ settle before L4 spends.
 
   Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
   layers. **Re-test:** the `type_cycles` row of `BASELINE` falls to 0.
-- **Every pass is a recorded pass (root C1)**: w8-spine landed its flag half (every pass's cells reach
-  the ledger as `SampleScoredRecord`s); w9-pass the rest but one (the origin panel is one record
-  on the round, a restatement is one more close, the parent's catch-up is its arm's pass). Open: the
-  race's catch-ups are scheduled by a pool of their own (`catch_up.py::CatchUpPool`, 7/3) beside
-  `query_loop.py::run_walks`, which walks every other pass.
-  Root: a pass that measures is a record. **Size:** small; it edits `scoring/query_loop.py`.
-  **Re-test:** `git grep -c CatchUpPool -- promptpotter` is 0.
 - **Names collide across layers**: two modules each named `head_to_head.py`, `hierarchy.py`,
   `bench.py`, `power.py`, `wounds.py` and `cells.py`; `ledger_scan.py:176 CycleFacts` beside
   `evidence/read.py:360 _CycleFacts`. Root: a name is one thing; each pair renames the one that stopped
   describing its contents, with its doc and `CLAUDE.md` row. **Re-test:**
   `git ls-files promptpotter | xargs -n1 basename | sort | uniq -d | grep -v __init__` loses the six.
+- **`run_records.py` is a module of 38 records and ~35 non-records**: `domain/records/run_records.py`
+  declares 38 `CycleRecord` kinds beside charge lines (`Bill`, `Release`, `Lapse`), command-ack effects
+  (`LaunchedEffect`, `VerifySaturated`), the user-agent parser (`device_of`), fork specs and
+  `sibling_cycle_id`. Action: one module per record family under `domain/records/` (phase/stop, round,
+  pass, provider, spend, LLM call, lineage, wiring, workspace), each non-record to its owner. **Rides
+  with:** area 01's chain. **Re-test:** `git grep -cE "^class \w+\(.*CycleRecord" --
+  promptpotter/domain/records/run_records.py` is 0.
+- **A closed round banks its election twice**: `runner/round.py` appends an `ElectionRecord` from
+  `result.election`, and the round's `RoundClosedRecord` carries the same `Election` through
+  `results.py::RoundOutcome.election`; `ledger_scan.py` reads the first. Action: the ledger states the
+  election once, the other reader reads that record. **Rides with:** area 01's chain. **Re-test:**
+  `git grep -c "ElectionRecord(" -- promptpotter` is 0, or `RoundOutcome` holds no `election`.
+- **`Election.deciding_pair` admits a pair that is not read**: `domain/results.py::Election.deciding_pair`
+  is `PairedReading | None`, so `scoring/selection.py` asserts `ReadingState.READ` away. Action: type it
+  `ReadPair | None`, narrowed where potter's election builds it (a behaviour-key move,
+  named). **Rides with:** area 01's chain. **Re-test:** no `assert pair.state` in `selection.py`.
+- **A round file stores a served word**: `arm_reading.py::ArmReading.vs_reference_name` is a
+  `@computed_field`, dumped into each round file's scoreboard and read back by `RoundFileView.tsx`.
+  Root: the round file holds facts, the round read words them. **Rides with:** area 01's chain.
+  **Re-test:** a `RoundResult` dump holds no `vs_reference_name`.
+- **Round health folds through three carriers**: `results_health.py::compute_degradation_health` has one
+  caller (`compute_round_health`), which passes every argument, yet it defaults them and folds `or {}`,
+  then copies the counts into `_RoundCounts` and again into `DegradationHealth`; `classify_sample_failure`
+  and `compute_node_failure_rates` are public with no outside reader. Action: one fold, no defaults, one
+  carrier. **Rides with:** area 01's chain. **Re-test:** `git grep -c "or {}" --
+  promptpotter/domain/results_health.py` is 0.
+- **What a child moved over its parent is computed twice**: `candidate_diff.py::candidate_delta` diffs
+  flattened prompt maps (read by `l1.py`, `validators.py`, `panels.py`, `earned_blocks.py`) beside
+  `opt_search_point.py::OptSearchPoint.loci_moved_from` over `loci()` (read by `export.py`,
+  `hierarchy_subtree.py`); `flatten_prompts`/`flatten_sp_summary` are a third spelling of a locus, and
+  `parent_param_value` falls back `or {}` twice. Action: `CandidateDelta` is built from `loci()`.
+  **Rides with:** area 01's chain. **Re-test:** one of `candidate_delta`, `loci_moved_from` is left.
+- **An unknown error category reads as UNKNOWN**: `shared/errors.py::error_category` catches `ValueError`
+  and returns `None`, and its one reader (`domain/scoring.py:291`) maps that to `ErrorCategory.UNKNOWN`, so a
+  category this build does not know is relabelled, never refused. Action: the cell reader parses
+  `ErrorCategory(cat)` strictly. Same shape one layer up: `errors.py::graceful` swallows a fault into a
+  log at `main.py` and `api/middleware/visits.py`. **Rides with:** area 01's chain. **Re-test:** `git grep -c "except
+  ValueError" -- promptpotter/shared/errors.py` is 0.
+- **Backend wire records drop undeclared keys**: `wire_record.py::typed_record` sets `extra="ignore"` on a
+  record with no `rest` field, so `NodeWarning`, `Diagnostics` and `JudgeReading` silently drop a key the
+  backend added. **Held:** a decision, whether backend wire is tolerant by design. **Re-test:** the
+  generated `read` refuses an undeclared key, or the doc states the tolerance.
 
 ## 02 · Store, ledger, projections, landing
 
@@ -273,6 +308,16 @@ optimizer node.
 `scoring/formula/compiler.py`, `intelligence/indexes/axis.py`, `scoring/row_policy.py`,
 `domain/fitness_fold.py`, `scoring/query_loop.py`, `domain/scoring.py`, `scoring/measurement_log.py`
 
+- **A walk ended outside `land` names nothing it bought**: `query_loop.py::_ScoringPhase.discard` (a
+  cancel) and a crash write no `UntakenBoughtRecord` (only the land path, `query_loop.py:1271`), so those
+  paid cells stay the campaign's memory. Root: name the cell at its filing in `_acquire`. **Rides with:**
+  area 04's chain. **Re-test:** a cancelled pressed walk's untaken cells are left out of its campaign's
+  `SampleIndex`.
+- **A freed slot idles up to `HELD_POLL_S`**: `query_loop.py::_ScoringPhase.freed` polls a run waiting on
+  another run's landing (`asyncio.sleep(HELD_POLL_S)`, two sites). Root: no wake signal crosses phases.
+  **Rides with:** area 04's chain. **Re-test:** `git grep -c "sleep(HELD_POLL_S)" --
+  promptpotter/application/scoring/query_loop.py` is 0.
+
 - **The first verify after a pause started 38 s late (2026-11-06, live)**: the click shows from admission now
   (the pass's slot serves `starting` then `running`, and an unended command reads `working`), so no
   `accepted` ack is owed: that status is a loop's standing command. Between the slot's START and the
@@ -280,12 +325,6 @@ optimizer node.
   the archive (`measurements_for_config`) and fits the ruler (`judging_ruler`); a warm verify entered
   in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
   verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
-- **`ab` under an edited scorer refits what the archive still holds**: `difficulty.py::regraded_ruler`
-  re-grades a ruler row off its address's archive answer, but `ruler.jsonl` is never rewritten and
-  outlives those answers (hotpotqa's tenant scale, 2026-11-15: 305 of 372 addresses, 5,840 of 7,874
-  rows, have none), so the edited-formula counterfactual reads a quarter of the scale and says
-  nothing. **Decided 2026-11-27:** an edited formula refuses a replay below a coverage and
-  serves the share re-graded. **Rides with:** a design call.
 - **A lift is read two ways**: `paired_reading.py::Estimate` is the one level and lift every surface
   renders, and `paired.py::_lift`'s test is the measurand's (exact sign where it is declared binary,
   paired t where graded), but a θ lift is a bare `Estimate` (`ruler.py::theta_lift`), never a
@@ -360,13 +399,6 @@ optimizer node.
   `band is None or recorded.composite is None` beside `unread` since mypy narrows only the inline
   test — the root: one narrowing, a helper returning the band or `None` — **Rides with:** `area
   04's chain` — **Re-test:** the condition appears once in the function.
-- **A parent's θ is bought by paired catch-up** (ml-4, 11-25):
-  `promptpotter/application/scoring/catch_up.py::CatchUpPool` and
-  `promptpotter/application/optimizers/potter/race.py::PoBBRace` — under either shape the parent
-  answers each row a rival took (50 of the 300 calls on the offline run), through `catch_up` into
-  `extend_prior` — the parent's θ sits on the anchored ruler alone, so no paired catch-up call is
-  bought for it — **Rides with:** `area 04's chain` — **Re-test:** parent calls per round on
-  `python scripts/offline_run.py --optimizer potter --straight` are 0 with no decision move.
 
 ## 05 · Spend, wallet, quota
 
@@ -673,6 +705,10 @@ modules outside `optimizers/` import it.
   `optimizer_state`. Root: a knob is a node `config` field; the round carries what exists. **Rides with:**
   area 09's chain. **Re-test:**
   `git grep -nE "_LLOYD_ITERATIONS|randrange\(3\)" -- promptpotter/application/optimizers` is empty.
+- **`theta_election` names a θ it no longer reads**: since θ left the round's statement every crown elects
+  on the fitness column, yet the pipeline node, its knobs and `row_policy.py` still spell
+  `theta_election`. Action: rename it to what it decides (with its doc row; a behaviour-key move).
+  **Rides with:** area 09's chain. **Re-test:** `git grep -c theta_election -- promptpotter` is 0.
 - **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
   `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
   fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
@@ -1017,6 +1053,15 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+- **The bundle check times out under the gate's load** (w10-records' landing): the full gate's
+  playwright went red in 37 s, because the e2e serve refused: `application/health.py::webapp_bundle`
+  ran `git add -A -- webapp` into an empty scratch index with `timeout=10` and timed out; alone on
+  the same tree it was green (449.9 s). An empty index stats and hashes every `webapp/` file on every
+  check, so its cost grows with the tree and the desk's load. Root: the scratch index starts as a
+  copy of the checkout's own, so only changed files are hashed, stamped as
+  `webapp/vite.config.ts::webappTree` stamps (check that both name one tree). **Rides with:** the next
+  chain touching `application/health.py`. **Re-test:** the full gate's playwright is green on the
+  desk beside its pytest.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in

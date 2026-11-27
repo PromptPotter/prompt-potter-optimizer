@@ -26,7 +26,7 @@ import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { useViewedCycle, useViewedLineage } from "@/lib/state/lineage";
+import { useViewedLineage } from "@/lib/state/lineage";
 import type { CandidateBar } from "@/lib/types";
 import { barRound } from "./lineage-tree";
 
@@ -46,9 +46,8 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const displayMetric = dash.display_metric;
   const metrics = useMetrics(cycleId, displayMetric);
   const overlay = useViewedLineage();
-  const wonOnTheta = useViewedCycle()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
-  const { history, overlap, coverage, sampleUniverse, viewedNode, areCycles, views, priorDominated } =
+  const { history, overlap, coverage, sampleUniverse, viewedNode, areCycles, views } =
     useCandidateBars(overlay.index);
 
   const { open: maskOpen, mask } = useMaskState();
@@ -71,7 +70,6 @@ export function useCandidatesModel(dash: ServedDashboard) {
     displayMetric,
   });
 
-  const [showTheta, setShowTheta] = useState(false);
   const [plot, setPlot] = useState<PlotGeometry | null>(null);
   const onGeometry = useCallback((g: PlotGeometry) => {
     setPlot((prev) => (geomEqual(prev, g) ? prev : g));
@@ -191,12 +189,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
     pickCandidate,
     history,
     coverage,
-    ability: history.at(-1)?.series_reading ?? null,
     displayMetric,
-    wonOnTheta,
     views,
     areCycles,
-    priorDominated,
     metrics,
     toggleMetric: (m: DisplayMetric) => toggleMetric(m, cycleId, metrics),
     showCache,
@@ -206,8 +201,6 @@ export function useCandidatesModel(dash: ServedDashboard) {
     totalDescendants,
     metric,
     forkedFrom,
-    showTheta,
-    toggleTheta: () => setShowTheta((v) => !v),
     plot,
     onGeometry,
     onSelect,

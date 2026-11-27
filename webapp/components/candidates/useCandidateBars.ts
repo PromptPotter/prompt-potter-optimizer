@@ -58,12 +58,6 @@ export function useCandidateBars(index: LineageIndex) {
     [index, viewedNode, line, sampleSet, marks, every],
   );
 
-  const priorDominated = useMemo(
-    () =>
-      views.filter((v) => v.reading?.ability?.caveat === "prior_dominated").map((v) => v.label),
-    [views],
-  );
-
   return {
     history,
     overlap,
@@ -72,6 +66,5 @@ export function useCandidateBars(index: LineageIndex) {
     viewedNode,
     areCycles,
     views,
-    priorDominated,
   };
 }

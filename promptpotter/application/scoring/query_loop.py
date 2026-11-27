@@ -8,8 +8,9 @@ import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
+from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_phase_control import Flight, budget_stop
@@ -31,6 +32,7 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.command_kinds import MAX_SPEED
+from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import (
@@ -51,7 +53,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.records.untaken import UntakenBoughtRecord
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import FiledAnswer, Sample
+from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     GradedCell,
@@ -74,10 +76,11 @@ from promptpotter.infrastructure.llm.telemetry import (
     claim_campaign_price,
     current_round,
 )
-from promptpotter.infrastructure.run_scope import run_scope
+from promptpotter.infrastructure.run_scope import run_scope, scope_context
 from promptpotter.infrastructure.store.command_log import LookaheadWindow, effective_lookahead
 from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
@@ -86,7 +89,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.scoring.catch_up import CatchUpPool, CaughtUp
+    from promptpotter.application.optimizers.nodes import Race
 
 
 _BUDGET_STOPS = frozenset(
@@ -630,19 +633,155 @@ class Turn:
         return ids != was or (self.block is not None and self.racing != held.racing)
 
 
+@dataclass(frozen=True)
+class CatchUps:
+    """A race's priors, each caught up on a cell a later arm takes that it lacks: every comparison
+    its stop rule makes is on identical cells, one measurement per (prior, cell), each on the
+    prior's own pass (*passes*, by every key the race may admit)."""
+
+    race: Race
+    member: str
+    passes: Mapping[ArmKey, tuple[JobSearchPoint, MeasurementRole]]
+    sample_index: SampleIndex | None
+
+
+class PhaseEnd(NamedTuple):
+    """A phase's end: its budget stop where ``keep_cut`` kept one, and each prior's caught-up cells."""
+
+    stop: StopLoop | None
+    caught: Mapping[ArmKey, Sequence[GradedCell]]
+
+
+# A started catch-up: its call, the commit writing its row once a walk takes the cell, the discard.
+type _CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
+
+
+def _catch_up(session: Session, catch: CatchUps, sample: Sample, prior: ArmKey) -> _CatchUp:
+    # The PRIOR's own pass, never the triggering arm's. No stop rule: it recurses into the eliminator.
+    sp, role = catch.passes[prior]
+    walk = open_walk(
+        sp, [sample], session, kind=role, sample_index=catch.sample_index, measured=prior
+    )
+    walk.release()
+    _, cell = walk.launch(0, LookaheadWindow(1, 1))
+
+    def commit() -> Sequence[GradedCell]:
+        walk.collect()
+        # Its one row taken, it is done.
+        verdict = walk.take(cell) or walk.judge() or QueryLoopResult(walk.results)
+        walk.end(verdict, cancel=True)
+        return walk.ctx.scorer.graded(verdict.results).cells
+
+    def discard() -> None:
+        # Collected first, so a cell already back releases its claim now rather than on a callback.
+        walk.collect()
+        walk.end(None, cancel=True)
+
+    return cell, commit, discard
+
+
+@dataclass
+class _ArchiveRecorder:
+    session: Session
+    search_point: JobSearchPoint
+    kind: MeasurementRole
+    entry: ArchiveEntry
+
+    def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
+        return self.session.state.scoring.basis.fold(results)
+
+    def provenance(self, facts: MeasuredCell) -> str:
+        return grade_answer(
+            self.kind,
+            facts,
+            self.session.bound_resolution.chain,
+            human_intervened=self.session.state.human_intervened,
+        )
+
+    def take(self, cell: GradedCell) -> GradedCell:
+        """Files a cell once, at whichever of its claim or take meets it first."""
+        if cell.facts.answer is not None:
+            return cell
+        (answer,) = self.session.store.archive.file_answers(
+            self.entry,
+            [(cell.facts, self.provenance(cell.facts))],
+            role=self.kind,
+            created_at=utcnow_iso(),
+            output_keys={
+                n.name: tuple(n.output_keys)
+                for n in self.session.bound_resolution.chain.running_nodes
+            },
+            grading=self.session.state.scoring.grading,
+        )
+        return cell.filed(replace(cell.facts, answer=answer))
+
+
+def filed_entry(search_point: JobSearchPoint, session: Session) -> ArchiveEntry:
+    """The entry *search_point*'s cells are filed under in *session*: its dataset, schema and cell
+    identity."""
+    return archive_entry(
+        search_point,
+        dataset_hash=session.bank.dataset_hash,
+        pipeline_schema=session.bound_resolution.chain,
+        cell_identity=session.cell_identity,
+    )
+
+
+def open_walk(
+    search_point: JobSearchPoint,
+    dataset: list[Sample],
+    session: Session,
+    *,
+    kind: MeasurementRole,
+    checks: Sequence[StopRule] = (),
+    sample_index: SampleIndex | None = None,
+    measured: str | None,
+    skip_at: int | None = None,
+    budget: int | None = None,
+) -> Walk:
+    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
+    It takes *budget* of *dataset*'s rows (all, unset), in the order its race chooses."""
+    store = session.store
+    entry = filed_entry(search_point, session)
+    row = PASSES[kind]
+    node_configs = [] if row.fresh else entry.node_configs
+    # No node configs, no cell identity: every such searchpoint would share one claim per sample.
+    feed = ReplayFeed(store.archive, node_configs) if node_configs else None
+    measuring = None if measured is None else MeasuredPass(measured, kind)
+    ctx = QueryLoopState(
+        search_point=search_point,
+        session=session,
+        kind=kind,
+        feed=feed,
+        recorded=measuring,
+        sample_index=sample_index,
+        recorder=_ArchiveRecorder(
+            session=session, search_point=search_point, kind=kind, entry=entry
+        ),
+    )
+    return Walk(
+        order=dataset,
+        budget=len(dataset) if budget is None else budget,
+        ctx=ctx,
+        checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
+        context=scope_context(measured=measuring),
+        skip_at=skip_at,
+    )
+
+
 async def run_walks[K: Hashable](
     walks: Mapping[K, Walk | None],
     session: Session,
     *,
     keep_cut: bool,
-    backfills: CatchUpPool | None = None,
+    catch_ups: CatchUps | None = None,
     race: Decider[K] | None = None,
     on_turn: Callable[[K, Turn], None] | None = None,
     on_decided: Callable[[K, Sequence[Sample] | None], None] | None = None,
-) -> StopLoop | None:
+) -> PhaseEnd:
     """Rows, cuts and events land where a SERIAL phase lands them: one walk's turn at a time, the
-    calls its race's decisions sent read in the order its trigger names; ``keep_cut`` returns a
-    budget stop, its words whole, not raises."""
+    calls its race's decisions sent read in the order its trigger names, a prior's catch-up on a
+    cell beside the walk that took it; ``keep_cut`` returns a budget stop, its words whole."""
     if over := [w.budget for w in walks.values() if w is not None and w.budget > MAX_PASS_ROWS]:
         raise PayloadInvalidError(
             f"A pass scores at most {MAX_PASS_ROWS} rows, and this one asks for {max(over)}. "
@@ -650,7 +789,7 @@ async def run_walks[K: Hashable](
             code="pass_too_large",
         )
     phase = _ScoringPhase(
-        list(walks), list(walks.values()), session, backfills, race, on_turn, on_decided
+        list(walks), list(walks.values()), session, catch_ups, race, on_turn, on_decided
     )
     if phase.trigger.reads == "arrival":
         phase.replaying = phase.filed_reads()
@@ -670,7 +809,7 @@ async def run_walks[K: Hashable](
                 walking_on = await phase.step()
             if not phase.cancels:
                 await phase.land()
-            return None
+            return PhaseEnd(None, phase.caught)
         except BaseException as stop:
             budget = _budget_stop(stop)
             # A pause or a spent ceiling first waits out the calls already sent, which bill anyway.
@@ -680,7 +819,7 @@ async def run_walks[K: Hashable](
             if budget is None or not keep_cut:
                 raise
             phase.keep_cut()
-            return budget
+            return PhaseEnd(budget, phase.caught)
         finally:
             # Not awaited: an `await` here can swallow a CancelledError aimed at this coroutine.
             phase.discard()
@@ -709,7 +848,7 @@ class _ScoringPhase[K: Hashable]:
     keys: list[K]
     walks: list[Walk | None]
     session: Session
-    backfills: CatchUpPool | None
+    catch_ups: CatchUps | None
     # ``None``: no race, so one decision sends every walk its budget.
     race: Decider[K] | None
     on_turn: Callable[[K, Turn], None] | None
@@ -730,6 +869,11 @@ class _ScoringPhase[K: Hashable]:
     replaying: list[tuple[int, int]] = field(default_factory=list)
     # The walks with no row whose turn has not passed, in walk order.
     unwalked: list[int] = field(default_factory=list)
+    # By (prior, sample id), each catch-up started and not yet taken; by prior, the cells it SCORED,
+    # kept as the race admits them so a turn costs priors, not rows; each one's committed catch-ups.
+    catching: dict[tuple[ArmKey, int], _CatchUp] = field(default_factory=dict)
+    prior_scored: dict[ArmKey, set[str]] = field(default_factory=dict)
+    caught: dict[ArmKey, list[GradedCell]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.trigger = BATCH if self.race is None else self.race.trigger
@@ -779,15 +923,13 @@ class _ScoringPhase[K: Hashable]:
     def out(self) -> int:
         # A catch-up and a cancelled call still draining count too, or `max_cells_in_flight` understates peak RSS.
         cells = sum(len(walk.running) for walk in self.racing().values())
-        catching = len(self.backfills.backfills_in_flight()) if self.backfills is not None else 0
-        return cells + len(self.draining) + catching
+        return cells + len(self.draining) + len(self.catching_out())
 
     def outstanding(self) -> set[asyncio.Future[Any]]:
         calls = {call for call in self.draining if not call.done()}
         for walking in self.racing().values():
             calls.update(walking.running.values())
-        if self.backfills is not None:
-            calls.update(self.backfills.backfills_in_flight())
+        calls.update(self.catching_out())
         return calls
 
     def decide(self) -> None:
@@ -945,9 +1087,9 @@ class _ScoringPhase[K: Hashable]:
         now = self.turn_state(walk)
         if now.stopping and (now.cut or not now.keeping):
             return self.honour_stop(walk, now)
-        if now.settled and now.settle is not None and self.backfills is not None:
+        if now.settled and now.settle is not None:
             walk.settling = None
-            self.caught_up(walk, self.backfills.commit_backfills(now.settle))
+            self.commit_catch_ups(walk, now.settle)
             return self.judged(walk)
         if now.head is not None:
             return self.take_head(walk, now.head)
@@ -957,14 +1099,11 @@ class _ScoringPhase[K: Hashable]:
         return True
 
     def turn_state(self, walk: Walk) -> _TurnState:
-        session, backfills = self.session, self.backfills
+        session = self.session
         head = walk.head()
         settle = walk.settling
-        started: list[asyncio.Future[Any]] = []
-        unstarted = 0
-        if settle is not None and backfills is not None:
-            started = backfills.backfills_for(settle)
-            unstarted = backfills.owed_backfills(settle)
+        started = [] if settle is None else self.catching_on(settle)
+        unstarted = 0 if settle is None else len(self.owed_catch_ups(settle))
         cut = (head is not None and head.cancelled()) or any(c.cancelled() for c in started)
         # A cancelled call is the pause's own doing: the throttle wait polls the same flag.
         skip = session.state.control.skip_requested()
@@ -998,14 +1137,11 @@ class _ScoringPhase[K: Hashable]:
         raise now.tripped
 
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
-        backfills = self.backfills
         sample = walk.order[len(walk.results)]
         self.read(self.turn, sample)
         if (verdict := walk.take(head)) is not None:
             return self.ends(walk, verdict)
-        if backfills is not None and (
-            backfills.owed_backfills(sample) or backfills.backfills_for(sample)
-        ):
+        if self.owed_catch_ups(sample) or self.catching_on(sample):
             walk.settling = sample
             return True
         return self.judged(walk)
@@ -1028,9 +1164,8 @@ class _ScoringPhase[K: Hashable]:
     def held(self, walk: Walk) -> int:
         """A walk's own calls out: its cells, and the catch-ups started on its cells not yet settled."""
         out = len(walk.running)
-        if self.backfills is not None:
-            for sample in walk.sent()[max(0, len(walk.results) - 1) :]:
-                out += sum(not call.done() for call in self.backfills.backfills_for(sample))
+        for sample in walk.sent()[max(0, len(walk.results) - 1) :]:
+            out += sum(not call.done() for call in self.catching_on(sample))
         return out
 
     def others(self) -> int:
@@ -1051,12 +1186,12 @@ class _ScoringPhase[K: Hashable]:
         return turning if armed.abreast == "all" else turning[: armed.abreast]
 
     def launch(self, walk: Walk, armed: LookaheadWindow) -> None:
-        if self.backfills is not None:
+        if self.catch_ups is not None:
             room = min(self.room(walk, armed, self.ceiling), self.affordable())
             owing = [walk.settling] if walk.settling is not None else []
             owing += [sample for sample in walk.order if sample.id in walk.finished]
             for sample in owing:
-                room -= len(self.backfills.start_backfill(sample, room))
+                room -= self.start_catch_ups(sample, room)
         for ahead in self.abreast(armed):
             # A walk behind the turn leaves it one slot, so its next cell never waits on another's.
             self.fill(ahead, armed, self.ceiling if ahead is walk else self.ceiling - 1)
@@ -1064,7 +1199,6 @@ class _ScoringPhase[K: Hashable]:
     def fill(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> None:
         """Up to the press, on the rows its race's last decision ordered: its decided calls, then
         past them as far as the trigger lets the press."""
-        backfills = self.backfills
         i = next(i for i, w in enumerate(self.walks) if w is walk)
         decided = self.owed(i)
         if not (unsent := walk.unsent(armed.cells, decided, self.trigger)):
@@ -1079,8 +1213,8 @@ class _ScoringPhase[K: Hashable]:
             sample, cell = walk.launch(idx, armed)
             cell.add_done_callback(partial(_returned, self.returned, (i, sample.id)))
             room -= 1
-            if backfills is not None:
-                room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
+            if self.catch_ups is not None:
+                room -= self.start_catch_ups(sample, min(room, self.affordable()))
 
     async def pressed(self, armed: LookaheadWindow, kind: MeasurementRole) -> None:
         """Polled: the press is a command another process records on the ledger, which no signal carries."""
@@ -1136,14 +1270,60 @@ class _ScoringPhase[K: Hashable]:
         ):
             append_record(UntakenBoughtRecord(round=bound_round(), answers=bought))
 
-    def caught_up(self, walk: Walk, caught: CaughtUp | None) -> None:
-        """A catch-up walk records no pass, so its cells reach the ledger here or nowhere."""
-        if caught is None:
+    def prior_cells(self, key: ArmKey) -> set[str]:
+        if key not in self.prior_scored:
+            assert self.catch_ups is not None
+            self.prior_scored[key] = {row.key for row in self.catch_ups.race.priors[key].scoreable}
+        return self.prior_scored[key]
+
+    def owed_catch_ups(self, sample: Sample) -> list[ArmKey]:
+        """The race's priors owed *sample*: a prior holds a cell it SCORED, so an errored one is
+        caught up again."""
+        if self.catch_ups is None:
+            return []
+        return [
+            key
+            for key in self.catch_ups.race.priors
+            if sample.key not in self.prior_cells(key) and (key, sample.id) not in self.catching
+        ]
+
+    def catching_on(self, sample: Sample) -> list[asyncio.Future[Any]]:
+        return [call for (_, sid), (call, *_) in self.catching.items() if sid == sample.id]
+
+    def catching_out(self) -> list[asyncio.Future[Any]]:
+        return [call for call, *_ in self.catching.values() if not call.done()]
+
+    def start_catch_ups(self, sample: Sample, room: int) -> int:
+        """Nothing is written or graded until the walk that took *sample* commits them."""
+        catch = self.catch_ups
+        assert catch is not None
+        owed = self.owed_catch_ups(sample)[: max(room, 0)]
+        for key in owed:
+            self.catching[(key, sample.id)] = _catch_up(self.session, catch, sample, key)
+        return len(owed)
+
+    def commit_catch_ups(self, walk: Walk, sample: Sample) -> None:
+        """In prior order, when a serial round would have measured them, so what reaches disk is
+        the serial round's."""
+        catch = self.catch_ups
+        assert catch is not None
+        taken: dict[ArmKey, Sequence[GradedCell]] = {}
+        for key in list(catch.race.priors):
+            if (started := self.catching.pop((key, sample.id), None)) is not None:
+                cells = taken[key] = started[1]()
+                catch.race.catch_up(key, cells)
+                self.prior_cells(key).update(c.key for c in cells if c.scored)
+                self.caught.setdefault(key, []).extend(cells)
+        self.caught_up(walk, taken)
+
+    def caught_up(self, walk: Walk, caught: Mapping[ArmKey, Sequence[GradedCell]]) -> None:
+        """A catch-up records no pass of its own, so its cells reach the ledger here or nowhere."""
+        if not caught or self.catch_ups is None:
             return
         arm = walk.ctx.recorded
         assert arm is not None, "a race settles arms, and every arm's pass is recorded"
         by_cell: dict[str, dict[ArmKey, WalkedCell]] = {}
-        for prior, cells in caught.cells.items():
+        for prior, cells in caught.items():
             for cell in cells:
                 if (address := cell.address) is not None:
                     by_cell.setdefault(cell.key, {})[prior] = address
@@ -1155,7 +1335,7 @@ class _ScoringPhase[K: Hashable]:
                 RaceCatchUpRecord(
                     round=bound_round(),
                     arm=ArmKey(arm.individual_id),
-                    member=caught.member,
+                    member=self.catch_ups.member,
                     sample_key=key,
                     position=position_of[key],
                     cells=taken,
@@ -1168,13 +1348,7 @@ class _ScoringPhase[K: Hashable]:
         for i, walk in self.racing().items():
             try:
                 sure = walk.bank(self.trigger.sure(len(walk.results), self.owed(i)))
-                if self.backfills is not None:
-                    self.caught_up(
-                        walk,
-                        self.backfills.bank_backfills(
-                            [*sure, walk.settling] if walk.settling is not None else sure
-                        ),
-                    )
+                self.bank_catch_ups(walk, [*sure, walk.settling] if walk.settling else sure)
             except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
                 raise
             except Exception as fault:  # noqa: BLE001 -- the stop that ended the walk stands
@@ -1184,6 +1358,18 @@ class _ScoringPhase[K: Hashable]:
                         "cells_unbanked", fault, said=said, round=bound_round()
                     )
                 )
+
+    def bank_catch_ups(self, walk: Walk, samples: Sequence[Sample]) -> None:
+        """Written UNGRADED and never admitted: cells a stopped round's walks were sure to take, so
+        the resume replays them unpaid."""
+        wanted = {s.id for s in samples}
+        taken: dict[ArmKey, list[GradedCell]] = {}
+        for (key, sid), (call, commit, _) in list(self.catching.items()):
+            landed = call.done() and not call.cancelled() and call.exception() is None
+            if sid in wanted and landed:
+                del self.catching[(key, sid)]
+                taken.setdefault(key, []).extend(commit())
+        self.caught_up(walk, taken)
 
     def keep_cut(self) -> None:
         for i, walk in enumerate(self.walks):
@@ -1198,13 +1384,15 @@ class _ScoringPhase[K: Hashable]:
     def discard(self) -> None:
         for walk in self.racing().values():
             walk.end(None, cancel=True)
-        if self.backfills is not None:
-            self.backfills.discard_backfills()
+        # Paid and never written: a serial round would never have made these.
+        for _call, _commit, discard in self.catching.values():
+            discard()
+        self.catching.clear()
         if self.gauge is not None:
             self.gauge.close()
 
     def reading(self) -> Flight:
-        backfills, book, cell = self.backfills, self.book, self.cell
+        book, cell = self.book, self.cell
         racing = self.racing()
         walking = list(racing.values())
         parts = [
@@ -1215,11 +1403,11 @@ class _ScoringPhase[K: Hashable]:
         out_now = sum(p.out for p in parts) + winding
         allowed = sum(p.allowed for p in parts) + winding
         most = sum(p.most for p in parts) + winding
-        if backfills is not None:
-            catching = len(backfills.backfills_in_flight())
+        if self.catch_ups is not None:
+            catching = len(self.catching_out())
             samples = {s.id: s for walk in walking for s in walk.order[: walk.budget]}
             launched = {s.id for walk in walking for s in walk.sent()}
-            owed = {sid: backfills.owed_backfills(s) for sid, s in samples.items()}
+            owed = {sid: len(self.owed_catch_ups(s)) for sid, s in samples.items()}
             out_now += catching
             allowed += catching + sum(k for sid, k in owed.items() if sid in launched)
             most += catching + sum(owed.values())

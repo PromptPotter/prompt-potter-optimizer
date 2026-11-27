@@ -107,7 +107,7 @@ class PoBBCheck:
         parent: ArmKey,
         on_snapshot: Callable[[RaceSnapshot], None] | None = None,
     ) -> None:
-        # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
+        # The δ scale the round opened on; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
         self.parent = parent
         self.n_min = n_min

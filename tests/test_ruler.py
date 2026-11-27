@@ -561,8 +561,7 @@ def test_a_line_read_on_cells_the_scale_lacks_still_differences_its_levels() -> 
         series = level_series(0.30, [0.31, 0.32, 0.30], caveat=caveat)
         first, last = series.level(0), series.level(3)
         lift = None if first is None or last is None else last.lift_over(first)
-        read = (lift is not None, series.plateau() is not None)
-        assert read == (differences, differences), (
+        assert (lift is not None) == differences, (
             f"`{caveat}` withheld a level it only footnotes, or read one it withholds"
         )
 
@@ -622,13 +621,11 @@ def traced() -> _Traced:
         )
 
     def closed(n: int, walked: dict[str, list[float]], pick: str | None, held_on: str) -> Any:
-        # Each election reads its own version; the series must read none of them.
-        stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=_SCOPE, excluded=())
         return round_result(
             n,
             arms=[arm_state(k) for k in walked],
             cells={arm_key(k): graded(h) for k, h in walked.items()},
-            election=election(pick and arm_key(pick), parent=arm_key(held_on), ruler=stamp),
+            election=election(pick and arm_key(pick), parent=arm_key(held_on)),
         )
 
     hits = {
@@ -674,15 +671,12 @@ def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamp
         "o",
     ), "the series read a scale its own parent line moved, or not the run's clock"
     assert all(lv is not None and lv.ruler == series.stamp for lv in levels.values()), (
-        "a round's level sat on the scale its own election read, not the series'"
+        "a round's level sat on another scale than the series'"
     )
     assert levels[1] is not None and levels[0] is not None and levels[1].theta > levels[0].theta
     assert levels[1] == levels[2] == levels[3], (
         "a held round, or one that elected nothing, read another individual than the parent "
         "standing into it"
-    )
-    assert series.plateau() == pytest.approx(levels[3].theta), (
-        "three rounds of one standing parent on one scale is the plateau"
     )
 
 
@@ -716,7 +710,7 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     )
     [cold] = _series(lone, [traced.run])
     caveats = {lv.caveat for lv in cold.levels.values() if lv is not None}
-    assert cold.stamp.cold and caveats == {ThetaCaveat.COLD_RULER} and cold.plateau() is None, (
+    assert cold.stamp.cold and caveats == {ThetaCaveat.COLD_RULER}, (
         "a series on no δ scale read as one that differences"
     )
     ran = [round_result(1), round_result(2)]

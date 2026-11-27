@@ -32,7 +32,6 @@ from promptpotter.domain.paired_reading import (
     level_text,
     lift_versus,
 )
-from promptpotter.domain.ruler import ThetaCaveat, withheld
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import VerifyReading
@@ -44,13 +43,12 @@ def order_floor(score: float | None) -> float:
     return score if score is not None else -math.inf
 
 
-ScoreboardRankKey = tuple[bool, bool, float, float, float]
+ScoreboardRankKey = tuple[bool, bool, float, float]
 
 
 def scoreboard_rank_key(
     composite_fitness: float | None,
     fitness: float | None,
-    theta: float | None = None,
     *,
     is_leading: bool = False,
     is_partial: bool = False,
@@ -60,7 +58,6 @@ def scoreboard_rank_key(
         is_leading,
         # The round order is stratified, so a walk cut short kept a biased slice, not a smaller sample.
         not is_partial,
-        order_floor(theta),
         order_floor(composite_fitness),
         order_floor(fitness),
     )
@@ -73,7 +70,7 @@ class ScoreboardRow(FrozenModel):
     reading: ArmReading
 
 
-type DisplayMetric = Literal["fitness", "composite", "ability"]
+type DisplayMetric = Literal["fitness", "composite"]
 
 
 def fold_fitness_text(fold: CellFold | None) -> str:
@@ -102,14 +99,6 @@ DISPLAY_METRIC_INFO: Worded[DisplayMetric, DisplayMetricInfo] = Worded(
             "(subset-relative).",
             "score",
         ),
-        "ability": DisplayMetricInfo(
-            "ability θ",
-            "θ",
-            "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. "
-            "A logit (not a %): comparable within a round; cross-round comparison waits on the stable "
-            "δ bank.",
-            "theta",
-        ),
         "composite": DisplayMetricInfo(
             "composite",
             "∑",
@@ -131,20 +120,6 @@ CANDIDATE_COUNT_WORDS: Worded[CandidateCount, str] = Worded(
         "replayed": "Counted per candidate: N of the M shown carry at least one replayed cell.",
     }
 )
-
-
-class ArmFit(FrozenModel):
-    """What the election read of one arm: θ lives here and nowhere else."""
-
-    # Rasch ability on the round's joint-fit scale; `None` outside the election fit.
-    theta: float | None = None
-    theta_se: float | None = None
-    # This ARM's own reason θ is not ability (`bench/difficulty.py::JudgingRuler.caveat`).
-    theta_caveat: ThetaCaveat | None = None
-    # This arm over the individual it was judged against; `None` on an arm with no reference.
-    vs_reference: PairedReading | None = None
-    # Its θ over its parent's on the same fit: the arm-vs-parent pair a lift prior is read off.
-    lift: Estimate | None = None
 
 
 def panel_counts(arm: ArmState, fold: ScoreSummary | None) -> tuple[int | None, int | None]:
@@ -194,45 +169,6 @@ class ArmSamples(FrozenModel):
     ) -> ArmSamples:
         share = cached / scored if scored and cached is not None else None
         return cls(scored=scored, expected=expected, cached=cached, cached_share=share, cut=cut)
-
-
-class ArmAbility(FrozenModel):
-    """One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale."""
-
-    theta: Estimate | None = Field(description="Null where the round's fit read no θ for the arm.")
-    caveat: ThetaCaveat | None = Field(
-        description="Why `theta` is not this arm's ability, of the ARM's own scope."
-    )
-
-    @classmethod
-    def of(
-        cls, theta: float | None, se: float | None, caveat: ThetaCaveat | None
-    ) -> ArmAbility | None:
-        if (theta, se, caveat) == (None, None, None):
-            return None
-        read = (
-            None
-            if theta is None or se is None
-            else Estimate.normal(theta, se, unit="theta", form="level", n=None)
-        )
-        return cls(theta=read, caveat=caveat)
-
-
-class ElectionColumn(FrozenModel):
-    """The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or
-    withheld (`ThetaCaveat.withholds`): there θ is not ability, and the election reads on fitness."""
-
-    elects_on: DisplayMetric = Field(description="What the electing round's selector ranked on.")
-    ability: ArmAbility | None = Field(description="The pick's θ on its electing round.")
-    reads_on: DisplayMetric
-
-    @classmethod
-    def of(cls, elects_on: DisplayMetric, ability: ArmAbility | None) -> ElectionColumn:
-        unread = ability is None or ability.theta is None or withheld(ability.caveat)
-        caveated = elects_on == "ability" and unread
-        return cls(
-            elects_on=elects_on, ability=ability, reads_on="fitness" if caveated else elects_on
-        )
 
 
 class ArmElection(FrozenModel):
@@ -389,7 +325,6 @@ class ArmReading(FrozenModel):
         description="The provider's prefix-cache reading of `tokens.input`; null beside a null "
         "`tokens`."
     )
-    ability: ArmAbility | None = Field(description="Null outside the round's election fit.")
     vs_reference: PairedReading | None = Field(
         description="This arm (`b`) over the individual it was judged against (`a`), on the "
         "cells both scored. Null on the origin and until the election stamps it."
@@ -426,9 +361,10 @@ class ArmReading(FrozenModel):
         fold: ScoreSummary | None,
         cut: bool,
         election: ArmElection,
-        fit: ArmFit | None,
+        vs_reference: PairedReading | None,
     ) -> ArmReading:
-        """*fold* is its round's, or `narration.py::Narration.fold` in flight; *fit* the election's, ``None`` until held."""
+        """*fold* is its round's, or `narration.py::Narration.fold` in flight; *vs_reference* the
+        election's pairing of it, ``None`` until held."""
         walked = None if isinstance(arm, Proposed) else arm
         tokens = None if fold is None else fold.tokens
         samples = ArmSamples.of(
@@ -453,10 +389,7 @@ class ArmReading(FrozenModel):
             samples=samples,
             tokens=tokens,
             prefix=None if tokens is None else tokens.prefix(replayed=False),
-            ability=None
-            if fit is None
-            else ArmAbility.of(fit.theta, fit.theta_se, fit.theta_caveat),
-            vs_reference=None if fit is None else fit.vs_reference,
+            vs_reference=vs_reference,
             election=election,
             bench=None,
             verify=None,

@@ -141,7 +141,7 @@ function drawRibbons(chart: ChartJS, bands: WhiskerBand[]): void {
   ctx.clip();
   ctx.globalAlpha = BAND_ALPHA;
   for (const band of bands) {
-    const yScale = chart.scales[seriesByKey(band.anchor)?.axis ?? "y"];
+    const yScale = chart.scales.y;
     const di = chart.data.datasets.findIndex((ds) => ds.label === band.anchor);
     const ink = chart.data.datasets[di]?.borderColor;
     if (!yScale || di < 0 || typeof ink !== "string") continue;
@@ -196,7 +196,7 @@ const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
     ctx.lineWidth = 1.5;
     const capHalf = 4;
     for (const band of bands) {
-      const yScale = chart.scales[seriesByKey(band.anchor)?.axis ?? "y"];
+      const yScale = chart.scales.y;
       const meta = chart.data.datasets.findIndex((ds) => ds.label === band.anchor);
       if (!yScale || meta < 0) continue;
       const bars = chart.getDatasetMeta(meta);
@@ -396,7 +396,7 @@ export const FitnessChart = memo(function FitnessChart({
   inFlightIndices,
   onGeometry,
 }: Props) {
-  const { views, metrics } = ctx;
+  const { views } = ctx;
   const themeVersion = useThemeVersion();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   // The x-axis reads in rounds: a round's label sits under its middle point, and `thinTickLabels`
@@ -417,7 +417,6 @@ export const FitnessChart = memo(function FitnessChart({
 
   const active = useMemo(() => activeSeries(ctx), [ctx]);
   const bands = useMemo(() => whiskerBands(ctx), [ctx]);
-  const showAbility = metrics.has("ability");
 
   const selectionBorder = useMemo(() => {
     if (selectedKey == null) return null;
@@ -488,7 +487,7 @@ export const FitnessChart = memo(function FitnessChart({
             pointBorderColor: ink,
             pointBackgroundColor: spec.mark?.filled ? ink : paper,
             borderColor: ink,
-            yAxisID: spec.axis,
+            yAxisID: "y",
             order: -2,
             animation: false as const,
           };
@@ -504,7 +503,7 @@ export const FitnessChart = memo(function FitnessChart({
             pointRadius: 0,
             fill: false,
             spanGaps: false,
-            yAxisID: spec.axis,
+            yAxisID: "y",
             // Lowest `order` paints LAST in chart.js — +1 would hide the line behind the bars.
             order: -1,
           };
@@ -526,7 +525,7 @@ export const FitnessChart = memo(function FitnessChart({
             pointHitRadius: 10,
             fill: false,
             spanGaps: spec.gap === "sparse",
-            yAxisID: spec.axis,
+            yAxisID: "y",
           };
         }
         return {
@@ -534,13 +533,12 @@ export const FitnessChart = memo(function FitnessChart({
           data,
           backgroundColor: ink,
           ...outline(),
-          yAxisID: spec.axis,
+          yAxisID: "y",
           barPercentage: 0.95,
           categoryPercentage: cat,
           // A cap only: the category's own width, read by Chart.js, sizes every bar under it.
           maxBarThickness: 28,
-          // chart.js applies `minBarLength` as absolute, so a negative stub would cross zero.
-          ...(spec.signed ? {} : { minBarLength: 2 }),
+          minBarLength: 2,
         };
       }),
     };
@@ -572,23 +570,6 @@ export const FitnessChart = memo(function FitnessChart({
         ticks: { font: { size: cssPx("--text-xs"), family: getCss("--font-mono") }, autoSkip: false, maxRotation: 0 },
       },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: cssPx("--text-xs") }, stepSize: 0.2 } },
-      // Declared only while θ shows: the right gutter shifts every dendrogram fraction.
-      ...(showAbility
-        ? {
-            y1: {
-              position: "right" as const,
-              grid: { display: false },
-              ticks: { font: { size: cssPx("--text-xs") } },
-              title: {
-                display: true,
-                text: "[θ]",
-                align: "end" as const,
-                color: getCss("--color-text-secondary"),
-                font: { size: cssPx("--text-xs") },
-              },
-            },
-          }
-        : {}),
     },
     plugins: {
       legend: { display: false },
@@ -600,7 +581,7 @@ export const FitnessChart = memo(function FitnessChart({
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndices, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndices, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="chart-frame">

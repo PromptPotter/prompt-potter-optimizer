@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import regraded_ruler
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
@@ -115,29 +114,20 @@ def _identity(rd: RoundResult, current: Mapping[str, str]) -> list[ReplayMismatc
 
 def replay_verdict(
     session: Session,
-    campaign_config: CampaignConfig,
     optimizer: SelectedOptimizer,
     sink: list[ReplayMismatch],
 ) -> Verdict:
     """THE validity check, a resume's and ``ab``'s alike: a round stands while the optimizer that
     produced it is the one loaded and every decision it recorded re-derives off its rows, each
-    re-graded under the current scorer on the scale its election read."""
+    re-graded under the current scorer."""
     scorer = session.state.scoring.scorer
-    opt = campaign_config.optimization
-    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
     current = optimizer.prompt_hashes()
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         if rnd.round_data is None:
             return VerdictOutcome(diverged=False)
         rd = _regraded(rnd.round_data, scorer)
-        stamp = rd.ruler
-        ruler = (
-            None
-            if stamp is None or stamp.cold
-            else regraded_ruler(session.store, stamp, scorer, n_min=n_min, enable_2pl=two_pl)
-        )
-        found = [*_identity(rd, current), *replay_all_mismatches(rd, rnd.decisions, ruler=ruler)]
+        found = [*_identity(rd, current), *replay_all_mismatches(rd, rnd.decisions)]
         if not found:
             return VerdictOutcome(diverged=False)
         sink.extend(found)
@@ -152,7 +142,6 @@ def replay_verdict(
 
 def line_divergence(
     session: Session,
-    campaign_config: CampaignConfig,
     optimizer: SelectedOptimizer,
     rounds: Sequence[RoundResult],
     decisions: Mapping[int, list[DecisionRecord]],
@@ -169,9 +158,7 @@ def line_divergence(
         ],
     )
     found: list[ReplayMismatch] = []
-    walked = find_divergences(
-        MaskRecord(cycles=[line]), replay_verdict(session, campaign_config, optimizer, found)
-    )
+    walked = find_divergences(MaskRecord(cycles=[line]), replay_verdict(session, optimizer, found))
     if not walked.divergences:
         return None
     at = walked.divergences[0].round
@@ -204,9 +191,7 @@ def ab_replay_cycle(
         )
     mismatches: list[ReplayMismatch] = []
     optimizer = select_optimizer(campaign_config.optimization)
-    result = find_divergences(
-        record, replay_verdict(session, campaign_config, optimizer, mismatches)
-    )
+    result = find_divergences(record, replay_verdict(session, optimizer, mismatches))
     n_rounds = sum(len(c.rounds) for c in record.cycles)
     return AbReport(
         campaign_id=hop.campaign_id,

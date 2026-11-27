@@ -110,7 +110,7 @@ def _accumulate(
 ) -> None:
     earned: list[tuple[OptSearchPoint, str, float]] = []
     for key, arm in closed.proposed.items():
-        reading = None if (fit := closed.fit(key)) is None else fit.vs_reference
+        reading = closed.vs_reference(key)
         if (
             reading is None
             or reading.state is not ReadingState.READ

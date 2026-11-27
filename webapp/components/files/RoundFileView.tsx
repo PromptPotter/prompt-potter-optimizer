@@ -19,10 +19,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
 }
 
 // The served order IS the rank: `RoundView.candidates` lists the round's own arms as its scoreboard ranks them.
-function scoreboardColumns(
-  wonOnTheta: boolean,
-  arms: readonly ServedArm[],
-): Column<ServedArm>[] {
+function scoreboardColumns(arms: readonly ServedArm[]): Column<ServedArm>[] {
   // The column takes its readings' one served name; where they differ, each row says its own.
   const [only, ...others] = new Set(arms.flatMap(({ reading: s }) => s.vs_reference_name ?? []));
   const shared = only !== undefined && others.length === 0 ? only : null;
@@ -52,19 +49,6 @@ function scoreboardColumns(
       width: "6rem",
       align: "end",
       cell: ({ reading: s }) => fmtEstimate(s.own?.composite) ?? PLACEHOLDER,
-    },
-    {
-      id: "theta",
-      label: (
-        <Term
-          content={`Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler${wonOnTheta ? " — the metric the round winner is elected on, which is what explains a lower-fitness winner" : ""}. Empty outside the election fit, and for every row while the ruler is cold.`}
-        >
-          θ
-        </Term>
-      ),
-      width: "5rem",
-      align: "end",
-      cell: ({ reading: s }) => fmtEstimate(s.ability?.theta) ?? PLACEHOLDER,
     },
     {
       id: "lift",
@@ -150,7 +134,7 @@ export function RoundFileView({
       {doc && doc.candidates.length > 0 && (
         <CardFrame title={<span>Scoreboard</span>} actions={<Badge>{doc.candidates.length}</Badge>}>
           <DataTable
-            columns={scoreboardColumns(election?.elects_on === "ability", doc.candidates)}
+            columns={scoreboardColumns(doc.candidates)}
             rows={doc.candidates}
             getRowId={(r) => r.reading.arm.key}
             ariaLabel={`Round ${round} scoreboard`}

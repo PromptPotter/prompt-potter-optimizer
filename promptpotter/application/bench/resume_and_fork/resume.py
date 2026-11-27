@@ -110,7 +110,7 @@ def _divergence(
 ) -> tuple[ReplayMismatch, bool] | None:
     """The first divergence of the line, and whether this resume CAUSED it."""
     session = cycle.session
-    div = line_divergence(session, cycle.config, cycle.optimizer, prior, standing.decisions)
+    div = line_divergence(session, cycle.optimizer, prior, standing.decisions)
     if div is not None:
         return div, False
     # The round about to run has no round file, so the walk cannot visit it.

@@ -656,40 +656,6 @@
         "title": "Arm",
         "type": "object"
       },
-      "ArmAbility": {
-        "additionalProperties": false,
-        "description": "One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale.",
-        "properties": {
-          "caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why `theta` is not this arm's ability, of the ARM's own scope."
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Estimate"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null where the round's fit read no θ for the arm."
-          }
-        },
-        "required": [
-          "theta",
-          "caveat"
-        ],
-        "title": "ArmAbility",
-        "type": "object"
-      },
       "ArmContrast": {
         "additionalProperties": false,
         "description": "Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline\ncolumn: per row, b's replicate mean less a's, and the row is the cluster.",
@@ -828,66 +794,6 @@
         "title": "ArmElection",
         "type": "object"
       },
-      "ArmFit": {
-        "additionalProperties": false,
-        "description": "What the election read of one arm: θ lives here and nowhere else.",
-        "properties": {
-          "lift": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Estimate"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta"
-          },
-          "theta_caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "theta_se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta Se"
-          },
-          "vs_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairedReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "title": "ArmFit",
-        "type": "object"
-      },
       "ArmName": {
         "additionalProperties": false,
         "description": "One arm of the run: its key, and where it was walked (a re-read: its latest walk).",
@@ -1008,17 +914,6 @@
         "additionalProperties": false,
         "description": "One arm of one round, read: the one carrier every surface that lists or ranks arms embeds.\n\nEach part lands when its fact exists, so an arm in flight is this type with fewer parts set.",
         "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmAbility"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null outside the round's election fit."
-          },
           "arm": {
             "$ref": "#/components/schemas/ArmName",
             "description": "THE key, and where the arm was walked."
@@ -1209,7 +1104,6 @@
           "samples",
           "tokens",
           "prefix",
-          "ability",
           "vs_reference",
           "election",
           "bench",
@@ -5338,7 +5232,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the cycle's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on fitness."
+            "description": "The column the cycle's newest election elected on; null before its first."
           },
           "mint": {
             "$ref": "#/components/schemas/CycleMint",
@@ -6202,8 +6096,7 @@
       "DisplayMetric": {
         "enum": [
           "fitness",
-          "composite",
-          "ability"
+          "composite"
         ],
         "type": "string"
       },
@@ -6788,13 +6681,6 @@
             "$ref": "#/components/schemas/RoundEnding",
             "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
-          "fit": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ArmFit"
-            },
-            "title": "Fit",
-            "type": "object"
-          },
           "leading": {
             "anyOf": [
               {
@@ -6828,9 +6714,6 @@
               }
             ]
           },
-          "ruler": {
-            "$ref": "#/components/schemas/RulerStamp"
-          },
           "verdict_reason": {
             "anyOf": [
               {
@@ -6841,6 +6724,13 @@
               }
             ],
             "title": "Verdict Reason"
+          },
+          "vs_reference": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PairedReading"
+            },
+            "title": "Vs Reference",
+            "type": "object"
           }
         },
         "required": [
@@ -6848,41 +6738,9 @@
           "ending",
           "parent",
           "electable",
-          "elects_on",
-          "ruler"
+          "elects_on"
         ],
         "title": "Election",
-        "type": "object"
-      },
-      "ElectionColumn": {
-        "additionalProperties": false,
-        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\nwithheld (`ThetaCaveat.withholds`): there θ is not ability, and the election reads on fitness.",
-        "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmAbility"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The pick's θ on its electing round."
-          },
-          "elects_on": {
-            "$ref": "#/components/schemas/DisplayMetric",
-            "description": "What the electing round's selector ranked on."
-          },
-          "reads_on": {
-            "$ref": "#/components/schemas/DisplayMetric"
-          }
-        },
-        "required": [
-          "elects_on",
-          "ability",
-          "reads_on"
-        ],
-        "title": "ElectionColumn",
         "type": "object"
       },
       "EnvironmentReading": {
@@ -7712,8 +7570,7 @@
           "time_per_lift",
           "lives",
           "fitness",
-          "fitness_terms",
-          "ability"
+          "fitness_terms"
         ],
         "type": "string"
       },
@@ -8591,16 +8448,16 @@
               }
             ]
           },
-          "election": {
+          "elects_on": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ElectionColumn"
+                "$ref": "#/components/schemas/DisplayMetric"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The column the selection's electing round chose it on; null before a round selects. Quote an `ability` pick on θ unless its caveat is served."
+            "description": "The column the selection's electing round chose it on; null before a round selects."
           },
           "guard": {
             "$ref": "#/components/schemas/PairGuard"
@@ -8745,7 +8602,7 @@
           "spend_metered",
           "human_intervened",
           "status",
-          "election",
+          "elects_on",
           "bench",
           "bench_set",
           "spend",
@@ -9071,7 +8928,7 @@
                 "type": "null"
               }
             ],
-            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is what they all read in: the measurand and, under an ability election, that rounds are won on θ. Null until the lift vs origin is read."
+            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is the measurand they all read in. Null until the lift vs origin is read."
           },
           "entry_kind": {
             "const": "cycle",
@@ -10089,36 +9946,6 @@
           "absent"
         ],
         "title": "LiftCost",
-        "type": "object"
-      },
-      "LiftPrior": {
-        "additionalProperties": false,
-        "description": "The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean (its own\nerror *mu0_se*), τ² their observed variance less their mean noise variance, floored at 0.",
-        "properties": {
-          "mu0": {
-            "title": "Mu0",
-            "type": "number"
-          },
-          "mu0_se": {
-            "title": "Mu0 Se",
-            "type": "number"
-          },
-          "pairs": {
-            "title": "Pairs",
-            "type": "integer"
-          },
-          "tau": {
-            "title": "Tau",
-            "type": "number"
-          }
-        },
-        "required": [
-          "mu0",
-          "tau",
-          "pairs",
-          "mu0_se"
-        ],
-        "title": "LiftPrior",
         "type": "object"
       },
       "LiftProfile": {
@@ -15447,7 +15274,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on fitness."
+            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected."
           },
           "round": {
             "title": "Round",
@@ -16924,7 +16751,7 @@
                 "type": "null"
               }
             ],
-            "description": "This round's promotion over the parent it beat, each read on every row it met in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift that held beside the one it was crowned on. Null on a round that promoted nothing."
+            "description": "This round's promotion over the parent it beat, each read on every row it met in the cycle on the `LevelSeries`' one scale, its later rows as parent included: the lift that held beside the one it was crowned on. Null on a round that promoted nothing."
           },
           "leading": {
             "anyOf": [
@@ -16936,16 +16763,6 @@
               }
             ],
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the crown, the leader the line moved to, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
-          },
-          "lift_prior": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LiftPrior"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "measured": {
             "description": "The samples `selection` holds, each once, in id order.",
@@ -17017,17 +16834,6 @@
             "title": "Selection Movement",
             "type": "array"
           },
-          "series_reading": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AbilityReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This round's level on the cycle's `LevelSeries`, under its own round's caveat; null where no scored cell sits on the scale."
-          },
           "verdict_reason": {
             "anyOf": [
               {
@@ -17049,7 +16855,6 @@
           "panel_precision_verdict",
           "selection_movement",
           "measured",
-          "series_reading",
           "hold_up"
         ],
         "title": "ServedRound",
@@ -18550,7 +18355,7 @@
                 "type": "null"
               }
             ],
-            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is what they all read in: the measurand and, under an ability election, that rounds are won on θ. Null until the lift vs origin is read."
+            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is the measurand they all read in. Null until the lift vs origin is read."
           },
           "entry_kind": {
             "const": "cycle",
@@ -18671,7 +18476,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the cycle's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on fitness."
+            "description": "The column the cycle's newest election elected on; null before its first."
           },
           "from_candidate": {
             "anyOf": [

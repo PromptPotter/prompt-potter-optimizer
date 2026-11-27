@@ -186,7 +186,9 @@ def build_prompt_export(
     """*winner* may be the origin round: a campaign that never selected past it exports round 0."""
     election, head = winner.election, winner.head
     selected = (
-        None if election is None or election.selected is None else winner.fit(election.selected)
+        None
+        if election is None or election.selected is None
+        else winner.vs_reference(election.selected)
     )
     # Framing splices in at render: the stored fields alone re-render a prompt nothing was scored on.
     individual = None if head is None else head.individual
@@ -207,7 +209,7 @@ def build_prompt_export(
             round=winner.round,
             formula=formula,
             own=own,
-            vs_reference=selected.vs_reference if selected else None,
+            vs_reference=selected,
             vs_origin=winner.origin_panel.reading.lead,
             ability=level,
         ),

@@ -116,8 +116,7 @@ nodes:
       dispatch: rolling
       read_order: launch
   # The next parent: the arm `crown` ranks first of those it crowns (`selection.py::crowned`), else
-  # the round's leader where its parent did not beat it. The paper's earlier bar is `crown:
-  # posterior`, `next_parent: crowned` and the bench's `not_separated_stall: resets`.
+  # the round's leader where its parent did not beat it.
   theta_election:
     type: selector
     config:

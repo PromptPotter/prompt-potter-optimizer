@@ -16,8 +16,5 @@ export function metricLevel(
   metric: DisplayMetric,
   reading: ArmReading | null | undefined,
 ): number | null {
-  if (!reading) return null;
-  return metric === "ability"
-    ? (reading.ability?.theta?.value ?? null)
-    : (reading.own?.[metric]?.value ?? null);
+  return reading?.own?.[metric]?.value ?? null;
 }

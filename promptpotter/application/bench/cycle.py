@@ -15,12 +15,10 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import RoundSamples
-from promptpotter.application.scoring.selection import banked_lift_prior
-from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
@@ -81,8 +79,6 @@ def _distinct(failures: Sequence[RuntimeFailure]) -> list[RuntimeFailure]:
 def _origin_round(
     origin_arm: ReadArm,
     *,
-    fit: dict[ArmKey, ArmFit],
-    ruler: RulerStamp,
     optimizer_state: OptimizerState | None,
     elects_on: DisplayMetric,
     scorer: Scorer,
@@ -99,25 +95,13 @@ def _origin_round(
             ending=RoundEnding.ADOPTED,
             parent=None,
             electable=0,
-            fit=fit,
             elects_on=elects_on,
-            ruler=ruler,
         ),
         # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
         health=head_health(0, arm, results, picked=True, priors=()),
         origin_panel=OriginPanel.unread(ReadingState.SAME_INDIVIDUAL, RoundEnding.ADOPTED),
         optimizer_state=optimizer_state,
     )
-
-
-def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, ArmFit]:
-    """The origin read as a fresh floor, on the scale the cycle stands on."""
-    reading = difficulty.judging.frontier(origin.rows)
-    if reading is None:
-        return {}
-    return {
-        origin.key: ArmFit(theta=reading.theta, theta_se=reading.se, theta_caveat=reading.caveat)
-    }
 
 
 def _assert_overlay_preserved(sp: JobSearchPoint, session_pipeline_params: PipelineParams) -> None:
@@ -189,10 +173,6 @@ class Cycle:
         optimizer.refuse_pipeline(session.bound_resolution.chain)
         cycle.seat_origin(origin, None)
         return cycle
-
-    def lift_prior(self) -> LiftPrior | None:
-        """The tenant's banked lift prior over arm-vs-parent θ lifts on this dataset."""
-        return banked_lift_prior(self.survey, self.session.measured_dataset)
 
     def reopen_difficulty(self) -> None:
         """Round 0's view again, on the scorer its close locked."""
@@ -266,8 +246,6 @@ class Cycle:
             [
                 _origin_round(
                     origin,
-                    fit=_origin_fit(self.difficulty, origin),
-                    ruler=self.difficulty.stamp,
                     optimizer_state=optimizer_state,
                     elects_on=self.optimizer.elects_on,
                     scorer=self.session.state.scoring.scorer,
@@ -287,7 +265,6 @@ class Cycle:
         closed = self.rounds[-1].closed_state
         self.population = list(closed.population)
         self.slices.seat(closed)
-        self.difficulty.seat(self.elected[1].ruler)
 
     def reopen_origin(self) -> None:
         """A fork cut at round 0 keeps the origin's measurement and none of what its close banked."""
@@ -295,8 +272,6 @@ class Cycle:
         assert origin.election is not None and head is not None, "round 0 ends on its origin"
         key = origin.election.ended_on
         self.restate_rounds([origin])
-        # On the scale round 0 opened on, so its θ re-reads as it was read.
-        self.difficulty.seat(origin.election.ruler)
         self.seat_origin(ReadArm(key, head, origin.rows(key)), None)
         self.population = []
         self.slices = SliceMap(self.optimizer.slices)

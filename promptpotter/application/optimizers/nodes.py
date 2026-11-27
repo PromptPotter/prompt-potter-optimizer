@@ -30,7 +30,7 @@ from promptpotter.application.scoring.paired import RoundPairs
 from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.prompt_blocks import PackShelf
-from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmPosition, Concluded, Elimination, Proposal, Proposed
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -51,7 +51,6 @@ from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -64,7 +63,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import ReadArm, RoundContext
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.config_map import CouplingSeverity
-    from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
 
@@ -438,9 +436,8 @@ class MeasuredRound:
     filed: dict[ArmKey, ReadArm]
     # Each filed arm's fold of those rows (`domain/fitness_fold.py::arm_folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
-    fit: dict[ArmKey, ArmFit]
-    # Every draw-electable arm's θ over `raced` against the parent: the one fit the election reads.
-    abilities: RoundAbilities
+    # Each arm (`b`) over the individual it was judged against (`a`).
+    vs_reference: dict[ArmKey, PairedReading]
     electable: list[ArmKey]
     coverage_floor: int
     cut: StopLoop | None
@@ -613,11 +610,7 @@ class Selector(NodeMember, Protocol):
         return None
 
     def covered(
-        self,
-        _selected: SelectedOptimizer,
-        cells: CellSheet,
-        _parent: Collection[str],
-        _ruler: DeltaRuler | None,
+        self, _selected: SelectedOptimizer, cells: CellSheet, _parent: Collection[str]
     ) -> int:
         """The cells of an arm the round's coverage floor counts, so whether ``select`` can read it
         at all (a cut round none clears is unwound): every scored one, *parent* holding the cells

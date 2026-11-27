@@ -2,7 +2,6 @@ import type { CSSProperties } from "react";
 import type { ServedDashboard } from "@/lib/api/types";
 import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
-import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
 import { CardFrame, HoverCard, Loading, ReadState } from "@/components/ui";
@@ -115,11 +114,6 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
               />
             )}
           </div>
-          {!m.areCycles && m.wonOnTheta && (
-            <div className="fitness-notes">
-              <ThetaCaveats caveat={m.ability?.caveat ?? null} priorDominated={m.priorDominated} />
-            </div>
-          )}
         </div>
         {maskOpen && !drilled && (
           <Criterion

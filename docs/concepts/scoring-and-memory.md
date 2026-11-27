@@ -15,7 +15,7 @@ under the node-chain prefix that PRODUCED it, so every configuration sharing tha
 configuration × bank's answers are its **population**; each reader declares its take over it. The archive knows
 no run, campaign or round: the ledger names the answers a walk took. **A measurement is filed once**: a claimed
 cell as its claim retires, so a waiter replays it, any other at its take or its stopped walk's bank
-(`search_point_scorer.py::_ArchiveRecorder`). **A press moves the bill, never the running
+(`query_loop.py::_ArchiveRecorder`). **A press moves the bill, never the running
 campaign's record**: what its walks bought and none took (a look-ahead cell a cut discarded,
 `domain/records/untaken.py::UntakenBoughtRecord`) is filed, every other campaign's memory, and left out of its own until one of
 its walks takes it (`archive_queries.py::OpenAt`). Every other answer stays memory, its campaign deleted or not.

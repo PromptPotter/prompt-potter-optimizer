@@ -116,14 +116,6 @@ export function SearchpointDrillIn({
                 }
               />
             )}
-            {reading.ability?.theta != null && (
-              <Fact
-                k="ability"
-                hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher fitness."
-                v={fmtEstimate(reading.ability.theta)}
-
-              />
-            )}
             {composite != null && <Fact k="composite" v={fmtUnit("score", composite)} />}
             <Fact
               k="winner"

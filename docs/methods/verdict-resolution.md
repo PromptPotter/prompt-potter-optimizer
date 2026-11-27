@@ -44,14 +44,11 @@ Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, 
 election (`difficulty.py::DifficultyView.fold`), so a round's race and election read the scale it
 opened on. Every reading holds δ fixed and solves θ alone, one arm at a time (`::fit_theta`), or the
 scale moves under the round it judges. Each δ enters at its SE, its slope scaled by
-`1/√(1+π·a²·se_δ²/8)` (`DeltaRuler.entries`), and an arm's prior sits on its lift: arm and bar are
-both fit centred on the parent's own read (`rasch.py::candidate_abilities`), so an equal arm on 8
-cells against a parent at θ = +1.5 on 40 reads −0.02, where per-arm N(0, 1.5²) priors read −0.27.
+`1/√(1+π·a²·se_δ²/8)` (`DeltaRuler.entries`).
 
-`δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
-
-**θ is why per-round resubsetting is safe.** On different subsets raw fitness drifts — whoever drew
-the easier samples wins — but θ is subset-invariant (Rasch specific objectivity).
+`δ_s` selects samples and ranks hardness; `θ_c` is the race's instrument (PoBB's cut) and the level
+L4 reads (`LevelSeries`). **No θ rides the round's statement**: the round is won on paired verdicts
+over the parent on shared cells, which differencing on one cell set makes subset-safe.
 
 **Responses are graded, not Bernoulli.** `Observation.response` is the cell's composite OBJECTIVE
 clamped to [0,1] (`intelligence/rasch.py::graded_response`), never the per-sample fitness; the
@@ -85,21 +82,19 @@ disk (`(ns)` beside its `p`). Degenerate candidates (a constant
 answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
 never the one that proposed it.
 
-**A campaign drifting on noise is served, never inferred** (`dashboard_rows.py::ServedRound`): each
-round's `lift_prior` is the generator's N(μ0, τ²) off its own arm-vs-parent θ lifts (μ0 < 0 with τ ≈ 0
-is a generator walking on noise), and a promoting round's `hold_up` is its pick over the parent it beat
-on the `LevelSeries` scale, its later rows as parent included; a flat ruler withholds it.
+**A promotion that does not hold is served, never inferred** (`dashboard_rows.py::ServedRound`): a
+promoting round's `hold_up` is its pick over the parent it beat on the `LevelSeries` scale, its later
+rows as parent included; a flat ruler withholds it.
 
-**θ is the verdict; fitness is not** — raw fitness moves without ability:
+**The paired lift is the verdict; a round's own fitness is not** — raw fitness moves without ability:
 
 - **The subset moves.** `per_round_resubset` is on, so consecutive rounds are different exams.
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early and `build_round_order`
   front-loads the parent's misses, so a cut arm was graded on a harder prefix.
 
 So **a winner with lower fitness than a rival or the previous round is normally correct** — the
-election ranks on what potter's crown reads (`crowning_bar.py::CrowningBar.rank`): under its
-default `paired_point` the paired verdict lift over the parent on the vote's cells, under the θ readings
-`P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls the election wrong off the
+election ranks on what potter's crown reads (`crowning_bar.py::CrowningBar.rank`): the paired
+verdict lift over the parent on the vote's cells. When an operator calls the election wrong off the
 fitness column, say which column it used.
 
 **No harness rule ranks rounds by their own readings.** The run has one ceiling stop: the declared

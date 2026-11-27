@@ -52,9 +52,8 @@ def render_hard_sample_heatmap(
         for key in sample_order:
             fitness = cells.get((cid, key))
             row_cells.append(_UNMEASURED * cell_w if fitness is None else _shade(fitness) * cell_w)
-        theta_str = f"{view.theta[cid]:>+5.2f}" if cid in view.theta else " " * 5
         label = cid[: label_w - 1].ljust(label_w)
-        lines.append(f"  {label} {theta_str}  {''.join(row_cells)}")
+        lines.append(f"  {label} {''.join(row_cells)}")
 
     lines.append("")
     if not fitted:

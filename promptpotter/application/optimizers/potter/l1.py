@@ -550,11 +550,9 @@ def _top_lifts(rounds: list[RoundResult]) -> list[float]:
     tops: list[float] = []
     for r in rounds:
         lifts = [
-            fit.vs_reference.headline.estimate.value
+            pair.headline.estimate.value
             for key in r.proposed
-            if (fit := r.fit(key)) is not None
-            and fit.vs_reference is not None
-            and fit.vs_reference.state is ReadingState.READ
+            if (pair := r.vs_reference(key)) is not None and pair.state is ReadingState.READ
         ]
         if lifts:
             tops.append(max(lifts))

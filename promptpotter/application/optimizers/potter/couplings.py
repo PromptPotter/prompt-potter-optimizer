@@ -15,7 +15,7 @@ ADAPTIVE_QUEUE = (
         relation=(
             "per_round_resubset=ON re-draws the scored subset per round. Every "
             "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
-            "c0_ok, the round-winner election and PoBB elimination all via "
+            "c0_ok and PoBB elimination all via "
             "fit_theta on cycle.difficulty — and that ruler is EXTENDED to cover each "
             "round's new cells, so the fitness-space collision is resolved."
         ),
@@ -27,28 +27,6 @@ ADAPTIVE_QUEUE = (
         ),
         severity="info",
         predicate=lambda _c, k, _d, _s: bool(k.per_round_resubset),
-    ),
-    MemberCoupling(
-        name="display_subset_relative_under_resubset",
-        knobs=("per_round_resubset",),
-        bench_knobs=("display_metric",),
-        estimand=Estimand.DISPLAY,
-        relation=(
-            "With per_round_resubset ON, fitness/composite are subset-relative while "
-            "the gate is θ; the number the operator reads first should be ability "
-            "(θ) or carry the subset badge."
-        ),
-        consequence=(
-            "The views lead with fitness/composite while θ decides the winner. Every "
-            "surface now prints θ beside it, so the pairing is legible rather than "
-            "unexplained — but the number read first is still the subset-relative one. Set "
-            "display_metric='ability' under resubset."
-        ),
-        # `inert`, not `info`: nothing co-moves; one knob's display choice wastes the other's invariance.
-        severity="inert",
-        predicate=lambda c, k, _d, _s: (
-            bool(k.per_round_resubset) and c is not None and c.display_metric != "ability"
-        ),
     ),
 )
 
