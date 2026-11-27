@@ -1,15 +1,9 @@
 import os
 
-# OpenBLAS commits a buffer per logical core when numpy LOADS, here and in every child process.
+# The one act at import: OpenBLAS commits a buffer per logical core when numpy LOADS, and numpy can
+# load before any entry point's start runs, here and in every child process (16 cores: ~640 MB).
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 from promptpotter.shared.extras import require_core
 
 require_core()
-
-# Every process imports this before its first write: the root its environment names at import is
-# held private here (`user_data_root()` itself resolves per call).
-from promptpotter.config.paths import user_data_root  # noqa: E402
-from promptpotter.infrastructure.store.private_root import hold_private  # noqa: E402
-
-hold_private(user_data_root())

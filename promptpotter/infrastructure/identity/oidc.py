@@ -31,11 +31,11 @@ from cryptography.hazmat.primitives.asymmetric.rsa import (
 )
 from pydantic import Field, ValidationError
 
+from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
     unlink_robust,
-    validate_path_component,
     write_json,
 )
 from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason

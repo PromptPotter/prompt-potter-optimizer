@@ -61,7 +61,7 @@ export function SteerForkPanel({
     Record<string, unknown>
   > | null>(null);
   // The fork runs the candidate's own record; only the operator's edit is a steer.
-  const preview = useRead(forkPreviewRead(root.campaignId, pickedOverlay ?? {}));
+  const preview = useRead(forkPreviewRead(path, pickedOverlay ?? {}));
   const checking = preview.status === "loading";
   const refused = readyData(preview)?.steer === "refused";
 

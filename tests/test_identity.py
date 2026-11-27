@@ -457,7 +457,7 @@ def _unranked() -> PipelineSchema:
     return pipeline_schema(
         [
             PipelineNode(
-                name="solve", kind=NodeKind.LLM, current_config={"model": "m"}, tunes_llm=False
+                name="solve", kind=NodeKind.LLM, current_config=NodeCall(model="m"), tunes_llm=False
             )
         ]
     )
@@ -475,7 +475,7 @@ def test_the_judge_a_cell_is_graded_by_moves_its_archive_key_and_no_arm_id() -> 
             PipelineNode(
                 name="llm_only",
                 kind=NodeKind.LLM,
-                current_config={"model": "m", "provider": "p"},
+                current_config=NodeCall(model="m", provider="p"),
                 tunes_llm=False,
             )
         ]
@@ -751,7 +751,7 @@ def test_only_an_edit_to_what_a_campaigns_chain_admits_re_keys_that_campaign(
         kind=NodeKind.LLM,
         role=NodeRole.RANKER,
         observation_mappings=[ObservationMapping(pipeline_key="ranking")],
-        current_config={"model": "m"},
+        current_config=NodeCall(model="m"),
         tunes_llm=False,
     )
     admitted_by = {
@@ -938,7 +938,7 @@ def test_an_unpinned_node_is_filed_as_and_sent_to_the_host_it_is_pinned_to(
                 PipelineNode(
                     name="llm_only",
                     kind=NodeKind.LLM,
-                    current_config={"model": cfg["model"]},
+                    current_config=NodeCall(model=cfg["model"]),
                     prompt_info=PROMPT_INFO,
                     tunes_llm=True,
                 )
@@ -981,7 +981,7 @@ def test_an_edit_on_the_second_prompt_node_is_scored_with_it_and_filed_apart() -
             PipelineNode(
                 name=name,
                 kind=NodeKind.LLM,
-                current_config={"model": "m"},
+                current_config=NodeCall(model="m"),
                 prompt_info=NodePromptInfo(fields=fields),
                 tunes_llm=True,
             )
@@ -2269,7 +2269,13 @@ def test_an_edit_lays_over_the_drafts_config_depth_first(
         "temperature": 0.3,
         "max_tokens": 64,
     }, "an edit to one knob clobbered the node's other"
-    for malformed in ({"weights": "tokens=1"}, {"per_cell": "correct +"}):
+    # A term no cell of the campaign carries is refused with the edit, never at every cell.
+    malformations = (
+        {"weights": "tokens=1"},
+        {"per_cell": "correct +"},
+        {"per_cell": "fitness - typo"},
+    )
+    for malformed in malformations:
         with pytest.raises((PayloadInvalidError, ScoringFormulaError)):
             asyncio.run(
                 plan_draft_patch(
@@ -2431,13 +2437,15 @@ class _Steered(NamedTuple):
 
 @pytest.fixture(scope="module")
 def steered_line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
-    # A root and its fork, each on the menu the backend served it: the fork's carries one rung more.
+    # A root and its fork, each on the menu the backend served it: the fork's carries one rung more
+    # and one model less.
     # Run once for the module (~2.7 s), ~25 ms a fact.
     async def act(world: World) -> tuple[CampaignCycle, CampaignCycle]:
         with pytest.MonkeyPatch.context() as served:
             served.setitem(_SERVED, "model", _MODELS)
             root = await world.campaign()
             served.setitem(_SERVED, "reasoning_effort", [*_SERVED["reasoning_effort"], "xhigh"])
+            served.setitem(_SERVED, "model", _MODELS[:1])
             fork = await world.fork(root.hop, 0)
         return root.session.at, fork.session.at
 
@@ -2482,19 +2490,23 @@ def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(steered: 
 
 def test_a_node_permits_what_its_recorded_schema_serves_under_the_line(steered: _Steered) -> None:
     # So the backend's menu sanctions a model the campaign's own (empty) layer never names.
-    stores, campaign_id = steered.stores, steered.root.campaign.campaign_id
+    stores, root = steered.stores, steered.root.hop
     plain = {"llm_only": {"model": _MODELS[1]}}
-    assert fork_preview(stores, campaign_id, plain) == ForkPreviewResponse(
+    assert fork_preview(stores, root, plain) == ForkPreviewResponse(
         steer="clean", permitted={"llm_only": _MODELS}
     ), "a steer inside the served model list was graded the babysit act"
-    assert fork_preview(stores, campaign_id, {"llm_only": {"model": "z"}}).steer != "clean", (
+    assert fork_preview(stores, root, {"llm_only": {"model": "z"}}).steer != "clean", (
         "a model no layer permits forked clean"
     )
     at_fork = permitted_narrowing(stores, steered.fork)["llm_only"].param_allowed_values
     assert (at_fork["reasoning_effort"], at_fork["model"]) == (
         [*_SERVED["reasoning_effort"], "xhigh"],
-        _MODELS,
+        _MODELS[:1],
     ), "a fork's steer was checked against its root's menu, not its own"
+    # A launch at the fork answers to its line's narrowing: the root-only model is the babysit act.
+    assert fork_preview(stores, steered.fork.hop, plain).steer != "clean", (
+        "a steer outside its fork's narrowing read clean off the root's"
+    )
 
 
 def test_a_served_row_says_whether_its_reader_may_steer_it_past_permitted(
@@ -3794,7 +3806,7 @@ def test_answering_in_text_sends_no_contract_to_answer_into() -> None:
         CONNECTORS.get("termnorm"), None, {"nodes": {"llm_only": served_llm}}
     ).over(d234)
     text_schema = parse_pipeline_response(text_pipeline)
-    base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
+    base = {n.name: n.current_config.laid_keys() for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
     )
@@ -3892,16 +3904,15 @@ def test_a_nested_fields_description_folds_into_the_contract_it_names() -> None:
             PipelineNode(
                 name="llm_only",
                 kind=NodeKind.LLM,
-                current_config={
-                    "model": "m",
-                    "output_schema": {"type": "object", "properties": invoice},
-                },
+                current_config=NodeCall.model_validate(
+                    {"model": "m", "output_schema": {"type": "object", "properties": invoice}}
+                ),
                 tunes_llm=False,
             )
         ]
     )
     amount = description_key("lines.amount")
-    declared = cast(Any, nested.get_node("llm_only")).current_config
+    declared = cast(Any, nested.get_node("llm_only")).current_config.laid_keys()
     pp = fold_output_contract(
         PipelineParams().with_nodes({"llm_only": {**declared, amount: "Net, in CHF."}}), nested
     ).laid_nodes
@@ -3986,7 +3997,7 @@ def _graded(outer_schema: Any) -> Any:
     grade = PipelineNode(
         name="grade",
         kind=NodeKind.LLM,
-        current_config={"model": "m"},
+        current_config=NodeCall(model="m"),
         prompt_info=PROMPT_INFO,
         tunes_llm=True,
     )

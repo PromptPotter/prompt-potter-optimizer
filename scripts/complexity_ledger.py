@@ -331,7 +331,16 @@ BASELINE = {
     # by hand; a prior's catch-up reads its rows under the scorer it files under.
     # w8-l4 (−2): a seat's optimizer owns its nodes (`panel.inner_nodes.<optimizer>`); a content
     # filter's row is graded and cut by the rate, not fatal on one sighting.
-    "package_lines": 113904,
+    # w8-resolve3 (+38): `Resolution.proven_scorer` refuses a criterion's unowned term before an
+    # answer is filed (`campaign_owners`, `refuse_unowned_terms`); a fork's stamp reads its hop's
+    # narrowing beside the root's; `current_config` is a `NodeCall`, read by field or `laid_keys()`.
+    # w8-launch3 (−6): the sweep alone reclaims; `PathComponent` is the domain's.
+    # w8-box2 (+8): a DSPy LM and an installed agent are handed `wallet.py::sending_key`'s key,
+    # never the environment's. (+6 at its landing): the OpenBLAS thread cap stays the one act at
+    # import, since numpy can load before an entry point's start (16 cores: ~640 MB per process).
+    # w8-job (−36): a job holds no ending; how it ended is read off its cycle's stop.
+    # Windows stamp fix (+1): a compaction taker seeks to byte 0 before it locks.
+    "package_lines": 113915,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -404,7 +413,9 @@ BASELINE = {
     # w8-launch (−1): measured at its landing; one served property gained a reader.
     # w8-web (+1): `RunStanding.candidates_tested`, the lift denominator `_climb` reads server-side;
     # its browser figure moved to `ServedDashboard.line_count`.
-    "p_served": 198,
+    # w8-resolve3 (+1): the fork preview is asked of a cycle (`_CycleAddressed`), whose `descend`
+    # no browser preview sends.
+    "p_served": 199,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

@@ -20,14 +20,13 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     TypeAdapter,
     ValidationError,
-    field_validator,
     model_serializer,
     model_validator,
 )
 
 from promptpotter.domain.bulletin import BULLETIN_TEXT_CHARS
 from promptpotter.domain.campaign import ArmName, ArmSeat
-from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
+from promptpotter.domain.cycle_paths import PathComponent
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
     CampaignLayer,
@@ -1011,19 +1010,11 @@ class BankSnippetPayload(CommandPayload, kind=CommandKind.BANK_SNIPPET):
         min_length=1, max_length=64, description="The id of the snippet the text was edited from."
     )
     text: str = Field(min_length=1, max_length=16384, description="The edited text.")
-    experiment: str = Field(
+    experiment: PathComponent = Field(
         min_length=1,
         max_length=128,
         description="The campaign or check-in draft it was written in.",
     )
-
-    @field_validator("experiment")
-    @classmethod
-    def _an_id(cls, experiment: str) -> str:
-        """Read on the ids' own grammar: a family dataset's campaign id holds a dot."""
-        if not ID_COMPONENT_RE.fullmatch(experiment):
-            raise ValueError(f"{experiment!r} names no campaign or draft")
-        return experiment
 
 
 type ArchiveMode = Literal["compact", "restore", "purge-cold", "reclaim"]
@@ -1515,7 +1506,7 @@ class ReadKind(StrEnum):
     DRAFT = "draft"
     CAMPAIGN_PIPELINE = "campaign-pipeline"
     # A read on a POST: nothing is written.
-    FORK_PREVIEW = "fork-preview"
+    CYCLE_FORK_PREVIEW = "cycle-fork-preview"
     CONFIG_MAP = "config-map"
     CAMPAIGN_STORAGE = "campaign-storage"
     WORKSPACE_STORAGE = "workspace-storage"

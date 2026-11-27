@@ -15,20 +15,23 @@ from typing import Any
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import AdmissionGate
 from promptpotter.application.runner.termination import run_stop_reason
-from promptpotter.config.paths import ENDED_JOBS_DIR, LIVE_JOBS_INDEX, UNSWEPT_DIR
+from promptpotter.config.paths import (
+    ENDED_JOBS_DIR,
+    LIVE_JOBS_INDEX,
+    REFUSED_JOBS_DIR,
+    UNSWEPT_DIR,
+)
 from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     JOB_ADAPTER,
-    LAUNCH_EXITS,
     LAUNCH_MOVES,
     LIVE_JOB_IDS,
     UNRESOLVED_HOP,
     UNSWEPT_FAULTS,
     CampaignLaunch,
     Job,
-    JobEnding,
     JobHolder,
     LaunchMove,
     LaunchMoveError,
@@ -225,20 +228,13 @@ class JobRegistry:
             job = self.get(job_id)
             if job is None or not job.queued:
                 return None
-            return self.move(job_id, LaunchMove.END, ended=JobEnding(lapse="withdrawn"))
+            return self.move(job_id, LaunchMove.END)
 
-    def move(
-        self,
-        job_id: str,
-        move: LaunchMove,
-        *,
-        hop: CycleHop | None = None,
-        ended: JobEnding | None = None,
-    ) -> Job | None:
+    def move(self, job_id: str, move: LaunchMove, *, hop: CycleHop | None = None) -> Job | None:
         """THE one writer of a launch's phase, every door's: *move* by its `LAUNCH_MOVES` row, a LAND
-        onto *hop*, an END stamping *ended*. ``None`` where the job is gone, or an END finds it
-        ended (stamped once: a queue waiter waking on a job already ended raises into a second
-        release); an undeclared move raises `LaunchMoveError`."""
+        onto *hop*. ``None`` where the job is gone, or an END finds it ended (stamped once: a
+        queue waiter waking on a job already ended raises into a second release); an undeclared
+        move raises `LaunchMoveError`."""
         sources, targets = LAUNCH_MOVES[move]
         stamp: dict[str, Any]
         match move:
@@ -252,7 +248,7 @@ class JobRegistry:
             case LaunchMove.START:
                 stamp = {"stage": RunPhase.RUNNING, "started_at": utcnow_iso()}
             case LaunchMove.END:
-                stamp = {"released_at": utcnow_iso(), **(ended or JobEnding())._asdict()}
+                stamp = {"released_at": utcnow_iso()}
 
         def change(job: Job) -> Mapping[str, Any] | None:
             if move is LaunchMove.END and job.released:
@@ -262,8 +258,6 @@ class JobRegistry:
             moved = replace(job, **stamp)
             if moved.state not in targets:
                 raise LaunchMoveError(f"job {job_id}: {move} from {job.state} reads {moved.state}")
-            if (left := moved.exit) is not None and job.state not in LAUNCH_EXITS[left]:
-                raise LaunchMoveError(f"job {job_id} is {job.state}: no {left} exit from there")
             return stamp
 
         return self._stamp(job_id, change)
@@ -299,38 +293,37 @@ class JobRegistry:
                 self._gate.close_for(target)
             return held
 
-    def release(
-        self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
-    ) -> Job | None:
-        """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
-        (`opening.py::Opening`'s exit): the `StopReason` its run returned (*stepped* where it
-        paused at its round allowance); any raise in the queue withdrew it, one before its admission
-        or a campaign's refusal at any point refused it, and an interrupt or a raise after it is the
-        stop it reads as (`run_stop_reason`); nothing at all is a scoring pass that returned."""
+    def release(self, job_id: str, ended: BaseException | None = None) -> StopReason | None:
+        """Ends the job, answering the stop its raise *ended* reads as, which the cycle's declared
+        stop takes (`opening.py::Opening`'s exit; a run declares its own): an interrupt, or a raise
+        once admitted, is the stop it reads as (`run_stop_reason`); ``None`` where it was withdrawn
+        from the queue, refused (before its admission, or by its campaign at any point), or
+        returned. How it ended is its cycle's stop, never the job's (`command_reading.py`); a
+        refusal is filed beside it, before its release, so no reader finds it released unsaid."""
         with self.admission_gate():
             job = self.get(job_id)
-            if job is None:
+            if job is None or job.released:
                 return None
-            match ended:
-                case StopReason():
-                    ending = JobEnding(ending=ended, stepped=stepped)
-                case BaseException() if job.queued:
-                    ending = JobEnding(lapse="withdrawn")
-                case BaseException() if isinstance(ended, CampaignRefusedError) or (
-                    not job.admitted and not launch_interrupted(ended)
-                ):
-                    refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
-                    ending = JobEnding(lapse="refused", refusal=Refusal.of(refused))
-                case BaseException():
-                    ending = JobEnding(ending=run_stop_reason(ended))
-                case None:
-                    ending = JobEnding()
-            return self.move(job_id, LaunchMove.END, ended=ending) or job
+            if ended is None or job.queued:
+                self.move(job_id, LaunchMove.END)
+                return None
+            refused = isinstance(ended, CampaignRefusedError) or (
+                not job.admitted and not launch_interrupted(ended)
+            )
+            if refused:
+                said = ended if isinstance(ended, PotterError) else PotterError(str(ended))
+                write_json(self._refused_path(job_id), Refusal.of(said).model_dump(mode="json"))
+            self.move(job_id, LaunchMove.END)
+        return None if refused else run_stop_reason(ended)
+
+    def refusal(self, job_id: str) -> Refusal | None:
+        """What *job_id* was refused with, where its release refused it."""
+        return read_file(self._refused_path(job_id), Refusal.model_validate_json)
 
     def launched_by(self, job_ids: Sequence[str], *, principal_id: str) -> list[Job] | None:
         """Each of *job_ids* as *principal_id* launched it, a reaped one as its release stamped it;
         ``None`` where any is unknown or another's launch. A live job whose producer is gone reads
-        `orphaned` here before the sweep releases it: a reader never waits on one that will not
+        released here before the sweep releases it: a reader never waits on one that will not
         end."""
         jobs = [self.get(job_id) or self._read(self._ended_path(job_id)) for job_id in job_ids]
         known = [job for job in jobs if job is not None and job.principal_id == principal_id]
@@ -338,7 +331,7 @@ class JobRegistry:
             return None
         for job in known:
             if not job.released and not self.in_flight(job):
-                job.released_at, job.lapse = utcnow_iso(), "orphaned"
+                job.released_at = utcnow_iso()
         return known
 
     def get(self, job_id: str) -> Job | None:
@@ -462,6 +455,7 @@ class JobRegistry:
         reaped: list[Job] = []
         for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
             if (ended := self._read(path)) is not None and (ended.released_at or "") < kept_from:
+                unlink_robust(self._refused_path(ended.job_id))
                 unlink_robust(path)
         for job in self.list_all():
             if job.released and not _counted_on(job, today):
@@ -471,7 +465,7 @@ class JobRegistry:
             with self.admission_gate():
                 if self.in_flight(self.get(job.job_id) or job):
                     continue
-                if self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned")) is None:
+                if self.move(job.job_id, LaunchMove.END) is None:
                     continue
             reaped.append(job)
         return reaped
@@ -494,3 +488,6 @@ class JobRegistry:
 
     def _ended_path(self, job_id: str) -> Path:
         return self._path(job_id).parent / ENDED_JOBS_DIR / f"{job_id}.json"
+
+    def _refused_path(self, job_id: str) -> Path:
+        return self._path(job_id).parent / REFUSED_JOBS_DIR / f"{job_id}.json"

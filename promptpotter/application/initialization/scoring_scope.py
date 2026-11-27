@@ -21,10 +21,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_spawn_of,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
-from promptpotter.application.scoring.evaluators import (
-    connector_report_owner,
-    observation_owner,
-)
+from promptpotter.application.scoring.evaluators import campaign_owners
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
@@ -54,20 +51,16 @@ def scorer_setup(
     session: Session, campaign_config: CampaignConfig, *, partition: BankPartition
 ) -> ScorerSetup:
     """What *session* scores under *campaign_config*, built whole once per launch or pass."""
-    connector = session.backend_client.connector
+    owners = campaign_owners(
+        session.backend_client.connector, session.bound_resolution.chain.observation_keys
+    )
     graded = Resolution(campaign_config, session.bank.verifier_graded)
     return ScorerSetup(
-        scorer=graded.scorer,
+        scorer=graded.proven_scorer(owners),
         grading=graded.grading,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
-        judges=build_evaluators(
-            campaign_config.judges,
-            beside=(
-                connector_report_owner(connector.name, connector.cell_report_keys),
-                observation_owner(session.bound_resolution.chain.observation_keys),
-            ),
-        ),
+        judges=build_evaluators(campaign_config.judges, beside=owners),
     )
 
 

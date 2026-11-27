@@ -729,24 +729,24 @@ class CampaignPipelineParams(
 
 
 class ForkPreviewParams(
-    ReadParams,
-    read=ReadKind.FORK_PREVIEW,
-    route="/campaigns/{campaign_id}/fork-preview",
+    _CycleAddressed,
+    read=ReadKind.CYCLE_FORK_PREVIEW,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/fork-preview",
     method="POST",
 ):
-    """Whether this steer takes the babysit path: the fork gate's own verdict, asked without
-    forking.
+    """Whether this steer takes the babysit path: the gate's own verdict on a fork cut at this
+    cycle, asked without forking.
 
     A read despite the POST: nothing is written, and no capability is needed to ask.
     """
 
-    campaign_id: str = Field(min_length=1, max_length=128)
     pipeline_overlay: dict[str, dict[str, Any]] = Field(
         description="The `nodes.*.config` overlay the fork would carry, as its `CycleStart` sends it"
     )
 
     def answer(self, caller: Caller) -> ForkPreviewResponse:
-        return fork_preview(caller.stores, self.campaign_id, self.pipeline_overlay)
+        cycle = self.viewed(caller)
+        return fork_preview(cycle.stores, cycle.hop, self.pipeline_overlay)
 
 
 class ConfigMapParams(

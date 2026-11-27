@@ -303,7 +303,7 @@ async def run_held_job(
     observers = await asyncio.to_thread(enter_cycle, session, readout_sink=readout_sink)
     # Anything raised from here fired OUTSIDE the runner's try, an interrupt aside: it stamps.
     opening.running_on(session.hop)
-    ended, result = await run_optimization(
+    return await run_optimization(
         list(session.bank.samples),
         cycle,
         session=session,
@@ -312,8 +312,6 @@ async def run_held_job(
         budget=budget,
         optimizer=optimizer,
     )
-    opening.ended = result
-    return ended, result
 
 
 if __name__ == "__main__":

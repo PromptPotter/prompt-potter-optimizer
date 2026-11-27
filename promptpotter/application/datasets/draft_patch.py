@@ -25,6 +25,7 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
+from promptpotter.application.scoring.evaluators import campaign_owners
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
     MATCHER_KEY,
@@ -132,8 +133,8 @@ async def plan_draft_patch(
     if config != draft.config:
         laid = draft_pipeline(stores, draft.patch(**changes, config=config), served)
         if "scoring" in sent:
-            # Compiled here, so a criterion no cell could be graded by is refused, never stored.
-            _ = laid.scorer
+            # Proven here, so a criterion no cell could be graded by is refused, never stored.
+            laid.proven_scorer(campaign_owners(served.connector, laid.chain.observation_keys))
         changes["config"] = _narrowing_follows_schema(
             config, _description_keys(was), _description_keys(laid)
         )

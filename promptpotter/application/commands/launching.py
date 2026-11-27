@@ -148,7 +148,7 @@ def parse_cycle_start(sent: ForkStart, stores: Stores, at: CampaignCycle) -> Cyc
             }
         except ValueError as exc:
             raise PayloadInvalidError(f"payload.start.node_narrowing invalid: {exc}") from exc
-    verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.laid)
+    verdict = steer_verdict(stores, permitted_narrowing(stores, at), sent.laid)
     if verdict == "refused":
         raise NotFoundError("Not found", code="not_found")
     overlay = _typed_steer(sent.laid, resolved(stores, at).declared) if sent.laid else {}

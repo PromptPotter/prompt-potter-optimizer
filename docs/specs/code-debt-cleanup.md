@@ -94,14 +94,6 @@ row it closes.
   cut it: `wiring.py::init_services`, `session_bank` and `dataset_experiment` read the landed
   definition off disk). **Re-test:** one `select_optimizer` call
   between a draft's Start and its first cycle plan.
-- **A per-cell criterion naming a term no cell carries compiles** (`pipeline_resolve.py::Resolution`, compiled at
-  the check-in by `datasets/draft_patch.py`) and refuses per cell at the run. Root: `compiler.py::compile_scorer`
-  refuses a name no owner holds, `evaluators.py::cell_name_owners` beside the campaign's own owners (the
-  connector's terms and report keys, the observations); a check-in-only list in `draft_patch.py` would
-  be a second spelling of that roster. **Held:** the owners ride the scoring spec first (rk-rest cut
-  it: no `Resolution` reader outside the check-in holds them, and an optional owners argument is a
-  flag); the compiler is a hashed unit, so the refusal moves digests. **Re-test:** a scoring edit `correct - no_such_term`
-  is refused.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -223,14 +215,13 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/26 · rn-conn
 
-- **The pipeline carrier is typed only at its door**: both connectors now read `NodeCall`'s fields,
-  but `PipelineNode.current_config` is a `dict` (`domain/pipeline_parsing.py:381` builds it from the
-  validated call), so `pipeline_schema.py` (7 reads), `pipeline_resolve.py:297` and `free_tier.py:137`
-  read the model by string; `measurement_log.py::_span` and `wounds.py:184` read a laid dump the same
-  way. The re-test also counts carriers that are no `NodeCall` (an OpenAI request body in
-  `openai_compat.py`, a record payload in `audit_trail.py`, a model menu, dspy's `LM.kwargs`), which
-  the action leaves alone. Action: type `current_config` as `NodeCall` and read its fields.
-  **Re-test:** `git grep -cE "current_config\.get\(" -- promptpotter` is 0.
+- **The pipeline carrier is typed only at its door**: `PipelineNode.current_config` is a `NodeCall`
+  now, but two laid dumps still read the model by string: `measurement_log.py::_span` reads a cell's
+  `node_configs` (the archive address, `measurement_archive.py::config_key`'s `list[tuple[str, dict]]`)
+  and `injections/wounds.py::_format_runtime_failure_group` reads `RuntimeFailure.observed_config`,
+  laid as a dict by `scoring/arm_states.py`. Action: the archive address and `observed_config` carry
+  a `NodeCall` per node, each hash reading its laid dump. **Re-test:**
+  `git grep -cE "cfg\.get\(\"(model|provider)\"" -- promptpotter` is 0.
 
 ### batch/27 · rec
 
@@ -395,23 +386,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/31 · box
 
-- **The box holds the app's environment twice**: the services load `/etc/promptpotter.env`, and both
-  they and the login user's CLI read the checkout's `.env` under it through `config/paths.py::env_file_path`,
-  since no unit or shell sets `PROMPTPOTTER_ENV_FILE`. Checked live 2026-11-13: the app resolves the checkout
-  `.env`, and `TERMNORM_TOKEN` is held only there. One file serves both; which one is the operator's (read
-  access for the login user, or SELinux under `$HOME`), and the token moves into it first. **Rides with:**
-  box 1.
-- **`promptpotter/__init__.py` acts at import, on the process and on the data root**: `:4` sets
-  `OPENBLAS_NUM_THREADS`, a fact of the process, not the package, and `hold_private(user_data_root())`
-  writes the data root before any process's landing. Action: the unit and the process launcher set the
-  environment, and the entry that lands holds the root private. **Rides with:** box 1. **Re-test:**
-  `git grep -n "OPENBLAS" -- promptpotter` is empty, and
-  `git grep -n "hold_private" -- promptpotter/__init__.py` is empty.
-- **The box runbook skips the move `site_records/` owes**: `deploy-linux/README.md` has no step that moves
-  it out before `update.sh`; only `CHANGELOG.md` and `cd8593459`'s body say it. `update.sh`'s dry-run
-  refuses and rolls back, so nothing is wiped. Action: a step that moves `site_records/` out before
-  `update.sh`. **Rides with:** box 1. **Re-test:**
-  `git grep -n "site_records" -- deploy-linux/README.md` names the move.
 - **A resume's wait is unattributed**: on the box a resume takes up to 72 s to be applied, while
   offline its `open_launch`, `open_cycle` and `close_init` total about 0.3 s and the landing stamps once
   per schema, so the wait sits on the backend's network edges (every symbol is present, but the box
@@ -489,17 +463,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-
-### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
-
-- **A launch's steer verdict reads the root's narrowing**: `commands/launching.py` reads a launch's
-  node rows at its hop ("a row's menu is its cycle's own declaration") but judges its steer with
-  `permitted_narrowing(stores, of)`, the campaign root's, where a fork's start judges against its
-  parent cycle's (`fork_siblings.py::operator_start`). A steer outside a forked line's narrowing and
-  inside the root's reads `clean`. Action: decide which narrowing a launch at a hop answers to (the
-  babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
-  narrowed a model steers to the root-only model and reads `babysat`.
-
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
@@ -596,15 +559,6 @@ Each row names the chain it rides with.
   inside `round_document_digest`, so a diagnostic edit moves `consumed`. Root: a report derived from
   cells is computed by the optimizer that reads it; potter folds it at render, its text byte-identical.
   **Rides with:** rec-2, after potter-w1 (it edits `optimizers/potter/`). **Re-test:** `git grep -n "RoundDiagnostics" -- promptpotter/domain/results.py` is empty.
-- **A job is a survivor that carries how its run ended**: `store/data_root.py::INSTALL_KINDS` keeps
-  `Kind("job", …, _SURVIVOR, …)` for the daily quota, but `domain/job.py::Job` holds `ending:
-  StopReason | None`, `refusal: Refusal | None` (a served message, `details`, `next_acts`), `lapse`,
-  `stepped` and a five-arm `holder`, so a `StopReason`, `Refusal`, `NextAct` or holder rename is a
-  survivor migration or a refused landing (two of the five migrations are jobs': `job_endings.py`,
-  `live_jobs_index.py`; 5cf502c7b dropped `converged` with none, found at the v0.8.21 cut); `ending` and `refusal`'s readers (`admission.py:144`,
-  `machine_status.py:297-301`) read a released job. Root: a survivor's model imports no run-data enum
-  and no served-words model; the ending, refusal and lapse go to run data, in a one-shot migration
-  (decisions.md § 0011). **Rides with:** surv, before "A queued launch dies with the asking process". **Re-test:** the model `Kind("job", …)` loads holds no `StopReason`, `Refusal` or `JobLapse` field.
 - **An invalid arm is recorded twice**: `domain/arms.py::Invalid`, the `Cut` reason
   `scoring/arm_states.py::cut_invalid` mints, re-states what `_Arm.invalid` derives from the arm's own
   fatal `validation_failures`, and readers split between them (`arm_end`, `walked_short`,

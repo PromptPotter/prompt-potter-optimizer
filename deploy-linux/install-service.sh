@@ -19,10 +19,10 @@ HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 # Optional cgroup memory ceiling (e.g. "2G"). Empty = no limit. A bound turns the
 # pp-self memory-starvation failure into a clean cgroup OOM instead of a silent OS kill.
 MEMORY_MAX="${MEMORY_MAX:-}"
-# Where systemd reads the environment from — the same knob bootstrap.sh seeded. Not necessarily
-# $INSTALL_DIR: systemd loads EnvironmentFile as root, and SELinux denies root a file under $HOME.
-# deploy.config.example carries the full symptom.
-ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+# The ONE env file, the checkout's (`config/paths.py::env_file_path`): the app reads it itself, as
+# $RUN_USER, and so does every CLI the login user runs. No unit loads it, so systemd (as root, and
+# under SELinux denied a file under $HOME) never reads it, and no second copy can drift.
+ENV_FILE="$INSTALL_DIR/.env"
 # The ONE directory the service may write. Empty (the default) keeps the historical
 # `ReadWritePaths=$INSTALL_DIR` — which is the repo, the venv AND `.env`, so the service can
 # rewrite its own code and its own secrets and survive a restart. `ProtectSystem=strict` bounds
@@ -51,7 +51,7 @@ warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ -d "$INSTALL_DIR/.venv" ]] || die "no .venv at $INSTALL_DIR — run bootstrap.sh first"
-[[ -f "$ENV_FILE" ]] || die "no env file at $ENV_FILE — run bootstrap.sh first, or set ENV_FILE in deploy.config"
+[[ -f "$ENV_FILE" ]] || die "no env file at $ENV_FILE — run bootstrap.sh first"
 
 # Resolve the write surface once, so the unit below has a single answer to substitute.
 if [[ -n "$DATA_DIR" ]]; then
@@ -104,7 +104,6 @@ Wants=network-online.target
 Type=simple
 User=$RUN_USER
 WorkingDirectory=$WORK_DIR
-EnvironmentFile=$ENV_FILE
 ${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
 # A benchmark's first fetch caches under HF_HOME; ProtectHome=read-only shuts ~/.cache.
 Environment=HF_HOME=$WRITE_PATH/.cache/huggingface
@@ -131,12 +130,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME.service"
 sudo systemctl restart "$SERVICE_NAME.service"
 
-# A drop-in outranks the unit written above, so re-running this script cannot undo one — and the
-# box that first hit the SELinux denial got exactly that, by hand. Ask systemd which file is
-# actually in force rather than reporting the one we asked for: a service reading an env file
-# nobody edits is invisible until a key is missing, and then it looks like the app's bug.
-IN_FORCE="$(systemctl show "$SERVICE_NAME" -p EnvironmentFiles --value | sed 's/ (ignore_errors=.*//')"
-[[ "$IN_FORCE" == "$ENV_FILE" ]] || warn "systemd loads '$IN_FORCE', NOT '$ENV_FILE' — a drop-in under /etc/systemd/system/$SERVICE_NAME.service.d/ is overriding this unit. Put the path in ENV_FILE (deploy.config) and delete the drop-in, or every key bootstrap/update writes goes to a file the service never reads."
+# A drop-in outranks the unit written above, so re-running this script cannot undo one. Ask systemd
+# whether it loads an env file at all: one in force is a second source, over $ENV_FILE's keys.
+IN_FORCE="$(systemctl show "$SERVICE_NAME" -p EnvironmentFiles --value)"
+[[ -z "$IN_FORCE" ]] || warn "systemd loads '$IN_FORCE' over $ENV_FILE — a drop-in under /etc/systemd/system/$SERVICE_NAME.service.d/ is a second env source. Move its keys into $ENV_FILE and delete the drop-in."
 
 if wait_healthy "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"; then
     say "service is up: http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"

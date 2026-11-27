@@ -7970,6 +7970,19 @@
       "ForkPreviewBody": {
         "additionalProperties": false,
         "properties": {
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
+            "title": "Descend"
+          },
           "pipeline_overlay": {
             "additionalProperties": {
               "additionalProperties": true,
@@ -20978,6 +20991,72 @@
         ]
       }
     },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/fork-preview": {
+      "post": {
+        "description": "Whether this steer takes the babysit path: the gate's own verdict on a fork cut at this\ncycle, asked without forking.\n\nA read despite the POST: nothing is written, and no capability is needed to ask.",
+        "operationId": "cycle_fork_preview_api_v1_campaigns__campaign_id__cycles__cycle_id__fork_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkPreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Cycle-Fork-Preview",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}": {
       "get": {
         "description": "One round: a closed one's last close's arms and verdict, or the one no file holds yet.\n\nA fork answers for the rounds it inherited; any other round is not found.\n``at`` is the dashboard read's: the round as it stood at that line of the cycle's own ledger.",
@@ -21167,61 +21246,6 @@
           }
         },
         "summary": "Cycle-Round-Audit",
-        "tags": [
-          "Reads"
-        ]
-      }
-    },
-    "/api/v1/campaigns/{campaign_id}/fork-preview": {
-      "post": {
-        "description": "Whether this steer takes the babysit path: the fork gate's own verdict, asked without\nforking.\n\nA read despite the POST: nothing is written, and no capability is needed to ask.",
-        "operationId": "fork_preview_api_v1_campaigns__campaign_id__fork_preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "campaign_id",
-            "required": true,
-            "schema": {
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Campaign Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForkPreviewBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ForkPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Fork-Preview",
         "tags": [
           "Reads"
         ]

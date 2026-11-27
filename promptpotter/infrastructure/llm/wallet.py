@@ -1,9 +1,9 @@
 """The wallet door: the host coupon and the one payer rule ([decisions.md](../../../docs/decisions.md)
 § 0003), below the connectors so a cell's sends go through it too.
 
-A send on a provider goes out on the account's own key for it, else on the box's, which the host's
-coupon meters; a send a library makes on the process environment's key is the box's
-(`ENV_KEY_PAYER`). What the coupon has left is DERIVED, from the face (`grant.json`, else the box's
+Every send on a provider carries its key from here (`sending_key`), the account's own key for it,
+else the box's, which the host's coupon meters; a library's send is handed it too, and none reads
+the process environment. What the coupon has left is DERIVED, from the face (`grant.json`, else the box's
 default) less what the account's charges since the grant say the box's keys paid; nothing counts
 it down.
 """
@@ -40,9 +40,6 @@ from promptpotter.shared.errors import (
     LaunchRefusalReason,
     NoApiKeyError,
 )
-
-# A send on the process env's key (litellm under DSPy, an installed agent): the env holds the box's.
-ENV_KEY_PAYER: KeySource = "host"
 
 
 def face_of(grant: CouponGrant | None, *, host: bool) -> Budget:
@@ -267,9 +264,9 @@ class AccountWallet(NamedTuple):
         )
 
 
-def keyed_client(provider: str) -> OpenAICompatibleClient:
-    """The client a send under the bound account goes out on: `paying_key`'s, refused where the
-    box's key would pay past what the run's reserve has left, or no key exists."""
+def sending_key(provider: str) -> ProviderKey:
+    """The key a send under the bound account goes out on, a library's included: `paying_key`'s,
+    refused where the box's key would pay past what the run's reserve has left, or none exists."""
     what = f"a send on {provider}"
     stores = bound_account(what)
     key = paying_key(stores.api_keys.load(), provider)
@@ -282,4 +279,8 @@ def keyed_client(provider: str) -> OpenAICompatibleClient:
         raise AccountWallet(read_coupon(stores), left.budget).refused(
             ProviderSend(provider, key.paid_by), what="this account"
         )
-    return get_llm_client(provider, key)
+    return key
+
+
+def keyed_client(provider: str) -> OpenAICompatibleClient:
+    return get_llm_client(provider, sending_key(provider))

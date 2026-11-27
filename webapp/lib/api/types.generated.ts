@@ -5867,6 +5867,7 @@ export const READ_ROUTES = {
   "cycle-export": "/campaigns/{campaign_id}/cycles/{cycle_id}/export",
   "cycle-file": "/campaigns/{campaign_id}/cycles/{cycle_id}/file",
   "cycle-files": "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
+  "cycle-fork-preview": "/campaigns/{campaign_id}/cycles/{cycle_id}/fork-preview",
   "cycle-round": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
   "cycle-round-audit": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit",
   "dataset-cells": "/datasets/{name:path}/cells",
@@ -5875,7 +5876,6 @@ export const READ_ROUTES = {
   "draft": "/drafts/{draft_id}",
   "evidence": "/evidence",
   "feed": "/feed",
-  "fork-preview": "/campaigns/{campaign_id}/fork-preview",
   "head-to-head-price": "/head-to-head/price",
   "hierarchy": "/hierarchy",
   "hierarchy-steps": "/hierarchy/{address:path}/@",
@@ -5896,7 +5896,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "e8ceafb046063630";
+export const SERVED_CONTRACT = "9e1825531f03c5a1";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

@@ -148,7 +148,7 @@ export function NodeConfigEditor(props: {
           );
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
-        // Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/fork-preview`'s.
+        // Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/cycles/{id}/fork-preview`'s.
         const pickable = { any: values, permitted: r.permitted, none: [r.value] }[r.pickable];
         const barred = values.filter((v) => !pickable.includes(v));
         return (

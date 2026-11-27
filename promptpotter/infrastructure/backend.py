@@ -111,13 +111,10 @@ class _CellSends:
 
 
 class MachineSlots:
-    def __init__(
-        self, jobs_dir: Path, name: str, capacity: int, *, compose_overlay: Path | None
-    ) -> None:
+    def __init__(self, jobs_dir: Path, name: str, capacity: int) -> None:
         self._jobs_dir = jobs_dir
         self._root = jobs_dir / MACHINE_DIR / name
         self._capacity = capacity
-        self._compose_overlay = compose_overlay
 
     def _lock(self, name: str) -> HeldLock | None:
         return take_lock(self._root / f"{name}.lock", wait_s=0)
@@ -141,7 +138,7 @@ class MachineSlots:
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
         with machine_step():
-            await claim_machine(self._jobs_dir, compose_overlay=self._compose_overlay)
+            claim_machine(self._jobs_dir)
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.
         turn = await self._wait(lambda: self._lock("turn"))
         try:
@@ -191,12 +188,7 @@ class BackendClient:
             ),
         )
         self._machine_slots = (
-            MachineSlots(
-                jobs_dir,
-                connector.name,
-                connector.max_cells_in_flight,
-                compose_overlay=connector.compose_overlay,
-            )
+            MachineSlots(jobs_dir, connector.name, connector.max_cells_in_flight)
             if connector.cells_hold_the_machine
             else None
         )

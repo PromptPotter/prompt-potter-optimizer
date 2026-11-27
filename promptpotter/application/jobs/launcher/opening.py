@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Self
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.jobs.shares import hold_moved, release_run
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import Job, LaunchMove
 from promptpotter.domain.phases import PauseCause, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.records.error import ErrorRecord
@@ -29,7 +28,7 @@ if TYPE_CHECKING:
 @dataclass(eq=False, slots=True)
 class Opening:
     """A job's slot, from its admission to its one release. Its exit releases the job with what
-    ended it: the raise, the run's ``ended``, or nothing (a pass that returned), unless the run's
+    ended it: the raise, or nothing (a run that declared its own stop, a pass that returned), unless the run's
     own process took the job over (`hand_off`). Every hold the job holds closes with it: its hold on
     the account by a `Release`, filed first so a crash before the job's stamp leaves an unreleased
     job the reaper still ends; its claim of a cycle as it reads released. A raise stamps the cycle
@@ -39,7 +38,6 @@ class Opening:
     stores: Stores
     job_registry: JobRegistry
     job: Job
-    ended: CycleResult | None = None
     cut: ForkCut | None = None
     _stamps: CycleHop | None = None
     _running: bool = False
@@ -72,19 +70,14 @@ class Opening:
         held = self.job_registry.get(self.job_id)
         if held is not None and held.admitted and not held.released:
             release_run(self.stores, self.job_id)
-        ran = None if exc is not None else self.ended
-        job = self.job_registry.release(
-            self.job_id,
-            exc if ran is None else ran.stop_reason,
-            stepped=ran is not None and ran.stepped,
-        )
+        stop_reason = self.job_registry.release(self.job_id, exc)
         # An interrupt past the boundary is the pause flag's SYNTHETIC one, its pause declared.
         if (
             exc is not None
             and self._stamps is not None
             and not (self._running and launch_interrupted(exc))
         ):
-            self._stamp(job, exc, self._stamps)
+            self._stamp(stop_reason or StopReason.NOT_ADMITTED, exc, self._stamps)
         if exc is not None and self.cut is not None:
             self.cut.withdraw(self.stores, self.job_registry, exc)
 
@@ -135,8 +128,7 @@ class Opening:
         """The run's own process holds the job: it releases it there."""
         self._handed = True
 
-    def _stamp(self, job: Job | None, exc: BaseException, stamps: CycleHop) -> None:
-        stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
+    def _stamp(self, stop_reason: StopReason, exc: BaseException, stamps: CycleHop) -> None:
         # Best-effort — it must never mask *exc*.
         try:  # noqa: SIM105
             self.stores.declare_stop(

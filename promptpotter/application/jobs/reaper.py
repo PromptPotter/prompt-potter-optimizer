@@ -8,6 +8,7 @@ from pathlib import Path
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.shares import reap_dead_runs
 from promptpotter.config.paths import PRODUCERS_DIR, jobs_dir
+from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.docker_host import reap_dead_producers
 from promptpotter.infrastructure.llm.pricing import refresh_rates, refresh_route_answers
@@ -108,7 +109,12 @@ def sweep(projects_root: Path) -> None:
         reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
         # Off every loop: each door offloads the sweep.
         asyncio.run(
-            reap_dead_producers(jobs_dir(projects_root) / PRODUCERS_DIR, compose_overlay=None)
+            reap_dead_producers(
+                jobs_dir(projects_root) / PRODUCERS_DIR,
+                overlays=(
+                    c.compose_overlay for c in CONNECTORS.table.values() if c.compose_overlay
+                ),
+            )
         )
         return undeleted
 

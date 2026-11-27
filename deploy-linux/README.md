@@ -130,9 +130,8 @@ key with why it exists — the brand block included; this is the map:
 |---|---|---|
 | `APP_NAME` | `myapp` | slug → systemd unit, tunnel name, install-dir, Description |
 | `APP_MODULE` | `myapp.main:app` | uvicorn ASGI target |
-| `ENV_FILE` | `$INSTALL_DIR/.env` | the env file both units load — under SELinux it must move to `/etc` |
 | `ADMIN_BOT_MODULE` | `myapp.presentation.admin_bot` | admin-bot module (optional) |
-| `BOT_ENV_FILE` | the app's `ENV_FILE` | the admin bot's own env file, once split |
+| `BOT_ENV_FILE` | unset | the admin bot's own env file, once split; under SELinux it lives in `/etc` |
 | `REPO_URL` | `…/CHANGE-ME/your-repo.git` | git clone source — **edit before bootstrap** |
 | `INSTALL_DIR` | `$HOME/$APP_NAME/your-repo` | where the repo lands |
 | `RUN_USER` | `$USER` | systemd `User=` |
@@ -155,7 +154,7 @@ key with why it exists — the brand block included; this is the map:
 | repo | `$INSTALL_DIR` |
 | Python venv | `$INSTALL_DIR/.venv` |
 | webapp build | `$INSTALL_DIR/$WEBAPP_DIR/out/` |
-| env file (secrets) | `$ENV_FILE`, default `$INSTALL_DIR/.env` — **0600 perms, don't commit**. Seeded by bootstrap, named as `EnvironmentFile` by the app unit and, unless `BOT_ENV_FILE` splits it, by the bot too; under SELinux it must move to `/etc` (see `deploy.config.example`) |
+| env file (secrets) | `$INSTALL_DIR/.env` — **0600 perms, don't commit**. Seeded by bootstrap; the app, the bot and every CLI read it themselves as `$RUN_USER`, and no unit loads it |
 | writable surface | `$DATA_DIR` when set (campaigns, measurements, the run readout), else `$INSTALL_DIR`. Only the first stops the service being able to rewrite its own source, venv and env file |
 | uvicorn unit | `/etc/systemd/system/$APP_NAME.service` |
 | cloudflared config | `~/.cloudflared/config.yml` + `~/.cloudflared/<UUID>.json` |
@@ -212,6 +211,19 @@ knowing:
   (`./update.sh v0.8.19 --reset`) drops every account's run data besides, refused while a run is live. Last, with the API and the admin bot stopped, `land-data` plans again and writes; from
   then on nothing rolls back. A roll-back that itself fails, or a `land-data` that crashed, exits 3,
   naming the commit the checkout is on, with the services stopped.
+- **Before the first update past `/site-records` (CHANGELOG, 2b82aa95a), move `site_records/` out of
+  the data root**: no row names it, so the landing refuses it and the deploy rolls back. Re-runnable:
+  a root without it moves nothing, and a destination already there is never overwritten.
+
+  ```bash
+  ROOT="${DATA_DIR:-$INSTALL_DIR/.promptpotter}"; DEST="$HOME/site_records.moved"
+  if [[ -d "$ROOT/site_records" && -e "$DEST" ]]; then echo "$DEST exists: merge it by hand"
+  elif [[ -d "$ROOT/site_records" ]]; then
+    sudo systemctl stop "$APP_NAME" && mv "$ROOT/site_records" "$DEST"   # update.sh starts it again
+  fi
+  ```
+
+  The records are the website's now: hand `$DEST` to its own service (`promptpotter-web`, `records/`).
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing
@@ -291,8 +303,8 @@ HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
 
 - **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file** once `BOT_ENV_FILE` is split: a copy in the
   API's environment turns a read of that process into command authority.
-- **Token and chat id live in the APP's file only** — the API sends on the same bot, and the bot's
-  unit loads the app's file before its own, so one edit reaches both. A copy in the bot's file is a
+- **Token and chat id live in the APP's file only** — the API sends on the same bot, and the bot
+  reads the app's file itself, its own file's keys over it, so one edit reaches both. A copy in the bot's file is a
   second home: a re-issued token pasted into one leaves the other refused. `install-admin-bot.sh`
   warns.
 

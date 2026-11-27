@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_schema import ANSWER_TERMS_FILE
 from promptpotter.domain.sample import Bank, Sample, banked_row
@@ -19,7 +20,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     parse_yaml,
-    validate_path_component,
     write_bytes,
     write_json,
     write_text,

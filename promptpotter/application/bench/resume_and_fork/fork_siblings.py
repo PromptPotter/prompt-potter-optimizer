@@ -22,7 +22,8 @@ from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_kinds import ForkCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
+from promptpotter.domain.pipeline_overlay import steers_disallowed_model
+from promptpotter.domain.pipeline_params import PipelineParams, laid_calls, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.records.run_records import (
     FORK_DIRECTION,
@@ -63,8 +64,14 @@ def _fork_sibling_setup(
     campaign_store = stores.campaigns
     campaign = campaign_store.campaign(child.campaign_id)
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
-    babysat = fork_config(stores, CampaignCycle(campaign, parent.cycle_id), start).steers_outside(
-        permitted_narrowing(stores, campaign)
+    # The babysit act its launch's verdict judged (outside what *parent*'s line permits), or a line
+    # steered outside what its campaign's root permits, which every fork of it carries.
+    at = CampaignCycle(campaign, parent.cycle_id)
+    steered = start is not None and steers_disallowed_model(
+        permitted_narrowing(stores, at), laid_calls(start.pipeline_overlay)
+    )
+    babysat = steered or fork_config(stores, at, start).steers_outside(
+        permitted_narrowing(stores, campaign.root_cycle)
     )
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)

@@ -17,10 +17,8 @@ BIND_PORT="${BIND_PORT:-8001}"
 WEBAPP_DIR="${WEBAPP_DIR:-webapp}"
 HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-https://app.example.com}"
-# The ONE env file — where this script seeds secrets AND where systemd later reads them. Keep the
-# two the same or they silently diverge: a key written here never reaches the service. See
-# deploy.config.example for why an SELinux box has to move it under /etc.
-ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+# The ONE env file, the checkout's: the service and every CLI read it themselves (install-service.sh).
+ENV_FILE="$INSTALL_DIR/.env"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -136,10 +134,7 @@ ensure_uv
 # --- 5. env file ---------------------------------------------------------
 if [[ ! -f "$ENV_FILE" ]]; then
     say "creating $ENV_FILE from .env.example"
-    # Outside $HOME the file belongs to root — systemd reads it as root, and /etc is where SELinux
-    # permits that — so creating it takes the same privilege its edits do.
-    [[ -w "$(dirname "$ENV_FILE")" ]] && priv="" || priv="sudo"
-    $priv install -m 600 .env.example "$ENV_FILE"
+    install -m 600 .env.example "$ENV_FILE"
     echo
     warn "you MUST set at least one LLM API key in $ENV_FILE before starting the service"
     read -rp "set GROQ_API_KEY now? (paste key or press Enter to skip) > " groq_key

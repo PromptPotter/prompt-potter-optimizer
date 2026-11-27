@@ -11,11 +11,11 @@ import threading
 from pathlib import Path
 
 from promptpotter.config.paths import PRODUCERS_DIR
+from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.infrastructure.store.io import (
     HeldLock,
     probe_lock,
     take_lock,
-    validate_path_component,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import ConflictError

@@ -5,9 +5,8 @@ row that answers once — so no transport adds or drops one. A `HostSession` ser
 `HostRequest` enters at `HostSession.answer`, admitted there once; a tool call validates its
 arguments as the row's own model off the event loop, and runs a command through the one dispatcher
 or a read through its `ReadParams.answer`. A kind its row answers as a task
-(`CommandKind.answering`) answers a `HostTask`, the MCP Tasks handle: its status is what its run
-returned (`Job.ending`, worded by `STOP_REASON_INFO`) or how its job lapsed, as its release
-stamped it, a reaped job's included, its result the answer its one dispatch recorded, and its cancel each job's own
+(`CommandKind.answering`) answers a `HostTask`, the MCP Tasks handle: its status is how its run
+ended (`command_reading.py::job_status`), a reaped job's included, its result the answer its one dispatch recorded, and its cancel each job's own
 command. A task held at its arms gate asks for its input (`HostHold`), answered as `submit-arms`.
 Transports: in-process (call `answer`) and `presentation/mcp/`.
 """

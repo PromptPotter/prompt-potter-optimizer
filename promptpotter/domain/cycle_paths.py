@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, NamedTuple, NewType, get_args
+from typing import Annotated, Literal, NamedTuple, NewType, get_args
+
+from pydantic import AfterValidator
 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import BadRequestError
@@ -23,6 +25,19 @@ ID_COMPONENT_PATTERN = (
 )
 
 ID_COMPONENT_RE = re.compile(ID_COMPONENT_PATTERN, re.IGNORECASE)
+
+
+def validate_path_component(name: str) -> str:
+    if not ID_COMPONENT_RE.fullmatch(name):
+        raise ValueError(
+            f"Invalid path component: {name!r}. Only alphanumerics, hyphens, underscores and "
+            "dots, never ending on a dot, and no Windows device name (CON, NUL, COM1, ...)."
+        )
+    return name
+
+
+# An id one path segment holds, read on the ids' own grammar: a family campaign id holds a dot.
+PathComponent = Annotated[str, AfterValidator(validate_path_component)]
 
 # Admit `~` or `:` into the charset and a deep path splits into a DIFFERENT well-formed address.
 if any(ID_COMPONENT_RE.fullmatch(ch) for ch in HOP_SEP + UNIT_SEP):

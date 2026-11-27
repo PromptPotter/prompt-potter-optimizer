@@ -6,11 +6,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir, validate_path_component
 from promptpotter.infrastructure.store.io import (
     WORKSPACE_STATE_DIR,
     unlink_robust,
-    validate_path_component,
     write_bytes,
     write_lock,
 )

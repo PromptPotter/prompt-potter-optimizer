@@ -9,11 +9,12 @@ from typing import ClassVar, NamedTuple, assert_never
 
 from pydantic import ValidationError
 
+from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.domain.job import JOB_ADAPTER, Job, ScoringPass
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import open_text_robust, validate_path_component
+from promptpotter.infrastructure.store.io import open_text_robust
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.shared.errors import (

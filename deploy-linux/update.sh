@@ -35,9 +35,8 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 # every command run BY HAND from the checkout must be handed explicitly. Unset = the tree still
 # lives under $INSTALL_DIR and the default resolves to it.
 DATA_DIR="${DATA_DIR:-}"
-# The file systemd actually loads — see deploy.config.example. Branding any other one repaints
-# nothing.
-ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+# The ONE env file, which the app and every verb read themselves (install-service.sh).
+ENV_FILE="$INSTALL_DIR/.env"
 
 # set_env_kv + the brand fan-out, shared with bootstrap.sh.
 source "$HERE/brand-env.sh"
@@ -68,15 +67,15 @@ checkout() {
   git -C "$1" reset --hard --quiet "$2"
   ok "$(basename "$1") at $(git -C "$1" describe --tags --always) ($(git -C "$1" rev-parse --short HEAD))"
 }
-# A verb under the unit's environment and its hardening: this shell holds neither its keys, its bot
-# token nor its data root, so a verb run here would judge whatever the checkout's .env happens to hold.
+# A verb under the unit's environment and its hardening: this shell holds neither its data root nor
+# its write surface, so a verb run here would judge a tree the service never reads.
 as_unit() {
   local line props=()
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == \#* ]] || props+=(-p "$line")
   done < <(unit_hardening "${DATA_DIR:-$INSTALL_DIR}")
   sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" "${props[@]}" \
-    -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
+    -p WorkingDirectory="$INSTALL_DIR" \
     -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
     "$INSTALL_DIR/.venv/bin/python" -m promptpotter "$@"
 }
@@ -170,7 +169,7 @@ if ! dry_out="$(as_unit land-data --dry-run ${RESET:+--reset})"; then
   roll_back "the data root does not land under this code"
 fi
 printf '%s\n' "$dry_out"
-# DATASET_OFFER is read from the file the UNIT loads. The verb refuses a name naming no dataset,
+# DATASET_OFFER is read from the env file, as the unit reads it. The verb refuses a name naming no dataset,
 # before the exact sync drops what that name's extras were.
 offer_out="$(as_unit offer-extras)" || roll_back "DATASET_OFFER names what this code cannot offer"
 offer_extras=()

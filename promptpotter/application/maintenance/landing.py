@@ -78,6 +78,7 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
+from promptpotter.infrastructure.store.private_root import hold_private
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import (
     DEFINITION_SWAP_DIR,
@@ -580,6 +581,7 @@ def land_at_entry(*, every_treatment: bool) -> None:
     module imported; *every_treatment* reads each one, for a process serving any campaign): the
     root lands under this code's record schema, once per schema. What it wrote and dropped is
     said here as one tally to the operator, for every entry alike; the stamp keeps its lines. A landing that refuses raises, having written nothing."""
+    hold_private(user_data_root())
     if every_treatment:
         check_every_treatment()
     projects_root = default_projects_root()

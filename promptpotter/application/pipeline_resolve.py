@@ -48,6 +48,7 @@ from promptpotter.application.pipeline_responses import (
     SteerVerdict,
     optimizer_setup,
 )
+from promptpotter.application.scoring.evaluators import NameOwner, refuse_unowned_terms
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
     compile_scorer,
@@ -254,7 +255,9 @@ def _routed_as_run(schema: PipelineSchema, pipeline_params: PipelineParams) -> P
     return schema.model_copy(
         update={
             "declared_nodes": [
-                n.model_copy(update={"current_config": {**n.current_config, **running[n.name]}})
+                n.model_copy(
+                    update={"current_config": n.current_config.model_copy(update=running[n.name])}
+                )
                 if n.name in running
                 else n
                 for n in schema.declared_nodes
@@ -274,7 +277,7 @@ def schema_as_run(
         sorted(
             (n.provider, model)
             for n in routed.running_nodes
-            if isinstance(model := n.current_config.get("model"), str)
+            if (model := n.current_config.model) is not None
             and model not in answered.get(n.provider, {})
         ),
         workspace=workspace,
@@ -667,6 +670,14 @@ class Resolution:
     def scorer(self) -> Scorer:
         return graded_scorer(self.grading, verifier_graded=self.verifier_graded)
 
+    def proven_scorer(self, owners: Sequence[NameOwner]) -> Scorer:
+        """`scorer`, each term it names held by an owner of this campaign's cells (`owners`, its
+        judges beside them): asked where the resolution meets its connector, before an answer is
+        filed under its grading, so `open_cell` compiles a grading proven once."""
+        judges = NameOwner("a judge of this campaign", frozenset(self.config.judges))
+        refuse_unowned_terms(self.scorer.terms, (*owners, judges))
+        return self.scorer
+
     def overlaid(self, *layers: Layer[str]) -> Self:
         return replace(self, config=self.config.overlaid(*layers))
 
@@ -1058,16 +1069,13 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     return resolve_pipeline_for_campaign(leaf, leaf.campaigns.campaign(campaign_id), at=spec)
 
 
-def permitted_narrowing(
-    stores: Stores, at: Campaign | CampaignCycle
-) -> dict[str, NodeSearchNarrowing]:
-    """What each node permits *at* a cycle, or a campaign's root: its recorded schema's value spaces
-    narrowed by the line, never the campaign's own layer alone, which holds none of the dataset's
-    optimizer blocks. A steer outside them is the babysit act (decisions.md § 0005)."""
-    on = at if isinstance(at, CampaignCycle) else at.root_cycle
+def permitted_narrowing(stores: Stores, at: CampaignCycle) -> dict[str, NodeSearchNarrowing]:
+    """What each node permits *at* a cycle: its recorded schema's value spaces narrowed by its line,
+    never the root's nor the campaign's own layer alone, which holds none of the dataset's optimizer
+    blocks. A steer launched at *at* outside them is the babysit act (decisions.md § 0005)."""
     return {
         n.name: NodeSearchNarrowing(param_allowed_values=dict(n.param_allowed_values))
-        for n in resolved(stores, on).schema.declared_nodes
+        for n in resolved(stores, at).schema.declared_nodes
         if n.param_allowed_values
     }
 
@@ -1081,8 +1089,10 @@ def steer_verdict(
     return "babysat" if has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP) else "refused"
 
 
-def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> ForkPreviewResponse:
-    narrowing = permitted_narrowing(stores, stores.campaigns.campaign(campaign_id))
+def fork_preview(stores: Stores, hop: CycleHop, overlay: dict[str, Any]) -> ForkPreviewResponse:
+    """The verdict a fork cut at *hop* would meet, asked without forking."""
+    at = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
+    narrowing = permitted_narrowing(stores, at)
     return ForkPreviewResponse(
         steer=steer_verdict(stores, narrowing, overlay),
         permitted=permitted_models_from_narrowing(narrowing),

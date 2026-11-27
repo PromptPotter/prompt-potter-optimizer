@@ -90,7 +90,7 @@ def _verify_observation_names(
     dataset_name: str | None,
 ) -> None:
     """An observation named like another owner's term would give one name two values."""
-    report = connector_report_owner(connector.name, connector.cell_report_keys)
+    report = connector_report_owner(connector)
     if refused := observation_key_refusals(schema.observation_keys, report):
         raise PayloadInvalidError(
             f"{dataset_name or '<dataset>'}'s pipeline maps {'; '.join(refused)}, and a cell's "

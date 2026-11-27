@@ -7,7 +7,13 @@ from typing import Any, Literal
 from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
+from promptpotter.domain.cycle_paths import (
+    CycleHop,
+    CyclePath,
+    Subject,
+    WorkspaceDir,
+    validate_path_component,
+)
 from promptpotter.domain.phases import ProducerState, RunState, StopReason
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import CycleSupersededRecord, RunPhaseRecord
@@ -31,7 +37,6 @@ from promptpotter.infrastructure.store.io import (
     rmtree_robust,
     stamp_of,
     unlink_robust,
-    validate_path_component,
     write_bytes,
     write_text,
     write_yaml,

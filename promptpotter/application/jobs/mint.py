@@ -69,7 +69,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.command_events import CommandLanded, draft_subject, subject_key
 from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, validate_path_component
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.pipeline_params import PipelineParams, moved_leaves
 from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
@@ -92,7 +92,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
     runnable_definition,
 )
-from promptpotter.infrastructure.store.io import make_dirs, validate_path_component
+from promptpotter.infrastructure.store.io import make_dirs
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PayloadInvalidError

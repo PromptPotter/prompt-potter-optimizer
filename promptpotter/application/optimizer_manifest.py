@@ -867,7 +867,7 @@ def _select(
         n.name: laid_config(
             f"optimizer {name!r}",
             n.name,
-            n.current_config,
+            n.current_config.laid_keys(),
             knobs=[
                 *(table[n.name].knobs.model_fields if n.name in table else ()),
                 *levers.get(n.name, ()),
@@ -878,7 +878,11 @@ def _select(
     node_levers = {
         n.name: laid
         for n in llm
-        if (laid := {k: v for k, v in n.current_config.items() if k in levers.get(n.name, ())})
+        if (
+            laid := {
+                k: v for k, v in n.current_config.laid_keys().items() if k in levers.get(n.name, ())
+            }
+        )
     }
     # One rule with an unknown key's: a lever no render can apply is refused, never dropped.
     if refused := [
@@ -888,7 +892,7 @@ def _select(
     ]:
         raise ValueError("; ".join(refused))
     node_knobs = {
-        n.name: _knobs(n.name, n.kind, n.current_config)
+        n.name: _knobs(n.name, n.kind, n.current_config.laid_keys())
         for n in schema.declared_nodes
         if n.kind in MEMBER_KINDS or n.name in table
     }

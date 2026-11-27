@@ -19,7 +19,6 @@ import yaml
 
 from promptpotter.config.paths import JOBS_DIR, PROJECTS_DIR, user_data_root
 from promptpotter.config.settings import LOCK_TIMEOUT
-from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
 if sys.platform == "win32":
@@ -94,18 +93,11 @@ else:
         finally:
             os.close(fd)
 
-    def _land(_f: IO[bytes], tmp: str, path: Path) -> None:
-        # The file stays open, so its lock holds through the replace.
+    def _land(f: IO[bytes], tmp: str, path: Path) -> None:
+        # The file stays open, so its lock holds through the replace; flushed first, or a reader
+        # after the replace reads the bytes still in its buffer as an empty file.
+        f.flush()
         _atomic_replace(tmp, path)
-
-
-def validate_path_component(name: str) -> str:
-    if not ID_COMPONENT_RE.fullmatch(name):
-        raise ValueError(
-            f"Invalid path component: {name!r}. Only alphanumerics, hyphens, underscores and "
-            "dots, never ending on a dot, and no Windows device name (CON, NUL, COM1, ...)."
-        )
-    return name
 
 
 def _long_path(p: str | Path) -> str:
@@ -166,6 +158,7 @@ def _compact_stamp(root: str) -> None:
     in an odd epoch is completed); no write waits on it."""
     stamp_path = _long_path(os.path.join(root, STAMP_FILE))
     with _gone_with_root(), _appended(os.path.join(root, STAMP_EPOCH_FILE)) as epoch:
+        epoch.seek(0)  # Every taker locks byte 0; an append-mode open sits at the end.
         if not _try_lock(epoch.fileno()):
             return
         try:

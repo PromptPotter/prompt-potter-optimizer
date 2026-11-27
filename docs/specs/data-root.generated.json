@@ -2723,22 +2723,6 @@
       ],
       "shape": {
         "$defs": {
-          "ActValue": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              }
-            ]
-          },
           "CampaignLaunch": {
             "additionalProperties": false,
             "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
@@ -2841,43 +2825,6 @@
             "title": "MeasurementRole",
             "type": "string"
           },
-          "NextAct": {
-            "additionalProperties": false,
-            "description": "A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it\nfills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it\n*reads*. *value* is the JSON scalar a `start-run`'s field takes, sent as typed; any other act's\ndescribes what goes in the field. Each door words its own spelling from it:\nthe terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the\nkind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a\ndoor takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate.",
-            "properties": {
-              "field": {
-                "default": "",
-                "title": "Field",
-                "type": "string"
-              },
-              "kind": {
-                "default": "",
-                "enum": [
-                  "",
-                  "start-run",
-                  "set-limits",
-                  "verify-candidate",
-                  "mint-campaign",
-                  "fork-cycle",
-                  "submit-arms",
-                  "revoke-api-token"
-                ],
-                "title": "Kind",
-                "type": "string"
-              },
-              "reads": {
-                "default": "",
-                "title": "Reads",
-                "type": "string"
-              },
-              "value": {
-                "$ref": "#/$defs/ActValue",
-                "default": ""
-              }
-            },
-            "title": "NextAct",
-            "type": "object"
-          },
           "PaidCall": {
             "additionalProperties": false,
             "description": "One LLM call outside any run (a check-in, a chat turn): a hold, never a slot.",
@@ -2903,53 +2850,6 @@
             "title": "PaidCall",
             "type": "object"
           },
-          "Refusal": {
-            "additionalProperties": false,
-            "description": "A refusal as served: the rest of the answer it rides in serves on beside it.",
-            "properties": {
-              "code": {
-                "description": "The code a client branches on: the refusal's kind.",
-                "title": "Code",
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": true,
-                "description": "The refusal's facts, by name.",
-                "title": "Details",
-                "type": "object"
-              },
-              "message": {
-                "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one; never a verb or a flag, which its acts carry.",
-                "title": "Message",
-                "type": "string"
-              },
-              "next_acts": {
-                "default": [],
-                "description": "The acts past it, as a stop's: each door spells one its own way (the terminal's verb and flag, the browser's control, the MCP tool its kind names).",
-                "items": {
-                  "$ref": "#/$defs/NextAct"
-                },
-                "title": "Next Acts",
-                "type": "array"
-              },
-              "notes": {
-                "default": [],
-                "description": "What the refusal's path left past its sentence, each line as said (a fork stub its withdrawal kept, the datasets a name could have been).",
-                "items": {
-                  "type": "string"
-                },
-                "title": "Notes",
-                "type": "array"
-              }
-            },
-            "required": [
-              "code",
-              "message",
-              "details"
-            ],
-            "title": "Refusal",
-            "type": "object"
-          },
           "ScoringPass": {
             "additionalProperties": false,
             "description": "A paid pass scoring outside any run: its hop is the cycle it scores, or none at all.",
@@ -2969,45 +2869,10 @@
             ],
             "title": "ScoringPass",
             "type": "object"
-          },
-          "StopReason": {
-            "description": "Why a cycle's run ended or paused.",
-            "enum": [
-              "rounds_budget",
-              "lives_exhausted",
-              "paused",
-              "panel_hole",
-              "adapter_output_owed",
-              "crashed",
-              "diverged",
-              "optimizer_abort",
-              "optimizer_exhausted",
-              "hard_cap_reached",
-              "target_hit",
-              "spend_budget",
-              "token_budget",
-              "host_allowance",
-              "wall_clock",
-              "origin_gate",
-              "backend_unreachable",
-              "backend_hole",
-              "provider_credit_exhausted",
-              "provider_throttled",
-              "price_list_unreachable",
-              "no_rate",
-              "render_error",
-              "optimizer_timeout",
-              "rebased_to_fork",
-              "producer_vanished",
-              "input_refused",
-              "not_admitted"
-            ],
-            "title": "StopReason",
-            "type": "string"
           }
         },
         "additionalProperties": false,
-        "description": "Outlives its release to the end of its UTC day: the daily launch quota counts it.",
+        "description": "Outlives its release to the end of its UTC day: the daily launch quota counts it. It holds\nwhat the quota, a landing and the live listings read, never how its run ended: that is its\ncycle's stop, or its command's refusal (`command_reading.py::job_status`).",
         "properties": {
           "admitted_at": {
             "anyOf": [
@@ -3036,17 +2901,6 @@
           "cycle_id": {
             "title": "Cycle Id",
             "type": "string"
-          },
-          "ending": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/StopReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           },
           "holder": {
             "discriminator": {
@@ -3082,23 +2936,6 @@
             "title": "Job Id",
             "type": "string"
           },
-          "lapse": {
-            "anyOf": [
-              {
-                "enum": [
-                  "refused",
-                  "withdrawn",
-                  "orphaned"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Lapse"
-          },
           "principal_id": {
             "title": "Principal Id",
             "type": "string"
@@ -3107,17 +2944,6 @@
             "default": "",
             "title": "Producer Id",
             "type": "string"
-          },
-          "refusal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/Refusal"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           },
           "released_at": {
             "anyOf": [
@@ -3156,11 +2982,6 @@
               }
             ],
             "title": "Started At"
-          },
-          "stepped": {
-            "default": false,
-            "title": "Stepped",
-            "type": "boolean"
           },
           "user_id": {
             "title": "User Id",

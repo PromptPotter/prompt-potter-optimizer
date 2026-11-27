@@ -677,7 +677,7 @@ def _steer_overlay(specs: list[str]) -> dict[str, dict[str, str]]:
 
 def _confirm_steer(ctx: SessionCtx, overlay: dict[str, dict[str, object]]) -> None:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
-    preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
+    preview = fork_preview(ctx.store, ctx.hop, overlay)
     if preview.steer == "clean":
         return
     steered = ", ".join(

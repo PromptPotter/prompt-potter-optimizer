@@ -132,9 +132,9 @@ def _bounded_nodes(
     and its model's bounds."""
     for node in schema.declared_nodes:
         laid = config.pipeline_overlay.get(node.name, NodeCall()).laid_keys()
-        cfg = {**node.current_config, **laid}
-        if node.is_llm and (bounds := tier.task_models.get(str(cfg.get("model")))):
-            yield node, cfg, bounds
+        call = node.current_config.model_copy(update=laid)
+        if node.is_llm and (bounds := tier.task_models.get(str(call.model))):
+            yield node, call.laid_keys(), bounds
 
 
 def free_task_models() -> frozenset[str]:

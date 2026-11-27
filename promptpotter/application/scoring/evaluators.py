@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import (
@@ -27,7 +27,11 @@ from promptpotter.domain.scoring import (
     all_verifier_graded,
     extract_item_label,
 )
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.worded import Worded
+
+if TYPE_CHECKING:
+    from promptpotter.connectors.protocol import Connector
 
 
 def compute_fitness(*, results: Sequence[GradedCell], **_: Any) -> float | None:
@@ -91,7 +95,7 @@ _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_
 def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
     out: list[tuple[PipelineNode, str, int]] = []
     for node in schema.running_nodes:
-        cfg = node.current_config
+        cfg = node.current_config.laid_keys()
         for key in cfg:
             if not any(key == s or key.endswith(s) for s in _LIMIT_KEY_SUFFIXES):
                 continue
@@ -303,12 +307,29 @@ def connector_name_refusals(terms: Iterable[CellTerm], reported: Iterable[str]) 
     return out
 
 
-def connector_report_owner(connector_name: str, report_keys: Iterable[str]) -> NameOwner:
-    return NameOwner(f"a key connector {connector_name!r} reports", frozenset(report_keys))
+def connector_report_owner(connector: Connector) -> NameOwner:
+    return NameOwner(f"a key connector {connector.name!r} reports", connector.cell_report_keys)
 
 
-def observation_owner(observation_keys: Iterable[str]) -> NameOwner:
-    return NameOwner("an observation key of this pipeline", frozenset(observation_keys))
+def campaign_owners(connector: Connector, observation_keys: Iterable[str]) -> tuple[NameOwner, ...]:
+    """The names a campaign's cells bind beyond every campaign's (`cell_name_owners`): its
+    connector's report and its pipeline's observations."""
+    return (
+        connector_report_owner(connector),
+        NameOwner("an observation key of this pipeline", frozenset(observation_keys)),
+    )
+
+
+def refuse_unowned_terms(terms: Iterable[str], beside: Sequence[NameOwner]) -> None:
+    """A criterion's name no owner binds would compile, then refuse at every cell it grades."""
+    owners = (*cell_name_owners(), *beside)
+    if unowned := sorted(t for t in terms if not any(o.holds(t) for o in owners)):
+        raise PayloadInvalidError(
+            f"the criterion names {unowned}, which no cell of this campaign carries: a term is "
+            "a core cell term, its connector's, an observation of its pipeline or one of its judges.",
+            code="pipeline_config_invalid",
+            details={"unowned_terms": unowned},
+        )
 
 
 def observation_key_refusals(keys: Iterable[str], report: NameOwner) -> list[str]:

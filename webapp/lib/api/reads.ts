@@ -492,10 +492,10 @@ export function configMapRead(campaignId: string): ReadDescriptor<ConfigMapRespo
 
 // A read despite the POST: its subject is an overlay that exists nowhere on disk yet.
 export function forkPreviewRead(
-  campaignId: string,
+  path: CyclePath,
   pipelineOverlay: Record<string, unknown>,
 ): ReadDescriptor<ForkPreviewResponse> {
-  const url = readUrl("fork-preview", { campaign_id: campaignId });
+  const url = cyclePathUrl("cycle-fork-preview", path, {});
   return {
     id: `fork-preview${SEP}${url}${SEP}${JSON.stringify(pipelineOverlay)}`,
     load: async (signal) => ({

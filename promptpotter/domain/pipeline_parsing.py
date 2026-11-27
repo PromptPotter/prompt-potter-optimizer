@@ -368,7 +368,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 _block(opt.get("param_allowed_values"), f"{where}.optimizer.param_allowed_values")
             ),
             "param_types": _infer_param_types(opt, nc, f"{where}.optimizer"),
-            "current_config": dict(nc),
+            "current_config": nc,
             "spend_bound": node.get("spend_bound"),
         }
         if "accepts" in node:

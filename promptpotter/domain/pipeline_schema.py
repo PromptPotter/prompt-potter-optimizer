@@ -10,6 +10,7 @@ from promptpotter.domain.layer_fold import Lay
 from promptpotter.domain.pipeline_params import (
     PARAM_FORBIDDEN_KEYS,
     RESERVED_NODE_NAMES,
+    NodeCall,
     PipelineParams,
 )
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -512,7 +513,7 @@ class PipelineNode(FrozenModel):
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     output_schema: NodeOutputSchema | None = None
     prompt_info: NodePromptInfo | None = None
-    current_config: dict[str, Any] = Field(default_factory=dict)
+    current_config: NodeCall = Field(default_factory=NodeCall)
     # A gateway's: the pipelines (dataset slugs) its measurement runs, as its declaration names them.
     nested_datasets: list[str] = Field(default_factory=list)
     # The walks whose runs fire this node though none lists it (an escalation, a fallback). A node
@@ -548,8 +549,7 @@ class PipelineNode(FrozenModel):
     @property
     def provider(self) -> str:
         """``""`` where its config names none, which prices only a model id no other vendor's list holds."""
-        named = self.current_config.get("provider")
-        return named if isinstance(named, str) else ""
+        return self.current_config.provider or ""
 
     @property
     def emits_ranking(self) -> bool:
@@ -1033,12 +1033,12 @@ class PipelineSchema(FrozenModel):
             return None
         if param not in caps.unsupported_params:
             return None
-        current = node.current_config.get(param)
+        current = node.current_config.laid_keys().get(param)
         return [str(current)] if isinstance(current, str | int | float | bool) else []
 
     def _capability(self, node: "PipelineNode", model: str | None) -> "ModelCapability | None":
-        picked = model if model is not None else node.current_config.get("model")
-        if not isinstance(picked, str) or not picked:
+        picked = model if model is not None else node.current_config.model
+        if not picked:
             return None
         return self.model_capabilities.get(node.provider, {}).get(picked)
 
@@ -1054,7 +1054,7 @@ class PipelineSchema(FrozenModel):
         models = set(self.available_models)
         for node in self.declared_nodes:
             models.update(node.param_allowed_values.get("model", ()))
-            if isinstance(picked := node.current_config.get("model"), str) and picked:
+            if picked := node.current_config.model:
                 models.add(picked)
         return sorted(models)
 
@@ -1077,16 +1077,18 @@ class PipelineSchema(FrozenModel):
         campaign read by an account without `campaign.babysit`."""
         # A model row is synthesized on the carrier only when no node OWNS a model.
         model_declared = any(
-            "model" in (n.param_keys | set(n.current_config)) for n in self.declared_nodes
+            "model" in n.param_keys or n.current_config.model is not None
+            for n in self.declared_nodes
         )
         model_carrier = None if model_declared else self._model_carrier()
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.declared_nodes:
             params: list[NodeConfigParam] = []
-            resolved = (values or {}).get(n.name, n.current_config)
+            laid = n.current_config.laid_keys()
+            resolved = (values or {}).get(n.name, laid)
             stamped = (sources or {}).get(n.name, {})
             # `param_keys_held` joins: a closed axis unset in `current_config` otherwise leaves the surface.
-            keys = n.param_keys | n.param_keys_held | set(n.current_config) | set(n.prompt_fields)
+            keys = n.param_keys | n.param_keys_held | set(laid) | set(n.prompt_fields)
             declared_node = declared.get_node(n.name) if declared else None
             # The prompt rows lead in the node's declared order: that roster is the editor's.
             ordered = [
@@ -1150,7 +1152,7 @@ class PipelineSchema(FrozenModel):
                 )
                 row = NodeConfigParam(
                     key=key,
-                    value=resolved.get(key, n.current_config.get(key, unset)),
+                    value=resolved.get(key, laid.get(key, unset)),
                     kind=kind,
                     integer=n.param_types.get(key) == "integer",
                     options=options,
@@ -1174,7 +1176,7 @@ class PipelineSchema(FrozenModel):
                 params.append(
                     NodeConfigParam(
                         key="model",
-                        value=resolved.get("model", n.current_config.get("model")),
+                        value=resolved.get("model", n.current_config.model),
                         kind="model",
                         options=menu,
                         permitted=allowed,

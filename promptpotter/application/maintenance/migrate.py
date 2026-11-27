@@ -12,6 +12,7 @@ from promptpotter.application.maintenance.migrations import job_endings, live_jo
 from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
-    "live-jobs index": live_jobs_index.staged,
+    # First: the index reads each job in this code's shape.
     "job endings": job_endings.staged,
+    "live-jobs index": live_jobs_index.staged,
 }

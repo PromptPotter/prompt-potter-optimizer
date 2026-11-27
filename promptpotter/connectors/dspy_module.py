@@ -23,6 +23,7 @@ from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
+from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
 from promptpotter.infrastructure.llm.spend_book import (
@@ -33,7 +34,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     admitted,
     answered,
 )
-from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER
+from promptpotter.infrastructure.llm.wallet import sending_key
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellUnscoreableError,
@@ -117,6 +118,10 @@ class _ProgramCalls:
         self.what = f"dspy example {sample_id}"
         self.calls_left = max_calls
         self.model, self.provider = priced_as
+        if self.provider not in providers():
+            msg = f"dspy connector: {self.model!r} names no provider a key is held for."
+            raise CellUnscoreableError(msg, spent={})
+        self.key = sending_key(self.provider)
         self.loop = asyncio.get_running_loop()
         self.budget = drawn_budget()
         self.used = TokenAccount()
@@ -171,7 +176,7 @@ class _ProgramCalls:
                 max_tokens=max_tokens,
             )
             admission = hold.enter_context(
-                admitted(_SEND, bound, model=model, provider=provider, paid_by=ENV_KEY_PAYER)
+                admitted(_SEND, bound, model=model, provider=provider, paid_by=self.key.paid_by)
             )
         except SendRefusedError as refused:
             raise self.end(refused) from None
@@ -304,6 +309,11 @@ _METERED: dict[type[Any], type[Any]] = {}
 
 
 def _metered(lm: Any, sends: _ProgramCalls, changed: dict[str, Any]) -> Any:
+    import dspy
+
+    if isinstance(lm, dspy.LM) and isinstance(lm.engine, str):
+        # DSPy connects it, so it carries the wallet's key; a custom engine owns its connection.
+        changed = {**changed, "api_key": sends.key.secret.get_secret_value()}
     # `copy`, not `dspy.LM(...)`: reconstructing swaps the caller's LM subclass for a generic one.
     own = lm.copy(**changed)
     lm_class = type(own)

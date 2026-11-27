@@ -29,6 +29,7 @@ from promptpotter.config.paths import (
     PRODUCERS_DIR,
     PROJECTS_DIR,
     READOUT_POINTER,
+    REFUSED_JOBS_DIR,
     UNSWEPT_DIR,
 )
 from promptpotter.config.prompt_blocks import PACK_FILE
@@ -44,6 +45,7 @@ from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.record_kinds import RECORDS
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.ruler import RulerFold
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, Bank, FiledAnswer
 from promptpotter.domain.search_point import TaskDecomposition
@@ -315,6 +317,14 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("live-jobs index", _INSTALL, f"{JOBS_DIR}/{LIVE_JOBS_INDEX}", _SURVIVOR, LIVE_JOB_IDS),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
+    # Run data, never the job's: a survivor's model holds no served words.
+    Kind(
+        "launch refusal",
+        _INSTALL,
+        f"{JOBS_DIR}/{REFUSED_JOBS_DIR}/*.json",
+        Fate.RUN,
+        TypeAdapter(Refusal),
+    ),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE, _HELD),
     Kind(
         "landed schema",

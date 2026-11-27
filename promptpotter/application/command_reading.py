@@ -1,6 +1,6 @@
 """One command as every door reads it, by its id, off the account's log: where it stands in the
-words of an MCP task's status, and for a launch each job it launched (`Job.ending`, worded by
-`STOP_REASON_INFO`, or how its job lapsed, as its release stamped it). The host's task, the
+words of an MCP task's status, and for a launch each job it launched (its cycle's stop since the
+launch, worded by `STOP_REASON_INFO`, or how its job left before any run). The host's task, the
 `command` read and the `cancel` of a launch read it here."""
 
 from __future__ import annotations
@@ -12,16 +12,19 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.command_kinds import CommandKind, acts_filed, filable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, Job
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job
 from promptpotter.domain.phases import (
     RUN_PHASE_INFO,
     STOP_REASON_INFO,
+    PauseCause,
     RunPhase,
     StopCategory,
     StopOutcome,
+    StopReading,
     StopReason,
 )
 from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NextAct, NotFoundError
@@ -35,11 +38,6 @@ _ENDED: dict[StopOutcome, TaskStatus] = {
     StopOutcome.HALTED: "failed",
     StopOutcome.FAILED: "failed",
     StopOutcome.PAUSED: "failed",
-}
-_LAPSED: dict[str, TaskStatus] = {
-    "refused": "failed",
-    "withdrawn": "cancelled",
-    "orphaned": "failed",
 }
 # One job held or working holds the task open; past that, the worst ending speaks for it.
 _PRECEDENCE: tuple[TaskStatus, ...] = (
@@ -75,21 +73,30 @@ def _ended(what: str, ending: StopReason, *, stepped: bool) -> JobStatus:
     return JobStatus(status, f"{what}: {info.label}. {info.next_step}", info.next_acts)
 
 
-def job_status(job: Job, *, held: bool) -> JobStatus:
-    """One job's task status and its words; *held* is its cycle holding at a gate for an answer."""
-    if job.ending is not None:
-        return _ended(job.what, job.ending, stepped=job.stepped)
-    if job.lapse is not None:
-        if (refused := job.refusal) is None:
-            return JobStatus(_LAPSED[job.lapse], f"{job.what}: {job.lapse}")
-        return JobStatus(_LAPSED[job.lapse], f"{job.what}: {refused.message}", refused.next_acts)
-    if job.released:
-        return JobStatus("completed", f"{job.what}: returned")
-    if held:
-        return JobStatus(
-            "input_required", f"{job.what}: holding at a gate for its answer", _HOLDING_ACTS
-        )
-    return JobStatus("working", f"{job.what}: {job.stage}")
+def job_status(
+    job: Job, *, held: bool, stop: StopReading | None, refused: Refusal | None
+) -> JobStatus:
+    """One job's task status and its words; *held* is its cycle holding at a gate for an answer,
+    *stop* its cycle's stop since the job was launched, *refused* what its release refused it
+    with. A released job neither names never ran: withdrawn from the queue, refused before its
+    admission, a pass that returned, or a run whose producer died before it held the cycle."""
+    if not job.released:
+        if held:
+            return JobStatus(
+                "input_required", f"{job.what}: holding at a gate for its answer", _HOLDING_ACTS
+            )
+        return JobStatus("working", f"{job.what}: {job.stage}")
+    if refused is not None:
+        return JobStatus("failed", f"{job.what}: {refused.message}", refused.next_acts)
+    if stop is not None and stop.stop_reason is not None:
+        return _ended(job.what, stop.stop_reason, stepped=stop.cause is PauseCause.STEP)
+    if job.stage is RunPhase.QUEUED:
+        return JobStatus("cancelled", f"{job.what}: withdrawn from the queue")
+    if not job.admitted:
+        return JobStatus("failed", f"{job.what}: refused before its admission")
+    if isinstance(job.holder, CampaignLaunch):
+        return JobStatus("failed", f"{job.what}: its producer died before its run held the cycle")
+    return JobStatus("completed", f"{job.what}: returned")
 
 
 class ArmsHold(FrozenModel):
@@ -101,14 +108,22 @@ class ArmsHold(FrozenModel):
     drafts: int
 
 
-def _hold(stores: Stores, job: Job) -> ArmsHold | None:
-    """Its cycle's hold, while the run waits on an answer."""
-    if job.released or job.hop == UNRESOLVED_HOP:
-        return None
+class _OnCycle(NamedTuple):
+    hold: ArmsHold | None = None
+    stop: StopReading | None = None
+
+
+def _on_cycle(stores: Stores, job: Job) -> _OnCycle:
+    """Its cycle's hold, while the run waits on an answer; its stop, once it ended there."""
+    if job.hop == UNRESOLVED_HOP:
+        return _OnCycle()
     state = stores.run_state(job.hop)
+    if job.released:
+        stop = state.stop
+        return _OnCycle(stop=stop if stop is not None and stop.at >= job.created_at else None)
     if state.run_phase is not RunPhase.GATE:
-        return None
-    return ArmsHold(hop=job.hop, held_at=state.held_at, drafts=state.drafts)
+        return _OnCycle()
+    return _OnCycle(hold=ArmsHold(hop=job.hop, held_at=state.held_at, drafts=state.drafts))
 
 
 class CommandReading(FrozenModel):
@@ -175,9 +190,17 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
     answers = CommandKind.SUBMIT_ARMS in kinds
     launched = launched_jobs(jobs, owned)
     if launched is not None:
-        held = {job.job_id: _hold(stores, job) for job in launched}
-        holds = [h for h in held.values() if h is not None and answers]
-        read = [job_status(job, held=held[job.job_id] is not None) for job in launched]
+        on = {job.job_id: _on_cycle(stores, job) for job in launched}
+        holds = [c.hold for c in on.values() if c.hold is not None and answers]
+        read = [
+            job_status(
+                job,
+                held=on[job.job_id].hold is not None,
+                stop=on[job.job_id].stop,
+                refused=jobs.refusal(job.job_id) if job.released else None,
+            )
+            for job in launched
+        ]
         status = next(s for s in _PRECEDENCE if s in {r.status for r in read})
         said = "; ".join(r.said for r in read)
         acts = tuple(dict.fromkeys(act for r in read for act in r.acts))

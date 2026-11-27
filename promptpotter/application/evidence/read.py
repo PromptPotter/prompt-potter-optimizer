@@ -80,7 +80,13 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
 )
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, parse_pool
+from promptpotter.domain.cycle_paths import (
+    CycleHop,
+    CyclePath,
+    Subject,
+    parse_pool,
+    validate_path_component,
+)
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -110,7 +116,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
 )

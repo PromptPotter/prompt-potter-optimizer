@@ -710,7 +710,6 @@ async def launched(held: HeldRun, *, round_num: int) -> AsyncIterator[RoundConte
             )
             ended = await open_origin_round(cycle, prep.dataset, resumed_ending=None)
             assert ended is None, f"round 0's door ended the launch: {ended}"
-            held.opening.ended = cycle_result([], None, [], cost=0.0)
             with scoped(round=round_num):
                 yield RoundContext(cycle, round_num)
     finally:

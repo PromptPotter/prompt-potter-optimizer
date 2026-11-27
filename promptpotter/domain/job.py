@@ -4,19 +4,12 @@ import enum
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal, NamedTuple, assert_never, get_args
+from typing import Annotated, ClassVar, Literal, assert_never, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.domain.phases import (
-    LaunchStage,
-    RunPhase,
-    StopOutcome,
-    StopReason,
-    stop_reason_outcome,
-)
-from promptpotter.domain.refusal import Refusal
+from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.shared.measurement_context import MeasurementRole
 
 # The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
@@ -99,17 +92,9 @@ class PaidCall:
     kind: Literal["paid_call"] = "paid_call"
 
 
-# How a released job ended where no run returned a `StopReason`, stamped by its release alone
-# (`JobRegistry.release`): `refused` was never admitted; `withdrawn` left the queue unrun;
-# `orphaned` lost its producer.
-JobLapse = Literal["refused", "withdrawn", "orphaned"]
-
-
 # Where a launch stands, read off its job's stamps (`Job.state`): ADMITTED holds its money on no
 # named cycle yet, HELD names the cycle it holds. It moves only by a `LAUNCH_MOVES` row.
 LaunchState = enum.StrEnum("LaunchState", ["ASKED", "ADMITTED", "HELD", "RUNNING", "ENDED"])
-# How an ended launch left (`Job.exit`).
-LaunchExit = enum.StrEnum("LaunchExit", ["REFUSED", "CANCELLED", "PAUSED", "CRASHED", "RELEASED"])
 # CLAIM: the queue's head takes its slot, still asked; LAND: onto the cycle its mint named, or a
 # running launch onto the fork it rebased on.
 LaunchMove = enum.StrEnum("LaunchMove", ["CLAIM", "ADMIT", "LAND", "START", "END"])
@@ -124,28 +109,10 @@ LAUNCH_MOVES: Mapping[LaunchMove, tuple[AbstractSet[LaunchState], AbstractSet[La
     LaunchMove.START: ({_S.ADMITTED, _S.HELD}, {_S.RUNNING}),
     LaunchMove.END: (_LIVE, {_S.ENDED}),
 }
-# Each exit, from the states it may leave: only a queued launch is withdrawn.
-LAUNCH_EXITS = {**dict.fromkeys(LaunchExit, _LIVE), LaunchExit.CANCELLED: {_S.ASKED}}
-_LAPSE_EXITS: Mapping[JobLapse, LaunchExit] = {
-    "refused": LaunchExit.REFUSED,
-    "withdrawn": LaunchExit.CANCELLED,
-    "orphaned": LaunchExit.CRASHED,
-}
-_OUTCOME_EXITS = {StopOutcome.PAUSED: LaunchExit.PAUSED, StopOutcome.FAILED: LaunchExit.CRASHED}
 
 
 class LaunchMoveError(RuntimeError):
     """A move the lifecycle does not declare: the caller's bug, never a refusal to serve."""
-
-
-class JobEnding(NamedTuple):
-    """What an END stamps: a run's `StopReason` (*stepped* where it paused at its round
-    allowance), or a lapse where no run returned; all unset is a scoring pass that returned."""
-
-    ending: StopReason | None = None
-    stepped: bool = False
-    lapse: JobLapse | None = None
-    refusal: Refusal | None = None
 
 
 SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
@@ -156,7 +123,9 @@ JobHolder = Annotated[
 
 @dataclass(frozen=False)
 class Job:
-    """Outlives its release to the end of its UTC day: the daily launch quota counts it."""
+    """Outlives its release to the end of its UTC day: the daily launch quota counts it. It holds
+    what the quota, a landing and the live listings read, never how its run ended: that is its
+    cycle's stop, or its command's refusal (`command_reading.py::job_status`)."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
@@ -180,23 +149,6 @@ class Job:
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""
-    # What its run returned, stamped with `released_at`; a scoring pass that returned has none.
-    ending: StopReason | None = None
-    # Its run paused at the round allowance it was launched with (`start-run {step_rounds}`).
-    stepped: bool = False
-    # How it ended where no run returned, stamped with `released_at` in place of an `ending`.
-    lapse: JobLapse | None = None
-    # What a `lapse` of `refused` was refused with, as its door served it; set nowhere else.
-    refusal: Refusal | None = None
-
-    def __post_init__(self) -> None:
-        if self.released_at is None and (self.ending, self.lapse) != (None, None):
-            raise ValueError(f"job {self.job_id}: an ending is stamped with its release")
-        if self.ending is not None and self.lapse is not None:
-            raise ValueError(f"job {self.job_id}: a run's ending or a lapse, never both")
-        unsaid = self.released_at is not None and self.ending is None and self.lapse is None
-        if unsaid and not isinstance(self.holder, ScoringPass | PaidCall):
-            raise ValueError(f"job {self.job_id}: a released run names its ending")
 
     @property
     def what(self) -> str:
@@ -254,16 +206,6 @@ class Job:
         if not self.admitted:
             return LaunchState.ASKED
         return LaunchState.ADMITTED if self.hop == UNRESOLVED_HOP else LaunchState.HELD
-
-    @property
-    def exit(self) -> LaunchExit | None:
-        if not self.released:
-            return None
-        if self.lapse is not None:
-            return _LAPSE_EXITS[self.lapse]
-        if self.ending is None:
-            return LaunchExit.RELEASED
-        return _OUTCOME_EXITS.get(stop_reason_outcome(self.ending), LaunchExit.RELEASED)
 
     @property
     def holds_slot(self) -> bool:

@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import AfterValidator
-
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import (
+    CycleHop,
+    PathComponent,
+    WorkspaceDir,
+    validate_path_component,
+)
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
@@ -17,7 +20,6 @@ from promptpotter.infrastructure.store.io import (
     DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
     read_bytes_optional,
-    validate_path_component,
 )
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import IdentityContext
@@ -135,9 +137,6 @@ def inner_sandbox_dir(workspace_projects_root: Path, tenant_id: str, hop: CycleH
 
 def sandbox_owner_path(sandbox_dir: Path) -> Path:
     return sandbox_dir / "owner.json"
-
-
-PathComponent = Annotated[str, AfterValidator(validate_path_component)]
 
 
 class SandboxOwner(FrozenModel):

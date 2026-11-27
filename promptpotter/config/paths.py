@@ -76,6 +76,8 @@ MACHINE_DIR = "machine"
 UNSWEPT_DIR = "unswept"
 # A reaped job's record as its release stamped it, read by job id alone (`JobRegistry.launched_by`).
 ENDED_JOBS_DIR = "ended"
+# What a launch refused before its admission was refused with, by job id (`JobRegistry.refusal`).
+REFUSED_JOBS_DIR = "refused"
 
 
 def default_projects_root() -> Path:

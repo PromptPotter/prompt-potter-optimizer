@@ -1774,11 +1774,11 @@ def test_an_embedded_run_holds_a_share_at_admission_and_gives_it_back_at_its_exi
         async with contextlib.AsyncExitStack() as closing:
             closing.push_async_exit(opening)
             held = await asyncio.to_thread(admit_embedded, opening)
-            _, opening.ended = await held_embedded(held)
+            await held_embedded(held)
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
-    shared.release(job_b.job_id, StopReason.TARGET_HIT)
+    shared.release(job_b.job_id)
     asyncio.run(embedded())
     assert built_stores.campaigns.holder(fork_c) is None, (
         "an embedded run kept its share past its exit"
@@ -1810,11 +1810,11 @@ def test_a_raised_ceiling_is_reshared_over_every_live_cycle_never_handed_whole_t
     with pytest.raises(QuotaExceededError):
         launch(unminted, None)
     for job in (job_a, job_b6):
-        shared.release(job.job_id, StopReason.TARGET_HIT)
+        shared.release(job.job_id)
     open_c, _ = launch(pair_c, None)
     with pytest.raises(QuotaExceededError):
         launch(unminted, 1.0)
-    shared.release(open_c.job_id, StopReason.TARGET_HIT)
+    shared.release(open_c.job_id)
 
 
 def _raise_ceiling(stores: Stores, registry: JobRegistry, at: CycleHop, usd: float) -> None:
@@ -1885,7 +1885,7 @@ def test_a_launch_landing_mid_reshare_waits_it_out(
         f"shares {racing} of a $3 ceiling: a launch admitted mid-reshare overcommitted it"
     )
     for job in _campaign_jobs(built_stores, shared, camp):
-        shared.release(job.job_id, StopReason.TARGET_HIT)
+        shared.release(job.job_id)
 
 
 def test_a_ceiling_its_campaign_has_spent_admits_nothing(
@@ -1935,7 +1935,7 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
         "a job retargeted mid-stamp was overwritten by the run's stale job file"
     )
     assert after.started_at is not None
-    shared.release(stamped.job_id, StopReason.TARGET_HIT)
+    shared.release(stamped.job_id)
 
 
 def test_a_busy_admission_gate_refuses_a_launch_and_never_a_running_jobs_stamp(
@@ -2025,7 +2025,7 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
     assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
         "a share was cut from its account's claim, not the campaign's $7 left"
     )
-    shared.release(claim.job_id, StopReason.TARGET_HIT)
+    shared.release(claim.job_id)
 
 
 def _archived_cell(stores: Stores, bank: Any) -> Any:
@@ -3079,6 +3079,7 @@ def dspy_billed(out: Path) -> dict[str, Any]:
     jobs = out / "jobs"
     sends: list[int] = []
     script: list[Exception] = []
+    keys: list[str | None] = []
 
     class _Engine:
         def complete(self, _request: Any) -> Any:
@@ -3100,8 +3101,12 @@ def dspy_billed(out: Path) -> dict[str, Any]:
             self.steps = [dspy.Predict("question -> answer") for _ in range(calls)]
             for step in self.steps:
                 step.lm = dspy.LM("openai/gpt-x", engine=_Engine(), cache=False)
+            # Never called: DSPy connects it, so the cell hands it the wallet's key.
+            self.connected = dspy.Predict("question -> answer")
+            self.connected.lm = dspy.LM("openai/gpt-x", cache=False)
 
         def forward(self, question: str) -> Any:
+            keys.append(self.connected.lm.kwargs.get("api_key"))
             for step in self.steps:
                 answer = step(question=question)
             return answer
@@ -3166,8 +3171,9 @@ def dspy_billed(out: Path) -> dict[str, Any]:
             return ["closed", refused.outcome.failure, refused.outcome.status]
         return ["answered", None, None]
 
+    account = workspace()
     with (
-        scoped(account=workspace()),
+        scoped(account=account),
         scoped(ledger=CycleEventLog(out / "bound.jsonl")),
         scoped(round=1),
         mock.patch.object(dspy_module, "held_wait", _no_wait),
@@ -3199,6 +3205,9 @@ def dspy_billed(out: Path) -> dict[str, Any]:
                 lm15.InvalidRequestError("unknown field", status=400),
             )
         ]
+        account.api_keys.put("openai", SecretStr("sk-own"))
+        dspy_cell(1)
+        paid["keys"] = [keys[0], keys[-1]]
     return paid
 
 
@@ -3231,6 +3240,14 @@ def test_a_dspy_cell_bills_each_lm_call_and_its_row_states_the_price_a_replay_re
     )
     assert dspy_paid["replay_usd"] == pytest.approx(2 * call_usd), (
         "a replayed DSPy cell read as free"
+    )
+
+
+def test_a_dspy_cells_lm_sends_on_the_wallets_key_the_accounts_own_first(
+    dspy_paid: dict[str, Any],
+) -> None:
+    assert dspy_paid["keys"] == [NOT_A_KEY, "sk-own"], (
+        "a DSPy LM read the process environment's key, or the box's paid past the account's own"
     )
 
 
@@ -4080,7 +4097,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
                 sends=_CELLS,
             )[1]
         finally:
-            slots.release(launch.job_id, StopReason.TARGET_HIT)
+            slots.release(launch.job_id)
 
     async def pass_beside() -> None:
         async with paid_pass(
@@ -4729,9 +4746,7 @@ def duel(monkeypatch: pytest.MonkeyPatch) -> _Duel:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec()
         detached.append(spec)
-        await asyncio.to_thread(
-            held.opening.job_registry.release, spec.job_id, StopReason.TARGET_HIT
-        )
+        await asyncio.to_thread(held.opening.job_registry.release, spec.job_id)
         held.opening.hand_off()
         return asyncio.create_task(asyncio.sleep(0))
 

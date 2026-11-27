@@ -307,10 +307,10 @@ def machine_status(
                 job_id=job.job_id,
                 what=job.what,
                 released_at=job.released_at or job.created_at,
-                reason=job.refusal.message,
+                reason=refused.message,
             )
             # `list_launched_today` answers newest first.
             for job in jobs.list_launched_today()
-            if job.principal_id == principal_id and job.refusal is not None
+            if job.principal_id == principal_id and (refused := jobs.refusal(job.job_id))
         ],
     )

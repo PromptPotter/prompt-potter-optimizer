@@ -5,12 +5,12 @@ import contextlib
 import logging
 import os
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 
-from promptpotter.config.paths import PRODUCERS_DIR
+from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import rmtree_robust, validate_path_component
+from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import CellInfrastructureError
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,6 @@ _PRODUCER_LABEL = "com.promptpotter.producer"
 _COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
 # Scratch only, in the temp dir for MAX_PATH: a private /tmp is per process, so no liveness lives here.
 _SCRATCH_HOME = Path(tempfile.gettempdir()) / "promptpotter-cells"
-_SWEPT: set[tuple[Path, Path | None]] = set()
 # The producer token this process's containers carry (`producer_lock.py::this_producer`), set by
 # its first claim: its lock is how the next run tells what a hard kill left from a live sibling.
 _claimed: str | None = None
@@ -162,11 +161,12 @@ def _forget_producers(home: Path, dead: set[str]) -> None:
         producer_lock.reclaim_producer(home / f"{token}.lock")
 
 
-async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
-    """THE reclaim of a dead producer, every sweep's: its containers, found by its lock, then it."""
-    ours = None if compose_overlay is None else str(compose_overlay).lower()
+async def reap_dead_producers(home: Path, *, overlays: Iterable[Path]) -> None:
+    """THE reclaim of a dead producer, every sweep's: its containers, found by its lock, then it;
+    and, while it lists, any unlabelled container one of *overlays* (a connector's) names."""
+    ours = [str(overlay).lower() for overlay in overlays]
     dead = await asyncio.to_thread(_dead_producers, home)
-    if not dead and ours is None:
+    if not dead:
         return
     try:
         code, out = await docker(
@@ -189,7 +189,7 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
             with contextlib.suppress(ValueError):
                 by_token.setdefault(validate_path_component(token), []).append(cid)
         # Unlabelled yet naming our overlay is nobody's: nothing this code starts is unlabelled.
-        elif ours is not None and ours in compose_files.lower():
+        elif any(overlay in compose_files.lower() for overlay in ours):
             gone.append(cid)
     gone += [cid for token in dead for cid in by_token.get(token, [])]
     if gone:
@@ -200,18 +200,9 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
     await asyncio.to_thread(_forget_producers, home, dead)
 
 
-async def claim_machine(jobs_dir: Path, *, compose_overlay: Path | None) -> None:
-    """This process's producer token labels its containers; the first claim per home and overlay
-    reaps what a dead producer left."""
+def claim_machine(jobs_dir: Path) -> None:
+    """This process's producer token labels its containers; what a dead producer left is the
+    sweep's to reclaim (`reaper.py::sweep`), whose fault `machine-status` serves."""
     global _claimed
-    home = jobs_dir / PRODUCERS_DIR
-    if (home, compose_overlay) in _SWEPT:
-        return
     _claimed = producer_lock.this_producer(jobs_dir)
     producer_scratch().mkdir(parents=True, exist_ok=True)
-    _SWEPT.add((home, compose_overlay))
-    try:
-        await reap_dead_producers(home, compose_overlay=compose_overlay)
-    except (OSError, TimeoutError) as exc:
-        # Not re-raised into `machine_step`: a failed sweep leaves junk, never a failed cell.
-        logger.debug("could not reap what earlier runs left: %s", exc)

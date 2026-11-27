@@ -17,26 +17,17 @@ APP_NAME="myapp"
 # uvicorn target — the FastAPI ASGI app, "package.module:attr".
 APP_MODULE="myapp.main:app"
 
-# THE env file — the one bootstrap seeds secrets into and the one both units name as
-# EnvironmentFile. Leave unset and it is $INSTALL_DIR/.env, correct on a box without SELinux.
-# WITH SELinux, systemd (as root) is denied a file under $HOME, the unit dies as "unavailable
-# resources", and the journal says "Failed to load environment files: Permission denied" — put the
-# file under /etc (label `etc_t`) and name it here.
-#
-# Name it here rather than pointing the unit at /etc by hand with a drop-in: a drop-in outranks the
-# unit these scripts write, so bootstrap and update keep seeding the file the service no longer
-# reads and nothing reports the split. install-service.sh warns if it finds one.
-#ENV_FILE="/etc/myapp.env"
+# The env file is $INSTALL_DIR/.env, no knob: bootstrap seeds it, and the app, the bot and every
+# CLI read it themselves as $RUN_USER (`config/paths.py::env_file_path`), so no unit loads it.
 
 # Optional admin bot module (only needed for install-admin-bot.sh).
 ADMIN_BOT_MODULE="myapp.presentation.admin_bot"
 
-# The bot's OWN env file. Unset = it shares the app's, which is where it started.
-# Set it and the two units stop sharing one secret file: the bot is the zero-trust channel
-# (no inbound door), so its token is the one credential an attacker cannot reach through the
-# app — and the API worker holds it today for no reason, since it never sends a message.
-# After splitting, delete ADMIN_BOT_* from the app's ENV_FILE; install-admin-bot.sh warns
-# while a copy is still there.
+# The bot's OWN env file, loaded into the bot's process alone. Unset = it reads the app's
+# alone, which is where it started. Set it and the passphrase leaves the app's reach: the bot
+# is the zero-trust channel (no inbound door). After splitting, delete ADMIN_BOT_PASSPHRASE
+# from the app's .env; install-admin-bot.sh warns while a copy is still there. systemd loads
+# it as root, so on an SELinux box it lives under /etc.
 #BOT_ENV_FILE="/etc/$APP_NAME-admin-bot.env"
 
 # --- source + install ---------------------------------------------------

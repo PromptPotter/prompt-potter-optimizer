@@ -1826,7 +1826,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
     # its start over its parent's: steering nothing more, it still runs babysat, and its mint
     # stamps the intervention every answer it files is graded by.
-    permitted = permitted_narrowing(stores, store.campaign(hop.campaign_id))
+    permitted = permitted_narrowing(stores, store.campaign(hop.campaign_id).root_cycle)
     steer = ForkStart(pipeline_overlay={"llm_only": {"model": "x"}})
     babysat = _operator_fork(stores, applied, steer, keep_rounds=True)
     assert _laid(stores, babysat).steers_outside(permitted), "an unpermitted steer forked clean"
@@ -1852,7 +1852,7 @@ def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operato
 ) -> None:
     ran = world.adopt(line)
     stores, (hop, _) = ran.stores, line.made
-    permitted = permitted_narrowing(stores, stores.campaigns.campaign(hop.campaign_id))
+    permitted = permitted_narrowing(stores, stores.campaigns.campaign(hop.campaign_id).root_cycle)
     candidate, measured = _measured_in(ran, hop, 2)
     ran_on = {n: c for n, c in measured.resolved_params.items() if n != "steps"}
     cleared = ForkStart(pipeline_overlay={"llm_only": {"route_order": None}})
@@ -1922,7 +1922,7 @@ def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
 
     asyncio.run(forked())
     withdrawn = queue.get(parents_launch.job_id)
-    assert withdrawn is not None and withdrawn.lapse == "withdrawn", (
+    assert withdrawn is not None and withdrawn.released and withdrawn.queued is False, (
         "a fork left its parent's queued launch to run beside it"
     )
     assert stores.campaigns.holder(hop) is None, "a withdrawn launch still claims the parent"

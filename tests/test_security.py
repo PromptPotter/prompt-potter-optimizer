@@ -235,6 +235,7 @@ from promptpotter.domain.phases import (
     ProducerState,
     RunPhase,
     StopOutcome,
+    StopReading,
     StopReason,
 )
 from promptpotter.domain.prompt_block import (
@@ -458,7 +459,7 @@ async def test_a_container_labelled_with_a_path_deletes_nothing_outside_the_home
     removed = _docker_answering(
         monkeypatch, tmp_path, [("c-up", "../.."), ("c-abs", str(kept.parent))]
     )
-    await docker_host.reap_dead_producers(home, compose_overlay=None)
+    await docker_host.reap_dead_producers(home, overlays=())
     assert kept.is_dir(), "a container's label deleted a directory outside the home"
     assert removed == [], "a container labelled with no token of ours was removed"
 
@@ -472,7 +473,7 @@ async def test_a_sweep_leaves_the_containers_of_a_producer_another_process_holds
     dead.release()
     removed = _docker_answering(monkeypatch, tmp_path, [("c-live", "live"), ("c-dead", "dead")])
     try:
-        await docker_host.reap_dead_producers(home, compose_overlay=None)
+        await docker_host.reap_dead_producers(home, overlays=())
     finally:
         held.release()
     assert removed == ["c-dead"], "a sweep reaped a live producer's containers or kept a dead one's"
@@ -741,7 +742,7 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
 
     assert verdict() == "held", "a live run on other code did not hold the landing open"
     assert registry.landing() is None, "a refused landing closed admission anyway"
-    registry.release(held.job_id, StopReason.TARGET_HIT)
+    registry.release(held.job_id)
     assert verdict() == "closed" and registry.landing() == elsewhere
     assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
     with pytest.raises(ServiceUnavailableError):
@@ -905,19 +906,22 @@ def test_only_a_strangers_visit_is_kept_its_query_only_where_nothing_answered_an
 def test_the_data_root_reaches_no_other_user_whoever_launches_under_whatever_umask(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A fresh root is made 0700, a wider one tightened, and one this process cannot tighten
-    # refused by name.
+    # The entry's landing makes a fresh root 0700 and tightens a wider one; one this process cannot
+    # tighten is refused by name.
     if sys.platform != "win32":
         opened = tmp_path / "opened-root"
         opened.mkdir(mode=0o755)
         opened.chmod(0o755)
-        for root in (tmp_path / "fresh-root" / "home", opened):
-            subprocess.run(
-                [sys.executable, "-c", "import os; os.umask(0o022); import promptpotter"],
-                cwd=_REPO,
-                env={**os.environ, "PROMPTPOTTER_HOME": str(root)},
-                check=True,
-            )
+        roots = (tmp_path / "fresh-root" / "home", opened)
+        land_each = (
+            "import os, sys; os.umask(0o022)\n"
+            "from promptpotter.application.maintenance.landing import land_at_entry\n"
+            "for root in sys.argv[1:]:\n"
+            "    os.environ['PROMPTPOTTER_HOME'] = root\n"
+            "    land_at_entry(every_treatment=False)\n"
+        )
+        subprocess.run([sys.executable, "-c", land_each, *map(str, roots)], cwd=_REPO, check=True)
+        for root in roots:
             assert root.stat().st_mode & 0o777 == 0o700, f"{root.name} reached other users"
         narrowed = tmp_path / "narrowed-root"
         narrowed.mkdir(mode=0o500)
@@ -2370,10 +2374,8 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
         "a detached run never adopted its job, or ran past its campaign's refusal"
     )
     handed_back = past.get(handed.job_id)
-    assert handed_back is not None and (handed_back.lapse, handed_back.ending) == (
-        "refused",
-        None,
-    ), f"an admitted job's campaign refusal read as {handed_back}"
+    assert handed_back is not None and handed_back.released, "a refused job was never released"
+    assert past.refusal(handed.job_id) is not None, "an admitted job's campaign refusal read unsaid"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3144,26 +3146,37 @@ def test_a_job_in_flight_before_the_live_jobs_index_holds_its_slot_past_the_land
     )
 
 
-def test_a_job_v0_8_20_ended_on_a_stop_since_gone_lands_ended_on_the_stop_that_replaced_it(
+def test_a_job_v0_8_21_wrote_with_how_its_run_ended_lands_counted_by_the_quota_and_live(
     tmp_path: Path,
 ) -> None:
-    # Today's launches stay in `jobs/`, which the daily quota counts: a SURVIVOR.
+    # Today's launches stay in `jobs/`, which the daily quota counts: a SURVIVOR. v0.8.21 wrote
+    # each with its ending, step, lapse and refusal, a refused one's served words among them.
     projects_root = default_projects_root()
     registry = JobRegistry.attach(jobs_dir(projects_root))
-    replaced = (("panel_cut", StopReason.PANEL_HOLE), ("converged", StopReason.OPTIMIZER_EXHAUSTED))
-    for was, now in replaced:
+    refusal = {"code": "quota", "message": "No.", "details": {}, "next_acts": []}
+    was = (
+        {"ending": None, "stepped": False, "lapse": None, "refusal": None},
+        {"released_at": "2026-11-18T00:00:00Z", "ending": "panel_cut", "stepped": True},
+        {"released_at": "2026-11-18T00:00:00Z", "lapse": "refused", "refusal": refusal},
+    )
+    jobs = []
+    for i, fields in enumerate(was):
         job = registry.create(
-            user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / was),
+            user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / str(i)),
             hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
         )  # fmt: skip
         path = jobs_dir(projects_root) / f"{job.job_id}.json"
-        ended = {"released_at": "2026-11-18T00:00:00Z", "ending": was}
-        write_json(path, json.loads(path.read_bytes()) | ended)
-        staged = {one.path: one.data for one in MIGRATIONS["job endings"](projects_root, {})}
-        landed = JobRegistry.as_staged(jobs_dir(projects_root), staged).get(job.job_id)
-        assert landed is not None and landed.ending is now, (
-            f"a job v0.8.20 ended on {was} refused the landing"
-        )
+        write_json(path, json.loads(path.read_bytes()) | fields)
+        jobs.append(job)
+    with pytest.raises(FileUnreadableError):
+        registry.get(jobs[0].job_id)
+    staged = {one.path: one.data for one in MIGRATIONS["job endings"](projects_root, {})}
+    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged)
+    read = [landed.get(job.job_id) for job in jobs]
+    assert all(job is not None for job in read), "a job v0.8.21 wrote refused the landing"
+    assert [job.released for job in read if job is not None] == [False, True, True], (
+        "the landing moved a job's release, which the quota and the live listings read"
+    )
 
 
 def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_survivor() -> None:
@@ -3261,7 +3274,7 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     minting = plan_landing(built_stores.projects_root, reset=False)
     assert minting.refused and not minting.torn, "a landing took a mint a held run may finish"
     assert [one.path for one in minting.unloadable] == [torn_dir]
-    holders.release(holding.job_id, StopReason.TARGET_HIT)
+    holders.release(holding.job_id)
     release_cycle(campaigns.cycle_dir(kept_hop))
     spent = campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
@@ -4106,17 +4119,18 @@ def launches(host_tenant: _HostTenant) -> _Launches:
         )
         return job
 
-    def read(job: Job, *, held: bool = False) -> str:
+    def read(job: Job, *, held: bool = False, stop: StopReading | None = None) -> str:
         read_back = registry.launched_by([job.job_id], principal_id=principal)
         assert read_back is not None, "a held job read as another's"
-        return job_status(read_back[0], held=held)[0]
+        refused = registry.refusal(job.job_id)
+        return job_status(read_back[0], held=held, stop=stop, refused=refused)[0]
 
     return _Launches(registry, launch, read)
 
 
 def test_a_task_reads_what_its_run_returned(launches: _Launches) -> None:
-    # A stepped pause done, a spent budget failed, an asked pause cancelled, a dead producer
-    # failed, a gate's hold waiting on its caller.
+    # Its cycle's stop since its launch: a stepped pause done, a spent budget failed, an asked
+    # pause cancelled; a gate's hold waiting on its caller.
     registry, launch, read = launches
     ended = {
         (StopReason.PAUSED, True): "completed",
@@ -4128,8 +4142,11 @@ def test_a_task_reads_what_its_run_returned(launches: _Launches) -> None:
     for (reason, stepped), status in ended.items():
         job = launch()
         assert read(job) == "working" and read(job, held=True) == "input_required"
-        registry.release(job.job_id, reason, stepped=stepped)
-        assert read(job) == status, f"a run that returned {reason} (stepped={stepped}) misread"
+        registry.move(job.job_id, LaunchMove.ADMIT)
+        registry.release(job.job_id)
+        cause = PauseCause.STEP if stepped else None
+        stop = StopReading(stop_reason=reason, cause=cause, detail="", at=job.created_at)
+        assert read(job, stop=stop) == status, f"a run that ended {reason} ({cause}) misread"
 
 
 def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
@@ -4181,15 +4198,16 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     assert waiting.queued and not slotted.queued
     user_id = str(caller.stores.identity.user_id)
     assert quota.campaigns_today(caller.stores, registry, user_id) == 2
-    for job, thrown, lapse in (
-        (waiting, RuntimeError("its wait raised"), "withdrawn"),
-        (slotted, PotterError("its probe failed"), "refused"),
+    for job, thrown, status in (
+        (waiting, RuntimeError("its wait raised"), "cancelled"),
+        (slotted, PotterError("its probe failed"), "failed"),
     ):
-        lapsed = registry.release(job.job_id, thrown)
-        assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
+        assert registry.release(job.job_id, thrown) is None, "a launch that never ran read a stop"
+        assert read(job) == status, f"a launch whose {thrown} ended it read {read(job)}"
+    assert registry.refusal(slotted.job_id) is not None, "a refused launch kept no refusal"
     spent = launch()
     registry.move(spent.job_id, LaunchMove.ADMIT)
-    registry.release(spent.job_id, StopReason.TARGET_HIT)
+    registry.release(spent.job_id)
     assert quota.campaigns_today(caller.stores, registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"
     )
@@ -4230,7 +4248,12 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
     step = StartRunPayload(
         campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id, step_rounds=1
     )
-    endings = {"completed": StopReason.TARGET_HIT, "failed": StopReason.CRASHED, "cancelled": None}
+    # Its cycle's stop, the terminal one last: a stepped pause, a withdrawal, a crash.
+    endings = {
+        "completed": (StopReason.PAUSED, PauseCause.STEP),
+        "cancelled": None,
+        "failed": (StopReason.CRASHED, None),
+    }
     # A waiter re-polls at once, so one woken on an ended job raises without a wall-clock wait.
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     for status, ending in endings.items():
@@ -4246,7 +4269,9 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         if ending is None:
             assert await asyncio.to_thread(queuing.cancel_queued, launched.job_id)
         else:
-            await asyncio.to_thread(queuing.release, launched.job_id, ending)
+            stop = RunPhaseRecord.stop(ending[0], cause=ending[1])
+            await asyncio.to_thread(caller.stores.declare_stop, step_hop, stop)
+            await asyncio.to_thread(queuing.release, launched.job_id)
         # Its queue waiter wakes on the ended job and raises into a release of its own.
         await asyncio.gather(*waiter, return_exceptions=True)
         with pytest.MonkeyPatch.context() as later:
@@ -4346,7 +4371,9 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
         await session.answer(AnswerHold(again, {"arms": json.dumps([arm])}))
         await asyncio.to_thread(ledger.append, RunPhaseRecord(state=Running()))
         await asyncio.to_thread(release_cycle, cycle_dir)
-        await asyncio.to_thread(queuing.release, job.job_id, StopReason.TARGET_HIT)
+        stop = RunPhaseRecord.stop(StopReason.TARGET_HIT)
+        await asyncio.to_thread(stores.declare_stop, job.hop, stop)
+        await asyncio.to_thread(queuing.release, job.job_id)
 
     async with Client(host_server(session), mode="legacy", elicitation_callback=answer) as host:
         result_of = mcp_types.GetTaskPayloadRequest(

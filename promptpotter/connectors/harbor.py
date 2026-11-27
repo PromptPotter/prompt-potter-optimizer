@@ -61,7 +61,7 @@ from promptpotter.infrastructure.docker_host import (
 )
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.capabilities import context_window, sent_llm_bound
-from promptpotter.infrastructure.llm.registry import openai_compat_spec, providers
+from promptpotter.infrastructure.llm.registry import host_key_attr, openai_compat_spec, providers
 from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
@@ -73,7 +73,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     reservation_left,
 )
 from promptpotter.infrastructure.llm.telemetry import append_record, rate_priced_usd
-from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER, keyed_client
+from promptpotter.infrastructure.llm.wallet import keyed_client, sending_key
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     CellInfrastructureError,
@@ -1288,14 +1288,21 @@ class _AgentModel:
 
 
 async def _installed_run(trial: Trial, episode: _Episode) -> TrialResult:
-    """An installed agent sends from its container: one send here, settled on Harbor's token read."""
+    """An installed agent sends from its container: one send here, settled on Harbor's token read,
+    on the wallet's key handed into the container's environment."""
     model, provider = episode.call.model, episode.call.provider
+    if provider is None:
+        # No model of ours (`_sent_spend_bound`): no key of ours reaches it, so nothing it sends is.
+        return await trial.run()
+    key = sending_key(provider)
+    # Private, as `_install_model`: so `config.json` never holds it, and Harbor scrubs its logs.
+    trial.agent._extra_env[host_key_attr(provider)] = key.secret.get_secret_value()
     with admitted(
         _AGENT_SEND,
         reservation_left(),
         model=model,
         provider=provider,
-        paid_by=ENV_KEY_PAYER,
+        paid_by=key.paid_by,
     ) as admission:
         try:
             result = await trial.run()
