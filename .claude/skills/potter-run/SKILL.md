@@ -80,7 +80,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-Finished cycle: `campaigns/<id>/log.md` and `cycles/<id>/index.json` (`final.stop_reason`: label, outcome
+Finished cycle: the stop block of `cycles/<id>/readout.log` and `cycles/<id>/index.json` (`final.stop_reason`: label, outcome
 and next step come from `STOP_REASON_INFO`; compose no other).
 
 **A held potter round is not proof the candidate failed**

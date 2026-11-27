@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import assert_never
 
@@ -40,6 +40,7 @@ from promptpotter.domain.records.run_records import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, AbilityReading, LevelSeries
+from promptpotter.domain.run_standing import CEILING_FRACTION
 from promptpotter.shared.errors import NextAct
 
 
@@ -225,9 +226,14 @@ def render_advance_status(overlap: OverlapReading, stall: int) -> str:
     return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{RESET}")
 
 
-def render_noise_walk(served: ServedRound) -> list[str]:
-    """The round's noise walk and its promotion's hold, off the round as the dashboard serves it."""
-    lines = []
+def render_round_block(served: ServedRound) -> list[str]:
+    """The round's text off the round as the dashboard serves it: the optimizer's stats and notes,
+    the noise walk and its promotion's hold."""
+    facts = served.optimizer_facts
+    lines = [f"{f.label}: {f.text}" for f in facts if f.kind == "stat"]
+    lines += [
+        f"{f.label}: {line}" for f in facts if f.kind == "note" for line in f.text.splitlines()
+    ]
     if (walk := served.lift_prior) is not None:
         mu0 = Estimate.normal(walk.mu0, walk.mu0_se, unit="theta", form="lift", n=walk.pairs)
         lines.append(
@@ -235,8 +241,17 @@ def render_noise_walk(served: ServedRound) -> list[str]:
             f"{walk.pairs} pairs"
         )
     if (held := served.hold_up) is not None:
-        lines.append(f"held up: the promotion holds {held.text} over the parent it beat")
+        lines.append(held_up_line(held))
     return [_node_line(line) for line in lines]
+
+
+def held_up_line(held: Estimate) -> str:
+    return f"held up: the promotion holds {held.text} over the parent it beat"
+
+
+def render_holds(rounds: Sequence[ServedRound]) -> list[str]:
+    """Each promotion's hold on the stopping close's scale, where its own close read it earlier."""
+    return [f"  r{r.round} {held_up_line(r.hold_up)}" for r in rounds if r.hold_up is not None]
 
 
 def render_completion(
@@ -297,8 +312,51 @@ def render_completion(
             "",
             f"Directory: {campaign_dir}",
             "  campaign.json          — manifest",
-            "  log.md                 — campaign digest",
             f"  cycles/{result.cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds"
             " + readout.log",
         ]
     return "\n".join(out)
+
+
+def _minutes(seconds: float | None) -> str:
+    return "—" if seconds is None else f"{seconds / 60.0:.1f} min"
+
+
+def _by_node(by_kind: Mapping[str, Mapping[str, float]]) -> list[str]:
+    rows = [(s, f"`{n}` ({kind})") for kind, by_node in by_kind.items() for n, s in by_node.items()]
+    return [f"{name} {_minutes(s)}" for s, name in sorted(rows, key=lambda row: -row[0])]
+
+
+def render_cycle_final(final: CycleResult) -> list[str]:
+    """An ended cycle's round clocks and its wall clock, the two denominators APART: from the
+    ledger's first record, never a clean machine, so `init` is preflight, not setup."""
+    clock = final.wall_clock
+
+    def rounds(n: int | None) -> str:
+        return "—" if n is None else f"{n} ({_minutes(clock.round_ended_s.get(str(n)))})"
+
+    ceiling = final.fitness_ceiling
+    basis = "no ceiling declared" if ceiling is None else f"{CEILING_FRACTION:.0%} of {ceiling:.2f}"
+    phases = sorted(clock.phase_s.items(), key=lambda kv: -kv[1])
+    # `None` (no fresh cell measured) and 0.0 are opposite readings.
+    unworked = "no fresh cell measured" if clock.unworked_s is None else _minutes(clock.unworked_s)
+    lines = [
+        f"rounds_to_separable {rounds(final.rounds_to_separable)} · rounds_to_improved (a new "
+        f"best selected, no interval) {rounds(final.rounds_to_improved)} · rounds_to_ceiling "
+        f"({basis}) {rounds(final.rounds_to_ceiling)}",
+        " · ".join(
+            [
+                f"wall clock: elapsed {_minutes(clock.elapsed_s)}",
+                *(f"{phase} {_minutes(s)}" for phase, s in phases),
+                f"a gate {_minutes(clock.gate_s)}",
+                f"unattributed {_minutes(clock.unattributed_s)}",
+                f"cells not ALLOWED to spend {unworked}",
+            ]
+        ),
+    ]
+    if outside := _by_node(clock.unbracketed_call_s):
+        lines.append(f"calls outside every phase: {' · '.join(outside)}")
+    if worked := _by_node(clock.worked_s):
+        # Summed CALL time, not a share of the clock: concurrent cells overshoot it.
+        lines.append(f"call time per node, replays excluded: {' · '.join(worked)}")
+    return [f"  {line}" for line in lines]

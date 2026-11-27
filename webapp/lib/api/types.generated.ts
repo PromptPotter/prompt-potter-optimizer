@@ -3566,8 +3566,8 @@ export interface CampaignConfig {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability';
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -4296,8 +4296,8 @@ export interface ConfigEdit {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -5230,8 +5230,8 @@ export interface CampaignLayer {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -5764,7 +5764,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "d0cd12733ded8080";
+export const SERVED_CONTRACT = "bf2b18bc68848648";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -6427,7 +6427,7 @@ export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
 
 // Mirror of domain/phases.py::STOP_REASON_INFO, in display order.
 export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
-  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.rounds", value: "more", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }, { kind: "", field: "", value: "", reads: "review.md" }] },
+  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.rounds", value: "more", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }, { kind: "", field: "", value: "", reads: "readout.log" }] },
   "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },

@@ -19,6 +19,7 @@ from promptpotter.application.account import (
     record_refusal,
     registered_or_default_identity,
 )
+from promptpotter.application.datasets.startability import offer_connectors
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.config.paths import (
     default_projects_root,
@@ -212,8 +213,8 @@ def _webapp_probe() -> Probe:
 
 
 def probes() -> list[Probe]:
-    """The roster: every remote backend endpoint, an unaddressed backend included, every configured
-    sign-in provider, every LLM key, the operator's channel where one is configured, and a
+    """The roster: every remote backend endpoint the offer reaches, an unaddressed backend
+    included, every configured sign-in provider, every LLM key, the operator's channel where one is configured, and a
     checkout's built page."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
@@ -221,11 +222,12 @@ def probes() -> list[Probe]:
         provider: partial(client.exchange_code, code=_NOBODYS_CODE, nonce=_NOBODYS_CODE)
         for provider, client in bundle.clients.items()
     }
+    reached = offer_connectors()
     return [
         *(
             _backend(name, endpoint)
             for name, connector in connectors.CONNECTORS.table.items()
-            if connector.execution == "remote_http"
+            if connector.execution == "remote_http" and (reached is None or name in reached)
             for endpoint in connector.probed_endpoints()
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),

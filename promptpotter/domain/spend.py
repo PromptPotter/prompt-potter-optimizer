@@ -843,7 +843,7 @@ class SpendRollup(StrictModel):
     unpriced_tokens: int = 0
     # Folded in `bank`, never a `@computed_field`: that serializes but does not round-trip on resume.
 
-    # Outside every total and off the wire: only `review.md` reads them. A `{}` default, never
+    # Outside every total and off the wire: only the readout's stop reads them. A `{}` default, never
     # `default_factory`: pydantic signature-inspects a private factory on every instance.
     _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default={})
     _by_node: dict[str, SpendBucket] = PrivateAttr(default={})

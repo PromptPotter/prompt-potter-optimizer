@@ -33,7 +33,7 @@ from promptpotter.application.runner.bench import (
     own_level,
     read_cycle_bench,
 )
-from promptpotter.application.runner.output import RunArtifacts
+from promptpotter.application.runner.output import ExportProjection
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
@@ -605,7 +605,7 @@ async def _grade(stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
         dashboard = DashboardCheckout(cycle_dir)
         assert dashboard.live.value() is not None, "a launched cycle with rounds is declared"
         dashboard.drain()
-        readout = ReadoutProjection(session, sink=None)
+        readout = ReadoutProjection(session, config, sink=None)
         banked: BenchPasses | None = None
         # The round an `at_end` launch grades under: its last.
         with (
@@ -616,7 +616,7 @@ async def _grade(stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
             dashboard = projecting.add(dashboard)
             readout.open_readout(hop)
             projecting.add(readout)
-            projecting.add(RunArtifacts(session, config))
+            projecting.add(ExportProjection(session, config))
             try:
                 try:
                     banked = await bench_origin(

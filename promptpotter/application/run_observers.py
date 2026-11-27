@@ -9,7 +9,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
-from promptpotter.application.runner.output import RunArtifacts
+from promptpotter.application.runner.output import ExportProjection
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.served_dashboard import spend_counts
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
@@ -201,7 +201,7 @@ def _bind_observers(
     forked_from: RunObservers | None,
 ) -> RunObservers:
     readout = (
-        ReadoutProjection(session, sink=readout_sink)
+        ReadoutProjection(session, campaign_config, sink=readout_sink)
         if forked_from is None
         else forked_from.readout
     )
@@ -217,7 +217,7 @@ def _bind_observers(
     readout = projecting.add(readout)
     projecting.add(CycleIndexProjection(cycle_dir))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
-    projecting.add(RunArtifacts(session, campaign_config))
+    projecting.add(ExportProjection(session, campaign_config))
     return RunObservers(
         store=session.store,
         hop=session.hop,

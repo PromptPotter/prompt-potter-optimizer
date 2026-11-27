@@ -8,7 +8,7 @@ from pathlib import Path
 from promptpotter.application.jobs.quota import reap_dead_runs
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.llm.pricing import refresh_rates, refresh_route_answers
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
@@ -47,11 +47,10 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> list[str]:
         owner_store = CampaignStore(
             tenant_workspace(projects_root, owner.tenant_id), jobs_dir(projects_root)
         )
-        owner_hop = CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id)
-        if owner_store.load(owner_hop, moment=None) is not None:
+        if owner_store.load(owner.hop, moment=None) is not None:
             continue
         try:
-            owner_store.delete_inner_sandbox(sandbox, owner=owner_hop)
+            owner_store.delete_inner_sandbox(sandbox, owner=owner)
         except OSError as refusal:
             undeleted.append(fault_said(refusal)[0])
     return undeleted

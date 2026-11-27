@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from promptpotter.application.views.view_models import HardSamplesView
+from collections.abc import Mapping, Sequence
+
+from promptpotter.domain.cells import HardSampleOrder, HardSamples
 
 # Graded, not binary: on a graded scorer every cell sits inside (0,1) and a split shades them alike.
 _SHADES = ("░", "▒", "▓", "█")
@@ -14,13 +16,15 @@ def _shade(fitness: float) -> str:
     return _SHADES[idx]
 
 
-def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
-    """``shown.ranked`` orders the LEADERBOARD only; the GRID stays δ-sorted whatever it says."""
-    view = shown.artifact
+def render_hard_sample_heatmap(
+    view: HardSamples, queries: Mapping[str, str], order: HardSampleOrder, ranked: Sequence[str]
+) -> list[str]:
+    """*ranked* orders the LEADERBOARD only; the GRID stays δ-sorted whatever it says. *queries*
+    is by ``Sample.key``, as the artifact holds its samples."""
     if not view.cells:
-        return ""
+        return []
 
-    candidate_order, sample_order = view.candidate_order, view.sample_order
+    candidate_order, sample_order = view.candidate_order, view.ranked_keys
     row = view.positions
     cells = {(c.candidate, c.sample_key): c.fitness for c in view.cells}
     fitted = view.ruler.state == "fitted"
@@ -29,6 +33,7 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
     cell_w = _HEATMAP_CELL_W
 
     lines = [
+        "  HARD SAMPLES",
         f"  individuals : {len(candidate_order)}",
         f"  samples     : {len(sample_order)}",
         f"  observed cells : {len(view.cells)}",
@@ -54,15 +59,15 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
     lines.append("")
     if not fitted:
         lines.append(f"  {view.ruler.label}")
-        return "\n".join(lines)
+        return lines
 
-    by_gain = shown.order == "info_gain"
+    by_gain = order == "info_gain"
     title, key_label = (
         ("Info-gain leaderboard", "info gain") if by_gain else ("Hardness leaderboard", "delta")
     )
     keyed = (
         (key, on.pick_score if by_gain else on.delta, on.delta_se)
-        for key in shown.ranked
+        for key in ranked
         for on in (view.samples[key],)
     )
     top = [
@@ -75,11 +80,11 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         lines.append(f"    {'position':>10s} {key_label:>10s} {'delta_se':>10s}  query")
         lines.append(f"    {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * 40}")
         for key, value, delta_se in top:
-            query = shown.sample_query_lookup.get(key, "")[:40]
+            query = queries.get(key, "")[:40]
             lines.append(f"    {row[key]:>10d} {value:>+10.3f} {delta_se:>10.3f}  {query}")
 
     off = [key for key in sample_order if view.samples[key].delta is None]
     if off:
         lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(row[k]) for k in off)}")
 
-    return "\n".join(lines)
+    return lines

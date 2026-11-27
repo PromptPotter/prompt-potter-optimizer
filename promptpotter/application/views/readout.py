@@ -6,7 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.hard_sample_sorter import rank_hard_samples
+from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizers.nodes import ReviewReading
+from promptpotter.application.scoring.closed_rounds import closed_rounds
+from promptpotter.application.scoring.measurement_log import cycle_hard_samples
 from promptpotter.application.served_dashboard import lookahead_axes
 from promptpotter.application.views.render.ansi import (
     render_bench_scored,
@@ -15,18 +21,22 @@ from promptpotter.application.views.render.ansi import (
     render_round_start,
     render_round_verdict,
     render_run_spend,
+    render_spend_breakdown,
     to_text,
 )
 from promptpotter.application.views.render.candidate import (
     fmt_individual_header,
     individual_summary,
 )
+from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
 from promptpotter.application.views.render.phase import (
     acts_line,
     fmt_elapsed,
     render_advance_status,
-    render_noise_walk,
+    render_cycle_final,
+    render_holds,
     render_progress_table,
+    render_round_block,
     render_round_stats,
     round_verdict_basis,
     stop_lines,
@@ -46,6 +56,11 @@ from promptpotter.application.views.render.primitives import (
     _round_rule,
     display_tags,
 )
+from promptpotter.application.views.render.review import (
+    render_cycle_review,
+    render_round_review,
+    schema_repairs,
+)
 from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.domain.arm_reading import DisplayMetric, ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.arms import (
@@ -57,6 +72,7 @@ from promptpotter.domain.arms import (
     arm_elimination,
     arm_name,
 )
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
@@ -82,6 +98,7 @@ from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRe
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     ArmsGate,
+    CycleFinalRecord,
     ElectionRecord,
     Ended,
     LLMCallProgressRecord,
@@ -104,10 +121,14 @@ from promptpotter.domain.records.run_records import (
     SampleScoredRecord,
     SampleStartedRecord,
 )
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.said import GLYPH
 from promptpotter.domain.sample import sample_tag
+from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_spend,
     scan_resolved_run,
     scan_standing_rounds,
 )
@@ -130,7 +151,8 @@ class ReadoutMissedInitError(RuntimeError):
 class ReadoutProjection(Projection):
     derives = "readout.log"
 
-    def __init__(self, session: Session, *, sink: StatusFn | None) -> None:
+    def __init__(self, session: Session, config: CampaignConfig, *, sink: StatusFn | None) -> None:
+        self._session, self._config = session, config
         self._round_num = 0
         self._sink = sink
         self._schema = session.pipeline_schema
@@ -251,6 +273,7 @@ class ReadoutProjection(Projection):
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
+            self._stop_digest()
         state = record.state
         if not isinstance(state, Paused | Ended):
             # The arms gate is its narration row, then the act that answers it.
@@ -273,8 +296,57 @@ class ReadoutProjection(Projection):
         for line in rest:
             self._write(f"    {line}")
 
+    def _stop_digest(self) -> None:
+        """What a stop reads off the cycle's ledger: its spend per bucket, each hold on the last
+        scale, the optimizer's review and the hard samples."""
+        hop, session = self._hop, self._session
+        assert hop is not None, "a run stops on the readout it opened"
+        for line in render_spend_breakdown(scan_ledger_spend(self._campaigns.chain(hop)).spend):
+            self._write(f"{DIM}{line}{RESET}")
+        # A run stopped before its origin closed has no round and may have no scorer either.
+        if not self._closed:
+            return
+        closed = [self._closed[n].summary() for n in sorted(self._closed)]
+        last_scale = self._closed[max(self._closed)].level_series
+        for line in render_holds(served_rounds(closed, {}, last_scale)):
+            self._write(line)
+        _, audits, review = self._reviewed()
+        for line in render_cycle_review(review, audits, self._config.optimization.optimizer):
+            self._write(line)
+        scorer = session.state.scoring.scorer
+        hard = cycle_hard_samples(session.store, hop, scorer, self._config)
+        measured = hard.ranked_keys
+        order, ranked = rank_hard_samples(
+            hard,
+            {key: hard.positions[key] for key in measured},
+            measured=set(measured),
+            order=self._config.hard_sample_order,
+        )
+        queries = {sample.key: sample.query for sample in session.bank.samples}
+        for line in render_hard_sample_heatmap(hard, queries, order, ranked):
+            self._write(line)
+
+    def _reviewed(self) -> tuple[list[RoundResult], list[RoundAudit | None], ReviewReading | None]:
+        """The optimizer's review of every round the cycle closed, read off its ledger."""
+        session, hop, config = self._session, self._hop, self._config
+        assert hop is not None, "a round closes on the readout it opened"
+        rounds = closed_rounds(session.store, hop, session.state.scoring.scorer, moment=None)
+        audits = round_audits(self._campaigns.cycle_dir(hop), [r.round for r in rounds])
+        framing = campaign_framing(session.store, config, session.dataset)
+        asked = (framing.pipeline_purpose, framing.optimization_goals, framing.key_challenges)
+        optimizer = select_optimizer(config.optimization)
+        return (
+            rounds,
+            audits,
+            optimizer.review(rounds, audits, context_object=[c for c in asked if c.strip()]),
+        )
+
     def _handle_pass_graded(self, record: PassGradedRecord) -> None:
         self._write(render_pass_graded(record))
+
+    def _handle_cycle_final(self, record: CycleFinalRecord) -> None:
+        for line in render_cycle_final(record.final):
+            self._write(line)
 
     def _handle_bench_scored(self, record: BenchScoredRecord) -> None:
         self._write(render_bench_scored(record))
@@ -571,11 +643,15 @@ class ReadoutProjection(Projection):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
-            self._write(_node_line(f"{fact.label}: {fact.text}"))
         closed = [self._closed[n].summary() for n in sorted(self._closed)]
         served = next(r for r in served_rounds(closed, {}, series) if r.round == rn)
-        for line in render_noise_walk(served):
+        for line in render_round_block(served):
             self._write(line)
+        rounds, audits, review = self._reviewed()
+        if (at := next((i for i, r in enumerate(rounds) if r.round == rn), None)) is not None:
+            for line in render_round_review(
+                [] if review is None else review.checks[at], schema_repairs(audits[at])
+            ):
+                self._write(line)
         self._write(render_advance_status(round_result.overlap, standing.rounds_without_advance))
         self._write(_node_bottom())

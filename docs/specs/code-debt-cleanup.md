@@ -115,11 +115,11 @@ row it closes.
 
 ### batch/26 · stream-rk
 
-- **`RunArtifacts` renders off a live `Session`**: `runner/output.py` reaches `session.state.scoring`
+- **`ExportProjection` renders off a live `Session`**: `runner/output.py` reaches `session.state.scoring`
   and its partition's `demo`. Action: it takes the scorer and partition off the ledger
   (`PartitionRecord`, the declared formula), as `closed_rounds.py::campaign_scorer` does. **Held:**
   the row below; until it lands, `campaign_scorer` grades a labelless cell unlike the run, and the
-  export and `log.md` would take that. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
+  export would take that. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
 - **`campaign_scorer` grades a labelless cell unlike the run**: `scoring/closed_rounds.py::campaign_scorer`
   compiles with `verifier_graded=False`, the run with `all_verifier_graded(bank)`
   (`initialization/scoring_scope.py:64`). Under `rr(ground_truth_rank)` a `ground_truth=""` cell is
@@ -348,11 +348,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
   served rows carry what the adapters join. **Rides with:** webd. **Re-test:**
   `git grep -c "\.facts\." -- webapp/components webapp/lib`.
-- **A round's markdown names its lift column from the first arm** (webb-5b's report):
-  `runner/output.py::_render_variants_table` reads the first fit's `vs_reference.cell_set`, the
-  first-arm shape `RoundFileView` dropped, because the served name sits on `ArmReading` and the table
-  reads `ArmFit`. Root: the name is the pair's, served wherever the pair is, so every reader takes each
-  arm's own. **Rides with:** webd. **Re-test:** `git grep -n "lift_versus('parent', sheet)" -- promptpotter` is empty.
 - **The browser recomputes engine facts**: `webapp/lib/derivations/` (~2.2k lines, plus tests) derives
   node config, spend, run phase and the search point the engine already computes. Action: each fact is
   served on its existing read and the TypeScript copy and its tests go; so do `wonOnTheta` (9 hits in 5 files; its filed row and `electedMetric` went, ec96b1cda) and
@@ -483,7 +478,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   writes each model's default host into every node config, and `bench/llm_call.py:231` pins the optimizer's
   own calls too. Decided: a model keeps its pin only where its
   realized cache share and effective $/M beat running uncached. **Rides with:** tune 3. **Re-test:**
-  `SpendRollup.by_node` in each twin's `review.md`.
+  the `spend by node:` block at each twin's `readout.log` stop (`render/ansi.py::render_spend_breakdown`).
 - **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
@@ -791,7 +786,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   only `initialization/scoring_scope.py:58` passes the bank's answer. `run_observers.py::_bind_observers`
   builds three projections on a live `Session`, and `runner/output.py` reads `session.` 23 times.
   Root: a `Session` binds the value to a live client and builds none of it. **Closes:**
-  **`RunArtifacts` renders off a live `Session`**, **`campaign_scorer` grades a labelless cell unlike the run**,
+  **`ExportProjection` renders off a live `Session`**, **`campaign_scorer` grades a labelless cell unlike the run**,
   **A check-in's cycle plan selects beside its landing's refusal**, **A per-cell criterion naming a term no cell carries compiles**,
   **A connector's two-valued term reaches no scorer**; adjacent: **The node document is typed two ways**,
   **The pipeline carrier is typed only at its door**, **A connector's name is looked up again**,
@@ -839,15 +834,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **A test seat binds a campaign disk does not hold**, **Smells the test-shape split left**, **A test stands outside the harness**.
   **Run data:** none. **Size:** large, tests only; cheaper after A, the harness then opens through the one opening.
   **Rides with:** tests-w's successor. **Re-test:** `git grep -c "def _peer_cycle" -- tests` is 0.
-- **The markdown artifacts are excised from the engine (root G, operator fork "md")**: `runner/output.py`
-  (786 lines) writes `log.md`, `review.md` and `export.json` (`:640`); `readout.log`,
-  `rounds/round_NNNN.json`, the `evidence` verb and the dashboard serve the same facts. Dropping the two
-  markdown files takes the runner to 9 modules and removes B's hardest reader. **Closes:**
-  **A round's markdown names its lift column from the first arm**. **Decided** (operator, 2026-11-25): the
-  two go, and the run folder stays the headless UI (a device with no browser, a PLC or a Raspberry Pi,
-  reads it), so every fact they show stays plain text in `readout.log`, a round file or a CLI read
-  verb, never a served-only read. The tuning row **The default host pin is a trial with no verdict**
-  reads `review.md`, so its reader moves first. **Run data:** none. **Size:** medium. **Re-test:** `git grep -c "review.md" -- promptpotter` is 0.
 - **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
   `infrastructure/store/read_model.py:1132-1136` branches on it, and `store/CLAUDE.md` warns that money
@@ -888,10 +874,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `_lay`, `_set_body`) walks a model's fields to build a patch, so no other door can spell a dotted path.
   Root: the grammar moves to `application/`, and the CLI, the API and `/potter-run` call it.
   **Re-test:** `git grep -n "def _set_body" -- promptpotter/presentation` is empty.
-- **A sandbox delete names its owner twice**: `jobs/reaper.py::reclaim_orphan_sandboxes` (`:43`) and
-  `infrastructure/store/campaign_store/store.py::delete_campaign` (`:475`) each read `read_sandbox_owner`
-  and build the owner hop before calling `delete_inner_sandbox`. Root: `delete_inner_sandbox` reads its own
-  owner file. **Re-test:** one `read_sandbox_owner` per sandbox delete.
 - **A cycle's running job is found two ways**: `served_dashboard.py::spend_counts` (`:611`) takes this
   cycle's `hold_id` from its caller (`run_scope().book` in `run_observers.py:59`, the held run's job in
   `armed_caps`) and reads the siblings' through `_job_holding` (`:636`). Root: one reader of a cycle's
@@ -926,19 +908,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   whatever the press. Unreproduced at ml-8 (4-core cloud: 0 of 3 moved at press 16, 0 of 3 at 64), so
   no replayed record is named yet; reproduce it first. **Re-test:** three runs at press max leave
   `capo/resumed` and `gepa/resumed` UNMOVED against each other.
-- **`sample_order` names two things**: `domain/arms.py:175` (an arm's walk order, `list[int]`) and
-  `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
-  heatmap's renamed for what it orders. **Re-test:**
-  `git grep -nE "sample_order\s*:" -- promptpotter/domain` returns one line.
 - **`tests/test_spend.py` holds the walk's tests**: 5,522 lines, 32 lines naming a walk (tw-j deleted
   `_round` and the pause and catch-up tests by mutation; the hand-driven `_walk` stays under the spend
   ceiling, skip and last-skip facts, and the inner stop patches `execute_round`). Root: each becomes an
   offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and `_walk` goes
   (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
-- **`scoring/query_loop.py::keep_cut` takes a refusal as a row**: `_ScoringPhase.keep_cut` (`:952`) filters
-  the cell the ceiling refused back out of `walk.results` (`:960-964`, by `_budget_refusal`), because the
-  refused cell was taken as a row before it stopped the phase. Root: a refusal is never a row. **Re-test:**
-  `keep_cut` holds no `_budget_refusal` filter.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -1095,10 +1069,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 ### wave-6 · what the v0.8.21 box test showed (2026-11-26)
 
-- **Health fails a backend no offered dataset names**: `update.sh`'s health printed `✗ backend:n8n
-  unverified (N8N_HARNESS_ENDPOINTS is unset)` on a box whose `DATASET_OFFER` names no n8n dataset.
-  Door: health checks the connectors the unit's offer reaches, the set `offer_faults()` reads.
-  **Rides with:** box. **Re-test:** the box's health lists no n8n line while its offer names none.
 - **A wiped campaign answers two failure kinds**: after the landing, a still-open tab asked
   `/campaigns/<wiped>/pipeline` (400) beside its `/hierarchy` and `/dashboard` (404). I7's GONE
   stops on a 404 alone, so that read keeps asking. Door: an absent campaign is a 404 at every read.
@@ -1110,9 +1080,15 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   at $0.041 spent of a $0.30 face (hold bound $0.06). Unchecked whether the run's own ceiling was
   worded as the host's allowance. **Rides with:** money. **Re-test:** a run halted on its own
   ceiling names that ceiling, never the allowance.
-- **Dead producers' locks accumulate**: the box's `jobs/producers/` holds 15 `.lock` files, one per
-  past producer pid, with nothing listed live. Door: the sweep that releases a dead producer's job
-  removes its lock. **Rides with:** box.
+- **A dead producer's lock and its containers are reclaimed by two owners**: the box's `jobs/producers/`
+  holds 15 `.lock` files, one per past producer pid, with nothing listed live: only
+  `docker_host.py::reap_dead_producers` forgets a jobless producer's lock, and it runs only on a machine
+  step. Yet `application/jobs/registry.py::JobRegistry.reap_orphans` unlinks a dead producer's lock when it releases its
+  job, and `reap_dead_producers` finds a dead producer's containers BY that lock, so a producer that
+  died holding a job leaves its containers unreaped. A sweep that unlinks every unheld lock (w7-small
+  link 3, not landed) widens that leak to every dead producer. Root: one reclaim of a dead producer
+  removes its containers and then its lock, and every sweep calls it. **Re-test:** a producer killed with
+  a job and a labelled container leaves neither its lock nor its container after one sweep.
 - **`promptpotter-self`'s ε 0.30 is priced on the retired pairwise statistic**: its comment weighs a
   false cut against a false survival on the pairwise p_best (and a 0.15 default), but since
   5cf502c7b ε reads a field share that a 3-variant round ties at 0.25, so 0.30 cuts a tied leader

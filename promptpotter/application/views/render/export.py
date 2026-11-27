@@ -12,7 +12,6 @@ from typing import Any, assert_never
 
 from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
 from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCycle
 from promptpotter.domain.paired_reading import (
@@ -118,15 +117,6 @@ def export_files(
             )
         case _:
             assert_never(tier)
-
-
-def winner_pointer(hop: CycleHop) -> str:
-    """The one statement of a cycle's winner: `log.md`'s `## Winner` and the notebook cell both say it."""
-    return (
-        "Stated once, by the package — the prompt per node, `export.json` and the evidence: "
-        f"the `cycle-export` read of {hop.campaign_id}/{hop.cycle_id} at its `package` tier. "
-        f"Its machine record is `cycles/{hop.cycle_id}/export.json`."
-    )
 
 
 def provenance_lines(p: ExportProvenance, kind: str) -> list[str]:

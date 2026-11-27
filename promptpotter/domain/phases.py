@@ -521,7 +521,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             (
                 NextAct(kind="set-limits", field="budget.rounds", value="more"),
                 NextAct(kind="start-run"),
-                NextAct(reads="review.md"),
+                NextAct(reads="readout.log"),
             ),
         ),
         StopReason.TARGET_HIT: StopReasonInfo(

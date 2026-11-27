@@ -190,7 +190,7 @@ BASELINE = {
     # tests-x (+2): `build_stores` refuses a projects root off the data root io places a write from.
     # small-13 (−8): a merged sheet is standing by construction; the fit is keyed by `ArmKey`.
     # usage-2 (−2): `StepUsage` takes its parts from `TokenAccount`'s fields, never a hand list.
-    # rk-dec-3 link 1 (+21): `phase.py::render_noise_walk`, the round readout's μ0, τ and hold off
+    # rk-dec-3 link 1 (+21): `phase.py::render_round_block`, the round readout's μ0, τ and hold off
     # the round `served_rounds` serves the dashboard at that close. link 2 (+16): the cycle read
     # names its headline's column (`Election.ended_on`), the one an unfiltered spread reads.
     # store-4 (+7): `io.py::refuse_off_workspace` matches a store's workspace to `WORKSPACE_SHAPES`
@@ -276,7 +276,10 @@ BASELINE = {
     # rebase-line (+13): a fork's line served whole: the candidates its bars lead with below its
     # cut (`SubtreeCycleEntryFacts.inherited`), and its Spend figure billing its chain.
     # v0.8.21 (−134): the three migrations v0.8.20 landed on the box go, with the retired claim row.
-    "package_lines": 113698,
+    # w7-small (+12): health probes only the offer's connectors (`offer_connectors`), and a sandbox
+    # owner names its own hop (`SandboxOwner.hop`).
+    # w7-text (−807): `log.md` and `review.md` excised; one round block off `ServedRound`.
+    "package_lines": 112903,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

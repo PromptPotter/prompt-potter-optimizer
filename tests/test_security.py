@@ -163,7 +163,7 @@ from promptpotter.config.paths import (
     jobs_dir,
     user_data_root,
 )
-from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
+from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION, settings
 from promptpotter.domain import kinds as kinds_module
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
@@ -2765,6 +2765,18 @@ def test_an_orphan_sandbox_the_sweep_cannot_delete_stands_in_machine_status(
     assert not orphan.exists(), "a deletable orphan sandbox survived the sweep"
     assert not JobRegistry.attach(jobs_dir(built_stores.projects_root)).unswept(), (
         "a clean pass left the refusal standing"
+    )
+
+
+@pytest.mark.usefixtures("built_stores")
+def test_health_probes_only_the_backends_the_offer_reaches(monkeypatch: pytest.MonkeyPatch) -> None:
+    def backends() -> set[str]:
+        return {p.name.split(":")[1] for p in health.probes() if p.name.startswith("backend:")}
+
+    everywhere = backends()
+    monkeypatch.setattr(settings, "DATASET_OFFER", "email-tagging")
+    assert backends() == {"termnorm"} < everywhere, (
+        "health probed a backend no offered dataset names"
     )
 
 

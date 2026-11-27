@@ -83,6 +83,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
+    SandboxOwner,
     campaign_cycles_dir,
     campaign_root_dir_for,
     campaigns_root_dir_for,
@@ -477,15 +478,14 @@ class CampaignStore:
                     self._base_dir.name,
                     campaign_id,
                 ):
-                    owner_hop = CycleHop(campaign_id=campaign_id, cycle_id=owner.cycle_id)
-                    self.delete_inner_sandbox(sandbox, owner=owner_hop)
+                    self.delete_inner_sandbox(sandbox, owner=owner)
         if keepsake:
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
         return True
 
-    def delete_inner_sandbox(self, sandbox: Path, *, owner: CycleHop) -> None:
+    def delete_inner_sandbox(self, sandbox: Path, *, owner: SandboxOwner) -> None:
         """Each inner campaign banked inside *owner*, the cycle whose sandbox it is: inner ids are
         content-addressed and repeat across sandboxes. Metered nothing of the outer ceiling: the
         outer ledger carries every inner call."""
@@ -496,7 +496,7 @@ class CampaignStore:
             self._bank(
                 inner,
                 list(hops),
-                subject=Subject(campaign_id, inside=(owner,)),
+                subject=Subject(campaign_id, inside=(owner.hop,)),
                 metered=_ledger_meters([]),
             )
         rmtree_robust(sandbox)
@@ -553,7 +553,7 @@ class CampaignStore:
         self.append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        """`runner/output.py::RunArtifacts` writes it off the ledger as the run drains."""
+        """`runner/output.py::ExportProjection` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
