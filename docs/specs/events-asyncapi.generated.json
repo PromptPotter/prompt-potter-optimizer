@@ -1692,13 +1692,6 @@
         "title": "CellSetName",
         "type": "string"
       },
-      "CheckpointInputs": {
-        "additionalProperties": false,
-        "description": "One kind of decision, declared in the package taking it: everything its writer banks and its replay reads.",
-        "properties": {},
-        "title": "CheckpointInputs",
-        "type": "object"
-      },
       "ConfigOverrides": {
         "additionalProperties": false,
         "description": "A fork's campaign-config delta, in which an absent field inherits the parent's value.",
@@ -1886,7 +1879,7 @@
       },
       "Cut": {
         "additionalProperties": false,
-        "description": "Stopped short of its panel against it.",
+        "description": "Stopped short of its panel against it; an ``invalid`` one, refused before a cell, carries no\nreason: its own fatal ``validation_failures`` are it.",
         "properties": {
           "config_key": {
             "title": "Config Key",
@@ -1918,31 +1911,34 @@
             ]
           },
           "reason": {
-            "discriminator": {
-              "mapping": {
-                "broken": "#/components/schemas/Broken",
-                "eliminated": "#/components/schemas/Eliminated",
-                "invalid": "#/components/schemas/Invalid",
-                "refused": "#/components/schemas/Refused",
-                "skipped": "#/components/schemas/Skipped"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/Eliminated"
+                "discriminator": {
+                  "mapping": {
+                    "broken": "#/components/schemas/Broken",
+                    "eliminated": "#/components/schemas/Eliminated",
+                    "refused": "#/components/schemas/Refused",
+                    "skipped": "#/components/schemas/Skipped"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Eliminated"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Broken"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Refused"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Skipped"
+                  }
+                ]
               },
               {
-                "$ref": "#/components/schemas/Broken"
-              },
-              {
-                "$ref": "#/components/schemas/Refused"
-              },
-              {
-                "$ref": "#/components/schemas/Invalid"
-              },
-              {
-                "$ref": "#/components/schemas/Skipped"
+                "type": "null"
               }
             ],
             "title": "Reason"
@@ -2144,7 +2140,7 @@
             "cycle_minted": "#/components/schemas/CycleMintedRecord",
             "cycle_share": "#/components/schemas/CycleShareRecord",
             "cycle_superseded": "#/components/schemas/CycleSupersededRecord",
-            "decision": "#/components/schemas/ResumeCheckpointRecord",
+            "decision": "#/components/schemas/DecisionRecord",
             "election": "#/components/schemas/ElectionRecord",
             "error": "#/components/schemas/ErrorRecord",
             "flight": "#/components/schemas/FlightRecord",
@@ -2219,7 +2215,7 @@
             "$ref": "#/components/schemas/CycleSupersededRecord"
           },
           {
-            "$ref": "#/components/schemas/ResumeCheckpointRecord"
+            "$ref": "#/components/schemas/DecisionRecord"
           },
           {
             "$ref": "#/components/schemas/ElectionRecord"
@@ -2678,6 +2674,70 @@
           "tolerance"
         ],
         "title": "DatasetSplit",
+        "type": "object"
+      },
+      "DecisionInputs": {
+        "additionalProperties": false,
+        "description": "One kind of decision, declared in the package taking it: everything its writer banks and its replay reads.",
+        "properties": {},
+        "title": "DecisionInputs",
+        "type": "object"
+      },
+      "DecisionRecord": {
+        "additionalProperties": false,
+        "description": "``inputs`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read.",
+        "properties": {
+          "inputs": {
+            "$ref": "#/components/schemas/DecisionInputs"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Node"
+          },
+          "outcome": {
+            "default": null,
+            "title": "Outcome"
+          },
+          "record_type": {
+            "const": "decision",
+            "default": "decision",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Round"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "inputs"
+        ],
+        "title": "DecisionRecord",
         "type": "object"
       },
       "DeclaredPhase": {
@@ -3929,20 +3989,6 @@
         "title": "InstrumentNovel",
         "type": "object"
       },
-      "Invalid": {
-        "additionalProperties": false,
-        "description": "Refused before a cell: the reasons are the arm's own fatal ``validation_failures``.",
-        "properties": {
-          "kind": {
-            "const": "invalid",
-            "default": "invalid",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "title": "Invalid",
-        "type": "object"
-      },
       "KeepDraftsAction": {
         "additionalProperties": false,
         "description": "One button: a press sends `payload` as `kind` to the cycle holding for its round's arms.",
@@ -4907,35 +4953,6 @@
           "source"
         ],
         "title": "ModelCapability",
-        "type": "object"
-      },
-      "NearMiss": {
-        "description": "A query whose ground truth landed in candidates rank 2-10.",
-        "properties": {
-          "ground_truth": {
-            "title": "Ground Truth",
-            "type": "string"
-          },
-          "predicted": {
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "rank": {
-            "title": "Rank",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "query",
-          "ground_truth",
-          "rank",
-          "predicted"
-        ],
-        "title": "NearMiss",
         "type": "object"
       },
       "NoRanker": {
@@ -6774,63 +6791,6 @@
         "title": "ResolvedRunRecord",
         "type": "object"
       },
-      "ResumeCheckpointRecord": {
-        "additionalProperties": false,
-        "description": "``inputs_ref`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read.",
-        "properties": {
-          "inputs_ref": {
-            "$ref": "#/components/schemas/CheckpointInputs"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Node"
-          },
-          "outcome": {
-            "default": null,
-            "title": "Outcome"
-          },
-          "record_type": {
-            "const": "decision",
-            "default": "decision",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Round"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "inputs_ref"
-        ],
-        "title": "ResumeCheckpointRecord",
-        "type": "object"
-      },
       "RoleScope": {
         "description": "Which roles a reading of an individual's cells may see; two scopes never pair.",
         "enum": [
@@ -6965,17 +6925,6 @@
           "cells": {
             "$ref": "#/components/schemas/RoundCells"
           },
-          "diagnostics": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundDiagnostics"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "election": {
             "anyOf": [
               {
@@ -7072,76 +7021,6 @@
           "panel_precision"
         ],
         "title": "RoundClosedRecord",
-        "type": "object"
-      },
-      "RoundDiagnostics": {
-        "description": "One round's post-scoring diagnostics, computed once and read by every renderer.",
-        "properties": {
-          "error_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Rate"
-          },
-          "n_valid": {
-            "title": "N Valid",
-            "type": "integer"
-          },
-          "near_misses": {
-            "items": {
-              "$ref": "#/components/schemas/NearMiss"
-            },
-            "title": "Near Misses",
-            "type": "array"
-          },
-          "rank_buckets": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Rank Buckets",
-            "type": "object"
-          },
-          "samples": {
-            "items": {
-              "$ref": "#/components/schemas/SampleDiag"
-            },
-            "title": "Samples",
-            "type": "array"
-          },
-          "top_k_accuracy": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Top K Accuracy",
-            "type": "object"
-          },
-          "warning_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Warning Rate"
-          }
-        },
-        "required": [
-          "rank_buckets",
-          "top_k_accuracy",
-          "near_misses",
-          "n_valid",
-          "error_rate",
-          "warning_rate",
-          "samples"
-        ],
-        "title": "RoundDiagnostics",
         "type": "object"
       },
       "RoundEnding": {
@@ -7310,17 +7189,6 @@
           },
           "cells": {
             "$ref": "#/components/schemas/RoundCells"
-          },
-          "diagnostics": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundDiagnostics"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           },
           "election": {
             "anyOf": [
@@ -7978,83 +7846,6 @@
           "label"
         ],
         "title": "Said",
-        "type": "object"
-      },
-      "SampleDiag": {
-        "properties": {
-          "fitness": {
-            "title": "Fitness",
-            "type": "number"
-          },
-          "ground_truth": {
-            "title": "Ground Truth",
-            "type": "string"
-          },
-          "gt_in_ranked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gt In Ranked"
-          },
-          "gt_in_source": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gt In Source"
-          },
-          "predicted": {
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "rank": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank"
-          },
-          "terminal_node": {
-            "title": "Terminal Node",
-            "type": "string"
-          },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "query",
-          "ground_truth",
-          "predicted",
-          "rank",
-          "terminal_node",
-          "gt_in_source",
-          "gt_in_ranked",
-          "warnings",
-          "fitness"
-        ],
-        "title": "SampleDiag",
         "type": "object"
       },
       "SampleScoredRecord": {

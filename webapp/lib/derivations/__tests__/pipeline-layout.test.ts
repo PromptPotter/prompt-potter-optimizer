@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flowOrder, layoutGrid, wrapAt } from "../pipeline-layout";
+import { layoutGrid, wrapAt } from "../pipeline-layout";
 import type { PipelineView, PipelineViewNode } from "@/lib/api/types";
 
 // What `derive_pipeline_view` serves for `assets/optimizers/potter/pipeline.yaml`: the `run_init`
@@ -123,16 +123,6 @@ describe("wrapAt", () => {
     expect(wrapAt("mean_round_delta_held_out", "_", 16)).toEqual(["mean_round_", "delta_held_out"]);
     expect(wrapAt(MODEL, "/", 20).join("")).toBe(MODEL);
     expect(wrapAt("", "/", 20)).toEqual([]);
-  });
-});
-
-describe("flowOrder", () => {
-  it("runs the phase that runs once, then the round it loops", () => {
-    expect(flowOrder(INTERIOR, POTTER.cycle).map((n) => n.id)).toEqual([
-      "block_pool",
-      "demo_pool",
-      ...POTTER.cycle,
-    ]);
   });
 });
 

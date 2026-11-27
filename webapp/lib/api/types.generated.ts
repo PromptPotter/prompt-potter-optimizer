@@ -448,6 +448,9 @@ export interface LibrarySnippet {
   /** The pack holding it, as a `packs` knob names it */
   pack: string;
   provenance: LibraryCited | LibraryAuthored;
+  /** The `source` its lineage's first snippet cites, walked up `supersedes` through
+   * the snippets served; `authored` where that first snippet cites none */
+  lineage_source: string;
 }
 
 /** A snippet its pack cites from a published work. */
@@ -1470,9 +1473,9 @@ export interface CandidateFacts {
   /** The loci, as `node.key`, its lineage records the donor gave and no later
    * variation rewrote. Empty without a donor. */
   donated_loci: string[];
-  /** Per other locus it moved off its main, the earlier candidates whose value
-   * there is closer to its own than the main's: most similar first, then most
-   * recently measured. */
+  /** Per other locus it moved off its main, the one earlier candidate whose value
+   * there is closest to its own and closer than the main's, the most recently
+   * measured of a tie. */
   gene_sources: GeneSource[];
   /** This candidate's composite fitness under the request's `score:` lens. Null
    * without a lens, or where no row carries a verdict under it. */
@@ -1714,7 +1717,6 @@ export interface LineageDivergence {
 export interface ServedDashboard {
   at_offset: number;
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
-  optimizer_step: string | null;
   stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   rounds: ServedRound[];
@@ -1753,6 +1755,9 @@ export interface ServedDashboard {
   /** The verb the run control offers now, its campaign's refusal joined
    * (`admission.py::admitted`), or the sentence where it offers none. */
   admission: RunAdmission;
+  /** What a pause asked now waits on: the optimizer's step by its served name, else
+   * `state` worded (`DASHBOARD_STATE_PAUSE_WORDS`). */
+  pause_waits_on: string;
   /** Why `skip-searchpoint` is refused, off the run (`RunState`), which no campaign
    * moves, and its reader (`command_kinds.py::filable`); empty where it is
    * admitted. */
@@ -4187,7 +4192,8 @@ export interface OptimizerSetup {
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no
- * manifest declares one. */
+ * manifest declares one. Its nodes stand in flow order (by tier, then rank),
+ * which the browser lays out as served. */
 export interface PipelineView {
   nodes: PipelineViewNode[];
   edges: PipelineViewEdge[];
@@ -5896,7 +5902,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "9e1825531f03c5a1";
+export const SERVED_CONTRACT = "f98fd49f4ed3cf83";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6245,6 +6251,11 @@ export interface ExportTierInfo {
 export interface RoundAdvanceInfo {
   label: string;
   sentence: string;
+}
+
+export interface LiftSideInfo {
+  tone: Tone;
+  verdict: string;
 }
 
 export interface ReadingStateInfo {
@@ -6690,11 +6701,11 @@ export const CELL_SET_NAME_WORDS: Record<CellSetName, string> = {
   "measured_by_both": "on the cells both measured",
 };
 
-// Mirror of domain/paired_reading.py::LIFT_SIDE_TONE, in display order.
-export const LIFT_SIDE_TONE: Record<'above' | 'below' | 'spans', Tone> = {
-  "above": "success",
-  "below": "danger",
-  "spans": "quiet",
+// Mirror of domain/paired_reading.py::LIFT_SIDE_INFO, in display order.
+export const LIFT_SIDE_INFO: Record<'above' | 'below' | 'spans', LiftSideInfo> = {
+  "above": { tone: "success", verdict: "clears 0" },
+  "below": { tone: "danger", verdict: "clears 0" },
+  "spans": { tone: "quiet", verdict: "could not separate from its reference" },
 };
 
 // Mirror of domain/paired_reading.py::READING_STATE_INFO, in display order.
@@ -6982,7 +6993,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],
   [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],
-  [LIFT_SIDE_TONE, ["above", "below", "spans"]],
+  [LIFT_SIDE_INFO, ["above", "below", "spans"]],
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
   [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],

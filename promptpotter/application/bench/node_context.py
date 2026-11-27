@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, overload
 
 from pydantic import BaseModel
@@ -64,7 +64,7 @@ from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, Pipeline
 from promptpotter.domain.pool import Access, BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.records.run_records import (
     ArmRecord,
-    CheckpointInputs,
+    DecisionInputs,
     PhaseRecord,
     RaceStandingRecord,
     RoundClosedRecord,
@@ -320,7 +320,6 @@ class Lineage(CycleRead):
             cells=held.cells,
             overlap_results=held.overlap_results,
             priors=cycle.rounds,
-            schema=session.bound_resolution.chain,
             overlap=ReadingState.NOT_ASKED,
         )
         rr = held.model_copy(
@@ -328,7 +327,6 @@ class Lineage(CycleRead):
                 "election": stated.election,
                 "health": stated.health,
                 "overlap": stated.overlap,
-                "diagnostics": stated.diagnostics,
                 "optimizer_state": held.closed_state.model_copy(
                     update={"population": [held.arms[at.arm].individual]}
                 ),
@@ -511,6 +509,10 @@ class Target(CycleRead):
     def prompt_delivery(self) -> Delivery:
         session = self._cycle.session
         return session.backend_client.connector.prompt_delivery(session.pipeline_params)
+
+    def graded(self, cells: Iterable[GradedCell]) -> CellSheet:
+        """*cells* as a sheet of the session's scorer, the one every row a member holds was graded by."""
+        return self._cycle.session.state.scoring.scorer.graded(cells)
 
     @property
     def cell_formula(self) -> str:
@@ -744,7 +746,7 @@ class Replay(CycleRead):
     def rng(self, tag: str = "") -> random.Random:
         return self._cycle.rng(self._round.round_num, f"{self._member.name}{tag}")
 
-    def decide(self, inputs: CheckpointInputs, outcome: Any) -> Any:
+    def decide(self, inputs: DecisionInputs, outcome: Any) -> Any:
         """A resume re-derives it only where *inputs* is ``Replayed``; else it is archived."""
         self._cycle.pending_decisions.append(
             decision(inputs, outcome, node=self._member.name, round=self._round.round_num)

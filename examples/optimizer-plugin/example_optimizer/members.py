@@ -17,7 +17,7 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.records.run_records import CheckpointInputs
+from promptpotter.domain.records.run_records import DecisionInputs
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 MANIFEST = ManifestDir("example", Path(__file__).parent)
 
 
-class ExampleKept(CheckpointInputs, kind="example_kept"):
+class ExampleKept(DecisionInputs, kind="example_kept"):
     """Archived on the ledger; a ``Replayed`` subclass would have a resume re-derive it."""
 
     ranked: list[ArmKey]

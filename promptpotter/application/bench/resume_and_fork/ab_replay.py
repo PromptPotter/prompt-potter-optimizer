@@ -22,7 +22,7 @@ from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRoun
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.run_records import ResumeCheckpointRecord
+from promptpotter.domain.records.run_records import DecisionRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.shared.errors import DiagnosticError
@@ -68,7 +68,7 @@ class AbReport:
                     "kind": str(d.kind),
                     "recorded": d.recorded_outcome,
                     "current": d.current_outcome,
-                    "inputs_ref": d.inputs_ref,
+                    "inputs": d.inputs,
                 }
                 for d in self.mismatches
             ],
@@ -108,7 +108,7 @@ def _identity(rd: RoundResult, current: Mapping[str, str]) -> list[ReplayMismatc
             kind=f"optimizer_identity:{','.join(moved)}",
             recorded_outcome={n: recorded[n] for n in moved},
             current_outcome={n: current.get(n) for n in moved},
-            inputs_ref={"nodes": moved},
+            inputs={"nodes": moved},
             stands_on=None,
         )
     ]
@@ -156,7 +156,7 @@ def line_divergence(
     campaign_config: CampaignConfig,
     optimizer: SelectedOptimizer,
     rounds: Sequence[RoundResult],
-    decisions: Mapping[int, list[ResumeCheckpointRecord]],
+    decisions: Mapping[int, list[DecisionRecord]],
 ) -> ReplayMismatch | None:
     """The first round of one line *replay_verdict* refuses, walked as ``ab`` walks a campaign."""
     cid = session.hop.cycle_id

@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal, NamedTuple, cast, override
 
 import httpx
+import offline_world
 import pytest
 from factories import (
     archive_row,
@@ -505,20 +506,6 @@ async def test_a_blocking_lock_refuses_on_the_event_loop_and_takes_nothing(tmp_p
     taken = await asyncio.to_thread(take_lock, gate, wait_s=1.0)
     assert taken is not None, "a refused wait on the loop left the lock taken"
     taken.release()
-
-
-# A child's network, answered by the `offline` fixture's world: its first argument is `scripts/`.
-_OFFLINE_CHILD = """
-import sys
-sys.path.insert(0, sys.argv[1])
-from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
-from pydantic import SecretStr
-from promptpotter.config.settings import settings
-for key in PROVIDER_KEYS:
-    setattr(settings, key, SecretStr(NOT_A_KEY))
-router = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
-install_network(router)
-"""
 
 
 def _uploader(user_id: str) -> Stores:
@@ -3821,10 +3808,11 @@ async def test_a_host_files_no_kind_its_press_keeps_from_hosts() -> None:
     assert not stores.api_keys.load(), "a host set the account's own key"
 
 
-# The stdio server as a host spawns it, in the `offline` fixture's world.
-_SERVE_MCP_OFFLINE = f"""{_OFFLINE_CHILD}
+# The stdio server as a host spawns it, in the offline world's child entry.
+_SERVE_MCP = """
+import sys
 from promptpotter.presentation.cli.main import main
-sys.argv = ["promptpotter", "--tenant", sys.argv[2], "mcp"]
+sys.argv = ["promptpotter", "--tenant", sys.argv[1], "mcp"]
 main()
 """
 
@@ -3837,11 +3825,7 @@ async def _stdio_host(tenant: str) -> AsyncIterator[_HostCall]:
     """The real stdio server as a host spawns it, spoken to in its own wire: one JSON-RPC message
     per line. A call answers its response, a refusal as an error or an ``isError`` result alike."""
     child = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        _SERVE_MCP_OFFLINE,
-        str(_REPO / "scripts"),
-        tenant,
+        *offline_world.child(_SERVE_MCP, tenant),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         cwd=_REPO,
@@ -3879,11 +3863,9 @@ async def _stdio_host(tenant: str) -> AsyncIterator[_HostCall]:
         await send({"method": "notifications/initialized"})
         yield call
     finally:
+        # A closed stdin ends the server; its world then names any send no route answered.
         stdin.close()
-        # Its exit is the kill's to cause, so the wait below ends on that signal, never a clock.
-        if child.returncode is None:
-            child.kill()
-        await child.wait()
+        assert await child.wait() == 0, "the host exited unclean or sent past the world"
 
 
 class _HostTenant(NamedTuple):

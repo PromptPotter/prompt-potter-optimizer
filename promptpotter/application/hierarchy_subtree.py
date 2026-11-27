@@ -253,10 +253,6 @@ class _Candidate:
         return self.individual.loci()
 
 
-# How many earlier candidates a moved locus names as its possible sources.
-GENE_SOURCES_PER_LOCUS = 3
-
-
 @lru_cache(maxsize=4096)
 def _text_ratio(a: str, b: str) -> float:
     """Keyed by content: a live tree is rebuilt each poll over the same earlier texts."""
@@ -332,11 +328,11 @@ def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
                 continue
             if (alike := _similarity(value, other)) > floor:
                 found.append((alike, x.round, x))
-        found.sort(key=lambda f: (f[0], f[1]), reverse=True)
-        c.gene_sources += [
-            GeneSource(locus=name, source=x.address, similarity=round(alike, 3))
-            for alike, _, x in found[:GENE_SOURCES_PER_LOCUS]
-        ]
+        if found:
+            alike, _, x = max(found, key=lambda f: (f[0], f[1]))
+            c.gene_sources.append(
+                GeneSource(locus=name, source=x.address, similarity=round(alike, 3))
+            )
 
 
 @dataclass

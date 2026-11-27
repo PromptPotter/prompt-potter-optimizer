@@ -71,8 +71,7 @@ class CatchUpPool:
         """Nothing is written or graded until :meth:`commit_backfills` takes them."""
         started: list[asyncio.Future[Any]] = []
         for cid in self._unstarted(sample)[: max(room, 0)]:
-            # The race holds its rows unfiled: the walk reads them under the scorer it files under.
-            held = self._session.state.scoring.scorer.graded(self._race.priors[cid].cells)
+            held = self._race.priors[cid]
             backfill = _catch_up(self._session, self._index, self._walks[cid], sample, cid, held)
             self._pending[(cid, sample.id)] = backfill
             started.append(backfill[0])

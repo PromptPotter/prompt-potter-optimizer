@@ -90,18 +90,18 @@ from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
-class CheckpointInputs(StatePart, kind=None):
+class DecisionInputs(StatePart, kind=None):
     """One kind of decision, declared in the package taking it: everything its writer banks and its replay reads."""
 
 
-class ResumeCheckpointRecord(CycleRecord):
-    """``inputs_ref`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read."""
+class DecisionRecord(CycleRecord):
+    """``inputs`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read."""
 
     record_type: Literal["decision"] = "decision"
     kind: str
     # The manifest node whose member took the decision; ``None`` for the bench's own.
     node: str | None = None
-    inputs_ref: SerializeAsAny[CheckpointInputs]
+    inputs: SerializeAsAny[DecisionInputs]
     outcome: Any = None
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
@@ -111,10 +111,10 @@ class ResumeCheckpointRecord(CycleRecord):
     def _read_by_kind(cls, raw: object) -> object:
         if not isinstance(raw, dict):
             return raw
-        inputs = STATE_KINDS.parse(raw["kind"], raw["inputs_ref"])
-        if not isinstance(inputs, CheckpointInputs):
+        inputs = STATE_KINDS.parse(raw["kind"], raw["inputs"])
+        if not isinstance(inputs, DecisionInputs):
             raise ValueError(f"{raw['kind']!r} is a state kind, never a decision's")
-        return {**raw, "inputs_ref": inputs}
+        return {**raw, "inputs": inputs}
 
 
 class PhaseRecord(CycleRecord):
@@ -1225,17 +1225,17 @@ class ForkSpec(FrozenModel):
         return FORK_DIRECTION[self.trigger]
 
 
-class ForkCutFrom(CheckpointInputs, kind="fork_cut"):
+class ForkCutFrom(DecisionInputs, kind="fork_cut"):
     from_round: int
     fork: ForkSpec
 
 
-class PanelCoverage(CheckpointInputs, kind="panel_coverage"):
+class PanelCoverage(DecisionInputs, kind="panel_coverage"):
     # Every arm of the round's panel, holed or not.
     holes_by_arm: dict[ArmKey, int]
 
 
-class OriginGatePass(CheckpointInputs, kind="origin_gate_pass"):
+class OriginGatePass(DecisionInputs, kind="origin_gate_pass"):
     """The operator's pass past the origin the gate stopped: round 0's, standing while it does."""
 
     by: str

@@ -3,9 +3,7 @@ import { cx } from "@/lib/cx";
 import {
   freeText,
   joinSegments,
-  lineageRoot,
   segmentPrompt,
-  snippetSource,
   withFreeText,
   withSnippetText,
   type KnownSnippet,
@@ -15,9 +13,8 @@ import {
 // The source a block names: its lineage's first snippet's work, or none for a text the library lacks.
 function sourceOf(library: LibraryResponse | null, known: KnownSnippet): string | null {
   const id = known.id ?? known.supersedes;
-  const root = library === null || id === null ? undefined : lineageRoot(library.snippets, id);
-  if (root === undefined) return null;
-  const work = snippetSource(root);
+  const work = library?.snippets.find((s) => s.id === id)?.lineage_source;
+  if (work === undefined) return null;
   const source = library?.sources.find((x) => x.id === work);
   if (source === undefined) return work;
   return source.short_title;

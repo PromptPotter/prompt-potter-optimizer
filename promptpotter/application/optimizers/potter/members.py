@@ -16,6 +16,7 @@ from promptpotter.application.bench.node_context import (
     Progress,
     Replay,
     Ruler,
+    Target,
 )
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
@@ -302,7 +303,7 @@ class PoBB(nodes.Eliminator):
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Lineage, Parent, Ruler, Bounds, Progress, Replay}
+        {Lineage, Parent, Ruler, Bounds, Progress, Replay, Target}
     )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm: a `draw` vote reads it on its draw, `overlap` never

@@ -23,7 +23,6 @@ from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, RoundEnding, line_by_individual
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
-from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.scoring import (
@@ -167,7 +166,6 @@ class RoundOutcome(FrozenModel):
     election: Election | None
     # Not `improved`, the selector's point estimate. `pending` until the overlap pass lands.
     overlap: OverlapReading
-    diagnostics: RoundDiagnostics | None = None
     # Graded against the rounds before it, so it is stamped, never re-derived from this one.
     health: DegradationHealth
     # Built once, at the round's close (`Cycle.close_state`); `None` from its election until then.

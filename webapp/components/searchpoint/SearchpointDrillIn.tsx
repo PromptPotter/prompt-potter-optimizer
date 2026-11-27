@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import {
   type ArmReading,
   type VerificationMark,
+  LIFT_SIDE_INFO,
   PREFIX_STATE_TITLES,
   READING_STATE_INFO,
   type ReadingState,
 } from "@/lib/api/types";
 import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
-import { liftOf, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
+import { liftOf, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
 import { fmtEstimate, fmtMetric, fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
 import { NodeSurface } from "@/components/node-surface/NodeSurface";
@@ -110,11 +111,7 @@ export function SearchpointDrillIn({
                 v={
                   <>
                     {fmtEstimate(paired.estimate)}
-                    {paired.side !== "spans" ? (
-                      " clears 0"
-                    ) : (
-                      <span className={sideTone(null)}> — {NOT_SEPARABLE}</span>
-                    )}
+                    <span className={sideTone(paired.side)}> — {LIFT_SIDE_INFO[paired.side].verdict}</span>
                   </>
                 }
               />

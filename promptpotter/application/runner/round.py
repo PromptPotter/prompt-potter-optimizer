@@ -1019,7 +1019,6 @@ def _round_result(
             ruler=cycle.difficulty.stamp,
         ),
         priors=cycle.rounds,
-        schema=cycle.session.bound_resolution.chain,
         overlap=ReadingState.PENDING,
         round=ctx.round_num,
         arms={key: read.state for key, read in measured.filed.items()},

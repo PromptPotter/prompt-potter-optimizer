@@ -447,7 +447,7 @@ describe("layout, freed: placed", () => {
 
 // ---- PAIRED
 
-const NO_DESCENT = { parent: null, donor: null, donated: [], genes: [] };
+const NO_DESCENT = { descends_from: null, donor: null, donated_loci: [], gene_sources: [] };
 const gene = (source: string) => ({ locus: `n.${source}`, source, similarity: 0.5 });
 
 // Each candidate is served as descending from the newest crown before it, as a mutation of the line.
@@ -465,7 +465,7 @@ function spine(rounds: { round: number; n: number; winner: number | null }[]): P
         address,
         is_selected: r.winner === i,
         crown: r.winner !== i ? null : r.n > 1 ? "elected" : "uncontested",
-        descent: { ...NO_DESCENT, parent: from },
+        descent: { ...NO_DESCENT, descends_from: from },
       });
       if (r.winner === i) crown = address;
     }
@@ -517,7 +517,7 @@ describe("layout, paired under the bars", () => {
       { round: 2, n: 1, winner: 0 },
     ]);
     const child = rows.find((r) => r.address === "r2_0")!;
-    child.descent = { ...child.descent, genes: [gene("r1_0")] };
+    child.descent = { ...child.descent!, gene_sources: [gene("r1_0")] };
     const ys = (variant: string) => paired(rows).beams.filter((b) => b.variant === variant).map((b) => b.y);
 
     expect(Math.min(...ys("gene"))).toBeGreaterThan(Math.max(...ys("chain")));
@@ -534,7 +534,7 @@ describe("layout, paired under the bars", () => {
       key: address.toUpperCase(),
       round: 2,
       address,
-      descent: { ...NO_DESCENT, parent },
+      descent: { ...NO_DESCENT, descends_from: parent },
     });
     rows.push(kid("r2_0", "r1_0"), kid("r2_1", "r1_1"));
     const g = paired(rows);
@@ -543,7 +543,7 @@ describe("layout, paired under the bars", () => {
     expect(chains).toHaveLength(3);
     const xOf = (address: string) => g.nodes.find((n) => n.address === address)!.xf;
     for (const k of ["r2_0", "r2_1"]) {
-      const parent = rows.find((r) => r.address === k)!.descent.parent!;
+      const parent = rows.find((r) => r.address === k)!.descent!.descends_from!;
       const [lo, hi] = [xOf(parent), xOf(k)].sort((a, b) => a - b);
       expect(chains.some((b) => b.x1f === lo && b.x2f === hi)).toBe(true);
     }
@@ -556,7 +556,7 @@ describe("layout, paired under the bars", () => {
       { round: 2, n: 1, winner: 0 },
     ]);
     const child = rows.find((r) => r.address === "r2_0")!;
-    child.descent = { ...child.descent, genes: [gene("r1_0"), gene("r1_1")] };
+    child.descent = { ...child.descent!, gene_sources: [gene("r1_0"), gene("r1_1")] };
     const g = paired(rows);
     const genes = g.beams.filter((b) => b.variant === "gene");
 
@@ -573,7 +573,7 @@ describe("layout, paired under the bars", () => {
       { round: 3, n: 1, winner: 0 },
     ]);
     const child = rows.find((r) => r.address === "r3_0")!;
-    child.descent = { ...child.descent, donor: "r0_0", genes: [gene("r0_0"), gene("r1_0")] };
+    child.descent = { ...child.descent!, donor: "r0_0", gene_sources: [gene("r0_0"), gene("r1_0")] };
     const g = paired(rows);
     const xOf = (address: string) => g.nodes.find((n) => n.address === address)!.xf;
     const span = (variant: string) =>
@@ -611,7 +611,7 @@ describe("layout, paired under the bars", () => {
   it("draws no edge from a parent the strip does not hold", () => {
     const rows = spine([{ round: 1, n: 2, winner: 0 }]).map((r) => ({
       ...r,
-      descent: { ...NO_DESCENT, parent: "elsewhere" },
+      descent: { ...NO_DESCENT, descends_from: "elsewhere" },
     }));
     expect(paired(rows).beams).toEqual([]);
   });
@@ -628,7 +628,7 @@ describe("layout, one tree two ways", () => {
       address: c.address,
       is_selected: c.facts.reading.election.selected,
       crown: c.facts.reading.election.crown,
-      descent: { ...NO_DESCENT, parent: c.facts.descends_from },
+      descent: { ...NO_DESCENT, descends_from: c.facts.descends_from },
     }));
     const p = paired(rows);
     const f = freed(tree, new Set([A]));

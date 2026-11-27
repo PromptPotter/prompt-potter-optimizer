@@ -44,7 +44,7 @@ from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSli
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.records.run_records import CheckpointInputs
+from promptpotter.domain.records.run_records import DecisionInputs
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
@@ -131,7 +131,7 @@ class MinibatchTested(Replayed, kind="minibatch_gate"):
         return minibatch_improves(self.parent_scores, cell_objectives(rows))[0]
 
 
-class CandidateRefused(CheckpointInputs, kind="candidate_refused"):
+class CandidateRefused(DecisionInputs, kind="candidate_refused"):
     arm: str
     ungraded: list[str]
 

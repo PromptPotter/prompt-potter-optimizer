@@ -4,7 +4,7 @@ from pydantic import Field
 
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.records.run_records import ResumeCheckpointRecord
+from promptpotter.domain.records.run_records import DecisionRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
@@ -41,7 +41,7 @@ class MaskRound(FrozenModel):
     parent: MaskReading | None = None
     # Carried only under ``with_replay``.
     round_data: RoundResult | None = None
-    decisions: list[ResumeCheckpointRecord] = Field(default_factory=list)
+    decisions: list[DecisionRecord] = Field(default_factory=list)
 
 
 class MaskCycle(FrozenModel):

@@ -45,8 +45,8 @@ from promptpotter.domain.phase_acts import StepClosed, StepOpened, TextFact
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.records.run_records import (
-    CheckpointInputs,
     ConfigOverrides,
+    DecisionInputs,
     ForkTrigger,
     RebaseRequest,
     RoundStatement,
@@ -466,11 +466,11 @@ class EscalationReading(FrozenModel):
 
 
 # Archived, never replayed: each folds the cycle's escalation history, which no replay holds.
-class L2EscalationTrigger(CheckpointInputs, kind="l2_escalation_trigger"):
+class L2EscalationTrigger(DecisionInputs, kind="l2_escalation_trigger"):
     reading: EscalationReading
 
 
-class L3EscalationTrigger(CheckpointInputs, kind="l3_escalation_trigger"):
+class L3EscalationTrigger(DecisionInputs, kind="l3_escalation_trigger"):
     reading: EscalationReading
     heal: bool
     l2_guard_breaches: list[str]

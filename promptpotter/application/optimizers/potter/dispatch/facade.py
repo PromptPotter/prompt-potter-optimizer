@@ -16,6 +16,7 @@ from promptpotter.application.bench.node_context import (
     Target,
     Transcript,
 )
+from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizers.nodes import CycleRead
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -301,9 +302,14 @@ class PotterView:
         return self.ctx.slice(L3Memory)
 
     # -- the round under render
-    @property
+    @functools.cached_property
     def diagnostics(self) -> RoundDiagnostics | None:
-        return self._latest.diagnostics
+        """Folded off the ended-on arm's rows at render: the round envelope keeps no report."""
+        latest = self._latest
+        # An origin that took no cell reports nothing; a later round's empty walk says so.
+        if latest.election is None or (latest.round == 0 and not latest.results):
+            return None
+        return compute_round_diagnostics(latest, self.pipeline_schema)
 
     @functools.cached_property
     def critique(self) -> CritiqueReadout | None:

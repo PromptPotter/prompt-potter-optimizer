@@ -247,4 +247,4 @@ def pass_origin_gate(*, by: str) -> None:
 
 def origin_gate_passed(session: Session) -> bool:
     standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
-    return any(isinstance(d.inputs_ref, OriginGatePass) for d in standing.decisions.get(0, ()))
+    return any(isinstance(d.inputs, OriginGatePass) for d in standing.decisions.get(0, ()))

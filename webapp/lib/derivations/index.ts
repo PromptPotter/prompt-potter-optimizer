@@ -2,7 +2,6 @@ export * from "./candidate-search-point";
 export * from "./candidate-views";
 export * from "./compare-items";
 export * from "./connector-state";
-export * from "./fitness";
 export * from "./fitness-shade";
 export * from "./headline-stats";
 export * from "./hierarchy";

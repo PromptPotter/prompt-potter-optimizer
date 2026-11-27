@@ -35,6 +35,7 @@ from promptpotter.domain.hierarchy import READ_ONLY, Figure, RunAdmission
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import (
+    DASHBOARD_STATE_PAUSE_WORDS,
     LOOKAHEAD_NO_RUN,
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
@@ -425,6 +426,10 @@ class ServedDashboard(DashboardFacts):
     admission: RunAdmission = Field(
         description="The verb the run control offers now, its campaign's refusal joined "
         "(`admission.py::admitted`), or the sentence where it offers none."
+    )
+    pause_waits_on: str = Field(
+        description="What a pause asked now waits on: the optimizer's step by its served name, "
+        "else `state` worded (`DASHBOARD_STATE_PAUSE_WORDS`)."
     )
     skip_refusal: str = Field(
         description="Why `skip-searchpoint` is refused, off the run (`RunState`), which no "
@@ -948,6 +953,9 @@ def _serve(
         run_phase=run.run_phase,
         producer=run.producer,
         admission=admission,
+        pause_waits_on=state.optimizer_step
+        if state.state == "optimizer_step" and state.optimizer_step is not None
+        else DASHBOARD_STATE_PAUSE_WORDS[state.state],
         skip_refusal=skip_refusal,
         stop=run.stop,
         overlap_line_round=None if line_round is None else line_round.round,

@@ -446,7 +446,8 @@ class PipelineViewEdge(FrozenModel):
 
 
 class PipelineView(FrozenModel):
-    """The graph projection derived from a manifest's nodes and pipelines; no manifest declares one."""
+    """The graph projection derived from a manifest's nodes and pipelines; no manifest declares one.
+    Its nodes stand in flow order (by tier, then rank), which the browser lays out as served."""
 
     model_config = ConfigDict(populate_by_name=True)
 

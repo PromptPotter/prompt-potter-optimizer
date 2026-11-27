@@ -11,7 +11,6 @@ from promptpotter.domain.arms import (
     DegradationContext,
     Eliminated,
     Elimination,
-    Invalid,
     Measured,
     Measuring,
     Proposed,
@@ -108,7 +107,7 @@ def _concluded_fields(arm: Measuring) -> dict[str, Any]:
 
 
 def cut_invalid(arm: Measuring) -> Cut:
-    return Cut(**_concluded_fields(arm), reason=Invalid())
+    return Cut(**_concluded_fields(arm), reason=None)
 
 
 def cut_past_draw(arm: Measured, elimination: Elimination) -> Cut:

@@ -8,7 +8,7 @@ import type {
   SubtreeCampaign,
   SubtreeCycle,
 } from "@/lib/api/types";
-import { candidatesOf, descentOf, figureOf, tagLabel, tagValue, type Descent } from "@/lib/derivations";
+import { candidatesOf, figureOf, tagLabel, tagValue } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
@@ -29,11 +29,18 @@ interface DescentLink<N> {
   note: string | null;
 }
 
+// The served descent of a candidate (one gene source per locus); a run drawn as a bar has none.
+type Descent = Pick<
+  HierarchyCandidate["facts"],
+  "descends_from" | "donor" | "donated_loci" | "gene_sources"
+> | null;
+
 function descentLinks<N extends { label: string }>(
   descent: Descent,
   nodeAt: (address: string) => N | undefined,
 ): DescentLink<N>[] {
-  const { parent, donor, donated, genes } = descent;
+  if (descent === null) return [];
+  const { descends_from: parent, donor, donated_loci: donated, gene_sources: genes } = descent;
   const from = parent === null ? undefined : nodeAt(parent);
   const links: DescentLink<N>[] = from ? [{ from, variant: "chain", note: null }] : [];
   const giver = donor === null ? undefined : nodeAt(donor);
@@ -98,7 +105,7 @@ export function pairedRow(bar: CandidateBar): PairedRow {
     address: bar.node.address,
     is_selected: selected,
     crown,
-    descent: descentOf(bar.node),
+    descent: bar.node.entry_kind === "candidate" ? bar.node.facts : null,
   };
 }
 
@@ -610,7 +617,7 @@ function freed(
   // itself is drawn by the node group, so each edge is only the slant to it.
   for (const n of nodes) {
     if (!n.isExpanded) continue;
-    for (const { from, variant, note } of descentLinks(descentOf(n.node), (a) => nodeByCandidate.get(a))) {
+    for (const { from, variant, note } of descentLinks(n.node.facts,(a) => nodeByCandidate.get(a))) {
       segs.push({ x1: from.x, y1: from.y, x2: n.x - d.candStub, y2: n.y, variant, note });
     }
   }

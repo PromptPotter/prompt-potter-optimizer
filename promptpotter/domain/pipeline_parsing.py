@@ -203,7 +203,7 @@ def derive_pipeline_view(
         introduced.append((fresh, seq))
 
     view_nodes = [PipelineViewNode(id="input", kind="io", rank=-1)]
-    for name, (tier, rank) in placed.items():
+    for name, (tier, rank) in sorted(placed.items(), key=lambda kv: kv[1]):
         view_nodes.append(
             PipelineViewNode(
                 id=name,

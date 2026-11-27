@@ -74,6 +74,10 @@ class LibrarySnippet(StrictModel):
     tags: list[str] = Field(description="Free labels for search alone; nothing else reads them")
     pack: str = Field(description="The pack holding it, as a `packs` knob names it")
     provenance: Annotated[LibraryCited | LibraryAuthored, Field(discriminator="kind")]
+    lineage_source: str = Field(
+        description="The `source` its lineage's first snippet cites, walked up `supersedes` "
+        "through the snippets served; `authored` where that first snippet cites none"
+    )
 
 
 class LibraryResponse(StrictModel):
@@ -94,8 +98,18 @@ class LibraryResponse(StrictModel):
     )
 
 
+def _lineage_source(provenance: dict[str, LibraryCited | LibraryAuthored], at: str) -> str:
+    seen = {at}
+    while isinstance(held := provenance[at], LibraryAuthored):
+        parent = held.supersedes
+        if parent is None or parent not in provenance or parent in seen:
+            return held.kind
+        seen.add(at := parent)
+    return held.source
+
+
 def library(shelf: PackShelf) -> LibraryResponse:
-    snippets: list[LibrarySnippet] = []
+    shelved: list[tuple[str, Snippet, LibraryCited | LibraryAuthored]] = []
     sources: dict[str, LibrarySource] = {}
     refused: list[Refusal] = []
     for name, pack in shelf.shelved().items():
@@ -120,21 +134,24 @@ def library(shelf: PackShelf) -> LibraryResponse:
                     provenance = LibraryAuthored(
                         kind="authored", author=author, version=version, supersedes=supersedes
                     )
-            snippets.append(
-                LibrarySnippet(
-                    id=snippet_id(s.text),
-                    text=s.text,
-                    suits=list(s.parts),
-                    presumes=sorted(s.presumes),
-                    tags=list(s.tags),
-                    pack=name,
-                    provenance=provenance,
-                )
-            )
+            shelved.append((name, s, provenance))
+    by_id = {snippet_id(s.text): provenance for _, s, provenance in shelved}
     return LibraryResponse(
         parts=list(PromptPart),
         sources=list(sources.values()),
-        snippets=snippets,
+        snippets=[
+            LibrarySnippet(
+                id=snippet_id(s.text),
+                text=s.text,
+                suits=list(s.parts),
+                presumes=sorted(s.presumes),
+                tags=list(s.tags),
+                pack=name,
+                provenance=provenance,
+                lineage_source=_lineage_source(by_id, snippet_id(s.text)),
+            )
+            for name, s, provenance in shelved
+        ],
         refused=[*refused, *shelf.skipped()],
     )
 

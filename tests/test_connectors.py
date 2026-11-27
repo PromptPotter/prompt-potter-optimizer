@@ -19,8 +19,7 @@ from factories import (
     spend_book,
     workspace,
 )
-from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
-from pydantic import SecretStr
+from offline_world import Router
 
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -170,18 +169,14 @@ def test_a_termnorm_reload_under_sixteen_cells_resends_the_terms_once_and_fails_
     assert offline.backend.asked.count("/matches") == 2 * len(rows), "a recovered cell resent twice"
 
 
-def dspy_cells(out: Path) -> dict[str, Any]:
-    """The dspy cells, run where dspy is imported: a child process, never the suite's (its
-    `extras` import costs the suite's process tens of MB it never returns). What each cell paid."""
+def dspy_cells(world: Router, out: Path) -> dict[str, Any]:
+    """The dspy cells, run where dspy is imported: a child process in the offline world, never the
+    suite's (its `extras` import costs the suite's process tens of MB it never returns). What each
+    cell paid."""
     import dspy  # extras: dspy
     from dspy import lm15
 
     complete_registries()
-    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
-    for key in PROVIDER_KEYS:
-        setattr(settings, key, SecretStr(NOT_A_KEY))
-    settings.RATE_LIMITS = {}
-    install_network(world)
     with scoped(account=workspace()), mock.patch.object(dspy_module, "held_wait", _no_wait):
         _priced(world)
         resent_sends: list[int] = []

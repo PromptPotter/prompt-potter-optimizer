@@ -1,12 +1,10 @@
 import {
-  type DashboardState,
   type HierarchyState,
   type NextAct,
   type Refusal,
   type RunPhase,
   type StopReading,
   type StopReason,
-  DASHBOARD_STATE_PAUSE_WORDS,
   RUN_PHASE_INFO,
   STOP_REASON_INFO,
 } from "@/lib/api/types";
@@ -73,10 +71,4 @@ export function stopNote(stop: StopReading, acts: readonly NextAct[]): string {
 /** What the run's stop said and what the operator does now; empty where it has not stopped. */
 export function runNextStep(state: HierarchyState): string {
   return state.stop === null ? "" : stopNote(state.stop, state.admission.stop_acts);
-}
-
-export function phasePauseLabel(state: DashboardState, optimizerStep: string | null): string {
-  return state === "optimizer_step" && optimizerStep !== null
-    ? optimizerStep
-    : DASHBOARD_STATE_PAUSE_WORDS[state];
 }

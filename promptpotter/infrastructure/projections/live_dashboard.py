@@ -233,7 +233,6 @@ class DashboardFacts(StrictModel):
     at_offset: int = -1
 
     state: DashboardState = DashboardState.INIT
-    optimizer_step: str | None = None
 
     stop_reason: StopReason | None = None
 
@@ -278,6 +277,7 @@ class DashboardFacts(StrictModel):
 class LiveDashboardState(DashboardFacts):
     # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
     declared_phase: RunPhase = RunPhase.RUNNING
+    optimizer_step: str | None = None  # served only as `ServedDashboard.pause_waits_on`
     # A FAILED stop's failure, else absent: served only as the run's pinned `said` row.
     error: ErrorRecord | None = None
     # The cycle entry serves both (`CycleEntryFacts.standing` / `elects_on`); the file keeps them.

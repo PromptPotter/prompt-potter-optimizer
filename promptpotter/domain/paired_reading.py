@@ -202,9 +202,19 @@ assert READING_STATE_INFO.keys() == set(ReadingState)
 
 LiftSide = Literal["above", "below", "spans"]
 
-#: A side's ink on every surface drawing a lift: a band clear of zero is loud, one spanning it quiet.
-LIFT_SIDE_TONE: Worded[LiftSide, Tone] = Worded(
-    {"above": "success", "below": "danger", "spans": "quiet"}
+
+class LiftSideInfo(NamedTuple):
+    tone: Tone
+    verdict: str
+
+
+#: A side's ink and verdict on every surface drawing a lift: a band clear of zero is loud, one spanning it quiet.
+LIFT_SIDE_INFO: Worded[LiftSide, LiftSideInfo] = Worded(
+    {
+        "above": LiftSideInfo("success", "clears 0"),
+        "below": LiftSideInfo("danger", "clears 0"),
+        "spans": LiftSideInfo("quiet", "could not separate from its reference"),
+    }
 )
 
 

@@ -1,7 +1,5 @@
 import type {
-  GeneSource,
   HierarchyCandidate,
-  HierarchyCycle,
   LineageNode,
   SubtreeCampaign,
   SubtreeCycle,
@@ -162,28 +160,6 @@ export function mainLineOf(index: LineageIndex, head: HierarchyCandidate): LineS
       return node ? [{ kind: "step", node }] : [];
     });
   });
-}
-
-export interface Descent {
-  // The address of its main, the candidate it descends from: the one edge every lineage drawing draws.
-  parent: string | null;
-  // The address of its declared donor, of any round, and the loci it gave.
-  donor: string | null;
-  donated: string[];
-  // Per locus no declared parent explains, the served source ranked first.
-  genes: GeneSource[];
-}
-
-const NO_DESCENT: Descent = { parent: null, donor: null, donated: [], genes: [] };
-
-export function descentOf(node: HierarchyCycle | HierarchyCandidate): Descent {
-  if (node.entry_kind !== "candidate") return NO_DESCENT;
-  const genes: GeneSource[] = [];
-  for (const gene of node.facts.gene_sources) {
-    if (!genes.some((g) => g.locus === gene.locus)) genes.push(gene);
-  }
-  const { descends_from, donor, donated_loci } = node.facts;
-  return { parent: descends_from, donor, donated: donated_loci, genes };
 }
 
 // As the cycle names it (`facts.origin`): never a walk up `parent_ids`, never a round-0 label.

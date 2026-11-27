@@ -3132,7 +3132,7 @@
             "title": "Donor"
           },
           "gene_sources": {
-            "description": "Per other locus it moved off its main, the earlier candidates whose value there is closer to its own than the main's: most similar first, then most recently measured.",
+            "description": "Per other locus it moved off its main, the one earlier candidate whose value there is closest to its own and closer than the main's, the most recently measured of a tie.",
             "items": {
               "$ref": "#/components/schemas/GeneSource"
             },
@@ -9899,6 +9899,11 @@
             "title": "Id",
             "type": "string"
           },
+          "lineage_source": {
+            "description": "The `source` its lineage's first snippet cites, walked up `supersedes` through the snippets served; `authored` where that first snippet cites none",
+            "title": "Lineage Source",
+            "type": "string"
+          },
           "pack": {
             "description": "The pack holding it, as a `packs` knob names it",
             "title": "Pack",
@@ -9958,7 +9963,8 @@
           "presumes",
           "tags",
           "pack",
-          "provenance"
+          "provenance",
+          "lineage_source"
         ],
         "title": "LibrarySnippet",
         "type": "object"
@@ -14307,7 +14313,7 @@
       },
       "PipelineView": {
         "additionalProperties": false,
-        "description": "The graph projection derived from a manifest's nodes and pipelines; no manifest declares one.",
+        "description": "The graph projection derived from a manifest's nodes and pipelines; no manifest declares one.\nIts nodes stand in flow order (by tier, then rank), which the browser lays out as served.",
         "properties": {
           "cycle": {
             "items": {
@@ -16655,17 +16661,6 @@
             ],
             "description": "The arm a surface following the run shows (`_observed`); null before any arm exists."
           },
-          "optimizer_step": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Optimizer Step"
-          },
           "overlap_line_n": {
             "anyOf": [
               {
@@ -16700,6 +16695,11 @@
               }
             ],
             "description": "The cycle's calls billed past their hold (`run_limits.overshoot`), off the account's charge book; null on a replay, which reads none."
+          },
+          "pause_waits_on": {
+            "description": "What a pause asked now waits on: the optimizer's step by its served name, else `state` worded (`DASHBOARD_STATE_PAUSE_WORDS`).",
+            "title": "Pause Waits On",
+            "type": "string"
           },
           "producer": {
             "$ref": "#/components/schemas/ProducerReading",
@@ -16845,6 +16845,7 @@
           "run_phase",
           "producer",
           "admission",
+          "pause_waits_on",
           "skip_refusal",
           "stop",
           "overlap_line_round",

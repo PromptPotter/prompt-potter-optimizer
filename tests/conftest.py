@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import tempfile
 
 # CI's configuration wherever the suite is launched, set before anything reads it: no desk `.env`,
@@ -16,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import offline_world
 import pytest
 from factories import workspace
 from offline_world import (
@@ -87,7 +87,8 @@ from test_connectors import dspy_cells
 from test_spend import dspy_billed
 out = Path(sys.argv[1])
 (out / "spend").mkdir(); (out / "connectors").mkdir()
-print(json.dumps({"spend": dspy_billed(out / "spend"), "connectors": dspy_cells(out / "connectors")}))
+paid = {"spend": dspy_billed(world, out / "spend"), "connectors": dspy_cells(world, out / "connectors")}
+print(json.dumps(paid))
 """
 
 
@@ -102,7 +103,7 @@ def dspy_child(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """What every dspy cell paid, run once for the suite in a child, where dspy is imported."""
     out, tests = tmp_path_factory.mktemp("dspy"), Path(__file__).resolve().parent
     child = subprocess.run(
-        [sys.executable, "-c", _DSPY_CHILD, str(out)],
+        offline_world.child(_DSPY_CHILD, str(out)),
         cwd=tests,
         env={
             **os.environ,

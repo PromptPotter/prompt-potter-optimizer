@@ -4566,7 +4566,6 @@ def _peer_round(
     *,
     bank: Sequence[Sample] = _PEER_BANK,
     bench: int = 0,
-    origin_replicates: int | None = None,
     **optimization: Any,
 ) -> AbstractAsyncContextManager[RoundContext]:
     """The peer campaign's round 1 opened through run init's door on *bank*; the backend answers
@@ -4590,7 +4589,6 @@ def _peer_round(
                 "per_sample": "label_match(predicted, ground_truth)",
                 "per_cell": "fitness * min(1.0, target_prompt_chars / 200.0)",
             },
-            "origin_replicates": origin_replicates,
         },
     )
 
@@ -4895,7 +4893,6 @@ async def _graded(
     bench: _Bench,
     *held: BenchPass,
     trigger: BenchTrigger = "at_end",
-    banked: BenchPasses | None = None,
     spent: bool = False,
 ) -> BenchPasses:
     """*bench*'s selections graded in a pass of their own; *spent* empties its book first."""
@@ -4906,7 +4903,7 @@ async def _graded(
             bench.session,
             bench.rounds,
             points=bench.points,
-            banked=bench_passes(bench.origin_pass, *held) if banked is None else banked,
+            banked=bench_passes(bench.origin_pass, *held),
             trigger=trigger,
         )
 
@@ -5035,41 +5032,6 @@ async def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unrea
 
 @pytest.mark.usefixtures("optimizing_memory")
 @on_jumping_clock
-async def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
-    offline: Router,
-) -> None:
-    offline.llm.says = _bench_says
-    async with _peer_round(
-        workspace(),
-        offline,
-        "capo",
-        {
-            "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
-            "capo_init": {"config": {"size": 2, "k_max": 0}},
-        },
-        lambda prompt, s: "OK" in prompt or s.id % 2 == 0,
-        origin_replicates=2,
-    ) as ctx:
-        ledger, session = cycle_ledger(ctx.cycle), ctx.cycle.session
-        zero = session.store.campaigns.standing_rounds(session.hop, moment=None).rounds[0].close
-        assert zero.election is not None
-        walked = {key for key, _, _ in zero.cells.arms[zero.election.ended_on]}
-        bands = [
-            record
-            for record in ledger_records(ledger)
-            if isinstance(record, PassGradedRecord)
-            and record.verification.kind is MeasurementRole.NOISE_FLOOR
-        ]
-    assert len(bands) == 1, "round 0 filed no band, or one per replicate"
-    (band,) = bands
-    assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
-    rows = band.verification.sample_keys
-    assert sorted(rows) == sorted(walked), "the band re-scored rows round 0 never recorded"
-    assert len(band.verification.cells) == 2 * len(rows), "a replicate re-scored a partial set"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-@on_jumping_clock
 async def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
     monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
@@ -5138,25 +5100,21 @@ async def test_a_refusal_mid_walk_banks_the_cells_the_pass_held_never_zero_over_
         )
 
 
-# A pass after the stop replays the cells the paused pass banked, and each regrade reads the last.
+# Each regrade reads the last pass.
 @pytest.mark.usefixtures("optimizing_memory")
 @on_jumping_clock
 async def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
+    offline: Router,
 ) -> None:
     # Its own line: the result it builds reads the run's `Cycle` (`entry.py::build_cycle_result`).
     cycle, origin_pass = await _banked_bench(offline)
     async with _bench_at(cycle.session.store, cycle.session.hop, origin_pass) as picked:
         session, head = picked.session, picked.head
-        paused_pass = (await _pause_mid_pass(picked, monkeypatch))[2].verification
         passes = await _graded(picked)
         [taken] = passes.selections.values()
         assert (taken.arm.key, taken.arm.round, taken.stop) == (head.individual.id, 1, None), (
             "the bench grades the pick the optimizer declared"
         )
-        assert {key for key, _, _ in paused_pass.cells} <= {
-            key for key, _, replayed in taken.cells if replayed
-        }, "the pass after a stop bought again a cell the stopped pass had banked"
         assert (await _graded(picked, taken)).selections[taken.arm.key] is taken, (
             "a held pass was sent again"
         )
@@ -5217,24 +5175,6 @@ def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[st
         line_bench, "line_spans", lambda *a: [LineSpan([earlier], None), *spans(*a)]
     )
     return head.individual.id, other
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-@on_jumping_clock
-async def test_every_adoption_grades_each_selection_the_line_adopted_once(
-    monkeypatch: pytest.MonkeyPatch, world: World, banked_line: Shared
-) -> None:
-    async with _bench_cycle(world, banked_line) as picked:
-        adopted = set(_adopting_twice(picked, monkeypatch))
-        assert set((await _graded(picked)).selections) == {picked.head.individual.id}, (
-            "`at_end` graded more than the final selection"
-        )
-        every = await _graded(picked, trigger="every_adoption")
-        assert set(every.selections) == adopted, "an adoption of the line went ungraded"
-        again = await _graded(picked, trigger="every_adoption", banked=every)
-        assert all(again.selections[key] is every.selections[key] for key in adopted), (
-            "a pass that answers was sent again"
-        )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

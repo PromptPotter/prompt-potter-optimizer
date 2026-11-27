@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -21,7 +21,7 @@ from promptpotter.application.scoring.row_policy import FieldRead
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.ruler import DeltaRuler
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
+from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
 
@@ -65,11 +65,6 @@ class PoBBStop(StopSignal):
     check_result: EliminationContext
     cells: dict[ArmKey, list[str]]
     paired_breakdown: dict[ArmKey, float]
-
-
-def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
-    """An arm's rows as the race holds them; never filed, so it carries no scorer and no declaration."""
-    return CellSheet("", frozenset(), tuple(cells))
 
 
 def field_p_best(
@@ -126,11 +121,11 @@ class PoBBCheck:
         self.read: FieldRead[ArmKey] | None = None
         self._on_snapshot = on_snapshot
 
-    def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
-        self.priors[key] = race_sheet(results)
+    def register_completed(self, results: CellSheet, *, key: ArmKey) -> None:
+        self.priors[key] = results
 
-    def extend_prior(self, key: ArmKey, rows: Iterable[GradedCell]) -> None:
-        self.priors[key] = self.priors[key].merged(race_sheet(rows))
+    def extend_prior(self, key: ArmKey, rows: CellSheet) -> None:
+        self.priors[key] = self.priors[key].merged(rows)
 
     def epsilon_at(self, n: int) -> float:
         if self.epsilon <= self.epsilon_floor:

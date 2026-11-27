@@ -27,6 +27,7 @@ from typing import Any, NamedTuple, NoReturn, cast, get_args
 from unittest import mock
 
 import httpx
+import offline_world
 import pytest
 from factories import (
     LAUNCHED_DATASET,
@@ -62,13 +63,10 @@ from fastapi import Response
 from offline_world import (
     NOT_A_KEY,
     PROVIDER_KEYS,
-    FakeBackend,
-    FakeLLM,
     Hang,
     Router,
     Said,
     completion,
-    install_network,
 )
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 from world import Shared, World, shared_run
@@ -137,14 +135,13 @@ from promptpotter.application.pipeline_resolve import (
     laid_config,
     laid_session,
 )
-from promptpotter.application.run_phase_control import RunControl, budget_stop
+from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
-from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
@@ -155,9 +152,6 @@ from promptpotter.application.scoring.sample_measurement import (
     emit_replayed_step_tokens,
     measure_sample,
     measured_cell_price,
-)
-from promptpotter.application.scoring.search_point_scorer import (
-    open_walk,
 )
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
@@ -186,7 +180,6 @@ from promptpotter.domain.command_kinds import (
     EditDraftCampaignPayload,
     ForkCyclePayload,
     HeadToHeadRequest,
-    LookaheadPress,
     MintHeadToHeadPayload,
     StartCheckinPayload,
 )
@@ -212,11 +205,9 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.layer_fold import UNBOUNDED, Layer, fold_layers
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
-    ERROR_CATEGORY_INFO,
     CampaignPhase,
     PauseCause,
     StopReason,
-    WalkEnd,
 )
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -245,7 +236,6 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     Running,
     RunPhaseRecord,
-    SampleScoredRecord,
     SpendTombstoneRecord,
     StandingBudgetRecord,
     StopLoop,
@@ -254,7 +244,6 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import MeasuredCell, PipelineData
-from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,
@@ -821,105 +810,6 @@ async def test_a_replayed_grading_is_metered_uncharged_and_an_empty_reply_never_
 # 2. What a run is billed
 
 
-class _OrderedFakeBackend:
-    """Finishes LATER samples FIRST: under uniform latency the loop need order nothing to pass."""
-
-    def __init__(self, n: int) -> None:
-        self.n = n
-        self.calls: list[int] = []
-
-    async def measure(self, sample: Sample) -> Any:
-        self.calls.append(sample.id)
-        await asyncio.sleep((self.n - sample.id + 1) * 0.01)
-        return MeasuredCell(
-            sample_key=sample.key,
-            query=sample.query,
-            ground_truth=sample.ground_truth or "",
-            predicted=sample.ground_truth or "",
-            pipeline=PipelineData(total_time=0.5),
-        )
-
-
-def _control_pausing(pressed: Callable[[], bool], *, lookahead: LookaheadPress) -> RunControl:
-    class _Pressed(RunControl):
-        def pause_requested(self) -> bool:
-            return pressed()
-
-        def sample_lookahead(self) -> LookaheadPress:
-            return lookahead
-
-    return _Pressed()
-
-
-def _ended_on(walk: query_loop.Walk) -> WalkEnd | None:
-    assert walk.outcome is not None, "a walk the phase ran ended without an outcome"
-    return walk.outcome.ended_on
-
-
-async def _stopped_by_operator(phase: Any) -> str | None:
-    try:
-        await phase
-    except KeyboardInterrupt as stop:
-        return str(stop)
-    except StopLoop as stop:
-        return stop.reason.value
-    except SendRefusedError as refused:
-        return str(ERROR_CATEGORY_INFO[refused.category].stops)
-    return None
-
-
-async def _walk(
-    world: World, dataset: list[Sample], *, resumes: JobSearchPoint | None = None, skip_at: int
-) -> dict[str, Any]:
-    """One walk pressed 4 cells deep on a backend that holds 4, each cell bound and billed $1."""
-    backend = _OrderedFakeBackend(len(dataset))
-    # The walk's own campaign, which priced nothing yet.
-    campaign = world.stores.projects_root / "walks" / uuid.uuid4().hex
-    rescope(priced=campaign)
-    # An individual of its own, so a walk replays only the cells of the one it resumes.
-    sp = resumes or JobSearchPoint(
-        pipeline_params=PipelineParams().with_nodes({"llm_only": {"walk": uuid.uuid4().hex}})
-    )
-    book = spend_book()
-    dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        with admitted(
-            CallLabel("cell", "backend"), dollar, model=None, provider=None, paid_by="host"
-        ) as bill:
-            row = await backend.measure(sample)
-            bill.settle(Billed(TokenAccount(), 1.0))
-        return row
-
-    started = laid_ledger(campaign_cycles_dir(campaign) / "walk")
-    holding = fake_connector("holding", max_cells_in_flight=4)
-    async with world.opened(connector=holding) as session:
-        session.state.control = _control_pausing(lambda: False, lookahead=LookaheadPress(cells=4))
-        with (
-            scoped(ledger=started),
-            mock.patch.object(query_loop, "measure_sample", _measure),
-            scoped(book=book),
-        ):
-            walk = open_walk(
-                sp, dataset, session, kind=MeasurementRole.PANEL, measured="arm", skip_at=skip_at
-            )
-            stopped = await _stopped_by_operator(
-                query_loop.run_walks({"arm": walk}, session, keep_cut=False)
-            )
-    return {
-        "sp": sp,
-        "rows": walk.results,
-        "stop_reason": stopped or _ended_on(walk),
-        "calls": list(backend.calls),
-        "ledger": started.path,
-    }
-
-
-def _dataset() -> list[Sample]:
-    return [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
-
-
-@pytest.mark.usefixtures("run_bound")
 def test_budget_equality_is_over_the_axes_each_names() -> None:
     # A lift is no bound, and an omitted axis no lift.
     for one, other, same in (
@@ -1068,28 +958,6 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
     assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a resume re-entering lost a skip"
     skips.append(RoundEnteredRecord(round=2, rewound=True))
     assert standing_skips() == {}, "a regenerated round inherited a displaced skip"
-
-
-# The second walk resumes the first's skipped individual.
-@pytest.mark.usefixtures("run_bound")
-@on_jumping_clock
-async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
-    world: World,
-) -> None:
-    dataset = _dataset()
-    replayed = await _walk(world, dataset, skip_at=3)
-    assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
-    assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
-    # A second resume replays the skipped walk: its depth is what the replay records, never zero.
-    again = await _walk(world, dataset, skip_at=3, resumes=replayed["sp"])
-    depth = [
-        r.running.walked
-        for r in ledger_records(again["ledger"])
-        if isinstance(r, SampleScoredRecord) and r.running is not None
-    ]
-    assert not again["calls"] and depth[-1:] == [3], (
-        "a replayed skip recorded no depth, so the next resume skips at zero cells"
-    )
 
 
 def _inner_seat(stores: Stores, seats: InnerCells) -> tuple[InnerSpawnContext, Sample]:
@@ -2381,17 +2249,13 @@ def test_a_free_send_fits_at_exactly_nothing_left_and_never_once_overdrawn() -> 
 
 
 _ASK_INSIDE_AN_OUTAGE = """
-import sys, urllib.error, urllib.request
+import sys
 from promptpotter.infrastructure.llm import pricing
-fetched = []
-def down(*args, **kwargs):
-    fetched.append(args)
-    raise urllib.error.URLError("no route to host")
-urllib.request.urlopen = down
+world.upstream_dead = True
 try:
     pricing.route_ceiling(sys.argv[1], "openrouter")
 except pricing.PriceListUnreachableError:
-    sys.exit(f"{len(fetched)} fetches" if fetched else 0)
+    sys.exit(f"{world.rate_fetches} fetches" if world.rate_fetches else 0)
 sys.exit("no outage")
 """
 
@@ -2423,7 +2287,7 @@ def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_c
     assert len(fetches) == 1, f"{len(fetches)} fetches — one per send, each a full timeout"
     assert run_stop_reason(outage) is StopReason.PRICE_LIST_UNREACHABLE, "an outage read as no rate"
     held_back = subprocess.run(
-        [sys.executable, "-c", _ASK_INSIDE_AN_OUTAGE, "vendor/model-x"],
+        offline_world.child(_ASK_INSIDE_AN_OUTAGE, "vendor/model-x"),
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
@@ -3061,20 +2925,16 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     )
 
 
-def dspy_billed(out: Path) -> dict[str, Any]:
-    """The dspy cells, run where dspy is imported: a child process, never the suite's (its
-    `extras` import costs the suite's process tens of MB it never returns). What each paid."""
+def dspy_billed(net: Router, out: Path) -> dict[str, Any]:
+    """The dspy cells, run where dspy is imported: a child process in the offline world, never the
+    suite's (its `extras` import costs the suite's process tens of MB it never returns). What each
+    paid."""
     import dspy  # extras: dspy
     from dspy import lm15
 
     from promptpotter.connectors import dspy_module  # extras: dspy
 
     complete_registries()
-    net = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
-    for key in PROVIDER_KEYS:
-        setattr(settings, key, SecretStr(NOT_A_KEY))
-    settings.RATE_LIMITS = {}
-    install_network(net)
     _priced_wire(net)
     jobs = out / "jobs"
     sends: list[int] = []

@@ -219,7 +219,7 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
   is keyed by its behaviour, what it never ran by its source, so a rename on a run line re-keys no
   cell; the whole-tree hash is recorded beside it, never keyed on.
 - **The core/extra split** — moving a package into core charges every embedder.
-- **Resume and fork-on-divergence** (`ResumeCheckpointRecord`, `CheckpointInputs`).
+- **Resume and fork-on-divergence** (`DecisionRecord`, `DecisionInputs`).
 - **No campaign fact on a side file** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 - **The hard-sample sorter** and the round order it feeds
   ([`methods/verdict-resolution.md`](methods/verdict-resolution.md) § The round order).

@@ -22,24 +22,6 @@ export function snippetSupersedes(s: LibrarySnippet): string | null {
   return s.provenance.kind === "authored" ? s.provenance.supersedes : null;
 }
 
-// The first snippet of a lineage: an edit names the source of what it was edited from.
-export function lineageRoot(
-  snippets: readonly LibrarySnippet[],
-  id: string,
-): LibrarySnippet | undefined {
-  const seen = new Set<string>();
-  let at = snippets.find((s) => s.id === id);
-  while (at !== undefined && !seen.has(at.id)) {
-    const parent = snippetSupersedes(at);
-    if (parent === null) return at;
-    seen.add(at.id);
-    const next = snippets.find((s) => s.id === parent);
-    if (next === undefined) return at;
-    at = next;
-  }
-  return at;
-}
-
 // `raw` is the exact text between its neighbours, the newline joining each snippet included.
 export type Segment =
   | { kind: "free"; raw: string; after: boolean; before: boolean }

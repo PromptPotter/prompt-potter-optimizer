@@ -731,13 +731,11 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     )
 
 
-def test_a_round_no_cell_ran_serves_no_error_rate() -> None:
+def test_a_round_no_cell_ran_reports_no_error_rate() -> None:
     for scored, rate in ((0, None), (2, 0.0)):
-        rr = round_result(1, candidates_scored=scored)
-        rr = rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, None)})
-        served = rr.model_dump(mode="json")["diagnostics"]
-        assert served["error_rate"] == rate and served["warning_rate"] == rate, (
-            f"{scored} arms scored served error_rate {served['error_rate']}, not {rate}"
+        report = compute_round_diagnostics(round_result(1, candidates_scored=scored), None)
+        assert report.error_rate == rate and report.warning_rate == rate, (
+            f"{scored} arms scored reported error_rate {report.error_rate}, not {rate}"
         )
 
 

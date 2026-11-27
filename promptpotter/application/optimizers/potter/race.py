@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from promptpotter.application.bench.node_context import (
     Bounds,
@@ -10,6 +11,7 @@ from promptpotter.application.bench.node_context import (
     Progress,
     Replay,
     Ruler,
+    Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.intelligence.rasch import (
@@ -24,7 +26,6 @@ from promptpotter.application.optimizers.potter.pobb import (
     PoBBCheck,
     PoBBStop,
     field_p_best,
-    race_sheet,
 )
 from promptpotter.application.scoring.race_protocol import Decision, Trigger, View, WalkView
 from promptpotter.application.scoring.row_policy import RowGround, send_rows
@@ -67,10 +68,11 @@ class EliminationCut(Replayed, kind="elimination_cut"):
         field: dict[ArmKey, CellSheet] = {}
         for side, cells in self.cells.items():
             # A cut in the top-up read the origin-panel rows too.
-            rows = ctx.round_data.raced(side).by_key()
+            raced = ctx.round_data.raced(side)
+            rows = raced.by_key()
             if any(cell not in rows for cell in cells):
                 return False
-            field[side] = race_sheet(rows[cell] for cell in cells)
+            field[side] = replace(raced, cells=tuple(rows[cell] for cell in cells))
         read = dict.fromkeys(cell for cells in self.cells.values() for cell in cells)
         p_best, _, _ = field_p_best(field, read)
         return self.arm in p_best and p_best[self.arm] < self.epsilon
@@ -105,6 +107,7 @@ class PoBBRace(Race):
             on_snapshot=self._progress.race_standing,
         )
         self._block_size = panel.block_size
+        self._graded = ctx.read(Target).graded
         self._knobs = knobs
         own_rows = ctx.read(Parent).own_rows
         # The round's θ: the parent's on the ruler seated at its start; its centre where it reads none.
@@ -128,10 +131,10 @@ class PoBBRace(Race):
         return self._check.priors
 
     def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
-        self._check.register_completed(results, key=key)
+        self._check.register_completed(self._graded(results), key=key)
 
     def catch_up(self, key: ArmKey, cells: Sequence[GradedCell]) -> None:
-        self._check.extend_prior(key, cells)
+        self._check.extend_prior(key, self._graded(cells))
 
     @property
     def top_up(self) -> PoBBRace:
@@ -163,7 +166,7 @@ class PoBBRace(Race):
     def _cut(self, walks: Mapping[ArmKey, WalkView]) -> dict[ArmKey, StopSignal]:
         """An admitted arm walking again is topped up: its rows so far lead the stretch."""
         standing = {
-            key: self._check.priors.get(key, NO_CELLS).merged(race_sheet(walk.taken))
+            key: self._check.priors.get(key, NO_CELLS).merged(self._graded(walk.taken))
             for key, walk in walks.items()
         }
         budgets = {key: self._depth(key) + walk.budget for key, walk in walks.items()}

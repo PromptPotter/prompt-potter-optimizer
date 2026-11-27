@@ -238,32 +238,33 @@ class Refused(FrozenModel):
     parameter: str
 
 
-class Invalid(FrozenModel):
-    """Refused before a cell: the reasons are the arm's own fatal ``validation_failures``."""
-
-    kind: Literal["invalid"] = "invalid"
-
-
 class Skipped(FrozenModel):
     """The operator stopped it."""
 
     kind: Literal["skipped"] = "skipped"
 
 
-CutReason = Annotated[
-    Eliminated | Broken | Refused | Invalid | Skipped, Field(discriminator="kind")
-]
+CutReason = Annotated[Eliminated | Broken | Refused | Skipped, Field(discriminator="kind")]
 
 
 class Cut(_Walked):
-    """Stopped short of its panel against it."""
+    """Stopped short of its panel against it; an ``invalid`` one, refused before a cell, carries no
+    reason: its own fatal ``validation_failures`` are it."""
 
     state: Literal["cut"] = "cut"
-    reason: CutReason
+    reason: CutReason | None
+
+    @model_validator(mode="after")
+    def _invalid_carries_no_reason(self) -> Self:
+        if (self.reason is None) != self.invalid:
+            raise ValueError(
+                "a cut names a reason exactly where its own validation did not refuse it"
+            )
+        return self
 
     @property
     def kind(self) -> CutKind:
-        return self.reason.kind
+        return "invalid" if self.reason is None else self.reason.kind
 
 
 class Measured(_Walked):
@@ -275,9 +276,9 @@ class Measured(_Walked):
 Concluded = Cut | Measured
 ArmState = Annotated[Proposed | Measuring | Cut | Measured, Field(discriminator="state")]
 
-assert {r.model_fields["kind"].default for r in get_args(get_args(CutReason)[0])} == set(
-    get_args(CutKind)
-), "CutKind is the cut reasons' discriminators"
+assert {r.model_fields["kind"].default for r in get_args(get_args(CutReason)[0])} | {
+    "invalid"
+} == set(get_args(CutKind)), "CutKind is the cut reasons' discriminators and `invalid`"
 assert {a.model_fields["state"].default for a in get_args(get_args(ArmState)[0])} == set(
     get_args(ArmStateKind)
 ), "ArmStateKind is the arm states' discriminators"
@@ -285,8 +286,8 @@ assert {a.model_fields["state"].default for a in get_args(get_args(ArmState)[0])
 
 def arm_end(arm: ArmState) -> ArmEnd | None:
     match arm:
-        case Cut(reason=reason):
-            return reason.kind
+        case Cut():
+            return arm.kind
         case Measured(locked_in=Elimination()):
             return "locked_in"
         case _:

@@ -73,7 +73,6 @@ from promptpotter.domain.arms import (
     CutKind,
     Eliminated,
     Elimination,
-    Invalid,
     Measured,
     Proposed,
     Refused,
@@ -351,7 +350,7 @@ def arm_state(
     } | overrides
     settled = Elimination(reason="pobb", context=elimination or {})
     if invalid_reason:
-        return Cut(reason=Invalid(), **fields)
+        return Cut(reason=None, **fields)
     match cut:
         case None:
             return Measured(locked_in=settled if locked_in else None, **fields)

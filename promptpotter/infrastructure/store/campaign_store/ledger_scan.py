@@ -31,6 +31,7 @@ from promptpotter.domain.records.run_records import (
     CycleMintedRecord,
     CycleShareRecord,
     CycleSupersededRecord,
+    DecisionRecord,
     ElectionRecord,
     Ended,
     ForkSpec,
@@ -41,7 +42,6 @@ from promptpotter.domain.records.run_records import (
     PricedKeyRecord,
     RaceCatchUpRecord,
     ResolvedRunRecord,
-    ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
@@ -311,7 +311,7 @@ class StandingRounds(NamedTuple):
     # No entry = never elected; elected-and-crowned-nobody is an entry with no selected arm.
     elections: dict[int, ElectionRecord]
     # Keyed on the record's round STAMP, never ledger position: a round can close more than once.
-    decisions: dict[int, list[ResumeCheckpointRecord]]
+    decisions: dict[int, list[DecisionRecord]]
     # The cells an operator's skip left each arm at: it stands as its proposal does, past a re-entry.
     skipped: dict[tuple[int, ArmKey], int]
     # The open round's rows in the order its walks read them, which an ``arrival`` resume replays
@@ -406,7 +406,7 @@ _RoundStep = (
     CycleMintedRecord
     | RoundEnteredRecord
     | ElectionRecord
-    | ResumeCheckpointRecord
+    | DecisionRecord
     | RoundClosedRecord
     | RoundProposedRecord
     | RoundRestatedRecord
@@ -453,7 +453,7 @@ class _StandingFold:
                 self._reread = 0
             case ElectionRecord():
                 held.elections[rnd] = record
-            case ResumeCheckpointRecord():
+            case DecisionRecord():
                 held.decisions.setdefault(rnd, []).append(record)
             case RoundClosedRecord():
                 self._arms.close(record, record.arms)

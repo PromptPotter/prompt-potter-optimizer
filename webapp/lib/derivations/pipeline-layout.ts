@@ -50,19 +50,6 @@ interface GridOpts {
   maxW: number;
 }
 
-export function flowOrder(nodes: PipelineViewNode[], cycle: string[]): PipelineViewNode[] {
-  const onSpine = new Set(cycle);
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const entry = nodes
-    .filter((n) => n.tier === 0 && !onSpine.has(n.id))
-    .sort((a, b) => a.rank - b.rank);
-  const spine = cycle.map((id) => byId.get(id)).filter((n): n is PipelineViewNode => !!n);
-  const alternatives = nodes
-    .filter((n) => n.tier > 0)
-    .sort((a, b) => a.tier - b.tier || a.rank - b.rank);
-  return [...entry, ...spine, ...alternatives];
-}
-
 // Each piece keeps its separator, so the lines rejoin into the name.
 function pieces(text: string, sep: string): string[] {
   const parts = text.split(sep);
@@ -95,13 +82,13 @@ export function rowHopD(a: Pt, b: Pt, r: number, rise: number): string {
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// `order` is the served flow order (`PipelineView.nodes`).
 export function layoutGrid(
-  nodes: PipelineViewNode[],
+  order: PipelineViewNode[],
   edges: PipelineViewEdge[],
   cycle: string[],
   o: GridOpts,
 ): GridLayout {
-  const order = flowOrder(nodes, cycle);
   const onSpine = new Set(cycle);
   const index = new Map(order.map((n, i) => [n.id, i] as const));
   const font = o.font;

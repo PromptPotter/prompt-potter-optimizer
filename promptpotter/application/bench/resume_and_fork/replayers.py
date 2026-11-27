@@ -6,7 +6,7 @@ import abc
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 
-from promptpotter.domain.records.run_records import CheckpointInputs, ResumeCheckpointRecord
+from promptpotter.domain.records.run_records import DecisionInputs, DecisionRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 
@@ -18,7 +18,7 @@ class ReplayMismatch(NamedTuple):
     kind: str
     recorded_outcome: Any
     current_outcome: Any
-    inputs_ref: dict[str, Any]
+    inputs: dict[str, Any]
     # `Replayed.stands_on` of `current_outcome`: the one-step counterfactual's arm.
     stands_on: str | None
 
@@ -27,11 +27,11 @@ class ReplayContext(NamedTuple):
     """ONE round and no history, so a decision needing the cycle's is archived; the anchor rides the decision."""
 
     round_data: RoundResult
-    decisions: list[ResumeCheckpointRecord]
+    decisions: list[DecisionRecord]
     ruler: DeltaRuler | None
 
 
-class Replayed(CheckpointInputs, kind=None):
+class Replayed(DecisionInputs, kind=None):
     """A kind a resume re-derives off the round's rows, by the rule its live call ran."""
 
     @abc.abstractmethod
@@ -45,23 +45,23 @@ class Replayed(CheckpointInputs, kind=None):
 
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     for rec in ctx.decisions:
-        if not isinstance(rec.inputs_ref, Replayed):
+        if not isinstance(rec.inputs, Replayed):
             continue
-        current = rec.inputs_ref.replay(ctx)
+        current = rec.inputs.replay(ctx)
         if current != rec.outcome:
             yield ReplayMismatch(
                 round_num=ctx.round_data.round,
                 kind=rec.kind,
                 recorded_outcome=rec.outcome,
                 current_outcome=current,
-                inputs_ref=rec.inputs_ref.model_dump(mode="json"),
-                stands_on=rec.inputs_ref.stands_on(current),
+                inputs=rec.inputs.model_dump(mode="json"),
+                stands_on=rec.inputs.stands_on(current),
             )
 
 
 def replay_all_mismatches(
     round_data: RoundResult,
-    decisions: list[ResumeCheckpointRecord],
+    decisions: list[DecisionRecord],
     ruler: DeltaRuler | None = None,
 ) -> list[ReplayMismatch]:
     return list(_iter_mismatches(ReplayContext(round_data, decisions, ruler)))

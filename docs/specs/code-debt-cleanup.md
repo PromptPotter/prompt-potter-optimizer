@@ -545,29 +545,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 Each row names the chain it rides with.
 
-- **A decision record is named three ways**: `ResumeCheckpointRecord`, its ledger kind `"decision"`,
-  and an `inputs_ref` holding the inputs whole (since potter-w1 a decision's inputs are addresses,
-  `race.py::EliminationCut.cells`). Root: one name for the record and its field, held in
-  `domain/records/run_records.py`, `mask/`, `store/campaign_store/ledger_scan.py` and
-  `bench/cycle.py`; a run-data wipe. **Rides with:** root C2 (wave-6). **Re-test:** `git grep -c ResumeCheckpointRecord -- promptpotter` is 0.
-- **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
-  `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
-  (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that
-  `bench/round_analysis.py` writes and `bench/node_context.py:319` copies across a restatement for one
-  reader, `potter/dispatch/facade.py:304` → `injections/panels.py:147`. On the desk's 40 `round_closed`
-  records the first three are empty and `samples` repeats the head arm's 2,131 cells (483 KB); it is
-  inside `round_document_digest`, so a diagnostic edit moves `consumed`. Root: a report derived from
-  cells is computed by the optimizer that reads it; potter folds it at render, its text byte-identical.
-  **Rides with:** rec-2, after potter-w1 (it edits `optimizers/potter/`). **Re-test:** `git grep -n "RoundDiagnostics" -- promptpotter/domain/results.py` is empty.
-- **An invalid arm is recorded twice**: `domain/arms.py::Invalid`, the `Cut` reason
-  `scoring/arm_states.py::cut_invalid` mints, re-states what `_Arm.invalid` derives from the arm's own
-  fatal `validation_failures`, and readers split between them (`arm_end`, `walked_short`,
-  `arm_reading.py::ArmReading`'s `end` read the reason; the hierarchy, measurement log, folds, mask,
-  transcript and L4 proxies read `.invalid`). They agree on all 42 invalid arms of 1,381 concluded
-  in a 21-campaign home (2026-11-25), held only because `cut_invalid` is the one minter and the
-  fatal roster has not moved. Root: the reason goes, and `arm_end` reads `.invalid`; a
-  `CutKind` and on-disk reshape, so a run-data wipe. **Rides with:** root C2 of wave-6 below. **Re-test:**
-  `git grep -n "class Invalid" -- promptpotter/domain/arms.py` is empty.
 
 ### wave-6 · arch review 2 (2026-11-25)
 
@@ -591,13 +568,13 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**.
   **Run data:** `RoundStatement` reshapes. **Size:** medium; it edits `runner/round.py` and `views/readout.py`.
   **Re-test:** the two rows' own.
-- **A record holds no value another record derives (root C2)**: `domain/arms.py::Invalid` beside `.invalid`
-  (12/9), `RoundDiagnostics` (8/4) on the envelope, `.running` (31/11) stamped on every cell.
-  **Closes:** **An invalid arm is recorded twice**, **The neutral round envelope stores one backend's ranking report and a second copy of its cells**,
-  **`SampleScoredRecord.running` stamps a running fold on every cell** (its field; B gives the readers the scorer);
-  adjacent: **`PairedReading` is a tagged union**, **Fields written, never read: 27 left**, and the decision record's three names
-  (**A decision record is named three ways**). **Run data:** every link; behaviour keys move.
-  **Size:** medium. **Rides with:** after C1. **Re-test:** `git grep -n "class Invalid" -- promptpotter/domain/arms.py` is empty.
+- **A record holds no value another record derives (root C2)**: w8-spine3 took the invalid reason and the
+  envelope's diagnostics. Open: `.running` (31/11) stamped on every cell, whose readers
+  (`Narration.fold`, `ledger_scan.py::StandingArm.fold`, the live board) sit in `domain/` and
+  `infrastructure/projections/`, where no scorer folds a cell.
+  **Closes:** **`SampleScoredRecord.running` stamps a running fold on every cell** (its field; B gives the readers the scorer);
+  adjacent: **`PairedReading` is a tagged union**, **Fields written, never read: 27 left**. **Run data:** every link; behaviour keys move.
+  **Size:** medium. **Re-test:** `git grep -c "running=" -- promptpotter/application/scoring/query_loop.py` is 0.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,
@@ -653,11 +630,10 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   no `aria-busy` while it is in flight, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
   Root: `useRead`'s `loading` state marks its pane busy, one rule in `webapp/lib/hooks/useRead.ts`.
   **Re-test:** `drawn` keeps only its `aria-busy` check and `landscape-844 › every view` stays red 3/3 at base.
-- **`tests/test_spend.py` holds the walk's tests**: 5,522 lines, 32 lines naming a walk (tw-j deleted
-  `_round` and the pause and catch-up tests by mutation; the hand-driven `_walk` stays under the spend
-  ceiling, skip and last-skip facts, and the inner stop patches `execute_round`). Root: each becomes an
-  offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and `_walk` goes
-  (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **`tests/test_spend.py` holds the walk's tests**: the hand-driven walk went to the `skipped` legs
+  (w8-tests3); the inner stop still patches `execute_round`. Root: it becomes an offline leg
+  (`run_one`'s knobs) or a rule exposed as a pure function (`tests/CLAUDE.md` § Three tiers).
+  **Re-test:** no test in `tests/test_spend.py` patches `execute_round`.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -720,19 +696,20 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   shared with `repairable_holes`'s row: `ErrorCategory` does not say which errors are fillable.
   **Rides with:** wave 6. **Re-test:** `offline_run.py --charged` crossed-resumed
   `harness.backend_cells` equals crossed's, or the retry is a decision in `docs/decisions.md`.
-- **23 parked facts wait for a world door** (tw-j2; each is kept as a test until its door exists):
+- **19 parked facts wait for a world door** (tw-j2; each is kept as a test until its door exists):
   - test_identity I2: a dataset with two prompt nodes.
   - I3, I4: a parent on fewer rows than its frontier.
   - I6: an L4 origin past 16k chars.
   - mixed ×2: an L4 leg mixing potter and capo.
   - test_scoring S3, S6, S13: a leg that binds a budget (backend cells cost $0).
-  - S8, S14, S15: a pause during a bench pass.
-  - S9–S12: a leg setting `origin_replicates`.
-  - S16–S18: a gate leg running `every_adoption`.
+  - S8, S14: a pause during a scoring pass's bench pass (the cycle reading as scoring), and a
+    refusal after it; the `bench-paused` leg pauses the run's own end pass.
+  - S9, S10, S12: the `replicated` leg with a row gone from its bank, and a replicate that stops or
+    raises.
+  - S17, S18: the `every-adoption` leg with a member whose point moved, and reading its set-aside.
   - S19: an `arm_gate=author` leg.
   - S20: a GEPA round proposing more than one arm.
   - S25: a world LLM naming `stand_on`.
-  - test_spend's skip journey: a `run_one` act that sends `SkipSearchpoint` mid-walk, with a resumed twin.
   - test_spend's inner-stop: an L4 leg whose inner run rebases and whose provider refuses credit.
   - The catch-up fact deleted at `af224d3bd` line 1222: a pause while a prior's catch-up is out past
     the sure rows.
@@ -741,9 +718,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
   **Rides with:** wave 6. **Re-test:** each fact moves to a leg on its door, or is deleted by a named
   mutation.
-- **test_security's stdio-host test is 78 lines** (tw-c, tw-j2), against the 60-line budget: it is one
-  function, so that one spawned host answers every act. Door: a host spawned once for the module.
-  **Rides with:** wave 6. **Re-test:** the test is at most 60 lines and spawns no host of its own.
 - **`write_json` writes with `indent=2`** (tw-q): `infrastructure/store/io.py::write_json` indents
   every file it writes, the dashboard's on every write included, and an indent forces json's
   pure-Python encoder. Fork: a run folder is a headless UI that people read (compact JSON is
@@ -771,12 +745,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
-- **A child process has no offline-world door** (tw-v): `refused_network` stops at the process, so
-  test_security's API-start child fetched upstream's real price list until `d2fce21` gave it a
-  `-c` preamble, `tests/test_security.py::_OFFLINE_CHILD`, that installs the world's `Router`. Door:
-  one child entry in `scripts/offline_world.py` that every spawned child runs under. **Rides with:**
-  wave 6. **Re-test:** `git grep -c "_OFFLINE_CHILD" -- tests` is 0 and each child asserts nothing
-  went unrouted.
 - **A first landing leaves `jobs/.live-jobs` unwritten** (tw-v, `tests/test_security.py` `moved`
   fixture): on a tree that never ran, a first landing writes no live-jobs index, and a second landing
   stages it, so the fixture keeps `campaign(rounds=0)` rather than a mint. This is a state the system

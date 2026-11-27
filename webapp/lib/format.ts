@@ -2,7 +2,7 @@ import {
   type Estimate,
   type MeasuredLift,
   type MeasuredUnit,
-  LIFT_SIDE_TONE,
+  LIFT_SIDE_INFO,
   RECENT_STEP_S,
   SAMPLE_TAG_DIGITS,
   UNIT_FORMATS,
@@ -182,9 +182,9 @@ export function fmtLogits(v: number): string {
 }
 
 
-// A side's served ink (`LIFT_SIDE_TONE`); no side reads as a band spanning zero.
+// A side's served ink (`LIFT_SIDE_INFO`); no side reads as a band spanning zero.
 export function sideTone(side: LiftSide | null | undefined): string {
-  return cx("l4-eff", `tone-${LIFT_SIDE_TONE[side ?? "spans"]}`);
+  return cx("l4-eff", `tone-${LIFT_SIDE_INFO[side ?? "spans"].tone}`);
 }
 
 export function fmtClock(s: unknown): string {

@@ -15,6 +15,7 @@ import atexit
 import contextlib
 import copy
 import dataclasses
+import functools
 import hashlib
 import inspect
 import itertools
@@ -85,7 +86,10 @@ from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import CallTool, HostSession
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.maintenance.landing import check_every_treatment
+from promptpotter.application.maintenance.landing import (
+    check_every_treatment,
+    complete_registries,
+)
 from promptpotter.application.optimizer_manifest import (
     bench_choice,
     manifest_directories,
@@ -131,6 +135,7 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
     ReadKind,
     SetSampleLookaheadPayload,
+    SkipSearchpointPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
@@ -155,11 +160,15 @@ from promptpotter.infrastructure.store.archive_queries import (
     list_populations,
     load_population,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_answers,
+    scan_standing_rounds,
+)
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
@@ -211,6 +220,18 @@ ARRIVED = "arrived"
 # Potter's warm run pressed and paused inside a walk, then resumed: what the press bought ahead and
 # no turn took stays out of the campaign's own memory across the pause.
 PRESSED_RESUMED = f"{PRESSED}-{RESUMED}"
+# Each optimizer's warm run with an operator's skip at this cell of its first walk past the origin,
+# and its twin paused on the cell after: the resume replays the skip at the depth it was pressed.
+SKIPPED = "skipped"
+SKIP_AT = 3
+# Each optimizer's warm run graded under `every_adoption`: a pass per selection its line adopted.
+EVERY = "every-adoption"
+# The first optimizer's one-round campaign whose origin is re-scored into a noise band at round 0.
+REPLICATED = "replicated"
+REPLICATES = 2
+# Each optimizer's warm run paused as its bench pass answers this cell, then resumed.
+BENCHED = "bench-paused"
+BENCH_PAUSE_AT = 6
 # The crossed pair's origin errs on one row in this many, so the resume replays the parent's bar
 # at the grade its live election charged.
 CHARGED = 8
@@ -866,12 +887,20 @@ async def run_one(
     press: bool = False,
     arrival: bool = False,
     charged: bool = False,
+    skip_at: int | None = None,
+    skip_resumed: bool = False,
+    origin_replicates: int | None = None,
+    pause_in_bench: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
     measures, its walk banked, so the resume replays the walk and runs no proposer; *press* presses
     `PRESS` as the first cell is answered; *arrival* lays `ARRIVAL`; *charged* answers one in `CHARGED`
-    of the origin's rows as the pipeline's error, a miss its bar is charged."""
+    of the origin's rows as the pipeline's error, a miss its bar is charged; *skip_at* skips the arm
+    walking at that cell of the first walk past the origin (`skipping`), *skip_resumed* pausing on
+    the cell after and resuming; *origin_replicates* re-scores the origin's round-0 rows that many
+    times into its noise band; *pause_in_bench* pauses inside the bench pass (`pausing_in_bench`)
+    and resumes."""
     out = workspace if out is None else out
     config = campaign_config(
         optimizer,
@@ -882,6 +911,8 @@ async def run_one(
     )
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
+    if origin_replicates is not None:
+        config = config.model_copy(update={"origin_replicates": origin_replicates})
     samples = synthetic_rows(rows)
     harness = Harness.installed(
         out,
@@ -902,6 +933,8 @@ async def run_one(
     acts = [
         *([pressing(stores)] if press else []),
         *([pausing_in_walk(stores, pause_in_walk)] if pause_in_walk is not None else []),
+        *([skipping(stores, skip_at, then_pause=skip_resumed)] if skip_at is not None else []),
+        *([pausing_in_bench(stores, rounds)] if pause_in_bench else []),
     ]
 
     async def acting() -> None:
@@ -919,7 +952,7 @@ async def run_one(
         mode=RunMode(),
     )
     harness.backend.before_answer = None
-    if pause_after is not None or pause_in_walk is not None:
+    if pause_after is not None or pause_in_walk is not None or skip_resumed or pause_in_bench:
         if result.stop_reason != StopReason.PAUSED:
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
@@ -944,27 +977,83 @@ async def run_one(
     return cycle, session.campaign_id
 
 
+def _run_hop(stores: Stores) -> CycleHop:
+    (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
+    return campaign.root_hop
+
+
+async def _pressed(stores: Stores, payload: CommandPayload) -> None:
+    """*payload* pressed at the terminal, as an operator presses it."""
+    await (await host_dispatcher(stores)).dispatch(CommandCall(payload, door=Door.TERMINAL))
+
+
+def _walk_banked(stores: Stores, at: int | None, from_round: int) -> bool:
+    """A cell answered in a round from *from_round* on whose walk banked: a cell measured inside a
+    walk, or replayed, is none."""
+    if at is None or at < from_round:
+        return False
+    return (
+        stores.campaigns.standing_rounds(_run_hop(stores), moment=None).proposals.get(at)
+        is not None
+    )
+
+
+def _paused(hop: CycleHop, reason: str) -> PauseCyclePayload:
+    return PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason=reason)
+
+
 def pausing_in_walk(stores: Stores, round_num: int) -> Callable[[], Awaitable[None]]:
     """The pause an operator presses as the first cell is answered of a round from *round_num* on
-    whose walk banked: a cell measured inside a walk, or replayed, presses nothing."""
+    whose walk banked."""
     asked = False
 
     async def pause() -> None:
         nonlocal asked
-        at = current_round()
-        if asked or at is None or at < round_num:
-            return
-        (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
-        hop = campaign.root_hop
-        if stores.campaigns.standing_rounds(hop, moment=None).proposals.get(at) is None:
+        if asked or not _walk_banked(stores, current_round(), round_num):
             return
         asked = True
-        payload = PauseCyclePayload(
-            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="offline: inside a walk"
-        )
-        await (await host_dispatcher(stores)).dispatch(CommandCall(payload, door=Door.TERMINAL))
+        await _pressed(stores, _paused(_run_hop(stores), "offline: inside a walk"))
 
     return pause
+
+
+def pausing_in_bench(stores: Stores, rounds: int) -> Callable[[], Awaitable[None]]:
+    """The pause an operator presses as the end's bench pass, every one of *rounds* closed,
+    answers its `BENCH_PAUSE_AT`-th cell."""
+    answered = 0
+
+    async def pause() -> None:
+        nonlocal answered
+        hop = _run_hop(stores)
+        if max(stores.campaigns.standing_rounds(hop, moment=None).rounds, default=0) < rounds:
+            return
+        answered += 1
+        if answered == BENCH_PAUSE_AT:
+            await _pressed(stores, _paused(hop, "offline: inside a bench pass"))
+
+    return pause
+
+
+def skipping(stores: Stores, skip_at: int, *, then_pause: bool) -> Callable[[], Awaitable[None]]:
+    """The skip an operator presses as the *skip_at*-th cell is answered of the first walk past the
+    origin that banked, cutting the arm it walks; *then_pause*, a pause on the cell after, inside
+    that walk, so the resume replays the skipped arm."""
+    answered = 0
+
+    async def skip() -> None:
+        nonlocal answered
+        if not _walk_banked(stores, current_round(), 1):
+            return
+        answered += 1
+        hop = _run_hop(stores)
+        if answered == skip_at:
+            await _pressed(
+                stores, SkipSearchpointPayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
+            )
+            if then_pause:
+                await _pressed(stores, _paused(hop, "offline: past a skip"))
+
+    return skip
 
 
 def pressing(stores: Stores) -> Callable[[], Awaitable[None]]:
@@ -976,12 +1065,13 @@ def pressing(stores: Stores) -> Callable[[], Awaitable[None]]:
         if pressed:
             return
         pressed = True
-        (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
-        hop = campaign.root_hop
-        payload = SetSampleLookaheadPayload(
-            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, **PRESS.model_dump()
+        hop = _run_hop(stores)
+        await _pressed(
+            stores,
+            SetSampleLookaheadPayload(
+                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, **PRESS.model_dump()
+            ),
         )
-        await (await host_dispatcher(stores)).dispatch(CommandCall(payload, door=Door.TERMINAL))
 
     return press
 
@@ -1293,7 +1383,7 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
 
     def passes(hop: CycleHop) -> list[str]:
         decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
-        return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
+        return [d.inputs.by for d in decided if isinstance(d.inputs, OriginGatePass)]
 
     for fixed in (False, True):
         backend.down, backend.sent = True, []
@@ -1761,7 +1851,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
 
 
 LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "decision": ("decisions", ("round", "kind", "outcome", "inputs_ref")),
+    "decision": ("decisions", ("round", "kind", "outcome", "inputs")),
     "election": ("elections", ("round", "leading", "ending", "parent", "fit")),
     "arm": ("arms", ("round", "arm", "state")),
     "phase": ("phases", ("round", "phase", "step")),
@@ -2474,12 +2564,169 @@ def filed_answers(workspace: Path) -> Counter[tuple[str, str]]:
     return Counter((row["config_key"], row["sample_key"]) for path in cells for row in _jsonl(path))
 
 
-def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
+def leg_ledger_path(workspace: Path) -> Path:
     """The one cycle's ledger a leg ran, off its own data root."""
     (ledger,) = Path(long_path(data_root(workspace))).glob(
         "projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl"
     )
-    return _jsonl(ledger)
+    return ledger
+
+
+def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
+    return _jsonl(leg_ledger_path(workspace))
+
+
+def graded_line(workspace: Path) -> tuple[list[str], Counter[str]]:
+    """A leg's line, the individual each crowning election adopted (round 0's the origin), and the
+    bench cells it graded per individual, off its ledger."""
+    crowned: list[str] = []
+    graded: Counter[str] = Counter()
+    for record in leg_ledger(workspace):
+        match record.get("record_type"):
+            case "election" if record.get("ending") == "crowned":
+                crowned.append(record["leading"])
+            case "sample_scored" if record.get("role") == "bench":
+                graded[record["individual_id"]] += 1
+    return crowned, graded
+
+
+def adopted_leg(name: str, home: Path, leg: Future[int]) -> bool:
+    """*name*'s warm line graded under `every_adoption`: one pass, of one width, per adoption of
+    the line, the origin's included, on the line `warm/` adopted, where `at_end` grades the origin
+    and the final selection alone."""
+    workspace = home / name / EVERY
+    if rc := leg.result():
+        print(f"{name}: every adoption graded: FAILED (exit {rc}) -- {workspace / 'run.log'}")
+        return False
+    (line, graded), (warm_line, warm_graded) = (
+        graded_line(workspace),
+        graded_line(home / name / WARM),
+    )
+    once = set(graded) == set(line) and len(set(graded.values())) == 1
+    held = line == warm_line and set(warm_graded) == {line[0], line[-1]}
+    print(
+        f"{name}: every adoption graded, {len(line)} adoptions, {len(graded)} passes of "
+        f"{sorted(set(graded.values()))} cells{'' if once else ' (NOT one per adoption)'}, at_end "
+        f"{len(warm_graded)}{'' if held else ' (NOT the origin and the final selection)'}"
+    )
+    return once and held
+
+
+def replicated_leg(name: str, workspace: Path, leg: Future[int] | None) -> bool:
+    """*name*'s origin re-scored `REPLICATES` times at round 0: one noise band, filed once, over
+    exactly the rows round 0 recorded, each re-scored by every replicate, and stood beside the
+    recorded level of those rows."""
+    if leg is None:
+        return True
+    if rc := leg.result():
+        print(f"{name}: a replicated origin: FAILED (exit {rc}) -- {workspace / 'run.log'}")
+        return False
+    ledger = leg_ledger(workspace)
+    bands = [
+        r
+        for r in ledger
+        if r.get("record_type") == "pass_graded" and r["verification"]["kind"] == "noise_floor"
+    ]
+    origin = bands[0]["verification"]["arm"]["key"] if bands else None
+    recorded = {
+        r["result"]["sample_key"]
+        for r in ledger
+        if r.get("record_type") == "sample_scored"
+        and r.get("round") == 0
+        and r.get("role") == "origin"
+        and r.get("individual_id") == origin
+    }
+    held = len(bands) == 1 and bool(recorded)
+    if held:
+        (band,) = bands
+        rows, reading = band["verification"]["sample_keys"], band["reading"] or {}
+        held = (
+            sorted(rows) == sorted(recorded)
+            and len(band["verification"]["cells"]) == REPLICATES * len(rows)
+            and len(reading.get("raw", ())) == REPLICATES
+            and (reading.get("recorded") or {}).get("n") == len(rows)
+        )
+    print(
+        f"{name}: a replicated origin filed {len(bands)} noise bands over {len(recorded)} recorded "
+        f"rows, {REPLICATES} replicates {'each' if held else 'NOT each'} re-scoring them"
+    )
+    return held
+
+
+def _unlabelled(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {k: _unlabelled(v) for k, v in node.items() if k != "individual_id"}
+    if isinstance(node, list):
+        return [_unlabelled(v) for v in node]
+    return node
+
+
+def bench_paused_leg(home: Path, leg: Future[int]) -> bool:
+    """Potter's warm run paused inside its end pass and resumed: the pass banks pending, stopped
+    by the pause on the cells it walked, and the resumed pass replays each of them and reads the
+    bench `warm/` read."""
+    workspace = home / "potter" / BENCHED
+    if rc := leg.result():
+        print(f"potter: a pause inside a bench pass: FAILED (exit {rc}) -- {workspace / 'run.log'}")
+        return False
+    passes = [
+        (r["state"], r["verification"])
+        for r in leg_ledger(workspace)
+        if r.get("record_type") == "pass_graded" and r["verification"]["kind"] == "bench"
+    ]
+    paused: dict[str, Any] = next((v for state, v in passes if state == "pending"), {})
+    width = max((len(v["cells"]) for _, v in passes), default=0)
+    banked = {c[0] for c in paused.get("cells", ())}
+    stopped = (paused.get("stop") or {}).get("cause") == StopReason.PAUSED and 0 < len(
+        banked
+    ) < width
+    resumed = stopped and any(
+        state == "read"
+        and v["arm"] == paused["arm"]
+        and banked <= {c[0] for c in v["cells"] if c[2]}
+        for state, v in passes
+    )
+    # Its labels name ids by first appearance on the ledger, which a resume's init records move.
+    bench = [
+        _unlabelled(decided(at, after=0)["run"]["bench"])
+        for at in (workspace, home / "potter" / WARM)
+    ]
+    same = bench[0] == bench[1]
+    print(
+        f"potter: a pause inside a bench pass banked "
+        f"{len(banked)} of {width} cells "
+        f"{'stopped by it' if stopped else 'NOT as stopped by it'}, the resume "
+        f"{'replayed them' if resumed else 'bought them AGAIN'}, its bench "
+        f"{'UNMOVED' if same else 'MOVED'} from warm/"
+    )
+    return resumed and same
+
+
+def skipped_leg(name: str, home: Path, straight: Future[int], twin: Future[int]) -> bool:
+    """*name*'s skip stands at the depth it was pressed (`SKIP_AT`), and its twin, paused inside the
+    skipped walk and resumed, replays it there: the same standing skip, decisions, backend cells,
+    bills and priced keys. A replay recording no depth leaves the next resume skipping at zero."""
+    legs = (home / name / SKIPPED, home / name / f"{SKIPPED}-{RESUMED}")
+    if rcs := [rc for leg in (straight, twin) if (rc := leg.result())]:
+        print(f"{name}: a skip and its resumed twin: FAILED (exit {rcs}) -- {legs[0] / 'run.log'}")
+        return False
+    complete_registries()
+    skips = [scan_standing_rounds([LedgerSpan(leg_ledger_path(leg))]).skipped for leg in legs]
+    cells = [
+        (BehaviourTrace.read(leg).decisions["harness"]["backend_cells"], *bought(leg))
+        for leg in legs
+    ]
+    same = decided(legs[0], after=0) == decided(legs[1], after=0)
+    at, inside = paused_at(legs[1])
+    held = list(skips[0].values()) == [SKIP_AT]
+    replayed = skips[0] == skips[1] and cells[0] == cells[1] and same
+    print(
+        f"{name}: a skip stands at {list(skips[0].values())} cells"
+        f"{'' if held else f' (NOT {SKIP_AT})'}, its twin paused "
+        f"{'inside' if inside else 'after'} round {at} and resumed, skip, decisions and cells "
+        f"{'UNMOVED' if replayed else f'MOVED ({skips[1]}, {cells[0]} -> {cells[1]})'}"
+    )
+    return held and replayed and inside
 
 
 def rows_read(workspace: Path) -> list[str]:
@@ -2611,11 +2858,13 @@ def read_children(
     home: Path,
     children: Mapping[str, Future[int]],
     warm: Mapping[str, tuple[Future[int], Future[int], Future[int], Future[int]]],
+    beside_warm: Mapping[str, list[Callable[[], bool]]],
     pause_after: int,
     *,
     controlled: bool,
 ) -> dict[str, int]:
-    """Per optimizer, its straight run's failed checks, and its warm legs' where they ran."""
+    """Per optimizer, its straight run's failed checks, its warm legs', and each leg's held beside
+    them, where they ran."""
     failed = dict.fromkeys(children, 0)
     for name, child in children.items():
         workspace = home / name
@@ -2626,7 +2875,33 @@ def read_children(
             failed[name] += read_straight(name, workspace)
         if name in warm:
             failed[name] += read_warm(name, workspace, *warm[name], pause_after)
+        failed[name] += sum(not held() for held in beside_warm.get(name, ()))
     return failed
+
+
+def beside_warm(
+    home: Path, spawn: Callable[..., Future[int]], names: Sequence[str]
+) -> dict[str, list[Callable[[], bool]]]:
+    """The legs each optimizer runs on `warm/`'s ruler beside it, each spawned and read by its
+    check: a skip and its resumed twin, every adoption graded, potter's pause inside a bench pass."""
+    warmly = (f"--hardness={REBASE_HARDNESS}",)
+    skip = (*warmly, f"--skip-at={SKIP_AT}")
+    checks: dict[str, list[Callable[[], bool]]] = {}
+    for name in names:
+        skipped = (
+            spawn(name, home / name / SKIPPED, *skip),
+            spawn(name, home / name / f"{SKIPPED}-{RESUMED}", *skip, "--skip-resumed"),
+        )
+        every = spawn(name, home / name / EVERY, *warmly, "--bench-trigger=every_adoption")
+        checks[name] = [
+            functools.partial(skipped_leg, name, home, *skipped),
+            functools.partial(adopted_leg, name, home, every),
+        ]
+    if "potter" in checks:
+        # Potter's warm line adopts past its origin, so its end pass grades a selection to pause in.
+        benched = spawn("potter", home / "potter" / BENCHED, *warmly, "--pause-in-bench")
+        checks["potter"].append(functools.partial(bench_paused_leg, home, benched))
+    return checks
 
 
 def run_child_leg(args: argparse.Namespace) -> None:
@@ -2678,6 +2953,10 @@ def run_child_leg(args: argparse.Namespace) -> None:
             press=args.press,
             arrival=args.arrival,
             charged=args.charged,
+            skip_at=args.skip_at,
+            skip_resumed=args.skip_resumed,
+            origin_replicates=args.origin_replicates,
+            pause_in_bench=args.pause_in_bench,
         )
         print(asyncio.run(one)[0])
 
@@ -2737,6 +3016,10 @@ def main() -> int:
     ap.add_argument("--press", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--arrival", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--charged", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--skip-at", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--skip-resumed", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--origin-replicates", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--pause-in-bench", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--l4",
         action="store_true",
@@ -2801,7 +3084,7 @@ def main() -> int:
     # Each script wounds a call of the first two rounds.
     wounded = [name for name in due if name in WOUNDS] if legs and args.rounds > 1 else []
     tasks = (
-        5 * len(due) + (len(INTERRUPTED) + 2) * firsts + 7 * potter_legs + len(wounded)
+        8 * len(due) + (len(INTERRUPTED) + 3) * firsts + 8 * potter_legs + len(wounded)
         if legs
         else len(due)
     )
@@ -2852,6 +3135,11 @@ def main() -> int:
         else None
     )
     gating = spawn(first, home / first / GATED, "--gated") if firsts else None
+    replicating = (
+        spawn(first, home / first / REPLICATED, "--rounds=1", f"--origin-replicates={REPLICATES}")
+        if firsts
+        else None
+    )
     # Only potter's L2 proposes a fork.
     rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
     # Only potter's nodes answer structured, so only its calls climb the client's repair ladder.
@@ -2897,7 +3185,14 @@ def main() -> int:
         )
         for name in (due if legs else ())
     }
-    failed = read_children(home, children, warm, pause_after, controlled=args.controlled)
+    failed = read_children(
+        home,
+        children,
+        warm,
+        beside_warm(home, spawn, due if legs else []),
+        pause_after,
+        controlled=args.controlled,
+    )
     # After the straight run, never beside it: two processes would land one root at entry.
     if args.l4 and failed.get("potter") == 0:
         nesting = spawn("potter", home / "potter" / L4, "--l4", into=home / "potter")
@@ -2914,6 +3209,7 @@ def main() -> int:
             f"{f'FAILED (exit {rc}) -- {log}' if rc else 'forked, its parent REBASED'}"
         )
     said_leg(failed, first, home / first / GATED, gating, "the origin gate")
+    failed[first] += not replicated_leg(first, home / first / REPLICATED, replicating)
     said_leg(failed, "potter", home / "potter" / REBASED, rebasing, "a line forking at every L2")
     if paired is not None:
         crossing, arriving = paired

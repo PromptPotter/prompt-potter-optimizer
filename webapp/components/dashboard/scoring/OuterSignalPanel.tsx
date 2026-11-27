@@ -17,13 +17,13 @@ import {
   type IntervalDomain,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { liftOf, type LiftSide } from "@/lib/derivations";
+import { liftOf } from "@/lib/derivations";
 import { fmtEstimate, fmtLogits, sideTone } from "@/lib/format";
 
 type Lift = {
   round: number;
   estimate: MeasuredLift["estimate"];
-  side: LiftSide;
+  side: MeasuredLift["side"];
   label: string;
   advance: RoundAdvance;
 };

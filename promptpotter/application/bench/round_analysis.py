@@ -35,16 +35,15 @@ def ended_on(
     cells: dict[ArmKey, CellSheet],
     overlap_results: dict[str, CellSheet],
     priors: Sequence[RoundResult],
-    schema: PipelineSchema | None,
     overlap: ReadingState,
 ) -> RoundResult:
-    """A round ending on *election*: what it reads off that arm (election, health, overlap,
-    diagnostics) stated once, for its selector at the close and for a layer that re-elects it
+    """A round ending on *election*: what it reads off that arm (election, health, overlap) stated
+    once, for its selector at the close and for a layer that re-elects it
     (`node_context.py::Lineage.reelected`)."""
     head = arms[election.ended_on]
     assert isinstance(head, Concluded), "a round ends on an arm it concluded"
     picked = election.selected is not None
-    rr = RoundResult(
+    return RoundResult(
         round=round,
         arms=arms,
         reference=reference,
@@ -55,7 +54,6 @@ def ended_on(
         health=head_health(round, head, cells[election.ended_on], picked=picked, priors=priors),
         overlap=OverlapReading.unpaired(overlap, round, election.ending),
     )
-    return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
 
 
 def head_health(
@@ -71,7 +69,7 @@ def head_health(
     )
 
 
-# The bench calls it, outside any hashed module, and an optimizer prompt renders what it returns.
+# Potter's prompt renders it at its own render, off the rows of the arm a round ended on.
 def compute_round_diagnostics(
     round_result: RoundResult, pipeline_schema: PipelineSchema | None
 ) -> RoundDiagnostics:

@@ -552,7 +552,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     // The pre-first-record offset the projection starts from.
     at_offset: -1,
     state: "init",
-    optimizer_step: null,
     run_phase: "running",
     stop_reason: null,
     round: 0,
@@ -597,6 +596,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     held_call: null,
     producer: producerReading(),
     admission: { offers: "pause", refusal: null, payload: {}, stop_acts: [] },
+    pause_waits_on: "starting up",
     skip_refusal: "",
     backpressure: null,
     measured_unit: "sample",

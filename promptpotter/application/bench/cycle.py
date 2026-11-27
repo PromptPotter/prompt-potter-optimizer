@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
-from promptpotter.application.bench.round_analysis import compute_round_diagnostics, head_health
+from promptpotter.application.bench.round_analysis import head_health
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
@@ -29,7 +29,7 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.records.run_records import ResumeCheckpointRecord, RoundProposedRecord
+from promptpotter.domain.records.run_records import DecisionRecord, RoundProposedRecord
 from promptpotter.domain.results import Election, InRunCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp, withheld
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
@@ -89,7 +89,7 @@ def _origin_round(
     schema: PipelineSchema,
 ) -> RoundResult:
     key, arm, results = origin_arm.key, origin_arm.state, origin_arm.rows
-    origin = RoundResult(
+    return RoundResult(
         round=0,
         arms={key: arm},
         reference=None,
@@ -109,10 +109,6 @@ def _origin_round(
         overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, 0, RoundEnding.CROWNED),
         optimizer_state=optimizer_state,
     )
-    if not results:
-        return origin
-    # Without them round 1 opens blind to the origin's per-sample failure pattern.
-    return origin.model_copy(update={"diagnostics": compute_round_diagnostics(origin, schema)})
 
 
 def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, ArmFit]:
@@ -155,7 +151,7 @@ class Cycle:
     population: list[OptSearchPoint] = field(default_factory=list)
     framing: TaskDecomposition = field(default_factory=TaskDecomposition)
     sample_index: SampleIndex | None = None
-    pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
+    pending_decisions: list[DecisionRecord] = field(default_factory=list)
     bench_passes: BenchPasses | None = None
     # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
     standing: RunStanding | None = None

@@ -1284,7 +1284,7 @@ def _cut(
     check = PoBBCheck(
         pobb_knobs(**knobs), n_min=4, ruler=_keyed_ruler(_TEN), parent=ArmKey("parent")
     )
-    check.register_completed(parent.cells, key=ArmKey("parent"))
+    check.register_completed(parent, key=ArmKey("parent"))
     stops = check.check({ArmKey("parent"): parent, **walked}, {key: len(_TEN) for key in walked})
     stop = stops.get(ArmKey("c1"))
     return stops, None if stop is None else EliminationCut.of(stop, ArmKey("c1"), ArmKey("parent"))
@@ -2502,7 +2502,7 @@ def gated(tmp_path_factory: pytest.TempPathFactory) -> Shared:
 
 def _passes(world: World, hop: CycleHop) -> list[str]:
     decided = world.stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
-    return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
+    return [d.inputs.by for d in decided if isinstance(d.inputs, OriginGatePass)]
 
 
 # Each launch reads the pass the one before it banked.

@@ -55,6 +55,7 @@
 - **≤ 2 s** wall, a world campaign included (one round on 40 rows runs in ~3 s: share it through a fixture, never re-run it per fact).
 - **≤ 2 MB** left in the process after it: nothing it imports or caches outlives it.
 - **An extra (dspy, …) is never imported into the suite's process**: it is tested where it runs, in an offline leg or a child process. A child-process test runs early, or the parent is small when it does.
+- **A child that sends is spawned by `scripts/offline_world.py::child`**: its code runs in the world (`world`, its `Router`), and a send no route answered fails the child at its exit.
 
 ## Shape
 

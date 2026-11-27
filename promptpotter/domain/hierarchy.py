@@ -402,8 +402,8 @@ class CandidateFacts(FrozenModel):
         "variation rewrote. Empty without a donor."
     )
     gene_sources: list[GeneSource] = Field(
-        description="Per other locus it moved off its main, the earlier candidates whose value there "
-        "is closer to its own than the main's: most similar first, then most recently measured."
+        description="Per other locus it moved off its main, the one earlier candidate whose value "
+        "there is closest to its own and closer than the main's, the most recently measured of a tie."
     )
     lens_value: float | None = Field(
         description="This candidate's composite fitness under the request's `score:` lens. Null "

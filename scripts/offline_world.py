@@ -16,6 +16,7 @@ import json
 import re
 import signal
 import socket
+import sys
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 import httpx
+from pydantic import SecretStr
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -727,3 +729,33 @@ def install_network(router: Router) -> Callable[[], None]:
         wire["held_wait"], settings.TERMNORM_ENDPOINTS = real
 
     return restore
+
+
+def child(code: str, *argv: str) -> list[str]:
+    """The command line a fact spawns a child process by: *code* runs as `python -c` runs it, *argv*
+    its arguments, inside this world (`run_child`)."""
+    return [sys.executable, __file__, code, *argv]
+
+
+def run_child(code: str, *argv: str) -> None:
+    """A spawned child's world, as the `offline` fixture lays the suite's: every key one its
+    provider accepts, no rate capped, every send answered by one `Router`, which *code* reads as
+    `world`. A send no route answered fails the child at its exit, whatever *code* did."""
+    for key in PROVIDER_KEYS:
+        setattr(settings, key, SecretStr(NOT_A_KEY))
+    settings.RATE_LIMITS = {}
+    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+    install_network(world)
+    sys.argv = [sys.argv[0], *argv]
+    try:
+        exec(compile(code, "<offline child>", "exec"), {"__name__": "__main__", "world": world})
+    finally:
+        if world.unrouted:
+            raise SystemExit(f"offline child: unrouted sends {sorted(world.unrouted)}")
+
+
+if __name__ == "__main__":
+    # The world its importers know, never a second copy of this module named `__main__`.
+    import offline_world
+
+    offline_world.run_child(*sys.argv[1:])

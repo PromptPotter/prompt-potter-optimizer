@@ -340,7 +340,12 @@ BASELINE = {
     # import, since numpy can load before an entry point's start (16 cores: ~640 MB per process).
     # w8-job (−36): a job holds no ending; how it ended is read off its cycle's stop.
     # Windows stamp fix (+1): a compaction taker seeks to byte 0 before it locks.
-    "package_lines": 113915,
+    # w8-web2 (+32, webapp −78): a library snippet serves its `lineage_source`, walked once; the
+    # dashboard serves `pause_waits_on`, the pause's wording; a lift side's verdict joins its tone in
+    # `LIFT_SIDE_INFO`, so the browser words no side.
+    # w8-spine3 (−5): an invalid arm has no reason and the envelope no report; a decision is one
+    # `DecisionRecord`; a race's priors are sheets of the session scorer.
+    "package_lines": 113942,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -415,7 +420,9 @@ BASELINE = {
     # its browser figure moved to `ServedDashboard.line_count`.
     # w8-resolve3 (+1): the fork preview is asked of a cycle (`_CycleAddressed`), whose `descend`
     # no browser preview sends.
-    "p_served": 199,
+    # w8-web2 (+1): `Variation.donated`, read server-side now (`hierarchy_subtree.py` serves the
+    # loci a donor gave as `donated_loci`).
+    "p_served": 200,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
