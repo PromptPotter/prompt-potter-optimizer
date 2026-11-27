@@ -82,7 +82,7 @@ from promptpotter.domain.scoring import (
     ground_truth_text,
     is_verifier_graded,
 )
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, TokenAccount
+from promptpotter.domain.spend import SpendRollup, TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -718,9 +718,6 @@ class LiveDashboardProjection(Projection):
         self.state.spend = self.state.spend.banked(record)
         rollup = (SpendRollup() if held is None else held).banked(record)
         self.state.spend_by_round = {**self.state.spend_by_round, key: rollup}
-
-    def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
-        return MeteredSpend.of(self.state.spend, meters)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._open_calls[record.call_id] = record.node

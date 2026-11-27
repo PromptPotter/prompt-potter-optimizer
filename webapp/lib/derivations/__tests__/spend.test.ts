@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costSeries, roundCosts, spendHeadline } from "../spend";
+import { costSeries, roundCosts } from "../spend";
 import type { KindSpend, MeteredSpend } from "@/lib/api/types";
 import { dash } from "@/lib/test-fixtures";
 
@@ -25,29 +25,17 @@ function metered(
     metered_usd: 0,
     billed_usd: 0,
     rate_priced_usd: 0,
-    calls_rate_priced: false,
-    rate_known: true,
-    bill_is_floor: false,
     incurred_usd: 0,
     billed_tokens: 0,
-    unpriced_tokens: 0,
     kinds,
     replay_share: null,
+    bill: "$0.0000",
+    rate_priced_line: null,
+    replay_line: "The search incurred nothing, so no share of it replayed",
+    buckets_line: "",
     ...over,
   };
 }
-
-describe("spendHeadline", () => {
-  it("leads with the bill, never what the cap counts or the search incurred", () => {
-    const m = metered({}, { billed_usd: 2.5, metered_usd: 1.25, incurred_usd: 9 });
-    expect(spendHeadline(m)).toBe("$2.50");
-  });
-
-  it("marks a floor off the served flag alone, whatever the token count beside it says", () => {
-    expect(spendHeadline(metered({}, { billed_usd: 2.5, bill_is_floor: true }))).toBe("≥$2.50");
-    expect(spendHeadline(metered({}, { billed_usd: 2.5, unpriced_tokens: 40 }))).toBe("$2.50");
-  });
-});
 
 describe("costSeries over rounds carrying different kinds", () => {
   it("keys each series by kind, so a later round's dollars never land under another label", () => {
