@@ -305,16 +305,24 @@ unloadable run data itself; a survivor reshape ships its migration in its landin
 A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, la, lw),
 never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
-**Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether the
-visits analytics move to the site repo · whether resume
+**Forks left to the operator** (taste and policy; a chain leaves each as it stands): the
+visits analytics (**Decided 2026-11-27:** they stay in this repo) · whether resume
 re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
-today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · the sub-cent
-money rule (forks) · which env
-file the box keeps (box) · a bench's total · whether an upload's bytes are kept before the parse · a
-prompt field's order · the host assistant's open questions (§ Host assistant) · whether
+today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence; **Decided
+2026-11-27:** it does not, not now: §0.5 holds resume and fork-on-divergence load-bearing and the caches
+are evictable) · the sub-cent money rule (forks; **Decided 2026-11-27:** three significant digits under
+a dollar in `usd_text`, which feeds the webapp's `fmtUsd`) · which env
+file the box keeps (box) · a bench's total (**Decided 2026-11-27:** read the box's definition first, an
+operator read, then decide) · whether an upload's bytes are kept before the parse (**Decided 2026-11-27:**
+deferred, decided with the anon item) · a prompt field's order (**Decided 2026-11-27:** an operator
+setting, not an optimizer axis; a reorder re-keys every cell) · the host assistant's open questions
+(§ Host assistant) · whether
 `enable_2pl_graduation`, `degradation_fatal_fastpath`, `lift_reference` and `fitness_ceiling` /
-`rounds_to_ceiling` stay (asked 2026-11-12, not decided) · whether an inner L4 run inherits its outer
-run's overshoot switch (today set-limits refuses inner cycles, so an inner run always holds worst case).
+`rounds_to_ceiling` stay (asked 2026-11-12; **Decided 2026-11-27:** keep `degradation_fatal_fastpath`,
+which §0 names; delete `enable_2pl_graduation`, `lift_reference` and `fitness_ceiling` /
+`rounds_to_ceiling`, which no plan uses) · whether an inner L4 run inherits its outer
+run's overshoot switch (today set-limits refuses inner cycles, so an inner run always holds worst case;
+**Decided 2026-11-27:** it inherits it).
 
 **Kept on the operator's word** (2026-11-12; a survey proposes none of them again): the n8n and
 dbllmbench connectors; the grounding and simpleqa judges; SealQA (a Harbor source recipe);
@@ -352,7 +360,7 @@ each ends as a rule built or a closed note.
   `capo/members.py::_rank_survivors` keeps μ best-first by mean objective on the cells all survivors
   measured; promptolution's CAPO sorts survivors on raw score over every cell each was evaluated on,
   cached across rounds, so an incumbent's deeper blocks from earlier races count. After a one-block race
-  the two can crown differently. Open: which reading the bench compares. *Re-test:* on a CAPO run with
+  the two can crown differently. **Decided 2026-11-27:** the bench compares the reference's reading for CAPO's survivors. *Re-test:* on a CAPO run with
   offspring < μ, rank one round's survivors both ways.
 - **An optimizer's round price is its name's, not its treatment's**
   (`application/head_to_head_price.py::optimizer_round_price`): the three `escalation_ladder` arms read
@@ -367,7 +375,8 @@ each ends as a rule built or a closed note.
   `hotpotqa-closedbook`. No shipped recipe adds a `held_out` tail and the loader dedups rows, so the 62
   are in the box's tenant definition; the one code path holding out past `bench` is
   `domain/bench.py::partition_bank`, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are
-  built on. Open: read the definition (`/potter-box`), then decide whether `bench` becomes the total; it
+  built on. **Decided 2026-11-27:** read the box's definition first (an operator read, `/potter-box`), then
+  decide whether `bench` becomes the total; it
   moves a dataset cut, so it lands with a re-key. *Re-test:* a fresh `{bench: 100}` campaign on that
   definition holds out 100.
 
@@ -496,8 +505,8 @@ round.
    reading come before the knobs that sharpen it.
    - *Validity.* One ruler per outer cycle (landed with `l4-valid`, which also re-asks a 504's
      hole). Optimizer-prompt arms compared as a COMPARE run, every arm on every seat on one frozen ruler,
-     not through an optimize round's race (PoBB cuts, send-ahead order, uneven n). Open: can a
-     compare campaign seat optimizer-prompt arms?
+     not through an optimize round's race (PoBB cuts, send-ahead order, uneven n). **Decided
+     2026-11-27:** yes, a compare campaign may seat optimizer-prompt arms, riding `RunDeclaration.purpose`.
    - *Seats are the amplitude, the largest lever.* Screen dataset × solver × rung on 100 held-out
      rows: the origin, the best authored prompt (what is reachable), then one shipped inner run (what
      is delivered). Keep seats where delivered/reachable is mid-range: near 1 every arm finds it,
@@ -616,7 +625,8 @@ each moving what the loop decides ([`../developer/offline-run.md`](../developer/
 **Closes when** an offline replay elects no pick its later reads as parent contradict, and the pilot's
 equal-arms simulation shows false locks at the stated level. **Open:**
 - **Tie-breaking at budget cap.** Top 2–3 at similar `P(best)`: ship pick-by-point-estimate; design a
-  cap-extension policy after seeing how often it fires.
+  cap-extension policy after seeing how often it fires. **Decided 2026-11-27:** at the budget cap, pick by
+  point estimate as written, and count how often it fires.
 - **Sample more, or accept the false negative?** At the cap a real lead can be dropped; the bar
   accepts that, since a false crown costs more than a missed one. The optimum stops where one more
   row's price exceeds its chance of flipping the verdict times the crown's value, compounded over the
@@ -640,6 +650,7 @@ one `step`, a write fired only by the user's click on one proposal shape; the ch
 origin gate" prompt, deleting `CheckinOutput`, `RaisedCommand` and `shell/families.tsx::familiesNamed`. **Closes when** a new account's CSV starts its campaign from the
 webapp's host, and the same steps from Claude Code reach the same draft. **Open (operator):** where
 threads persist (a SURVIVOR); which writes skip the click; an in-house loop or an agent SDK; its model.
+**Decided 2026-11-27:** thread persistence is decided first (it is a survivor); the other three wait on it.
 
 ## Origin-resolution check-in
 
@@ -725,7 +736,8 @@ skill routing before the library grows.
 - **Run admission**: look-ahead's ceiling is a constant per connector, not measured headroom.
 - **Cheap top-up**: a second `PanelTrigger`, blocked on pricing a missing row.
 - **Delegation, open** ([`../decisions.md`](../decisions.md) § 0005): who edits grants; whether a delegate
-  is its own tenant.
+  is its own tenant. **Decided 2026-11-27:** deferred: decided before any grants change; the w10-identity
+  chain reviews grants read-only.
 - **Lineage mask (C8)**, beyond [`../operations/mask-projection.md`](../operations/mask-projection.md): a
   mask that changes which samples a round buys needs a replayable measurement order seeded into the
   fork; until then a sample-subset mask previews and stops.
@@ -733,8 +745,8 @@ skill routing before the library grows.
   private data, a right answer (held-out titles, `list_rr`), our own rows (MovieLens cannot ship), served
   from an install-tier campaign behind a `demo_mode_enabled` reader.
 - **Prompt-field order (C10):** today a node's declaration. Proposal: the check-in carries an order per
-  prompt node (`DraftFile.origin_prompts`), a fork inherits it, a reorder re-keys every cell. **Open
-  (operator):** an optimizer axis or an operator setting.
+  prompt node (`DraftFile.origin_prompts`), a fork inherits it, a reorder re-keys every cell. **Decided
+  2026-11-27:** an operator setting, not an optimizer axis (a reorder re-keys every cell).
 - **Arrangeable workspace (A4):** panels resize, collapse, pop out and dock back; on a phone they stack.
   Owed: one view, one panel (`components/dashboard/layout/panes.tsx`); the arrangement as data on the
   address (`lib/state/workspace.tsx`); one panel-chrome primitive; the tapped candidate's before/after.
