@@ -1,29 +1,28 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { Bar } from "react-chartjs-2";
 import type { ChartOptions } from "chart.js";
 import { CHART_DEFAULTS, ensureChartRegistered } from "@/lib/chart";
-import { fmtUsd } from "@/lib/format";
 import { seriesColor, useThemeVersion } from "@/lib/theme";
 import { CardFrame, ChartReading, useChartReading } from "@/components/ui";
-import { costSeries, roundCosts } from "@/lib/derivations";
 import { useViewedDashboard } from "@/lib/state/poll";
 
 ensureChartRegistered();
 
-// How the bill splits by round; the bill itself is the masthead's SPEND.
+const NO_SPEND = { rounds: [], series: [], readings: [] } as const;
+
+// How the bill splits by round, as served (`SpendByRound`); the bill itself is the masthead's SPEND.
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useViewedDashboard();
   useThemeVersion();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);
+  const { rounds, series, readings } = dash?.spend_by_round ?? NO_SPEND;
   const { at, events, frame } = useChartReading(rounds.length);
 
-  const labels = rounds.map((r) => String(r.round));
-  const series = costSeries(rounds);
-  const datasets = series.map((s) => ({
+  const labels = rounds.map(String);
+  // A kind's ink is its place in the served order, every kind served.
+  const datasets = series.map((s, ink) => ({
     label: s.label,
-    data: s.data,
-    backgroundColor: seriesColor(s.ink),
+    data: s.billed_usd,
+    backgroundColor: seriesColor(ink),
     borderWidth: 0,
   }));
 
@@ -39,14 +38,6 @@ export const CostStrip = memo(function CostStrip() {
     },
   };
 
-  const round = at === null ? undefined : rounds[at];
-  const billed =
-    at === null
-      ? []
-      : series.flatMap((s) => {
-          const usd = s.data[at];
-          return usd == null ? [] : [`${s.label.toLowerCase()} ${fmtUsd(usd)}`];
-        });
 
   return (
     <CardFrame title={<span>Spend by round</span>}>
@@ -71,9 +62,7 @@ export const CostStrip = memo(function CostStrip() {
       </div>
       {rounds.length > 0 && (
         <ChartReading hint="Hover, tap or press ← → on the chart to read a round's bill.">
-          {round === undefined
-            ? null
-            : `round ${round.round} · ${billed.join(" · ") || "nothing billed"}`}
+          {at === null ? null : (readings[at] ?? null)}
         </ChartReading>
       )}
     </CardFrame>

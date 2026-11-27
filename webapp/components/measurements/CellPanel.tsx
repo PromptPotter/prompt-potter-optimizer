@@ -174,7 +174,6 @@ function CellBody({ cell, unit }: { cell: Cell; unit: MeasurandUnit }) {
 }
 
 export function CellPanel({
-  datasetName,
   unit,
   answer,
   onClose,
@@ -182,7 +181,6 @@ export function CellPanel({
   hasNext,
   onStep,
 }: {
-  datasetName: string;
   unit: MeasurandUnit;
   answer: string;
   onClose: () => void;
@@ -190,7 +188,7 @@ export function CellPanel({
   hasNext: boolean;
   onStep: (shift: -1 | 1) => void;
 }) {
-  const read = useRead(cellRead(datasetName, answer));
+  const read = useRead(cellRead(answer));
   return (
     <SidePanel
       panelId="cell"

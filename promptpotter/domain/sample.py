@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
+from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.scoring import CELL_KEYS, MeasuredCell, all_verifier_graded
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -174,11 +175,19 @@ def _output_keys(row: Mapping[str, object]) -> dict[str, tuple[str, ...]]:
     return {node: tuple(keys) for node, keys in value.items()}
 
 
+class Grading(FrozenModel):
+    """What a cell was graded under: a config's ``scoring`` and the ``judges`` its terms name."""
+
+    scoring: str | dict[str, str]
+    judges: dict[str, JudgeSpec]
+
+
 @dataclass(frozen=True, slots=True)
 class FiledAnswer:
     """Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,
-    ``output_keys`` each node's outputs as the pipeline that answered declared them, so a read
-    attributes the answer by what was filed, never today's declaration."""
+    ``output_keys`` each node's outputs as the pipeline that answered declared them, ``grading``
+    the scoring it was graded under: a read opens the answer by what was filed, never today's
+    declaration or a dataset's."""
 
     cell: MeasuredCell
     config_key: str
@@ -187,6 +196,7 @@ class FiledAnswer:
     provenance: str
     created_at: str
     output_keys: Mapping[str, tuple[str, ...]]
+    grading: Grading
     compaction: str | None = None
     purged: str | None = None
 
@@ -203,6 +213,7 @@ class FiledAnswer:
             provenance=_stated(row, "provenance"),
             created_at=_stated(row, "created_at"),
             output_keys=_output_keys(row),
+            grading=Grading.model_validate(row.get("grading")),
             compaction=_stamp(row, "compaction"),
             purged=_stamp(row, "purged"),
         )
@@ -216,6 +227,7 @@ class FiledAnswer:
             "provenance": self.provenance,
             "created_at": self.created_at,
             "output_keys": {node: list(keys) for node, keys in self.output_keys.items()},
+            "grading": self.grading.model_dump(mode="json"),
         }
         if self.compaction is not None:
             out["compaction"] = self.compaction

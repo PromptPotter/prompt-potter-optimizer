@@ -113,7 +113,11 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
   const cycle = useViewedCycle();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;
-  const figures = cycle?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
+  // The line's count stands after the rounds: the dashboard serves it, over the line the bars draw.
+  const rows = (cycle?.figures ?? []).flatMap((row) =>
+    row.key === "rounds" && dash ? [row, dash.line_count] : [row],
+  );
+  const figures = rows.map((row) => ({ row, opens: familyOfGlance(row.key) }));
   const unnamed = useUnnamedViews(figures.map((f) => f.opens));
   const [whole, setWhole] = useState(false);
   // What the masthead adds to a served figure's Term, by its key.

@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { HoverCard, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
@@ -9,7 +8,6 @@ import {
   seedFromOrder,
   type SelectMode,
   type SortedRounds,
-  unionFirstAppearance,
 } from "@/lib/derivations";
 import { fmtSampleTag } from "@/lib/format";
 import { SAMPLE_MOVEMENT_LABELS, SAMPLE_MOVEMENT_TONE } from "@/lib/api/types";
@@ -31,7 +29,7 @@ export function SeriesView({
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
-  const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
+  const { columns } = sorted;
   const { setViewKeys } = useWorkspace();
 
   return (

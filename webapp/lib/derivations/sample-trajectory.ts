@@ -2,30 +2,20 @@ import type { ServedRound } from "@/lib/api/types";
 
 type SampleMovement = ServedRound["selection_movement"][number];
 
-// Position is 1-based; a sample absent from a round's map was not in that round.
+// Position is 1-based; a sample absent from a round's map was not in that round. `columns` is
+// served (`SampleCoverage.first_measured`).
 export interface SortedRounds {
   rounds: ServedRound[];
+  columns: readonly number[];
   positions: Map<number, number>[];
   movements: Map<number, SampleMovement>[];
 }
 
-export function unionFirstAppearance(rounds: ServedRound[]): number[] {
-  const out: number[] = [];
-  const seen = new Set<number>();
-  for (const r of rounds) {
-    for (const sid of r.selection) {
-      if (seen.has(sid)) continue;
-      seen.add(sid);
-      out.push(sid);
-    }
-  }
-  return out;
-}
-
-export function buildSorted(rounds: ServedRound[]): SortedRounds {
+export function buildSorted(rounds: ServedRound[], columns: readonly number[]): SortedRounds {
   const sorted = rounds.filter((r) => r.selection.length > 0);
   return {
     rounds: sorted,
+    columns,
     positions: sorted.map((r) => new Map(r.selection.map((sid, i) => [sid, i + 1]))),
     movements: sorted.map((r) => {
       const byId = new Map<number, SampleMovement>();

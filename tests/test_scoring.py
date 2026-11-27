@@ -128,6 +128,7 @@ from promptpotter.application.intelligence.rasch import (
     responses_of,
     theta_lift_over_parent,
 )
+from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     paid_pass,
@@ -351,6 +352,7 @@ from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
+    Ended,
     RebaseRequest,
     RoundClosedRecord,
     RoundWarningRecord,
@@ -1350,6 +1352,25 @@ def test_a_merge_never_shrinks_what_was_measured_and_joins_only_its_own_scorer()
     assert (merged.scorer_id, merged.two_valued) == (prior.scorer_id, prior.two_valued)
     with pytest.raises(ValueError, match="cannot join"):
         prior.merged(sheet(winner, scorer_id="another"))
+
+
+def test_a_walk_fill_keeps_the_paid_row_over_its_replay_and_the_scored_over_the_errored() -> None:
+    paid, replay = measurement(0, 1.0), measurement(0, 1.0, cached=True)
+    errored = measurement(0, None, error="504: no reply", error_category="SERVER")
+    scored = measurement(0, 0.0)
+    # held row, the re-read's row -> the row the walk files (a later read never wins by position)
+    rows = [
+        (paid, replay, paid),  # bought, then re-read as parent: `MemberRows.bought` keeps it
+        (replay, paid, paid),  # caught up after its replay
+        (errored, scored, scored),
+        (scored, errored, scored),
+        (scored, measurement(0, 1.0), scored),  # two paid scored rows: the held one stands
+    ]
+    for held, read, stands in rows:
+        [stood] = sheet([held]).filled_from(sheet([read]))
+        assert stood is stands, f"{held} re-read as {read} filed {stood}"
+    new = sheet([paid]).filled_from(sheet([measurement(1, 0.0)]))
+    assert [c.key for c in new] == ["0", "1"], "a re-read dropped a cell the walk lacked"
 
 
 # 3. Electing a round winner
@@ -2683,24 +2704,26 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
     )
 
 
-def test_an_empty_answer_is_a_graded_miss_and_cuts_only_by_the_rate() -> None:
-    """banking77, 2026-11-18: one stop-finished empty answer at row 18 cut an arm that answered 17."""
-    empty: dict[str, Any] = {
-        "predicted": "",
-        "pipeline_data": {
-            "terminal_node": "llm_only",
-            "step_tokens": {"llm_only": {"finish_reason": "stop", "reasoning": 0}},
-            "diagnostics": {"warnings": [{"step": "llm_only", "code": "content_empty"}]},
-        },
-    }
-    degradation = DegradationCheck(threshold=0.4, min_samples=3)
-    one_empty = [*(measurement(i, 1.0) for i in range(17)), measurement(17, 0.0, **empty)]
-    assert is_deprecated(one_empty[-1].facts), "an empty answer left the degradation rate"
-    assert degradation.check(one_empty) is None, "one empty answer cut an arm that answered 17"
-    assert scoreable_rows(one_empty)[-1].grade.fitness == 0.0, "the empty row is not a graded miss"
-    mostly_empty = [measurement(i, 0.0, **empty) for i in range(2)] + [measurement(2, 1.0)]
-    cut = degradation.check(mostly_empty)
-    assert cut is not None and cut.check_result["fatal"] is not True, "the rate did not cut it"
+def test_an_empty_or_filtered_answer_is_a_graded_miss_and_cuts_only_by_the_rate() -> None:
+    """banking77, 2026-11-18: one stop-finished empty answer at row 18 cut an arm that answered 17.
+    A provider's filter trips on one row's text as an empty answer is one attempt's."""
+    for code in ("content_empty", "content_filtered"):
+        empty: dict[str, Any] = {
+            "predicted": "",
+            "pipeline_data": {
+                "terminal_node": "llm_only",
+                "step_tokens": {"llm_only": {"finish_reason": "stop", "reasoning": 0}},
+                "diagnostics": {"warnings": [{"step": "llm_only", "code": code}]},
+            },
+        }
+        degradation = DegradationCheck(threshold=0.4, min_samples=3)
+        one_empty = [*(measurement(i, 1.0) for i in range(17)), measurement(17, 0.0, **empty)]
+        assert is_deprecated(one_empty[-1].facts), f"{code} left the degradation rate"
+        assert degradation.check(one_empty) is None, f"one {code} row cut an arm that answered 17"
+        assert scoreable_rows(one_empty)[-1].grade.fitness == 0.0, f"the {code} row is no miss"
+        mostly_empty = [measurement(i, 0.0, **empty) for i in range(2)] + [measurement(2, 1.0)]
+        cut = degradation.check(mostly_empty)
+        assert cut is not None and cut.check_result["fatal"] is not True, f"{code}: no rate cut"
 
 
 @on_jumping_clock
@@ -4107,7 +4130,7 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
         2,
         1,
     ), "promotions and separations are counted apart: a promotion is a point estimate"
-    assert (at_c0.candidates, standing_now.candidates) == (0, 5), (
+    assert (at_c0.candidates_tested, standing_now.candidates_tested) == (0, 5), (
         "the climb's per-candidate divisor counts the arms rounds after the origin proposed, "
         "never the parent each re-read"
     )
@@ -4316,6 +4339,29 @@ def test_an_embedded_head_to_head_is_filed_as_its_command(head_to_head: Shared) 
         filed = [record.kind for _, record in stores.commands.book().lines()]
     assert filed == [CommandKind.HEAD_TO_HEAD, CommandKind.MINT_CAMPAIGN], (
         f"an embedded head-to-head went unfiled: {filed}"
+    )
+
+
+def test_a_head_to_head_mint_raising_at_its_second_arm_leaves_the_first_stamped(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    drawn = mint.fresh_campaign_id
+    calls: list[str] = []
+
+    def second_raises(session: Session) -> str:
+        if calls:
+            raise RuntimeError("the second arm's mint died")
+        calls.append(drawn(session))
+        return calls[0]
+
+    monkeypatch.setattr(mint, "fresh_campaign_id", second_raises)
+    with pytest.raises(RuntimeError, match="second arm"):
+        asyncio.run(world.head_to_head({"p": "potter", "c": "capo"}, "torn", rows=60))
+    (first,) = world.stores.campaigns.list_campaigns(lifecycle="all")
+    hop = CycleHop(campaign_id=first.campaign_id, cycle_id=first.root_cycle_id)
+    stops = [r for r in world.records(hop) if isinstance(r, RunPhaseRecord)]
+    assert stops and isinstance(stops[-1].state, Ended), (
+        "an arm minted before its sibling's raise was left unstamped"
     )
 
 

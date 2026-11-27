@@ -118,7 +118,7 @@ from promptpotter.domain.records.run_records import (
     PipelineRead,
     ScoringLockedRecord,
 )
-from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.sample import Bank, Grading, Sample
 from promptpotter.domain.scoring import Scorer, ScoringFormulaError
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.spend import Budget
@@ -639,24 +639,33 @@ def cycle_config(stores: Stores, at: CampaignCycle) -> CycleConfig:
     )
 
 
+def graded_scorer(grading: Grading, *, verifier_graded: bool) -> Scorer:
+    """The ONE compile of a scorer: a run's (`Resolution.scorer`) or a filed answer's grading."""
+    spec = split_scoring_block(grading.scoring, judge_instrument=None)
+    return compile_scorer(
+        spec.per_sample,
+        spec.per_cell,
+        verifier_graded=verifier_graded,
+        judge_instrument=judge_instrument(grading.judges),
+        two_valued_terms=two_valued_terms(grading.judges),
+    )
+
+
 @dataclass(frozen=True)
 class Resolution:
-    """What a run grades by: its config and its bank's recorded answer to whether it carries no
-    label (`sample.py::Bank.verifier_graded`). The ONE compile of a scorer."""
+    """What a run grades by: its config's grading and its bank's recorded answer to whether it
+    carries no label (`sample.py::Bank.verifier_graded`)."""
 
     config: CampaignConfig
     verifier_graded: bool
 
+    @property
+    def grading(self) -> Grading:
+        return Grading(scoring=self.config.scoring, judges=self.config.judges)
+
     @functools.cached_property
     def scorer(self) -> Scorer:
-        spec = split_scoring_block(self.config.scoring, judge_instrument=None)
-        return compile_scorer(
-            spec.per_sample,
-            spec.per_cell,
-            verifier_graded=self.verifier_graded,
-            judge_instrument=judge_instrument(self.config.judges),
-            two_valued_terms=two_valued_terms(self.config.judges),
-        )
+        return graded_scorer(self.grading, verifier_graded=self.verifier_graded)
 
     def overlaid(self, *layers: Layer[str]) -> Self:
         return replace(self, config=self.config.overlaid(*layers))

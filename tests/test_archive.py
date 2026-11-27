@@ -767,15 +767,7 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     recut = Bank.of([Sample(id=0, query="q_new", ground_truth="g"), q2])
     built_stores.tenant_datasets.put_bank(recut)
     built_stores.tenant_datasets.relabel("compacted-renamed", recut.dataset_hash)
-    definition = built_stores.tenant_datasets.dataset_dir("compacted-renamed")
-    definition.mkdir(parents=True)
-    (definition / DEFINITION_FILE).write_text(
-        "pipeline:\n  connector: termnorm\n"
-        "campaign:\n  scoring: label_match(predicted, ground_truth)\n"
-        "  optimization:\n    degradation_threshold: 0.4\n",
-        encoding="utf-8",
-    )
-    opened = open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query])
+    opened = open_cell(built_stores, compacted_refs[q1.query])
     assert opened.position == compacted_bank.position_of[q1.key], (
         "an old answer opened at another bank's slot"
     )
@@ -1018,10 +1010,10 @@ def test_an_append_whose_cycle_is_deleted_before_its_cut_answers_not_found(
     with open(held.path, "ab") as torn:
         torn.write(b'{"torn')
 
-    def deleting_first(name: str, mode: str) -> IO[bytes]:
+    def deleting_first(name: str, mode: str, *args: Any, **kwargs: Any) -> IO[bytes]:
         if mode == "r+b":
             shutil.rmtree(cycle)
-        return open(name, mode)
+        return open(name, mode, *args, **kwargs)
 
     monkeypatch.setattr(store_io, "open", deleting_first, raising=False)
     with pytest.raises(NotFoundError):
@@ -2019,8 +2011,9 @@ def test_a_forks_served_line_leads_with_its_parents_rounds_and_bills_their_chain
     )
     on_fork = fork_entry.facts
     # Tokens, exactly: the offline world bills no USD.
-    prefix = sum(dash.spend_metered_by_round[str(r)].billed_tokens for r in (0, 1))
-    assert prefix > 0, "guard: the prefix billed nothing, so no bill below tells the chain apart"
+    assert dash.spend_by_round.rounds[:2] == [0, 1] and dash.spend_metered.billed_tokens > 0, (
+        "guard: the prefix billed nothing, so no bill below tells the chain apart"
+    )
     assert on_fork.spend.billed_tokens == dash.spend_metered.billed_tokens, (
         "the fork's Spend figure is not the bill its dashboard folds beside it"
     )

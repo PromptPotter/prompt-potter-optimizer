@@ -17,7 +17,7 @@ from typing import IO, Any, NamedTuple
 
 import yaml
 
-from promptpotter.config.paths import PROJECTS_DIR, user_data_root
+from promptpotter.config.paths import JOBS_DIR, PROJECTS_DIR, user_data_root
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
 from promptpotter.shared.errors import ConflictError, NotFoundError
@@ -120,45 +120,76 @@ def _long_path(p: str | Path) -> str:
 
 # A subject's version is stamped by its writer, once, as it writes: every write here appends one
 # byte to the `.stamp` of the nearest subject root above it, so a reader stats one file per subject
-# and walks none. A root is declared by the store that owns it, in every process that opens one.
+# and walks none. A root is matched by its PLACE from the data root (`_SUBJECT`), as a delete's
+# anchor is, never by a segment's name: a workspace holds user-named dirs (`datasets/<name>`).
 STAMP_FILE = ".stamp"
-_SUBJECTS: set[str] = set()
 
 
 def _spelled(path: Path | str) -> str:
     return os.path.normcase(os.path.abspath(str(path).removeprefix("\\\\?\\")))
 
 
-def stamped_subject(root: Path) -> None:
-    """*root* is a subject: a write under it, and under no nearer root, moves its version."""
-    _SUBJECTS.add(_spelled(root))
+def _from_root(path: Path | str) -> tuple[str, str] | None:
+    """The data root, and *path* `/`-joined from it, spelled lexically (a realpath per write costs
+    ~80 µs); ``None`` off the data root."""
+    at, root = _spelled(path), _spelled(user_data_root())
+    if not at.startswith(root + os.sep):
+        return None
+    return root, at[len(root) + 1 :].replace(os.sep, "/")
 
 
 def stamp(path: Path | str) -> None:
     """THE stamp of a write at *path*; a root gone with its tree stamps nothing, never re-made."""
-    at = _spelled(path)
-    while at not in _SUBJECTS:
-        if (up := os.path.dirname(at)) == at:
-            return
-        at = up
-    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
-    try:
-        fd = os.open(_long_path(os.path.join(at, STAMP_FILE)), flags, 0o600)
-    except (FileNotFoundError, NotADirectoryError):
+    if (placed := _from_root(path)) is None or not (subject := _SUBJECT.match(placed[1])):
         return
-    try:
-        os.write(fd, b".")
-    finally:
-        os.close(fd)
+    root = os.path.join(placed[0], subject[0])
+    with _gone_with_root(), _appended(os.path.join(root, STAMP_FILE)) as f:
+        f.write(b".")
+        if f.tell() >= _STAMP_COMPACTS_AT:
+            _compact_stamp(root)
 
 
-def stamp_of(root: Path) -> tuple[int, int] | None:
-    """A subject's version: its stamp's length, which only its writers move (never a clock)."""
-    try:
-        st = os.stat(_long_path(root / STAMP_FILE))
-    except FileNotFoundError:
+# The stamp truncates at this length, its epoch one byte longer before and after (odd between), so
+# a version is the epoch's and the stamp's lengths, the stamp only growing within an even epoch.
+STAMP_EPOCH_FILE = ".stamp-epoch"
+_STAMP_COMPACTS_AT = 2048
+_UNSETTLED = itertools.count()
+_gone_with_root = partial(contextlib.suppress, FileNotFoundError, NotADirectoryError)
+
+
+def _appended(path: str) -> IO[bytes]:
+    return open(_long_path(path), "ab", buffering=0, opener=lambda p, f: os.open(p, f, 0o600))
+
+
+def _compact_stamp(root: str) -> None:
+    """By the writer that grew it past the length, if it takes the epoch's lock (a taker crashed
+    in an odd epoch is completed); no write waits on it."""
+    stamp_path = _long_path(os.path.join(root, STAMP_FILE))
+    with _gone_with_root(), _appended(os.path.join(root, STAMP_EPOCH_FILE)) as epoch:
+        if not _try_lock(epoch.fileno()):
+            return
+        try:
+            if os.stat(stamp_path).st_size >= _STAMP_COMPACTS_AT:
+                if os.fstat(epoch.fileno()).st_size % 2 == 0:
+                    epoch.write(b".")
+                os.truncate(stamp_path, 0)
+                epoch.write(b".")
+        finally:
+            epoch.seek(0)  # Windows unlocks the byte at the position.
+            _unlock(epoch.fileno())
+
+
+def stamp_of(root: Path) -> tuple[int, ...] | None:
+    """A subject's version, which only its writers move (never a clock): read between two equal
+    even epochs, else a compaction is under way and the version is one no read held before."""
+    before, st, after = (
+        stat_optional(root / n) for n in (STAMP_EPOCH_FILE, STAMP_FILE, STAMP_EPOCH_FILE)
+    )
+    if st is None:
         return None
-    return st.st_ino, st.st_size
+    if (epoch := before.st_size if before else 0) % 2 or (after.st_size if after else 0) != epoch:
+        return (-1, next(_UNSETTLED))
+    return st.st_ino, epoch, st.st_size
 
 
 def unlink_robust(path: Path) -> None:
@@ -272,8 +303,9 @@ def remove_bare_dir(path: Path | str) -> None:
     no version left to keep (`stamp`), so its stamp goes with it; a directory holding more stays."""
     at = _long_path(path)
     with contextlib.suppress(OSError):
-        if os.listdir(at) == [STAMP_FILE]:
-            os.unlink(os.path.join(at, STAMP_FILE))
+        if (left := set(os.listdir(at))) and left <= {STAMP_FILE, STAMP_EPOCH_FILE}:
+            for name in left:
+                os.unlink(os.path.join(at, name))
         os.rmdir(at)
 
 
@@ -306,8 +338,19 @@ CYCLES_DIR = "cycles"
 DRAFTS_DIR = "drafts"
 # Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
 INNER_SANDBOXES_DIR = ".inner"
+# Beside `projects/`, never in it: no tenant walk can take an install's home for an account.
+ARCHIVE_HOMES_DIR = ".archives"
+# Under a workspace: its own ledger and active pointer, its head-to-heads.
+WORKSPACE_STATE_DIR = ".workspace"
 # A workspace, from the data root: an account's, or an inner sandbox's (`.inner/<key>/<tenant>`).
 WORKSPACE_SHAPES = (f"{PROJECTS_DIR}/*", f"{INNER_SANDBOXES_DIR}/*/*")
+# Every subject a write stamps (`stamp`), from the data root, the nearest first: an account's
+# filings and drafts, a workspace, an install's archive home (a tenant's is its account), the jobs.
+_SUBJECT = re.compile(
+    rf"(?:{PROJECTS_DIR}/[^/]+(?:/(?:{re.escape(WORKSPACE_STATE_DIR)}|{DRAFTS_DIR}))?"
+    rf"|{re.escape(INNER_SANDBOXES_DIR)}/[^/]+/[^/]+|{re.escape(ARCHIVE_HOMES_DIR)}/[^/]+"
+    rf"|{JOBS_DIR})(?=/|$)"
+)
 # What a delete removes, by its PLACE from the data root (`paths.py::user_data_root`, the one source),
 # never a segment's name: a campaign, a cycle (`cleanup-empty-cycles` keeps its campaign), a draft.
 _ANCHORS = tuple(
@@ -343,13 +386,12 @@ def complete_durable(patterns: tuple[str, ...]) -> None:
 
 
 def _durable(path: Path) -> bool:
-    """Spelled as a stamp's subject is (`stamp`): a realpath per write costs ~80 µs."""
-    at, root = _spelled(path), _spelled(user_data_root())
-    if not at.startswith(root + os.sep):
+    """Placed as a stamp's subject is (`stamp`)."""
+    if (placed := _from_root(path)) is None:
         return False
     if not _DURABLE:
         raise RuntimeError(f"{path} was written before this process completed its registries")
-    return _DURABLE[0].match(at[len(root) + 1 :].replace(os.sep, "/")) is not None
+    return _DURABLE[0].match(placed[1]) is not None
 
 
 def refuse_off_workspace(workspace: Path) -> None:

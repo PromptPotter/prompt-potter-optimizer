@@ -833,7 +833,9 @@ async def _walk_population(
             cycle.session,
             cycle.sample_index,
             eliminator.name,
-            {ArmKey(cycle.parent.id): cycle.parent_point, **sps},
+            # The parent's read opens after the walks, so its catch-up is a pass of its own.
+            {ArmKey(cycle.parent.id): (cycle.parent_point, MeasurementRole.BACKFILL)}
+            | {key: (sp, MeasurementRole.PANEL) for key, sp in sps.items()},
         )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
@@ -895,7 +897,7 @@ async def _walk_population(
     for key, cells in caught.items():
         if key in concluded:
             taken = replace(rows[key], cells=tuple(cells))
-            rows[key] = rows[key].merged(taken)
+            rows[key] = rows[key].filled_from(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
     return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, caught

@@ -1,15 +1,13 @@
 import type {
   HierarchyCampaign,
-  HierarchyCycle,
   HierarchyEntry,
   HierarchyTag,
   ListedCampaign,
   Figure,
 } from "@/lib/api/types";
+import { decodeCyclePath } from "@/lib/ids";
 
 export type FigureKey = Figure["key"];
-import { decodeCyclePath } from "@/lib/ids";
-import { dockPriority } from "./run-phase";
 
 export interface RootGroup {
   rootCycleId: string;
@@ -43,15 +41,6 @@ export function campaignAt(
 ): HierarchyCampaign | null {
   const entry = byAddress.get(address);
   return entry?.entry_kind === "campaign" ? entry : null;
-}
-
-export function runningCycles(entries: readonly HierarchyCampaign[]): HierarchyCycle[] {
-  return entries
-    .flatMap((campaign) => campaign.children)
-    .filter((c) => c.state.attached)
-    .sort(
-      (a, b) => dockPriority(a.state.status.run_phase) - dockPriority(b.state.status.run_phase),
-    );
 }
 
 // An entry without the entries under it: what a frozen item or a copy holds of one row.

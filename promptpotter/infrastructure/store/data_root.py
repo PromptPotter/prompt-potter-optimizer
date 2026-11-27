@@ -73,11 +73,14 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
+    ARCHIVE_HOMES_DIR,
     CAMPAIGNS_DIR,
     DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
+    STAMP_EPOCH_FILE,
     STAMP_FILE,
     WORKSPACE_SHAPES,
+    WORKSPACE_STATE_DIR,
     complete_lines,
     globbed,
     parse_yaml,
@@ -87,10 +90,8 @@ from promptpotter.infrastructure.store.io import (
     write_lock_name,
 )
 from promptpotter.infrastructure.store.layout import (
-    ARCHIVE_HOMES_DIR,
     HEAD_TO_HEADS_DIR,
     ROUND_GLOB,
-    WORKSPACE_STATE_DIR,
     CampaignLayout,
     CycleLayout,
     SandboxOwner,
@@ -632,6 +633,7 @@ KINDS: tuple[Kind, ...] = (
     ATOMIC_WRITE,
     # A subject's version (`io.py::stamp`): its length moves with every write under it.
     Kind("subject stamp", _INSTALL, f"**/{STAMP_FILE}", Fate.MACHINE, Opaque("one byte a write")),
+    Kind("stamp epoch", _INSTALL, f"**/{STAMP_EPOCH_FILE}", Fate.MACHINE, Opaque("2 a compaction")),
     *INSTALL_KINDS,
     *ACCOUNT_KINDS,
     *WORKSPACE_KINDS,

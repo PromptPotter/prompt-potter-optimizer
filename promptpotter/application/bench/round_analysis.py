@@ -15,7 +15,6 @@ from promptpotter.domain.results_health import (
     UNKNOWN_STEP,
     assemble_prior_healths,
     compute_round_health,
-    terminal_node,
 )
 from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
 from promptpotter.domain.round_health import DegradationHealth
@@ -162,7 +161,7 @@ def _sample_diagnostics(
                 ground_truth=facts.ground_truth[:60],
                 predicted=tail(graded_answer(facts, r.grade) or "?", 60),
                 rank=r.grade.ground_truth_rank,
-                terminal_node=terminal_node(facts) or UNKNOWN_STEP,
+                terminal_node=facts.pipeline.terminal_node or UNKNOWN_STEP,
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[

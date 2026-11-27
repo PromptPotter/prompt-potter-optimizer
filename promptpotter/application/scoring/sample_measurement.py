@@ -27,7 +27,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     WebSpendBound,
 )
-from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
+from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
     NO_RESULT,
@@ -684,7 +684,7 @@ def _rerun_would_repeat_token_budget_failure(
     rerun_pipeline_params: PipelineParams,
 ) -> bool:
     # The helper `classify_result` stamps its codes with: a second spelling of the node misses silently.
-    node = terminal_node(cached_result)
+    node = cached_result.pipeline.terminal_node
     if node is None:
         return False
     cl = classify_result(cached_result)

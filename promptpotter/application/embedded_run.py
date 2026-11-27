@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.account import local_stores
@@ -20,6 +20,7 @@ from promptpotter.application.jobs.launcher.head_to_head import (
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.mint_and_start import Hosted
 from promptpotter.application.jobs.reaper import sweep
+from promptpotter.application.maintenance import landing
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
@@ -61,9 +62,6 @@ __all__ = [
 async def enter(stores: Stores | None = None) -> Stores:
     """The embedded door, first wherever a host enters it: *stores* (the local account's where none),
     landed and swept off the loop, as no server ticks for a host. A sync host awaits `asyncio.run`."""
-    # Here alone: only an entry lands, and a module importing this one is no entry.
-    from promptpotter.application.maintenance import landing
-
     setup_logging()
     await asyncio.to_thread(landing.land_at_entry, every_treatment=False)
     stores = local_stores(tenant=None) if stores is None else stores
@@ -152,19 +150,19 @@ async def run_head_to_head(
     request: HeadToHeadRequest,
     *,
     stores: Stores | None = None,
-    mode: RunMode,
     readout_sink: StatusFn | None = None,
 ) -> list[tuple[str, Session, CycleResult]]:
     """Arms of one head-to-head on *dataset_name*, each answered by its key: filed as
     `head-to-head` at the host's door, every arm planned and admitted before any is minted, then
     run one after another in the host's loop, on the one backend client it closes on every exit.
+    Each arm is a mint, so no mode rewinds or diverges it.
 
     Raises what ``head-to-head`` refuses the browser's and the terminal's act on.
     """
     stores = await enter(stores)
 
     async def _run(arm: HeldArm) -> tuple[str, Session, CycleResult]:
-        ended, result = await replace(arm.held, mode=mode).run(readout_sink=readout_sink)
+        ended, result = await arm.held.run(readout_sink=readout_sink)
         return arm.arm_key, ended, result
 
     payload = MintHeadToHeadPayload(

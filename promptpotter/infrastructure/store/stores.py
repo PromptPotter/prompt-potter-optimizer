@@ -26,10 +26,10 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
+    WORKSPACE_STATE_DIR,
     refuse_off_workspace,
     rmtree_robust,
     stamp_of,
-    stamped_subject,
     unlink_robust,
     validate_path_component,
     write_bytes,
@@ -37,7 +37,6 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
-    WORKSPACE_STATE_DIR,
     ArchiveHome,
     archive_home,
     drafts_root_dir_for,
@@ -83,18 +82,6 @@ class Stores:
     commands: CommandLog
     # The L4 sandbox chain this store sits in, outermost first: ``()`` is the account's own.
     inside: CyclePath = ()
-
-    def __post_init__(self) -> None:
-        # Every subject this store's writers stamp (`io.py::stamp`), declared in each process
-        # opening it: the store, the account's filings and drafts, the archive home.
-        for root in (
-            self.base_dir,
-            self.account_dir,
-            self.account_state_dir,
-            self.account_drafts_dir,
-            self.archive_home.root,
-        ):
-            stamped_subject(root)
 
     @property
     def tenant_id(self) -> TenantId:

@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
+from promptpotter.domain.results_health import UNKNOWN_STEP
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
@@ -64,7 +64,9 @@ class SampleIndex:
             hit = cell.hit
             degraded = bool(facts.pipeline.diagnostics.warnings)
             # An errored row is not a bottleneck reading, so it carries no failure mode.
-            failure_mode = None if (hit or facts.errored) else terminal_node(facts) or UNKNOWN_STEP
+            failure_mode = (
+                None if (hit or facts.errored) else facts.pipeline.terminal_node or UNKNOWN_STEP
+            )
             cells.append((sid, hit, degraded, failure_mode))
 
         return cells, new_samples

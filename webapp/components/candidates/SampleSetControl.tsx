@@ -4,7 +4,7 @@ import { fmtSampleTag, unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
 import { useWorkspace } from "@/lib/state/workspace";
-import { roundMeasuredSets, sameSampleSet, toggleInSet } from "@/lib/derivations";
+import { sameSampleSet, toggleInSet } from "@/lib/derivations";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
 
@@ -34,7 +34,7 @@ export function SampleSetControl({
   if (sampleSet == null || coverage == null) return null;
 
   const universe = coverage.samples.map((s) => s.sample_id);
-  const roundSets = roundMeasuredSets(rounds);
+  const measuring = rounds.filter((r) => r.measured.length > 0);
   const inSet = new Set(sampleSet);
   const of = coverage.measuring_rounds;
   const shared = new Set(overlap?.positions ?? []);
@@ -93,15 +93,15 @@ export function SampleSetControl({
           </HoverCard>
         )}
         <ChipGroup label="round" showLabel>
-          {roundSets.map((rs) => (
+          {measuring.map(({ round, measured }) => (
             <Chip
-              key={rs.round}
-              on={sameSampleSet(sampleSet, rs.ids)}
-              ariaLabel={`Round ${rs.round} — ${unitCount(rs.ids.length, unit)}`}
-              title={`${unitCount(rs.ids.length, unit)} measured in round ${rs.round}`}
-              onClick={() => setViewKeys({ samples: rs.ids })}
+              key={round}
+              on={sameSampleSet(sampleSet, measured)}
+              ariaLabel={`Round ${round} — ${unitCount(measured.length, unit)}`}
+              title={`${unitCount(measured.length, unit)} measured in round ${round}`}
+              onClick={() => setViewKeys({ samples: measured })}
             >
-              R{rs.round}
+              R{round}
             </Chip>
           ))}
         </ChipGroup>
@@ -131,6 +131,7 @@ export function SampleSetControl({
           </div>
           <SampleTrajectorySeries
             rounds={rounds}
+            columns={coverage.first_measured}
             selectMode={load === "planned" ? "all" : "measured"}
             maxHeight={200}
           />

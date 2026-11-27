@@ -900,19 +900,16 @@ class DatasetCellsParams(
         return self.logged(self.scoped(caller.stores))
 
 
-class DatasetCellParams(
-    ReadParams, read=ReadKind.DATASET_CELL, route="/datasets/{name:path}/cells/{answer}"
-):
-    """One answer opened: its row assembled into a trace."""
+class AnswerParams(ReadParams, read=ReadKind.ANSWER, route="/answers/{answer}"):
+    """One answer opened: its row assembled into a trace, graded as it was filed."""
 
-    name: DatasetName = Field(min_length=1, description="The dataset name")
     # `answer` on the wire; `answer` is the read's own method.
     answer_id: str = Field(
         min_length=1, alias="answer", description="The answer's address in the log"
     )
 
     def answer(self, caller: Caller) -> Cell:
-        return open_cell(caller.stores, self.name, self.answer_id)
+        return open_cell(caller.stores, self.answer_id)
 
 
 class OriginsParams(ReadParams, read=ReadKind.ORIGINS, route="/origins"):

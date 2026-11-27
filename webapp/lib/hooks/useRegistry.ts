@@ -10,7 +10,7 @@ import type {
   ListedCampaign,
   UnstartedCampaign,
 } from "@/lib/api/types";
-import { campaignAt, runningCycles } from "@/lib/derivations";
+import { campaignAt } from "@/lib/derivations";
 import type { ReadResult } from "@/lib/read-cache";
 import { shownData, useRead } from "./useRead";
 
@@ -48,12 +48,17 @@ function indexOf(body: HierarchyResponse | null): RegistryIndex {
     byAddress.set(campaign.address, campaign);
     for (const cycle of campaign.children) byAddress.set(cycle.address, cycle);
   }
+  // The dock's order is served (`HierarchyResponse.docked`).
+  const running = body.docked.flatMap((address) => {
+    const cycle = byAddress.get(address);
+    return cycle?.entry_kind === "cycle" ? [cycle] : [];
+  });
   const index: RegistryIndex = {
     entries,
     started,
     unstarted: entries.filter((c): c is UnstartedCampaign => c.entry_kind === "unstarted"),
     byAddress,
-    running: runningCycles(started),
+    running,
   };
   indexed.set(body, index);
   return index;

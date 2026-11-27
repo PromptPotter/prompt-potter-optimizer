@@ -148,7 +148,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
+from promptpotter.domain.sample import ArchiveEntry, Bank, Grading, Sample, sample_key
 from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
@@ -498,6 +498,9 @@ def archive_row(query: str, *, truth: str = "g", **wire: Any) -> MeasuredCell:
     )
 
 
+LABEL_MATCH = Grading(scoring="label_match(predicted, ground_truth)", judges={})
+
+
 def filed(
     archive: MeasurementArchive,
     cells: Iterable[MeasuredCell],
@@ -507,6 +510,7 @@ def filed(
     role: MeasurementRole = MeasurementRole.PANEL,
     created_at: str = "",
     output_keys: Mapping[str, tuple[str, ...]] | None = None,
+    grading: Grading = LABEL_MATCH,
 ) -> list[WalkedCell]:
     """Each cell filed as a fresh answer under *under*, as a walk files what it bought."""
     held = list(cells)
@@ -516,6 +520,7 @@ def filed(
         role=role,
         created_at=created_at,
         output_keys={} if output_keys is None else output_keys,
+        grading=grading,
     )
     return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
 
@@ -616,10 +621,9 @@ def l4_panel(stores: Stores, world: Router, scratch: Path) -> None:
     research, outer = tier / "promptpotter-self", root / "promptpotter-self"
     (outer / "mixed").mkdir(parents=True, exist_ok=True)
     shutil.copy(research / "task.md", outer / "task.md")
-    # The panel's geometry lays no node: each seat's optimizer is its own dataset's.
+    # The panel's `inner_nodes` lay potter's over the potter seat alone: no copy narrows it.
     for layer in (FAMILY_FILE, f"e2e/{DEFINITION_FILE}"):
         held = read_yaml(research / layer)
-        held["panel"]["inner_campaign"]["optimization"].pop("nodes")
         if layer != FAMILY_FILE:
             held["panel"]["tasks"] = [
                 {"kind": "seat", "id": name, "inner_dataset": dataset}

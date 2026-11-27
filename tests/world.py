@@ -352,7 +352,6 @@ class World:
             CampaignLayer.model_validate(shared),
             request,
             stores=self.stores,
-            mode=RunMode(),
             readout_sink=lambda _line: None,
         )
         return [self._ran(session, result) for _, session, result in ran]

@@ -7,6 +7,7 @@ import stat
 import sys
 from pathlib import Path
 
+from promptpotter.infrastructure.store.io import file_stat
 from promptpotter.shared.errors import PotterError
 
 _PRIVATE = 0o700
@@ -29,7 +30,7 @@ def hold_private(root: Path) -> None:
     choice. Windows' per-user profile already scopes the root."""
     if sys.platform != "win32":
         root.mkdir(mode=_PRIVATE, parents=True, exist_ok=True)
-        mode = stat.S_IMODE(root.stat().st_mode)
+        mode = stat.S_IMODE(file_stat(root).st_mode)
         if mode & _OTHERS:
             try:
                 os.chmod(root, mode & ~_OTHERS)

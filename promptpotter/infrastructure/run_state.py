@@ -26,6 +26,7 @@ from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.store.command_log import Controls, PauseAsk
+from promptpotter.infrastructure.store.io import file_stat
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, scan_last
 from promptpotter.shared.clock import epoch_seconds
@@ -71,7 +72,7 @@ class _Progress:
 
 def _beat_stale_after(cycle_dir: Path) -> float | None:
     try:
-        beat = CycleLayout(cycle_dir).ledger.stat().st_mtime
+        beat = file_stat(CycleLayout(cycle_dir).ledger).st_mtime
     except OSError:
         return None
     return beat + RUN_FRESH_S

@@ -291,9 +291,8 @@ export function MeasurementsPane({
           empty={read.status === "ready" ? "No measured cells here yet." : "Loading…"}
         />
       )}
-      {cell !== null && datasetName && unit && (
+      {cell !== null && unit && (
         <CellPanel
-          datasetName={datasetName}
           unit={unit}
           answer={cell}
           onClose={() => openView("samples", null)}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -35,7 +34,7 @@ from promptpotter.domain.results import Election, InRunCells, RoundOutcome, Roun
 from promptpotter.domain.ruler import RulerStamp, withheld
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.verification import BenchPasses
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
@@ -538,11 +537,6 @@ class ArmWalk:
     asked: frozenset[str]
 
     def continued(self, read: ReadArm, asked: frozenset[str]) -> ArmWalk:
-        held = frozenset(cell.key for cell in self.arm.rows)
-        rows = self.arm.rows.merged(read.rows.where(functools.partial(_unheld, held)))
+        rows = self.arm.rows.filled_from(read.rows)
         state = read.state if self.arm.state.role == MeasurementRole.PARENT else self.arm.state
         return ArmWalk(ReadArm(read.key, state, rows), asked)
-
-
-def _unheld(held: frozenset[str], cell: GradedCell) -> bool:
-    return cell.key not in held

@@ -161,6 +161,39 @@
             "title": "ErrorCategory",
             "type": "string"
           },
+          "Grading": {
+            "additionalProperties": false,
+            "description": "What a cell was graded under: a config's ``scoring`` and the ``judges`` its terms name.",
+            "properties": {
+              "judges": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JudgeSpec"
+                },
+                "title": "Judges",
+                "type": "object"
+              },
+              "scoring": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                ],
+                "title": "Scoring"
+              }
+            },
+            "required": [
+              "scoring",
+              "judges"
+            ],
+            "title": "Grading",
+            "type": "object"
+          },
           "JudgeReading": {
             "description": "Beside the term's score, never in place of it; a failed grading has a reason and no label.",
             "properties": {
@@ -190,6 +223,71 @@
               }
             },
             "title": "JudgeReading",
+            "type": "object"
+          },
+          "JudgeSpec": {
+            "additionalProperties": false,
+            "description": "What a campaign declares to put a judge in its scoring: which judge, on which models.",
+            "properties": {
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "stages": {
+                "items": {
+                  "$ref": "#/$defs/JudgeStage"
+                },
+                "title": "Stages",
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "stages"
+            ],
+            "title": "JudgeSpec",
+            "type": "object"
+          },
+          "JudgeStage": {
+            "additionalProperties": false,
+            "description": "One model call in a judge's composition, on a model declared here and never inherited.",
+            "properties": {
+              "max_tokens": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Tokens"
+              },
+              "model": {
+                "title": "Model",
+                "type": "string"
+              },
+              "provider": {
+                "title": "Provider",
+                "type": "string"
+              },
+              "role": {
+                "title": "Role",
+                "type": "string"
+              },
+              "temperature": {
+                "title": "Temperature",
+                "type": "number"
+              }
+            },
+            "required": [
+              "role",
+              "model",
+              "provider",
+              "temperature"
+            ],
+            "title": "JudgeStage",
             "type": "object"
           },
           "MeasuredCell": {
@@ -792,7 +890,7 @@
             "type": "object"
           }
         },
-        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,\n``output_keys`` each node's outputs as the pipeline that answered declared them, so a read\nattributes the answer by what was filed, never today's declaration.",
+        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,\n``output_keys`` each node's outputs as the pipeline that answered declared them, ``grading``\nthe scoring it was graded under: a read opens the answer by what was filed, never today's\ndeclaration or a dataset's.",
         "properties": {
           "cell": {
             "$ref": "#/$defs/MeasuredCell"
@@ -820,6 +918,9 @@
           "dataset_hash": {
             "title": "Dataset Hash",
             "type": "string"
+          },
+          "grading": {
+            "$ref": "#/$defs/Grading"
           },
           "output_keys": {
             "additionalProperties": {
@@ -858,7 +959,8 @@
           "role",
           "provenance",
           "created_at",
-          "output_keys"
+          "output_keys",
+          "grading"
         ],
         "title": "FiledAnswer",
         "type": "object"

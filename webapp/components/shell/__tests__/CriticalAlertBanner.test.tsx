@@ -53,7 +53,7 @@ describe("CriticalAlertBanner — a 404 names a gone campaign on the viewed cycl
     serve({
       "/backends": [],
       "/sessions/active": { hop: { campaign_id: "c", cycle_id: "y" }, said: null },
-      "/hierarchy": { entries: [] },
+      "/hierarchy": { entries: [], docked: [] },
     });
     view();
     expect(await goneDetail()).not.toMatch(RETURNING);
@@ -65,7 +65,7 @@ describe("CriticalAlertBanner — a 404 names a gone campaign on the viewed cycl
       "",
       formatAddress({ subject: { path: [{ campaignId: "c", cycleId: "y" }] }, views: DEFAULT_VIEWS, keys: NO_KEYS }),
     );
-    serve({ "/backends": [], "/hierarchy": { entries: [] } });
+    serve({ "/backends": [], "/hierarchy": { entries: [], docked: [] } });
     view();
     expect(await goneDetail()).toMatch(RETURNING);
   });
@@ -78,7 +78,7 @@ describe("CriticalAlertBanner — a link this version reads no address in opens 
   it("says an earlier version's link is refused, and leaves it in the address bar", async () => {
     const earlier = "#/c/justlogic__cf67b3/ee7bb41bbde0";
     window.history.replaceState(null, "", earlier);
-    serve({ "/backends": [], "/hierarchy": { entries: [] } });
+    serve({ "/backends": [], "/hierarchy": { entries: [], docked: [] } });
     view();
     expect(await screen.findByText("This link is from an earlier version")).toBeTruthy();
     expect(window.location.hash).toBe(earlier);

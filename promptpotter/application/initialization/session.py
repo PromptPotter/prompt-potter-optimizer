@@ -18,7 +18,7 @@ from promptpotter.domain.records.run_records import (
     BackendRevision,
     PipelineRead,
 )
-from promptpotter.domain.sample import Bank
+from promptpotter.domain.sample import Bank, Grading
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import HeldBudget
@@ -42,6 +42,8 @@ class ScorerSetup:
     """Built whole by `scoring_scope.py::scorer_setup`; `{}` judges declares none, never "keep"."""
 
     scorer: Scorer
+    # What `scorer` compiled from, filed with each answer it grades (`FiledAnswer.grading`).
+    grading: Grading
     partition: BankPartition
     degradation_checks: tuple[StopRule, ...]
     # One per declared term, built once per run so every judge validation precedes spend.

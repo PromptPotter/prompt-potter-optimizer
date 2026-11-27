@@ -70,7 +70,7 @@ function serve(filable: Filable[]): void {
   const routes: Record<string, unknown> = {
     "/backends": [],
     "/sessions/active": { hop: { campaign_id: PATH[0]!.campaignId, cycle_id: PATH[0]!.cycleId }, said: null },
-    "/hierarchy": { entries: [] },
+    "/hierarchy": { entries: [], docked: [] },
     "/hierarchy/camp-exhibit": exhibit.tree,
     "/hierarchy/camp-own": tree("camp-own", "cycle_own", OWNER_FILABLE).tree,
     "/dashboard": dash({

@@ -4,7 +4,7 @@ each detached to its own process — or, for an embedded host, held for it to ru
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import assert_never
@@ -111,12 +111,15 @@ def _opened(source: ArmSource) -> tuple[Session, ConfigLayers, OpenedCheckin | N
             assert_never(source)
 
 
-async def _mint(source: ArmSource, plans: list[CyclePlan]) -> list[OpenedCycle]:
+async def _mint(source: ArmSource, plans: list[CyclePlan]) -> AsyncIterator[OpenedCycle]:
+    """Each arm as it lands."""
     match source:
         case DatasetArms(session=session):
-            return await mint_framed_arms(session, plans)
+            async for cycle in mint_framed_arms(session, plans):
+                yield cycle
         case CheckinArms(opened=opened):
-            return mint_arms(plans, adopting=opened.draft.draft_id)
+            for cycle in mint_arms(plans, adopting=opened.draft.draft_id):
+                yield cycle
         case _:
             assert_never(source)
 
@@ -157,18 +160,19 @@ class AdmittedHeadToHead(LaunchOutcome):
                 await opening.abandon(exc)
 
     async def minted(self) -> list[HeldArm]:
-        """All arms minted, each job landed on its cycle, each arm's opening riding its own
-        `HeldRun.closing`; a failure closes every arm, stamping every minted cycle."""
+        """All arms minted, each job landed on its cycle as it lands, each arm's opening riding its
+        own `HeldRun.closing`; a failure closes every arm, stamping every cycle minted before it."""
         closings = [AsyncExitStack() for _ in self.admitted]
+        minted: list[OpenedCycle] = []
         try:
             async with AsyncExitStack() as every:
                 for closing, (opening, _) in zip(closings, self.admitted, strict=True):
                     closing.push_async_exit(opening)
                     every.push_async_exit(closing)
-                minted = await _mint(self.source, self.plans)
-                for (opening, _), cycle in zip(self.admitted, minted, strict=True):
-                    opening.owns(cycle.hop)
-                await asyncio.to_thread(self._land, minted)
+                async for cycle in _mint(self.source, self.plans):
+                    opening, held = self.admitted[len(minted)]
+                    minted.append(cycle)
+                    await asyncio.to_thread(opening.land, cycle.hop, held)
                 every.pop_all()
         finally:
             if isinstance(self.source, CheckinArms):
@@ -180,10 +184,6 @@ class AdmittedHeadToHead(LaunchOutcome):
                 self.request.arms, self.admitted, minted, closings, strict=True
             )
         ]
-
-    def _land(self, minted: list[OpenedCycle]) -> None:
-        for (opening, held), cycle in zip(self.admitted, minted, strict=True):
-            opening.land(cycle.hop, held)
 
     async def launched(self) -> HeadToHeadLaunched:
         """Each arm in its own process, as every server launch."""

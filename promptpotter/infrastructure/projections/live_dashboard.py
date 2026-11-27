@@ -70,7 +70,6 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.results import Election
-from promptpotter.domain.results_health import terminal_node
 from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
@@ -116,7 +115,7 @@ def sample_row(s: WalkedSample) -> DashboardSample:
         sample_key=facts.sample_key,
         status=status,
         fitness=grade.fitness,
-        terminal_node=terminal_node(facts),
+        terminal_node=facts.pipeline.terminal_node,
         cached=facts.cached,
         cost_s=None if cost_s is None else round(cost_s, 2),
         predicted="" if graded_by_verifier else _trim(graded_answer(facts, grade) or "", 28),

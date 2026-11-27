@@ -16,10 +16,6 @@ export function phaseWalks(runPhase: RunPhase | null | undefined): boolean {
   return runPhase != null && RUN_PHASE_INFO[runPhase].walks;
 }
 
-export function dockPriority(runPhase: RunPhase): number {
-  return RUN_PHASE_INFO[runPhase].dock_priority;
-}
-
 export function isStopReason(v: unknown): v is StopReason {
   return typeof v === "string" && v in STOP_REASON_INFO;
 }

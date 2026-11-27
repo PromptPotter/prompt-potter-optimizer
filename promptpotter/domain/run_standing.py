@@ -232,7 +232,7 @@ def _per_unit_time(seconds: float) -> str:
 
 
 def _climb(standing: RunStanding) -> Climb | None:
-    pair, candidates = standing.vs_origin, standing.candidates
+    pair, tested = standing.vs_origin, standing.candidates_tested
     if (headline := pair.headline) is None:
         return None
     lift, unit = headline.estimate.value, headline.measurand.unit
@@ -267,8 +267,8 @@ def _climb(standing: RunStanding) -> Climb | None:
                 "lift_per_candidate",
                 "Lift per candidate",
                 "per candidate",
-                lift_text(lift / candidates, unit) if candidates else None,
-                f"{candidates} tested",
+                lift_text(lift / tested, unit) if tested else None,
+                f"{tested} tested",
             ),
             ClimbRate(
                 "time_per_lift",
@@ -325,9 +325,9 @@ class RunStanding(FrozenModel):
         description="Of those, how many closed `advanced`: their pick separated from C0 on the "
         "origin panel — the verdict clock. Never summed with `improved`."
     )
-    candidates: int = Field(
-        description="Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read "
-        "leader once per read."
+    candidates_tested: int = Field(
+        description="The lift-per-candidate denominator: the proposals those rounds scored "
+        "(`RoundOutcome.candidates_scored`), a re-read leader once per read."
     )
     search_usd: float | None = Field(
         description="USD the SEARCH had incurred at this close, every cycle of the line read "
@@ -426,7 +426,7 @@ class RunStanding(FrozenModel):
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
-            candidates=sum(rr.candidates_scored for rr in after_origin),
+            candidates_tested=sum(rr.candidates_scored for rr in after_origin),
             search_usd=outlay.search_usd,
             worked_s=outlay.worked_s,
         )

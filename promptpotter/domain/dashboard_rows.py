@@ -442,6 +442,9 @@ class ServedRound(RoundSummary):
         description="How each sample of `selection` moved against the round before it that "
         "measured any, position for position with `selection` (`sample_movements`)."
     )
+    measured: list[int] = Field(
+        description="The samples `selection` holds, each once, in id order."
+    )
     series_reading: AbilityReading | None = Field(
         description="This round's level on the cycle's `LevelSeries`, under its own round's "
         "caveat; null where no scored cell sits on the scale."
@@ -480,6 +483,9 @@ class SampleCoverage(FrozenModel):
 
     measuring_rounds: int = Field(description="The closed rounds that measured any sample")
     samples: list[SampleRounds]
+    first_measured: list[int] = Field(
+        description="The same samples in the order the rounds first measured them: a trajectory's columns."
+    )
 
     @classmethod
     def of(cls, rounds: Sequence[RoundSummary]) -> SampleCoverage:
@@ -488,6 +494,7 @@ class SampleCoverage(FrozenModel):
         return cls(
             measuring_rounds=len(measuring),
             samples=[SampleRounds(sample_id=s, rounds=n) for s, n in sorted(counts.items())],
+            first_measured=list(dict.fromkeys(s for r in rounds for s in r.selection)),
         )
 
 
@@ -527,6 +534,7 @@ def served_rounds(
             if closed.panel_precision is None
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
+            measured=sorted(set(closed.selection)),
             series_reading=None if series is None else series.levels[closed.round],
             hold_up=None
             if series is None or closed.ending is None or not closed.ending.moves_line

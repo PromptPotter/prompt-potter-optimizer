@@ -52,7 +52,7 @@ describe("a cells read's answer, as its panes say it", () => {
       }
       const cycle = subtreeCycle({ address: "c::y", tags: cycleTags("root", "ds") });
       if (path.endsWith("/hierarchy")) {
-        return Response.json({ entries: [subtreeCampaign({ address: "c", children: [cycle] })] });
+        return Response.json({ entries: [subtreeCampaign({ address: "c", children: [cycle] })], docked: [] });
       }
       // The viewed leaf's dataset is its served subtree tag.
       if (path.endsWith("/hierarchy/c")) {

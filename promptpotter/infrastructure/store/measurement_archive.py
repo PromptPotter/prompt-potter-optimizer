@@ -18,7 +18,7 @@ from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.l4.proxies import read_inner_report
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer
+from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer, Grading
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
     ABSENT,
@@ -28,6 +28,7 @@ from promptpotter.infrastructure.store.io import (
     append_jsonl,
     appending,
     file_stat,
+    iter_files,
     read_lines,
     replace_lines,
     rewrite_pair,
@@ -311,14 +312,12 @@ class MeasurementArchive:
     def path(self, kind: ArchiveFile, key: str = "") -> Path:
         return self.folder(kind) / kind.file_name(key)
 
-    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, os.DirEntry[str]]]:
+    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, os.stat_result]]:
         """The one enumeration: each file `path` builds for *kind*, beside its key."""
         try:
-            with os.scandir(self.folder(kind)) as it:
-                for entry in it:
-                    key = kind.key_of(entry.name)
-                    if key is not None and entry.is_file():
-                        yield key, entry
+            for path, st in iter_files(self.folder(kind)):
+                if path.parent == self.folder(kind) and (key := kind.key_of(path.name)) is not None:
+                    yield key, st
         except OSError:
             return
 
@@ -386,9 +385,10 @@ class MeasurementArchive:
         role: MeasurementRole,
         created_at: str,
         output_keys: Mapping[str, tuple[str, ...]],
+        grading: Grading,
     ) -> list[str]:
-        """Each cell beside its provenance grade, filed with the outputs each node declared; the
-        addresses come back in that order."""
+        """Each cell beside its provenance grade, filed with the outputs each node declared and the
+        grading it met; the addresses come back in that order."""
         by_file: dict[str, list[FiledAnswer]] = {}
         refs: list[str] = []
         for cell, provenance in graded:
@@ -404,6 +404,7 @@ class MeasurementArchive:
                     provenance=provenance,
                     created_at=created_at,
                     output_keys=output_keys,
+                    grading=grading,
                 )
             )
         if not refs:
@@ -475,8 +476,7 @@ class MeasurementArchive:
     def cell_signatures(self) -> dict[str, tuple[int, int]]:
         out: dict[str, tuple[int, int]] = {}
         with contextlib.suppress(OSError):
-            for key, entry in self._named(ArchiveFile.CELLS):
-                st = entry.stat()
+            for key, st in self._named(ArchiveFile.CELLS):
                 out[key] = (st.st_mtime_ns, st.st_size)
         return out
 

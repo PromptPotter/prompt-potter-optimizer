@@ -116,6 +116,7 @@ class _ArchiveRecorder:
                 n.name: tuple(n.output_keys)
                 for n in self.session.bound_resolution.chain.running_nodes
             },
+            grading=self.session.state.scoring.grading,
         )
         return cell.filed(replace(cell.facts, answer=answer))
 

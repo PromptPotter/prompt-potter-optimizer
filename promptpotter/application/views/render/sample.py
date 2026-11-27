@@ -10,7 +10,7 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
-from promptpotter.domain.results_health import is_deprecated, terminal_node
+from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import Grade, MeasuredCell, StaleOutcome, graded_answer
 
@@ -55,7 +55,7 @@ def fmt_query_result(
     gt = _ellide(facts.ground_truth.strip(), 30)
     q = _ellide(facts.query.replace("\n", " ").strip(), 15)
     pd = facts.pipeline
-    step = _step_tag(terminal_node(facts), display_tags)
+    step = _step_tag(facts.pipeline.terminal_node, display_tags)
 
     tt = facts.shown_s
 

@@ -320,7 +320,18 @@ BASELINE = {
     # w8-resolve (+4): `SchemaResolution` is the base a dataset read and a run share; `ReadoutProjection` takes its inputs.
     # w8-launch (+61): the embedded launch and head-to-head file their commands (`Hosted`), a mint
     # takes `step_rounds`, `new --draft` starts a kept check-in; `EmbeddedMint`/`EmbeddedResume` go.
-    "package_lines": 113788,
+    # w8-resolve2 (+24): an answer files its `Grading` (scoring + judges) and `open_cell` compiles off
+    # it through the one `graded_scorer`, so the cell read resolves no dataset.
+    # w8-web (+60, webapp −167): the browser's spend per round, dock order, measured sets and first
+    # order are served facts now (`SpendByRound`, `docked`, `measured`, `first_measured`, `line_count`).
+    # w8-store (+23): a subject's stamp compacts past 2048 bytes under its epoch's seqlock
+    # (`io.py::stamp_of`), so a stamp no longer grows a byte per write; `_SUBJECTS` goes. (+1): five
+    # bare stats and the archive's listing read through `io.py` (an import each).
+    # w8-spine2 (+10): `CellSheet.filled_from`, the walk fill named once where three sites folded
+    # by hand; a prior's catch-up reads its rows under the scorer it files under.
+    # w8-l4 (−2): a seat's optimizer owns its nodes (`panel.inner_nodes.<optimizer>`); a content
+    # filter's row is graded and cut by the rate, not fatal on one sighting.
+    "package_lines": 113904,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -391,7 +402,9 @@ BASELINE = {
     # w7-spend (−3): `MeteredSpend`'s rate and floor flags no reader read.
     # withdraw-bulletin (+1): `WithdrawBulletinPayload.bulletin_id`, a host-only kind no browser sends.
     # w8-launch (−1): measured at its landing; one served property gained a reader.
-    "p_served": 197,
+    # w8-web (+1): `RunStanding.candidates_tested`, the lift denominator `_climb` reads server-side;
+    # its browser figure moved to `ServedDashboard.line_count`.
+    "p_served": 198,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
@@ -414,7 +427,8 @@ BASELINE = {
     # l4-outer (+1): `Target.transcript`, a row's one transcript source, its inner run on L4.
     # round (+1): `LevelSeries.hold`, the lift a round that moved the line held on every row it
     # met, one read for the readout and the dashboard.
-    "p_reads": 293,
+    # w8-spine2 (+1): `CellSheet.filled_from`, the walk fill, beside `merged`, the standing fold.
+    "p_reads": 294,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     # webd-2 (+1): `test_stream_stamp.py`, its brief's own file, since store-2f lands in the others.
     # rates-1 (+1): `test_world_edges.py`, what a run meets at its edges: the rates it prices by

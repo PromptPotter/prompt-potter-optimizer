@@ -2786,7 +2786,7 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
         return asyncio.run(arm_plans(arming, door_layers, request, rows))
 
     # No dollar cap: a backend holding its own sends prices no cell before a run.
-    mint_arms(arm_of("a", Budget(usd=UNBOUNDED, rounds=2)), adopting=None)
+    list(mint_arms(arm_of("a", Budget(usd=UNBOUNDED, rounds=2)), adopting=None))
     # An arm declared over another budget never joins its head-to-head, and takes no campaign.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
@@ -2797,11 +2797,11 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
     # Two acts on one fresh id each plan off no record: the second to mint is held to the first's
     # record, so one comparison never holds two shared parts.
     early = arm_of("x", Budget(usd=UNBOUNDED, rounds=3), h2h="race")
-    mint_arms(arm_of("y", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None)
+    list(mint_arms(arm_of("y", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None))
     declared_race = stores.campaigns.load_head_to_head("race")
     assert declared_race is not None, "a fresh id's first mint declared no record"
     with pytest.raises(ConflictError):
-        mint_arms(early, adopting=None)
+        list(mint_arms(early, adopting=None))
     assert stores.campaigns.load_head_to_head("race") == declared_race, (
         "an act that planned off no record rewrote the record another act minted under"
     )
@@ -2814,7 +2814,7 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
     # An act on an id another act holds is refused before it pays or mints, never queued behind it.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with stores.campaigns.head_to_head_held("race"), pytest.raises(ConflictError):
-        mint_arms(arm_of("z", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None)
+        list(mint_arms(arm_of("z", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None))
     assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
         "an act on a held head-to-head minted a campaign"
     )
@@ -2834,8 +2834,8 @@ def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
             arms=[ArmRequest(arm_key=key, optimization=sent) for key, sent in arms],
             budget=Budget(usd=UNBOUNDED, rounds=2),
         )
-        minted = mint_arms(
-            asyncio.run(arm_plans(arming, door_layers, request, rows)), adopting=None
+        minted = list(
+            mint_arms(asyncio.run(arm_plans(arming, door_layers, request, rows)), adopting=None)
         )
         purposes: dict[str, Compare] = {}
         for cycle in minted:
@@ -2932,7 +2932,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
         Compare(arm=Arm(head_to_head_id="h4", arm_key="a", replicate=1)),
     )
     planned = resolve_cycle_plan(opened, effective_config(l4_arm.spec), l4_arm.purpose, rows_30)
-    (minted,) = mint_arms([planned], adopting=None)
+    (minted,) = list(mint_arms([planned], adopting=None))
     assert (
         cycle_config(stores, stores.campaigns.campaign_cycle(minted.hop)).config.model_dump()
         == effective_config(l4_arm.spec).model_dump()
@@ -3367,9 +3367,15 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     # An inner run reads the account's datasets and names none of its banks: the outer's mint does.
     stores = built_stores
     opened, rows_30, _, door, declared = decl
-    mint_arms(
-        [resolve_cycle_plan(opened, effective_config(declared.spec), declared.purpose, rows_30)],
-        adopting=None,
+    list(
+        mint_arms(
+            [
+                resolve_cycle_plan(
+                    opened, effective_config(declared.spec), declared.purpose, rows_30
+                )
+            ],
+            adopting=None,
+        )
     )
     labelled = stores.tenant_datasets.labels()
     assert "decl" in labelled, "a campaign's mint named no bank"
@@ -3383,7 +3389,7 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     assert inner_plan.declaration.spec.dataset_hash != labelled["decl"], (
         "the inner cut the same bank"
     )
-    mint_arms([inner_plan], adopting=None)
+    list(mint_arms([inner_plan], adopting=None))
     assert stores.tenant_datasets.labels() == labelled, (
         "an inner mint moved the account's label off the bank its outer named"
     )
@@ -4922,10 +4928,18 @@ async def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prom
 async def test_a_mixed_panels_outer_nodes_are_each_shown_as_their_manifests(
     world: World, l4_outer: Shared
 ) -> None:
-    async with _l4_round(world.adopt(l4_outer)) as outer:
+    adopted = world.adopt(l4_outer)
+    async with _l4_round(adopted) as outer:
         view = _view(outer, outer.cycle.parent)
         shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
     capo = select_optimizer(bench_choice("capo"))
+    run = read_dataset_definition(resolve_dataset(adopted.stores, L4_PANEL))
+    assert run is not None and run.panel is not None, "guard"
+    seats = InnerTasks.model_validate(run.panel).resolve_cells(adopted.stores).by_dataset.values()
+    laid = {cell.optimizer.name: set(cell.campaign.optimization.nodes) for cell in seats}
+    assert laid["capo"] <= set(capo.manifest.nodes) and laid["potter"], (
+        f"the panel laid another optimizer's nodes over its CAPO seat: {laid}"
+    )
     base_text = base_optimizer_template(capo, "capo_mutate").instruction
     assert f"[capo_mutate.instruction]\n{base_text}" in shown, (
         "a CAPO inner's prompt was never shown"

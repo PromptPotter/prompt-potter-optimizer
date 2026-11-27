@@ -36,12 +36,10 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.holders import in_flight, job_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.io import (
     read_text_optional,
-    stamped_subject,
     unlink_robust,
     write_json,
 )
@@ -90,8 +88,6 @@ class JobRegistry:
         staged: Mapping[Path, bytes] | None = None,
     ) -> None:
         self._dir = jobs_dir
-        # The `machine` subject: a job's move, the index and an unswept step stamp it.
-        stamped_subject(jobs_dir)
         self._staged = staged or {}
         # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
         # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.
@@ -457,8 +453,8 @@ class JobRegistry:
         return starts
 
     def reap_orphans(self) -> list[Job]:
-        """`shares.py::reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
-        producer's file, moves a release launched before today among the ended, and deletes an
+        """`shares.py::reap_dead_runs`'s alone: releases each job whose producer is gone, moves a
+        release launched before today among the ended, and deletes an
         ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood. Its scans
         are off the gate, which takes each orphan alone, asked again: an adoption made it live."""
         today = utcnow_iso()[:10]
@@ -477,11 +473,6 @@ class JobRegistry:
                     continue
                 if self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned")) is None:
                     continue
-            # An unstamped or unspellable id names no file.
-            with contextlib.suppress(ValueError):
-                producer_lock.reclaim_producer(
-                    producer_lock.producer_path(self._dir, job.producer_id)
-                )
             reaped.append(job)
         return reaped
 

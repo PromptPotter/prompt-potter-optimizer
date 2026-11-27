@@ -2,16 +2,13 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { type ServedRound, SAMPLE_MOVEMENT_TONE } from "@/lib/api/types";
 import { CardFrame, SegmentedControl } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import {
-  type SelectMode,
-  buildSorted,
-  unionFirstAppearance,
-  type SortedRounds,
-} from "@/lib/derivations";
+import { type SelectMode, buildSorted, type SortedRounds } from "@/lib/derivations";
 import { SeriesView } from "./TrajectorySeriesView";
 
+// `columns` is the served `SampleCoverage.first_measured`.
 interface Props {
   rounds: ServedRound[];
+  columns: readonly number[];
 }
 
 type ViewKind = "delta" | "series";
@@ -39,14 +36,13 @@ function miniTileSize(n: number): number {
 export function SampleTrajectoryMiniButton({
   expanded,
   rounds,
+  columns,
   onToggle,
-}: {
+}: Props & {
   expanded: boolean;
-  rounds: ServedRound[];
   onToggle: () => void;
 }) {
-  const sorted = useMemo(() => buildSorted(rounds), [rounds]);
-  const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
+  const sorted = useMemo(() => buildSorted(rounds, columns), [rounds, columns]);
 
   const nRounds = sorted.rounds.length;
   const summary = `Sample trajectory · ${nRounds} round${nRounds === 1 ? "" : "s"}`;
@@ -83,9 +79,9 @@ export function SampleTrajectoryMiniButton({
   );
 }
 
-export function SampleTrajectory({ rounds }: Props) {
+export function SampleTrajectory({ rounds, columns }: Props) {
   const [view, setView] = useState<ViewKind>("delta");
-  const sorted = useMemo(() => buildSorted(rounds), [rounds]);
+  const sorted = useMemo(() => buildSorted(rounds, columns), [rounds, columns]);
 
   if (sorted.rounds.length === 0) return null;
 
@@ -119,14 +115,14 @@ export function SampleTrajectory({ rounds }: Props) {
 
 export function SampleTrajectorySeries({
   rounds,
+  columns,
   selectMode = "measured",
   maxHeight = 200,
-}: {
-  rounds: ServedRound[];
+}: Props & {
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
-  const sorted = useMemo(() => buildSorted(rounds), [rounds]);
+  const sorted = useMemo(() => buildSorted(rounds, columns), [rounds, columns]);
   if (sorted.rounds.length === 0) return null;
   return <SeriesView sorted={sorted} selectMode={selectMode} maxHeight={maxHeight} />;
 }

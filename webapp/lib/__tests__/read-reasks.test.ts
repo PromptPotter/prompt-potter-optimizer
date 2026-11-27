@@ -64,7 +64,7 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
       if (name === "top" || name === "inner" || name === "other") {
         return Response.json(dash({}), { headers });
       }
-      return Response.json({ entries: [] }, { headers });
+      return Response.json({ entries: [], docked: [] }, { headers });
     });
   });
   afterEach(() => {

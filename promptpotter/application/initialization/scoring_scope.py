@@ -55,8 +55,10 @@ def scorer_setup(
 ) -> ScorerSetup:
     """What *session* scores under *campaign_config*, built whole once per launch or pass."""
     connector = session.backend_client.connector
+    graded = Resolution(campaign_config, session.bank.verifier_graded)
     return ScorerSetup(
-        scorer=Resolution(campaign_config, session.bank.verifier_graded).scorer,
+        scorer=graded.scorer,
+        grading=graded.grading,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
         judges=build_evaluators(

@@ -64,7 +64,7 @@ from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.dataset_access import campaign_defaults
-from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.infrastructure.store.io import file_stat, read_json, read_yaml
 from promptpotter.shared.errors import (
     FileKind,
     NotFoundError,
@@ -92,7 +92,7 @@ if TYPE_CHECKING:
 
 def _stamp(path: Path) -> int:
     try:
-        return path.stat().st_mtime_ns
+        return file_stat(path).st_mtime_ns
     except OSError:
         # A vanished file is its reader's error to raise; the stamp only keys the cache.
         return -1

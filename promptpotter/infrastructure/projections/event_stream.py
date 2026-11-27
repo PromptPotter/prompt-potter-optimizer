@@ -10,6 +10,7 @@ from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
 from promptpotter.infrastructure.store.io import (
     complete_lines,
+    file_stat,
     open_bytes_robust,
     read_bytes_optional,
 )
@@ -54,7 +55,7 @@ class CycleLedgerTail:
         """A batch ends at the index's head, so its frames carry the activity there and no batch
         refolds: a line landing after the view waits for the next batch."""
         try:
-            if self._ledger_path.stat().st_size <= self._byte_pos:
+            if file_stat(self._ledger_path).st_size <= self._byte_pos:
                 return []
         except FileNotFoundError:
             return []

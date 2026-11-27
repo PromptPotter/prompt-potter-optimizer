@@ -2,7 +2,6 @@ import {
   type Budget,
   type KindSpend,
   type MeteredSpend,
-  type ServedDashboard,
   SPEND_KIND_LABELS,
   type TokenUsageKind,
 } from "@/lib/api/types";
@@ -27,32 +26,4 @@ export function spendLines(m: MeteredSpend): SpendLine[] {
 export function budgetAxis(budget: Budget, axis: keyof Budget): number | null {
   const value = budget[axis];
   return typeof value === "number" ? value : null;
-}
-
-interface RoundCost {
-  round: number;
-  metered: MeteredSpend;
-}
-
-// Served in round order, and an object's integer keys enumerate ascending besides.
-export function roundCosts(dash: ServedDashboard | null): RoundCost[] {
-  const by = dash?.spend_metered_by_round;
-  if (!by) return [];
-  const out: RoundCost[] = [];
-  for (const [key, metered] of Object.entries(by)) {
-    const round = Number(key);
-    if (Number.isInteger(round)) out.push({ round, metered });
-  }
-  return out;
-}
-
-// KEYED by kind across rounds: a round lacking a kind is a gap (`null`), never another kind's dollars.
-export function costSeries(
-  rounds: RoundCost[],
-): { key: TokenUsageKind; label: string; ink: number; data: (number | null)[] }[] {
-  const perRound = rounds.map((r) => new Map(spendLines(r.metered).map((l) => [l.key, l.kind])));
-  return wordRows(SPEND_KIND_LABELS).flatMap(([key, label], ink) => {
-    const data = perRound.map((kinds) => kinds.get(key)?.billed_usd ?? null);
-    return data.every((v) => v === null) ? [] : [{ key, label, ink, data }];
-  });
 }

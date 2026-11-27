@@ -519,6 +519,10 @@ export interface HierarchyResponse {
    * root cycle sit together, the group of the newest first. A `campaign` or
    * `attached` filter asks after runs, so it serves no unstarted one. */
   entries: (HierarchyCampaign | UnstartedCampaign)[];
+  /** The addresses of the listed cycles a producer holds (`state.attached`), in
+   * dock order (`RunPhaseInfo.dock_priority`), listing order within one
+   * priority. */
+  docked: string[];
 }
 
 /** A campaign as the listing serves it: its state and line stats are its line
@@ -804,9 +808,9 @@ export interface RunStanding {
   /** Of those, how many closed `advanced`: their pick separated from C0 on the
    * origin panel — the verdict clock. Never summed with `improved`. */
   advanced: number;
-  /** Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader
-   * once per read. */
-  candidates: number;
+  /** The lift-per-candidate denominator: the proposals those rounds scored
+   * (`RoundOutcome.candidates_scored`), a re-read leader once per read. */
+  candidates_tested: number;
   /** USD the SEARCH had incurred at this close, every cycle of the line read whole
    * (`SpendRollup.search_incurred_usd`); null on unpriced search tokens. */
   search_usd: number | null;
@@ -1773,8 +1777,7 @@ export interface ServedDashboard {
   /** The cycle's spend under the campaign's ceiling meter, a manifest fact no
    * ledger record carries. */
   spend_metered: MeteredSpend;
-  /** `spend_metered` per round, in round order. */
-  spend_metered_by_round: Record<string, MeteredSpend>;
+  spend_by_round: SpendByRound;
   /** This cycle's spend in the campaign's meter, capped or not, a replay included —
    * `domain/spend.py::metered_line`, the CLI's stop line. */
   metered_line: string;
@@ -1803,6 +1806,10 @@ export interface ServedDashboard {
    * arms in round order, then the round in flight's while no round file holds
    * it. The bars, the tree strip and the chart are views of it. */
   line: LineArm[];
+  /** The masthead's CANDIDATES figure: the proposals of `line` scored so far,
+   * counted over the whole line whether or not `series_held` elides its
+   * closed arms. */
+  line_count: Figure;
   /** The closed series' version: `rounds` and their arms of `line`, as served. */
   series_version: string;
   /** The asker named this `series_version` as the one it holds: `rounds` is empty
@@ -1850,6 +1857,8 @@ export interface ServedRound {
   /** How each sample of `selection` moved against the round before it that measured
    * any, position for position with `selection` (`sample_movements`). */
   selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
+  /** The samples `selection` holds, each once, in id order. */
+  measured: number[];
   /** This round's level on the cycle's `LevelSeries`, under its own round's caveat;
    * null where no scored cell sits on the scale. */
   series_reading: AbilityReading | null;
@@ -2255,6 +2264,9 @@ export interface SampleCoverage {
   /** The closed rounds that measured any sample */
   measuring_rounds: number;
   samples: SampleRounds[];
+  /** The same samples in the order the rounds first measured them: a trajectory's
+   * columns. */
+  first_measured: number[];
 }
 
 export interface SampleRounds {
@@ -2406,6 +2418,22 @@ export interface LookaheadAbreastStep {
   label: string;
   /** What a press of it sends, a hover away. */
   hint: string;
+}
+
+/** The cycle's bill per round, keyed by kind across rounds, in round order. */
+export interface SpendByRound {
+  rounds: number[];
+  /** Every kind, in `SPEND_KIND_LABELS` order. */
+  series: KindSeries[];
+  /** Each round's bill by kind in one line, as `rounds`. */
+  readings: string[];
+}
+
+export interface KindSeries {
+  key: 'optimizer' | 'backend' | 'judge' | 'diagnostic' | 'bench';
+  label: string;
+  /** Its bill per round, in `SpendByRound.rounds` order. */
+  billed_usd: number[];
 }
 
 /** Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's,
@@ -5824,6 +5852,7 @@ export interface CommandResponses {
 export const READ_ROUTES = {
   "active-session": "/sessions/active",
   "activity": "/auth/activity",
+  "answer": "/answers/{answer}",
   "archive-datasets": "/workspace/archive/datasets",
   "backend-health": "/backends/{backend_id}/health",
   "backends": "/backends",
@@ -5840,7 +5869,6 @@ export const READ_ROUTES = {
   "cycle-files": "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
   "cycle-round": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
   "cycle-round-audit": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit",
-  "dataset-cell": "/datasets/{name:path}/cells/{answer}",
   "dataset-cells": "/datasets/{name:path}/cells",
   "dataset-pipeline": "/datasets/{name:path}/pipeline",
   "datasets": "/datasets",
@@ -5868,7 +5896,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "925408be4083aa5a";
+export const SERVED_CONTRACT = "e8ceafb046063630";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -5877,6 +5905,10 @@ export interface ReadQueries {
     /** `model` (the exact model string) or `api_key` (the provider that billed the
      * call, and whether the host's key or the caller's own sent it). */
     group_by?: 'model' | 'api_key';
+  };
+  "answer": {
+    /** The answer's address in the log */
+    answer: string;
   };
   "campaign-pipeline": {
     /** Searchpoint subject (`Subject.parse` grammar); defaults to the campaign root */
@@ -5927,10 +5959,6 @@ export interface ReadQueries {
     /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
      * the hierarchy address's `inside` byte-exact. */
     descend?: string | null;
-  };
-  "dataset-cell": {
-    /** The answer's address in the log */
-    answer: string;
   };
   "dataset-cells": {
     /** Samples per page. */

@@ -132,7 +132,7 @@ panel:
   #   the seed screens below read: those screens no longer describe the seats.
   #
   # ONE inner measurand and ONE stall ladder for every seat, declared here and nowhere else: a
-  # seat's own `scoring` and `escalation` never reach its inner run (`tasks.py::_THE_PANELS`),
+  # seat's own `scoring` and ladder never reach its inner run (`tasks.py::InnerTasks._laid`),
   # so a lift on one benchmark and on another are read on one scale. Here, beside the round
   # budget, because this block is laid over every seat once; a seat file would spell it per
   # benchmark. `em_match` reads the last bolded span under SQuAD normalization: hotpotqa's own
@@ -149,12 +149,15 @@ panel:
       # The width of the area `held_out_lift` reads, and inside every cell's key.
       budget: {rounds: 4}
       determinism: {temperature: 0.0}
-      nodes:
-        adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
-        # justlogic's own `k_max: 5` would open shots over the `demo: 0` above.
-        l1_generate: {config: {n_variants: 3, k_max: 0}}
-        escalation:
-          config: {l1_patience: 3, l2_patience: 2, l3_patience: 1, escalation_ladder: full}
+  # Each optimizer's nodes over the seats it runs (`tasks.py::InnerTasks._laid`): a seat on another
+  # optimizer opens on its own manifest's, and its own controller is cleared all the same.
+  inner_nodes:
+    potter:
+      adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
+      # justlogic's own `k_max: 5` would open shots over the `demo: 0` above.
+      l1_generate: {config: {n_variants: 3, k_max: 0}}
+      escalation:
+        config: {l1_patience: 3, l2_patience: 2, l3_patience: 1, escalation_ladder: full}
   #
   # A panel spans THREE benchmarks, two search seats each, so an edit that helps one task family
   # and hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ

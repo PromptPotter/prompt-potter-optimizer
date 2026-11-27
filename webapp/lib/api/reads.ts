@@ -406,8 +406,8 @@ export function cellsRead(
   };
 }
 
-export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
-  return once("cell", readUrl("dataset-cell", { name, answer }));
+export function cellRead(answer: string): ReadDescriptor<Cell> {
+  return once("cell", readUrl("answer", { answer }));
 }
 
 type DashboardBody = ServedDashboard | WarmingDashboard;

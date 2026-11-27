@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import (
+    WORKSPACE_STATE_DIR,
     unlink_robust,
     validate_path_component,
     write_bytes,
     write_lock,
 )
-from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import FileUnreadableError
 

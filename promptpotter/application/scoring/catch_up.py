@@ -13,7 +13,7 @@ from promptpotter.application.scoring.query_loop import QueryLoopResult
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.command_log import LookaheadWindow
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -44,10 +44,10 @@ class CatchUpPool:
         session: Session,
         sample_index: SampleIndex | None,
         member: str,
-        sps: Mapping[ArmKey, JobSearchPoint],
+        walks: Mapping[ArmKey, tuple[JobSearchPoint, MeasurementRole]],
     ) -> None:
         self._race, self._session, self._index = race, session, sample_index
-        self._member, self._sps = member, sps
+        self._member, self._walks = member, walks
         self._pending: dict[tuple[ArmKey, int], CatchUp] = {}
         # Each prior's scored cells, kept as the race admits them, so a turn costs priors, not rows.
         self._held: dict[ArmKey, set[str]] = {}
@@ -71,7 +71,9 @@ class CatchUpPool:
         """Nothing is written or graded until :meth:`commit_backfills` takes them."""
         started: list[asyncio.Future[Any]] = []
         for cid in self._unstarted(sample)[: max(room, 0)]:
-            backfill = _catch_up(self._session, self._index, self._sps[cid], sample, cid)
+            # The race holds its rows unfiled: the walk reads them under the scorer it files under.
+            held = self._session.state.scoring.scorer.graded(self._race.priors[cid].cells)
+            backfill = _catch_up(self._session, self._index, self._walks[cid], sample, cid, held)
             self._pending[(cid, sample.id)] = backfill
             started.append(backfill[0])
         return started
@@ -118,19 +120,15 @@ class CatchUpPool:
 def _catch_up(
     session: Session,
     sample_index: SampleIndex | None,
-    sp: JobSearchPoint,
+    walk_of: tuple[JobSearchPoint, MeasurementRole],
     sample: Sample,
     prior: ArmKey,
+    held: CellSheet,
 ) -> CatchUp:
-    # No stop rule: it recurses into the eliminator.
+    # The PRIOR's own pass, never the triggering arm's. No stop rule: it recurses into the eliminator.
+    sp, role = walk_of
     walk = open_walk(
-        sp,
-        [sample],
-        session,
-        kind=MeasurementRole.BACKFILL,
-        sample_index=sample_index,
-        # The PRIOR being caught up, never the arm whose cell triggered it.
-        measured=prior,
+        sp, [sample], session, kind=role, sample_index=sample_index, measured=prior, held=held
     )
     walk.release()
     _, cell = walk.launch(0, LookaheadWindow(1, 1))

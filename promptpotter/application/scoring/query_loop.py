@@ -208,10 +208,7 @@ class QueryLoopState:
         return self.session.state.scoring.scorer
 
     def running(self, results: Sequence[GradedCell]) -> ScoreSummary:
-        held = frozenset(cell.key for cell in self.held)
-        return self.recorder.scores(
-            [*self.held, *(cell for cell in results if cell.key not in held)]
-        )
+        return self.recorder.scores(self.held.filled_from(self.scorer.graded(results)).cells)
 
     def sample_scored(
         self,

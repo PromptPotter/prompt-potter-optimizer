@@ -1,5 +1,3 @@
-import type { ServedRound } from "@/lib/api/types";
-
 export function sameSampleSet(a: number[] | null, b: number[]): boolean {
   if (!a || a.length !== b.length) return false;
   const sa = new Set(a);
@@ -11,15 +9,4 @@ export function toggleInSet(set: number[], sid: number): number[] {
   if (next.has(sid)) next.delete(sid);
   else next.add(sid);
   return [...next].sort((a, b) => a - b);
-}
-
-interface RoundMeasuredSet {
-  round: number;
-  ids: number[];
-}
-
-export function roundMeasuredSets(rounds: ServedRound[]): RoundMeasuredSet[] {
-  return rounds
-    .filter((r) => r.selection.length > 0)
-    .map((r) => ({ round: r.round, ids: [...new Set(r.selection)].sort((a, b) => a - b) }));
 }

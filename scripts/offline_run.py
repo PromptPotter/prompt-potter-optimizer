@@ -196,6 +196,8 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
+# What the rebase leg's L2 steers L1 onto (`L2Memory.steered_onto`): no other leg's L2 steers.
+L2_STEER = {"temperature": 0.5}
 # Each optimizer's warm straight run, the same pressed, and paused inside a walk then resumed: the
 # press and the resume move the bill, never the record (`docs/developer/offline-run.md`).
 WARM = "warm"
@@ -430,7 +432,8 @@ def _asker() -> str:
 
 class ByCallIdentity:
     """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
-    prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork. *crossing*,
+    prompt's wording nor the arrival order. *rebasing*, every L2 fire steers L1 and proposes a
+    fork. *crossing*,
     every variant rewrites a second field, so any two arms differ on two loci a crossover swaps."""
 
     def __init__(
@@ -594,6 +597,7 @@ class ByCallIdentity:
             _recombine(obj, filler.resolve(schema)["properties"], filler, call)
             obj.pop("fork_proposal", None)
             if self.rebasing:
+                obj["l1_overrides"] = L2_STEER
                 obj["fork_proposal"] = {
                     "reason": f"L2 fire {call}: the stall is the output schema's names.",
                     "unlock_schema_field_rename": True,
@@ -1181,6 +1185,9 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     final = cycles[session.hop].stop_reason
     if final in (None, StopReason.REBASED):
         raise SystemExit(f"offline run: the line still reads {final}")
+    sent = (json.loads(p.read_text())["request"] for p in (workspace / "requests").glob("L1Gen*"))
+    if not any(L2_STEER.items() <= request.items() for request in sent):
+        raise SystemExit(f"offline run: L2's steer {L2_STEER} reached no L1 send")
     print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
     await noise_walk_doors(stores, session.hop, list(cycles))
     spread_reads_the_selection(
@@ -1483,7 +1490,6 @@ async def run_arms(
         CampaignLayer.model_validate(shared),
         request,
         stores=stores,
-        mode=RunMode(),
         readout_sink=print,
     )
     arms = {}

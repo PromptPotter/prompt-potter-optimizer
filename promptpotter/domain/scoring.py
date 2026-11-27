@@ -550,6 +550,10 @@ LedgerCell = Annotated[
 ]
 
 
+def _fill_rank(cell: GradedCell) -> tuple[bool, bool]:
+    return cell.scored, not cell.facts.cached
+
+
 @dataclass(frozen=True)
 class CellSheet:
     """A cell's STANDING row is its last scored row, else its last; statistics read the scored."""
@@ -601,12 +605,27 @@ class CellSheet:
         """STANDING by construction: one row per cell, *later* winning each cell both scored."""
         if not (self.cells and later.cells):
             return (self if self.cells else later).standing()
-        if (self.scorer_id, self.two_valued) != (later.scorer_id, later.two_valued):
+        self._graded_alike(later)
+        return replace(self, cells=(*self.cells, *later.cells)).standing()
+
+    def _graded_alike(self, other: CellSheet) -> None:
+        if (self.scorer_id, self.two_valued) != (other.scorer_id, other.two_valued):
             raise ValueError(
-                f"cells graded under {later.scorer_id!r} cannot join a sheet graded under "
+                f"cells graded under {other.scorer_id!r} cannot join a sheet graded under "
                 f"{self.scorer_id!r}"
             )
-        return replace(self, cells=(*self.cells, *later.cells)).standing()
+
+    def filled_from(self, read: CellSheet) -> CellSheet:
+        """The WALK FILL: *read*'s row takes a cell this lacks, or one it holds where it outranks it
+        (scored over errored, then measured over replay); never position, as `merged` folds."""
+        if not (self.cells and read.cells):
+            return self if self.cells else read
+        self._graded_alike(read)
+        rows = self.by_key()
+        for cell in read.cells:
+            if (held := rows.get(cell.key)) is None or _fill_rank(cell) > _fill_rank(held):
+                rows[cell.key] = cell
+        return replace(self, cells=tuple(rows.values()))
 
     def addresses(self) -> list[WalkedCell]:
         return [address for cell in self.cells if (address := cell.address) is not None]

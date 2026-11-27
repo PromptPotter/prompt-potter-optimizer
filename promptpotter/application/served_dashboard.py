@@ -31,7 +31,7 @@ from promptpotter.domain.dashboard_rows import (
     ServedRound,
     served_rounds,
 )
-from promptpotter.domain.hierarchy import READ_ONLY, RunAdmission
+from promptpotter.domain.hierarchy import READ_ONLY, Figure, RunAdmission
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import (
@@ -55,13 +55,17 @@ from promptpotter.domain.spend import (
     MONEY_AXES,
     NO_OVERSHOOT,
     NOTHING_METERED,
+    SPEND_KIND_LABELS,
     Budget,
     CapAxis,
     CeilingMeter,
     MeteredSpend,
     Overshoot,
     SpendCount,
+    SpendRollup,
+    TokenUsageKind,
     metered_line,
+    usd_text,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.spend_book import SpendBook
@@ -299,6 +303,45 @@ class SampleLookahead(StrictModel):
         return [self.flight] if self.shallow is None else [self.flight, self.shallow]
 
 
+class KindSeries(StrictModel):
+    key: TokenUsageKind
+    label: str
+    billed_usd: list[float] = Field(
+        description="Its bill per round, in `SpendByRound.rounds` order."
+    )
+
+
+class SpendByRound(StrictModel):
+    """The cycle's bill per round, keyed by kind across rounds, in round order."""
+
+    rounds: list[int]
+    series: list[KindSeries] = Field(description="Every kind, in `SPEND_KIND_LABELS` order.")
+    readings: list[str] = Field(description="Each round's bill by kind in one line, as `rounds`.")
+
+    @classmethod
+    def of(cls, by_round: Mapping[str, SpendRollup]) -> SpendByRound:
+        ordered = sorted(by_round.items(), key=lambda kv: int(kv[0]))
+        billed = {
+            kind: [spent.by_kind[kind].used_usd for _, spent in ordered]
+            for kind in SPEND_KIND_LABELS
+        }
+        return cls(
+            rounds=[int(key) for key, _ in ordered],
+            series=[
+                KindSeries(key=kind, label=label, billed_usd=billed[kind])
+                for kind, label in SPEND_KIND_LABELS.items()
+            ],
+            readings=[
+                f"round {key} · "
+                + " · ".join(
+                    f"{label.lower()} {usd_text(billed[kind][at])}"
+                    for kind, label in SPEND_KIND_LABELS.items()
+                )
+                for at, (key, _) in enumerate(ordered)
+            ],
+        )
+
+
 class RoundAxis(StrictModel):
     """The rounds a round-scoped surface may show."""
 
@@ -412,9 +455,7 @@ class ServedDashboard(DashboardFacts):
         description="The cycle's spend under the campaign's ceiling meter, a manifest fact no "
         "ledger record carries."
     )
-    spend_metered_by_round: dict[str, MeteredSpend] = Field(
-        description="`spend_metered` per round, in round order."
-    )
+    spend_by_round: SpendByRound
     metered_line: str = Field(
         description="This cycle's spend in the campaign's meter, capped or not, a replay included "
         "— `domain/spend.py::metered_line`, the CLI's stop line."
@@ -450,6 +491,10 @@ class ServedDashboard(DashboardFacts):
         description="The cycle's candidate line, read across its fork chain: every closed round's "
         "arms in round order, then the round in flight's while no round file holds it. The bars, "
         "the tree strip and the chart are views of it."
+    )
+    line_count: Figure = Field(
+        description="The masthead's CANDIDATES figure: the proposals of `line` scored so far, "
+        "counted over the whole line whether or not `series_held` elides its closed arms."
     )
     series_version: str = Field(
         description="The closed series' version: `rounds` and their arms of `line`, as served."
@@ -875,6 +920,20 @@ def _serve(
         for r in rounds
         for c in r.candidates
     ]
+    in_flight_line = [
+        LineArm(
+            address=owners(state.current_round.round, c.reading.arm.key),
+            reading=c.reading,
+            open_cells=c.open_cells,
+        )
+        for c in state.current_round.candidates
+        if state.unfiled() is not None
+    ]
+    scored = sum(
+        1
+        for arm in (*closed_line, *in_flight_line)
+        if arm.reading.role.is_proposal and arm.reading.own is not None
+    )
     version = stable_hash(
         [r.model_dump(mode="json") for r in rounds]
         + [a.model_dump(mode="json") for a in closed_line]
@@ -903,10 +962,7 @@ def _serve(
             state, run=run, standing=standing, in_flight=in_flight, allowed=allowed
         ),
         spend_metered=MeteredSpend.of(state.spend, meter),
-        spend_metered_by_round={
-            key: MeteredSpend.of(spent, meter)
-            for key, spent in sorted(state.spend_by_round.items(), key=lambda kv: int(kv[0]))
-        },
+        spend_by_round=SpendByRound.of(state.spend_by_round),
         metered_line=metered_line(
             meter,
             # A replay holds nothing: the bills it folded are its whole count.
@@ -939,18 +995,8 @@ def _serve(
         successor=run.successor,
         series_version=version,
         series_held=elided,
-        line=[
-            *([] if elided else closed_line),
-            *(
-                LineArm(
-                    address=owners(state.current_round.round, c.reading.arm.key),
-                    reading=c.reading,
-                    open_cells=c.open_cells,
-                )
-                for c in state.current_round.candidates
-                if state.unfiled() is not None
-            ),
-        ],
+        line=[*([] if elided else closed_line), *in_flight_line],
+        line_count=Figure(key="candidates", tone="quiet", label="Candidates", value=str(scored)),
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
         round_axis=axis,

@@ -11,6 +11,7 @@ from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
+    ARCHIVE_HOMES_DIR,
     CAMPAIGNS_DIR,
     CYCLES_DIR,
     DRAFTS_DIR,
@@ -40,9 +41,6 @@ def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
 
 
 ArchiveHomeOwner = Literal["tenant", "install"]
-
-# Beside `projects/`, never in it: no tenant walk can take an install's home for an account.
-ARCHIVE_HOMES_DIR = ".archives"
 
 
 @dataclass(frozen=True)
@@ -89,8 +87,6 @@ def draft_dirs(tenant_root: WorkspaceDir) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
 
 
-# Under a workspace: its own ledger and active pointer, its head-to-heads.
-WORKSPACE_STATE_DIR = ".workspace"
 HEAD_TO_HEADS_DIR = "head_to_heads"
 
 

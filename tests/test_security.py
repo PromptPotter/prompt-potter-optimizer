@@ -150,6 +150,7 @@ from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (
     LIVE_JOBS_INDEX,
+    PRODUCERS_DIR,
     PROJECTS_DIR,
     block_packs_root,
     default_projects_root,
@@ -478,6 +479,21 @@ async def test_a_sweep_leaves_the_containers_of_a_producer_another_process_holds
     assert not (home / "dead.lock").exists(), "a reaped producer's lock outlived it"
 
 
+def test_one_sweep_reclaims_a_dead_producers_containers_and_then_its_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "home" / "projects"
+    projects_root.mkdir(parents=True)
+    home = jobs_dir(projects_root) / PRODUCERS_DIR
+    dead = take_lock(home / "dead.lock", wait_s=0)
+    assert dead is not None
+    dead.release()
+    removed = _docker_answering(monkeypatch, tmp_path, [("c-dead", "dead")])
+    sweep(projects_root)
+    assert removed == ["c-dead"], "a sweep left a dead producer's container"
+    assert not (home / "dead.lock").exists(), "a sweep left a dead producer's lock"
+
+
 async def test_a_blocking_lock_refuses_on_the_event_loop_and_takes_nothing(tmp_path: Path) -> None:
     # A waiter on the loop stalls every request it serves for as long as another holder keeps it.
     gate = tmp_path / "gate.lock"
@@ -763,8 +779,8 @@ def test_an_edit_banked_in_one_accounts_block_pack_is_no_snippet_of_anothers() -
         workspace(dataclasses.replace(_who(u), capabilities=OWNER_COMMAND_CAPABILITIES))
         for u in ("ada-id", "eve-id")
     )
-    # Written in a check-in draft of ada's: a family dataset's campaign id holds a dot the payload
-    # refuses.
+    # Written in a check-in draft of ada's; a family dataset's campaign id, with its dot, is one too.
+    BankSnippetPayload(supersedes="s", text="t", experiment="justlogic.d234__ab12cd")
     drafted = asyncio.run(ingest_draft(stores=ada, blob=b"q,a\nx,y\n", filename="t.csv"))
     edit = "Think it through, one step at a time."
     banked = BankSnippetPayload(
@@ -2530,10 +2546,47 @@ def test_clearing_the_active_pointer_moves_the_accounts_feed_version(
     )
 
 
-def test_a_sandbox_emptied_by_a_reset_goes_with_its_stamp(tmp_path: Path) -> None:
+def test_a_write_moves_the_version_of_the_subject_at_its_place_never_one_named_like_it() -> None:
+    # A dataset named `jobs` or `projects` is its workspace's: a stamp of its own serves stale reads.
+    home = user_data_root()
+    ws, sandbox = home / "projects" / "t1", home / ".inner" / "key" / "t1"
+    for written, subject in (
+        (ws / "datasets" / "jobs" / "definition.yaml", ws),
+        (ws / "datasets" / "projects" / "t2" / "definition.yaml", ws),
+        (ws / ".workspace" / "events.jsonl", ws / ".workspace"),
+        (ws / "drafts" / "d1" / "ledger.jsonl", ws / "drafts"),
+        (home / ".archives" / "shared" / "measurements" / "a.json", home / ".archives" / "shared"),
+        (sandbox / "campaigns" / "c1" / "manifest.json", sandbox),
+        (home / "jobs" / "j1.json", home / "jobs"),
+    ):
+        store_io.make_dirs(written.parent)
+        held = store_io.stamp_of(subject)
+        store_io.write_bytes(written, b"{}")
+        assert store_io.stamp_of(subject) != held, f"a write at {written} left {subject} standing"
+        stray = [
+            d for d in written.parents if subject in d.parents if (d / store_io.STAMP_FILE).exists()
+        ]
+        assert not stray, f"a write at {written} stamped {stray}, under its subject {subject}"
+
+
+def test_a_stamp_compacts_and_its_version_never_repeats() -> None:
+    # A repeated version serves a reader the data it held; an unbounded stamp fills the disk.
+    jobs = user_data_root() / "jobs"
+    store_io.make_dirs(jobs)
+    seen, writes = {store_io.stamp_of(jobs)}, 3 * store_io._STAMP_COMPACTS_AT + 5
+    for _ in range(writes):
+        store_io.stamp(jobs / "j1.json")
+        seen.add(store_io.stamp_of(jobs))
+    assert len(seen) == writes + 1, "a version repeated across a compaction"
+    held = sum(
+        (jobs / name).stat().st_size for name in (store_io.STAMP_FILE, store_io.STAMP_EPOCH_FILE)
+    )
+    assert held < store_io._STAMP_COMPACTS_AT + 16, f"{writes} writes left a {held}-byte stamp"
+
+
+def test_a_sandbox_emptied_by_a_reset_goes_with_its_stamp() -> None:
     # A reset drops a sandbox's data and prunes it; the stamp is no data, so it never holds it up.
-    sandbox = tmp_path / ".inner" / "key" / "tenant"
-    store_io.stamped_subject(sandbox)
+    sandbox = user_data_root() / ".inner" / "key" / "tenant"
     ledger = sandbox / "campaigns" / "c1" / "ledger.jsonl"
     store_io.make_dirs(ledger.parent)
     ledger.write_text("{}", encoding="utf-8")

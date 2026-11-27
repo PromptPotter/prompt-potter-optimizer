@@ -6530,7 +6530,7 @@
       },
       "RaceCatchUpRecord": {
         "additionalProperties": false,
-        "description": "The catch-up walks one just-measured cell of ``arm`` took: no pass records their cells.",
+        "description": "The catch-up walks one just-measured cell of ``arm`` took, each prior's pass continued.",
         "properties": {
           "arm": {
             "title": "Arm",
@@ -7639,9 +7639,9 @@
             "title": "Advanced",
             "type": "integer"
           },
-          "candidates": {
-            "description": "Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader once per read.",
-            "title": "Candidates",
+          "candidates_tested": {
+            "description": "The lift-per-candidate denominator: the proposals those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader once per read.",
+            "title": "Candidates Tested",
             "type": "integer"
           },
           "changes": {
@@ -7735,7 +7735,7 @@
           "rounds_closed",
           "improved",
           "advanced",
-          "candidates",
+          "candidates_tested",
           "search_usd",
           "worked_s"
         ],

@@ -45,10 +45,16 @@ export function HardSamplesHeatmap() {
         <SampleTrajectoryMiniButton
           expanded={bankExpanded}
           rounds={dash?.rounds ?? []}
+          columns={dash?.sample_coverage.first_measured ?? []}
           onToggle={() => setBankExpanded((e) => !e)}
         />
       </div>
-      {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
+      {bankExpanded && (
+        <SampleTrajectory
+          rounds={dash?.rounds ?? []}
+          columns={dash?.sample_coverage.first_measured ?? []}
+        />
+      )}
     </div>
   );
 }

@@ -19,7 +19,12 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     rank_hard_samples,
 )
 from promptpotter.application.intelligence.rasch import Observation, build_observations
-from promptpotter.application.pipeline_resolve import Resolution, cycle_config, resolved
+from promptpotter.application.pipeline_resolve import (
+    Resolution,
+    cycle_config,
+    graded_scorer,
+    resolved,
+)
 from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
     cycle_bank,
@@ -177,9 +182,9 @@ def _assemble(
     )
 
 
-def open_cell(stores: Stores, name: str, answer: str) -> Cell:
-    """The position is the answer's own bank's: *name* may label a re-cut that moved or dropped its row."""
-    dataset = resolve_dataset(stores, name)
+def open_cell(stores: Stores, answer: str) -> Cell:
+    """Read off the answer alone: its position is its own bank's, its grade the grading it was filed
+    under, so no dataset label (which a re-cut may have moved) is resolved."""
     filed = stores.archive.answer(answer)
     if filed is None:
         raise NotFoundError(f"Answer '{answer}' not found")
@@ -191,14 +196,8 @@ def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         raise NotFoundError(f"Answer '{answer}' is filed under a bank no longer held")
     position = bank.position_of[filed.cell.sample_key]
     filed = stores.archive.whole(filed)
-    return _assemble(
-        described,
-        filed,
-        Resolution(load_dataset_campaign_config(dataset), bank.verifier_graded).scorer.grade(
-            filed.cell
-        ),
-        position,
-    )
+    scorer = graded_scorer(filed.grading, verifier_graded=bank.verifier_graded)
+    return _assemble(described, filed, scorer.grade(filed.cell), position)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:

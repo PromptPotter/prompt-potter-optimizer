@@ -61,7 +61,7 @@ from promptpotter.domain.paired_reading import (
     level_text,
     lift_versus,
 )
-from promptpotter.domain.phases import LaunchStage
+from promptpotter.domain.phases import RUN_PHASE_INFO, LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, withheld
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
@@ -218,7 +218,6 @@ def _cycle_figures(
     if (standing := facts.standing) is None:
         unread = PairedReading.unread(ReadingState.PENDING)
         return [*rows, _lift_row("lift", unread, "origin")]
-    rows.append(_figure("candidates", "Candidates", str(standing.candidates)))
     rows.append(_figure("selection", "Leader", standing.selection_name))
     rows.append(_lift_row("lift", standing.vs_origin, "origin"))
     if (lives := standing.lives) is not None:
@@ -645,6 +644,9 @@ def list_hierarchy(
             for draft in drafts
             if dataset in (None, draft.dataset_name)
         ]
+    started = [entry for group in rooted.values() for entry in group]
+    attached = [c for entry in started for c in entry.children if c.state.attached]
+    attached.sort(key=lambda c: RUN_PHASE_INFO[c.state.status.run_phase].dock_priority)
     return HierarchyResponse(
-        entries=[*unstarted, *(entry for group in rooted.values() for entry in group)]
+        entries=[*unstarted, *started], docked=[cycle.address for cycle in attached]
     )

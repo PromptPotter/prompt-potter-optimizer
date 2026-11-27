@@ -7,8 +7,9 @@ from pathlib import Path
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.shares import reap_dead_runs
-from promptpotter.config.paths import jobs_dir
+from promptpotter.config.paths import PRODUCERS_DIR, jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure.docker_host import reap_dead_producers
 from promptpotter.infrastructure.llm.pricing import refresh_rates, refresh_route_answers
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
@@ -100,11 +101,15 @@ def sweep_dead_cycles(projects_root: Path) -> None:
 
 def sweep(projects_root: Path) -> None:
     """Every reclaim of what a dead producer left: no read stamps or deletes any of it, and only
-    this releases its runs (`reap_dead_runs`)."""
+    this releases its runs (`reap_dead_runs`), then its containers and its lock."""
 
     def orphans() -> list[str]:
         undeleted = reclaim_orphan_sandboxes(projects_root)
         reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
+        # Off every loop: each door offloads the sweep.
+        asyncio.run(
+            reap_dead_producers(jobs_dir(projects_root) / PRODUCERS_DIR, compose_overlay=None)
+        )
         return undeleted
 
     sweep_dead_cycles(projects_root)

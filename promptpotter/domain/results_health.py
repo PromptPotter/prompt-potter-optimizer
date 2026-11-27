@@ -61,41 +61,22 @@ _REFUSAL_PATTERN = re.compile(
 )
 
 
-def _is_refusal(facts: MeasuredCell) -> bool:
-    """A refusal completes with ``finish_reason=stop`` and no warning: every other channel sees a plain MISS."""
-    predicted = facts.predicted
-    if not predicted:
-        return False
-    head = predicted[:120]
-    return bool(_REFUSAL_PATTERN.match(head))
-
-
 UNKNOWN_STEP: str = "unknown"
 
 
 def _collect_advisories(facts: MeasuredCell) -> set[str]:
-    advisories: set[str] = set()
-    for w in facts.pipeline.diagnostics.warnings:
-        advisories.add(_advisory_key(w))
-    reached = terminal_node(facts) or UNKNOWN_STEP
+    advisories = {_advisory_key(w) for w in facts.pipeline.diagnostics.warnings}
+    reached = facts.pipeline.terminal_node or UNKNOWN_STEP
     if not advisories and facts.errored:
         advisories.add(f"{reached}:error")
-    if _is_refusal(facts):
+    # A refusal finishes ``stop`` with no warning: every other channel sees a plain MISS.
+    if _REFUSAL_PATTERN.match(facts.predicted[:120]):
         advisories.add(f"{reached}:model_refusal")
     return advisories
 
 
-def _structural_advisory_keys(facts: MeasuredCell) -> set[str]:
-    """A warning with no ``kind`` is NOT structural: under-count, never over-eliminate."""
-    return {_advisory_key(w) for w in facts.pipeline.diagnostics.warnings if w.kind == "structural"}
-
-
 def _advisory_key(warning: NodeWarning) -> str:
     return f"{warning.step or UNKNOWN_STEP}:{warning.code or 'unknown'}"
-
-
-def terminal_node(facts: MeasuredCell) -> str | None:
-    return facts.pipeline.terminal_node
 
 
 def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int | None]:
@@ -112,7 +93,7 @@ def _answered(facts: MeasuredCell) -> bool:
 
 def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
     """An answer cut at its token ceiling: a miss the prompt's length owns, never infra."""
-    node = terminal_node(facts)
+    node = facts.pipeline.terminal_node
     return (
         node is not None
         and not facts.errored
@@ -145,11 +126,13 @@ def classify_result(facts: MeasuredCell) -> ResultClassification:
     eliminates a good one.
     """
     advisories = _collect_advisories(facts)
-    structural_advs = _structural_advisory_keys(facts)
+    # A warning with no ``kind`` is NOT structural: under-count, never over-eliminate.
+    warnings = facts.pipeline.diagnostics.warnings
+    structural_advs = {_advisory_key(w) for w in warnings if w.kind == "structural"}
     infra: set[str] = set()
     fatals: set[str] = set()
 
-    node = terminal_node(facts)
+    node = facts.pipeline.terminal_node
     # ``content_empty`` describes ONE ATTEMPT: the backend retries, and that retry can answer.
     if node is not None and f"{node}:content_empty" in advisories and not _answered(facts):
         finish_reason, reasoning_tokens = _terminal_llm_shape(facts, node)
@@ -167,10 +150,9 @@ def classify_result(facts: MeasuredCell) -> ResultClassification:
             )
 
     for adv in advisories:
-        if adv.endswith(":content_filtered"):
-            fatals.add(adv)
-        elif adv.endswith(":model_refusal"):
-            # Infra, not fatal: a rephrased instruction can recover, so no elimination at n=1.
+        if adv.endswith((":content_filtered", ":model_refusal")):
+            # Infra, not fatal: a filter trips on one row's text and a refusal on one phrasing, so
+            # neither is deterministic for the config and the rate, never one sighting, cuts.
             infra.add(adv)
         elif adv in structural_advs:
             # Source-stamped structural is deterministic for the config, so fatal.

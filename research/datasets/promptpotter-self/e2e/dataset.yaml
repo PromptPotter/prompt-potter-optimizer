@@ -71,9 +71,10 @@ panel:
     dataset_split: {bench: 2, tolerance: 0}
     optimization:
       budget: {rounds: 2}
-      nodes:
-        adaptive_queue: {config: {sp_budget_round: 2}}
-        l1_generate: {config: {n_variants: 1}}
+  inner_nodes:
+    potter:
+      adaptive_queue: {config: {sp_budget_round: 2}}
+      l1_generate: {config: {n_variants: 1}}
   tasks:
     # One search seat and one held-out seat: the fewest that turn the outer search and its bench over.
     - kind: seat

@@ -20,12 +20,14 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_serializer,
     model_validator,
 )
 
 from promptpotter.domain.bulletin import BULLETIN_TEXT_CHARS
 from promptpotter.domain.campaign import ArmName, ArmSeat
+from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
     CampaignLayer,
@@ -1012,9 +1014,16 @@ class BankSnippetPayload(CommandPayload, kind=CommandKind.BANK_SNIPPET):
     experiment: str = Field(
         min_length=1,
         max_length=128,
-        pattern=r"^[A-Za-z0-9_-]+$",
         description="The campaign or check-in draft it was written in.",
     )
+
+    @field_validator("experiment")
+    @classmethod
+    def _an_id(cls, experiment: str) -> str:
+        """Read on the ids' own grammar: a family dataset's campaign id holds a dot."""
+        if not ID_COMPONENT_RE.fullmatch(experiment):
+            raise ValueError(f"{experiment!r} names no campaign or draft")
+        return experiment
 
 
 type ArchiveMode = Literal["compact", "restore", "purge-cold", "reclaim"]
@@ -1514,6 +1523,6 @@ class ReadKind(StrEnum):
     DATASETS = "datasets"
     DATASET_PIPELINE = "dataset-pipeline"
     DATASET_CELLS = "dataset-cells"
-    DATASET_CELL = "dataset-cell"
+    ANSWER = "answer"
     ORIGINS = "origins"
     FEED = "feed"

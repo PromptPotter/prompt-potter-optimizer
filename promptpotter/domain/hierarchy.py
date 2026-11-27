@@ -651,3 +651,7 @@ class HierarchyResponse(StrictModel):
         "a root cycle sit together, the group of the newest first. A `campaign` or `attached` "
         "filter asks after runs, so it serves no unstarted one."
     )
+    docked: list[str] = Field(
+        description="The addresses of the listed cycles a producer holds (`state.attached`), in "
+        "dock order (`RunPhaseInfo.dock_priority`), listing order within one priority."
+    )

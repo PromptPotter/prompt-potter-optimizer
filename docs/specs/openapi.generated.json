@@ -1643,7 +1643,6 @@
             "description": "The campaign or check-in draft it was written in.",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Experiment",
             "type": "string"
           },
@@ -9136,6 +9135,14 @@
         "additionalProperties": false,
         "description": "Every campaign in one store: the unstarted first, then root-major and newest first.",
         "properties": {
+          "docked": {
+            "description": "The addresses of the listed cycles a producer holds (`state.attached`), in dock order (`RunPhaseInfo.dock_priority`), listing order within one priority.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Docked",
+            "type": "array"
+          },
           "entries": {
             "description": "Unstarted campaigns lead, most recently edited first; then campaigns sharing a root cycle sit together, the group of the newest first. A `campaign` or `attached` filter asks after runs, so it serves no unstarted one.",
             "items": {
@@ -9160,7 +9167,8 @@
           }
         },
         "required": [
-          "entries"
+          "entries",
+          "docked"
         ],
         "title": "HierarchyResponse",
         "type": "object"
@@ -9480,6 +9488,33 @@
           "payload"
         ],
         "title": "KeepDraftsAction",
+        "type": "object"
+      },
+      "KindSeries": {
+        "additionalProperties": false,
+        "properties": {
+          "billed_usd": {
+            "description": "Its bill per round, in `SpendByRound.rounds` order.",
+            "items": {
+              "type": "number"
+            },
+            "title": "Billed Usd",
+            "type": "array"
+          },
+          "key": {
+            "$ref": "#/components/schemas/TokenUsageKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "billed_usd"
+        ],
+        "title": "KindSeries",
         "type": "object"
       },
       "KindSpend": {
@@ -15748,9 +15783,9 @@
             "title": "Advanced",
             "type": "integer"
           },
-          "candidates": {
-            "description": "Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader once per read.",
-            "title": "Candidates",
+          "candidates_tested": {
+            "description": "The lift-per-candidate denominator: the proposals those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader once per read.",
+            "title": "Candidates Tested",
             "type": "integer"
           },
           "changes": {
@@ -15844,7 +15879,7 @@
           "rounds_closed",
           "improved",
           "advanced",
-          "candidates",
+          "candidates_tested",
           "search_usd",
           "worked_s"
         ],
@@ -15983,6 +16018,14 @@
         "additionalProperties": false,
         "description": "Every sample a closed round measured, in id order: the set a sample-set picker offers.",
         "properties": {
+          "first_measured": {
+            "description": "The same samples in the order the rounds first measured them: a trajectory's columns.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "First Measured",
+            "type": "array"
+          },
           "measuring_rounds": {
             "description": "The closed rounds that measured any sample",
             "title": "Measuring Rounds",
@@ -15998,7 +16041,8 @@
         },
         "required": [
           "measuring_rounds",
-          "samples"
+          "samples",
+          "first_measured"
         ],
         "title": "SampleCoverage",
         "type": "object"
@@ -16562,6 +16606,10 @@
             "title": "Line",
             "type": "array"
           },
+          "line_count": {
+            "$ref": "#/components/schemas/Figure",
+            "description": "The masthead's CANDIDATES figure: the proposals of `line` scored so far, counted over the whole line whether or not `series_held` elides its closed arms."
+          },
           "live": {
             "description": "Whether a producer is appending to the cycle now; false on a replay at a moment (`at`). The one liveness: `active`, `walk` and `round_axis.live` follow it.",
             "title": "Live",
@@ -16707,17 +16755,12 @@
             "title": "Skip Refusal",
             "type": "string"
           },
+          "spend_by_round": {
+            "$ref": "#/components/schemas/SpendByRound"
+          },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
             "description": "The cycle's spend under the campaign's ceiling meter, a manifest fact no ledger record carries."
-          },
-          "spend_metered_by_round": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/MeteredSpend"
-            },
-            "description": "`spend_metered` per round, in round order.",
-            "title": "Spend Metered By Round",
-            "type": "object"
           },
           "state": {
             "$ref": "#/components/schemas/DashboardState",
@@ -16797,7 +16840,7 @@
           "composite_fitness_anchors",
           "lookahead",
           "spend_metered",
-          "spend_metered_by_round",
+          "spend_by_round",
           "metered_line",
           "cap_lines",
           "caps",
@@ -16807,6 +16850,7 @@
           "active",
           "successor",
           "line",
+          "line_count",
           "series_version",
           "series_held",
           "observed",
@@ -16874,6 +16918,14 @@
                 "type": "null"
               }
             ]
+          },
+          "measured": {
+            "description": "The samples `selection` holds, each once, in id order.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Measured",
+            "type": "array"
           },
           "optimizer_facts": {
             "items": {
@@ -16968,6 +17020,7 @@
           "overlap",
           "panel_precision_verdict",
           "selection_movement",
+          "measured",
           "series_reading",
           "hold_up"
         ],
@@ -17249,6 +17302,42 @@
           }
         },
         "title": "SpendBucket",
+        "type": "object"
+      },
+      "SpendByRound": {
+        "additionalProperties": false,
+        "description": "The cycle's bill per round, keyed by kind across rounds, in round order.",
+        "properties": {
+          "readings": {
+            "description": "Each round's bill by kind in one line, as `rounds`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Readings",
+            "type": "array"
+          },
+          "rounds": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Rounds",
+            "type": "array"
+          },
+          "series": {
+            "description": "Every kind, in `SPEND_KIND_LABELS` order.",
+            "items": {
+              "$ref": "#/components/schemas/KindSeries"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rounds",
+          "series",
+          "readings"
+        ],
+        "title": "SpendByRound",
         "type": "object"
       },
       "SpendCount": {
@@ -19938,6 +20027,51 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/answers/{answer}": {
+      "get": {
+        "description": "One answer opened: its row assembled into a trace, graded as it was filed.",
+        "operationId": "answer_api_v1_answers__answer__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer",
+            "required": true,
+            "schema": {
+              "description": "The answer's address in the log",
+              "minLength": 1,
+              "title": "Answer",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cell"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Answer",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
     "/api/v1/auth/activity": {
       "get": {
         "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it\nwas stamped with.",
@@ -24711,62 +24845,6 @@
           }
         },
         "summary": "Dataset-Cells",
-        "tags": [
-          "Reads"
-        ]
-      }
-    },
-    "/api/v1/datasets/{name}/cells/{answer}": {
-      "get": {
-        "description": "One answer opened: its row assembled into a trace.",
-        "operationId": "dataset_cell_api_v1_datasets__name__cells__answer__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The dataset name",
-              "minLength": 1,
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "answer",
-            "required": true,
-            "schema": {
-              "description": "The answer's address in the log",
-              "minLength": 1,
-              "title": "Answer",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Cell"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Dataset-Cell",
         "tags": [
           "Reads"
         ]

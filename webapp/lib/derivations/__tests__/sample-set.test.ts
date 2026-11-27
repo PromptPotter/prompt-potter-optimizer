@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  orderAtStep,
-  roundMeasuredSets,
-  sameSampleSet,
-  seedFromOrder,
-  toggleInSet,
-} from "@/lib/derivations";
-import type { ServedRound } from "@/lib/api/types";
-import { summaryRound } from "@/lib/test-fixtures";
-
-const round = (r: number, selection: number[]): ServedRound =>
-  summaryRound({ round: r, selection });
+import { orderAtStep, sameSampleSet, seedFromOrder, toggleInSet } from "@/lib/derivations";
 
 describe("sample-set primitives", () => {
   it("sameSampleSet is order-insensitive and null-safe", () => {
@@ -23,12 +12,6 @@ describe("sample-set primitives", () => {
   it("toggleInSet adds/removes and returns a sorted set", () => {
     expect(toggleInSet([1, 3], 2)).toEqual([1, 2, 3]);
     expect(toggleInSet([1, 2, 3], 2)).toEqual([1, 3]);
-  });
-
-  it("roundMeasuredSets skips empty rounds and sorts each", () => {
-    expect(roundMeasuredSets([round(1, [3, 1]), round(2, [])])).toEqual([
-      { round: 1, ids: [1, 3] },
-    ]);
   });
 });
 

@@ -39,8 +39,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.records.run_records import StandingEffect
 from promptpotter.infrastructure.holders import hold_released, producer_alive
-from promptpotter.infrastructure.store.io import append_line, appending
-from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
+from promptpotter.infrastructure.store.io import WORKSPACE_STATE_DIR, append_line, appending
 from promptpotter.infrastructure.store.read_model import LineIndex
 from promptpotter.shared.errors import ConflictError, FileKind, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal

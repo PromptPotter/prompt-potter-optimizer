@@ -31,6 +31,7 @@ from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells
 from promptpotter.domain.layer_fold import LaidAs, Layer
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import (
+    ManifestNodeOverlay,
     NodeKind,
     NodeSearchNarrowing,
     PipelineNode,
@@ -77,8 +78,10 @@ class InnerTasks(FrozenModel):
     """A panel of seats, each a fresh inner campaign run as an inner hop of the arm's cell."""
 
     inner_benchmark: str = Field(min_length=1)
-    # A `campaign:` partial laid over each seat dataset's own block: one geometry per panel.
+    # A `campaign:` partial laid over each seat dataset's own block: one geometry per panel. Nodes
+    # are an optimizer's, so they ride `inner_nodes`, by the optimizer each seat runs.
     inner_campaign: Annotated[dict[str, Any], LaidAs(CampaignConfig)]
+    inner_nodes: dict[str, dict[str, ManifestNodeOverlay]] = Field(default_factory=dict)
     tasks: list[Seat] = Field(min_length=1)
 
     @model_validator(mode="before")
@@ -141,7 +144,7 @@ class InnerTasks(FrozenModel):
     def resolve_cells(self, stores: Stores) -> InnerCells:
         """Each cell runs its own optimizer: the treatment is the cell's."""
         if "scoring" not in self.inner_campaign:
-            # The inner scoring and ladder are the panel's alone (`_THE_PANELS` clears each seat's).
+            # The inner scoring and ladder are the panel's alone (`_laid` clears each seat's).
             raise PayloadInvalidError(
                 "the panel's `inner_campaign` declares no `scoring`: every seat's inner run is "
                 "scored by the one measurand the panel declares, never its dataset's own",
@@ -164,25 +167,42 @@ class InnerTasks(FrozenModel):
                     "inner_benchmark on another backend",
                     code="pipeline_config_invalid",
                 )
-            laid = CampaignConfig.model_validate(dataset_campaign_block(dataset)).overlaid(
-                Layer("seat", _THE_PANELS), Layer("panel", self.inner_campaign)
-            )
+            laid = self._laid(CampaignConfig.model_validate(dataset_campaign_block(dataset)))
             if (refused := _unreadable_geometry(laid)) is not None:
                 raise PayloadInvalidError(
                     f"the panel's `inner_campaign` over {name!r} {refused}",
                     code="pipeline_config_invalid",
                 )
             selected = select_optimizer(_inner_optimization(laid.optimization))
-            by_dataset[name] = InnerCell(
-                campaign=laid,
-                optimizer=cell_optimizer(selected, laid.scoring),
-            )
+            by_dataset[name] = InnerCell(laid, cell_optimizer(selected, laid.scoring))
         return InnerCells(
             cells=tuple(self.tasks),
             by_dataset=by_dataset,
             datasets={seat.id: self.dataset_for(seat) for seat in self.tasks},
             estimator=BehaviourKeys.held().cell_estimator,
         )
+
+    def _laid(self, own: CampaignConfig) -> CampaignConfig:
+        """*own* under the panel's one measurand and geometry, then its optimizer's `inner_nodes`
+        over its nodes, the seat's controllers cleared: one grade and one ladder across a panel."""
+        laid = own.overlaid(Layer("seat", {"scoring": None}), Layer("panel", self.inner_campaign))
+        selected = select_optimizer(_inner_optimization(laid.optimization))
+        declared = selected.schema.declared_nodes
+        ladders = {node.name: None for node in declared if node.kind is NodeKind.CONTROLLER}
+        own_nodes = self.inner_nodes.get(selected.name, {}).items()
+        nodes = {n: o.model_dump(mode="json", exclude_unset=True) for n, o in own_nodes}
+        return laid.overlaid(
+            Layer("seat", {"optimization": {"nodes": ladders}}),
+            Layer("panel", {"optimization": {"nodes": nodes}}),
+        )
+
+    @model_validator(mode="after")
+    def _nodes_ride_their_optimizer(self) -> InnerTasks:
+        if "nodes" in self.inner_campaign.get("optimization", {}):
+            raise ValueError(
+                "`inner_campaign.optimization.nodes` is one optimizer's: use `inner_nodes`"
+            )
+        return self
 
     @model_validator(mode="after")
     def _cells_are_distinct(self) -> InnerTasks:
@@ -253,10 +273,6 @@ def is_self_optimization(connector: str) -> bool:
 
 
 INNER_ARM_GATE: ArmGateMode = "off"
-
-# What no seat's own block lays: one inner measurand and one stall ladder across a panel, so a
-# lift on one benchmark and on another are read on one scale (the panel's `inner_campaign`).
-_THE_PANELS: dict[str, Any] = {"scoring": None, "optimization": {"nodes": {"escalation": None}}}
 
 
 def _unreadable_geometry(laid: CampaignConfig) -> str | None:

@@ -163,14 +163,23 @@ def _forget_producers(home: Path, dead: set[str]) -> None:
 
 
 async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
-    code, out = await docker(
-        "ps", "-a", "--format",
-        f'{{{{.ID}}}}|{{{{.Label "{_PRODUCER_LABEL}"}}}}|{{{{.Label "{_COMPOSE_FILES_LABEL}"}}}}',
-    )  # fmt: skip
+    """THE reclaim of a dead producer, every sweep's: its containers, found by its lock, then it."""
     ours = None if compose_overlay is None else str(compose_overlay).lower()
+    dead = await asyncio.to_thread(_dead_producers, home)
+    if not dead and ours is None:
+        return
+    try:
+        code, out = await docker(
+            "ps", "-a", "--format",
+            f'{{{{.ID}}}}|{{{{.Label "{_PRODUCER_LABEL}"}}}}|{{{{.Label "{_COMPOSE_FILES_LABEL}"}}}}',
+        )  # fmt: skip
+    except FileNotFoundError:  # no docker here: no container to reap
+        code, out = 0, ""
+    if code != 0:
+        raise OSError(f"`docker ps` could not list what a dead producer left: {out[-300:]}")
     by_token: dict[str, list[str]] = {}
     gone: list[str] = []
-    for line in out.splitlines() if code == 0 else []:
+    for line in out.splitlines():
         cid, _, rest = line.partition("|")
         label, _, compose_files = rest.partition("|")
         if not cid:
@@ -182,13 +191,11 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
         # Unlabelled yet naming our overlay is nobody's: nothing this code starts is unlabelled.
         elif ours is not None and ours in compose_files.lower():
             gone.append(cid)
-    dead = await asyncio.to_thread(_dead_producers, home)
     gone += [cid for token in dead for cid in by_token.get(token, [])]
     if gone:
         code, out = await docker("rm", "--force", *gone, timeout=120)
         if code != 0:
-            logger.debug("could not remove what earlier runs left: %s", out[-300:])
-            return
+            raise OSError(f"`docker rm` could not remove what a dead producer left: {out[-300:]}")
         logger.info("removed %d container(s) left by a run that is gone", len(gone))
     await asyncio.to_thread(_forget_producers, home, dead)
 

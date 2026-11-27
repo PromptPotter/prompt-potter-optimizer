@@ -29,11 +29,6 @@ row it closes.
   re-checks admission and spawns it when the slot frees; `application/CLAUDE.md` § Run admission's rule ("a queued job's intent
   never leaves the process that authenticated it") is restated in the same link. **Rides with:**
   admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
-- **A partial head-to-head mint leaves its arms unstamped** (a code review; w8-launch closed its two
-  siblings): `jobs/mint.py::_mint_all` mints arm by arm and raises with the arms before it on disk,
-  owned by no opening (`jobs/launcher/head_to_head.py::AdmittedHeadToHead.minted` owns a cycle only once every arm
-  minted), so a retry refuses `arm_taken`. Action: the mint answers each arm as it lands, so its
-  opening owns and stamps it. **Re-test:** a mint raising at its second arm leaves the first stamped.
 
 ### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
@@ -64,12 +59,13 @@ row it closes.
   `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
   fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
   `git grep -n "class EscalationLayer" -- promptpotter` is empty.
-- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
-  `runner/round.py::_walk_population` merges `CatchUpPool.caught` after `run_walks`, and a catch-up
-  walk records no pass (`BACKFILL` is no arm role). Action: a caught-up cell is a recorded row of its
-  prior's arm (its walk continues the prior's pass, `held` = the prior's rows). **Rides with:** rk-opt's
-  next chain. **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the close
-  counts the cells `rows(leader)` holds.
+- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**: a
+  proposed prior's catch-up continues its arm's pass (w8-spine2). Open: the PARENT's catch-up still
+  records as `BACKFILL`, no arm, because its read (`node_context.py::measure_as_parent`) opens after
+  the walks; announcing its arm first moves potter's and capo-pobb's behaviour keys
+  (`decisions.ledger.arms`). No offline leg catches up a proposed prior (all 19 `race_catch_up`
+  records are the parent's). **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the
+  close counts the cells `rows(leader)` holds; `git grep -c BACKFILL -- promptpotter` is 0.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
   fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
@@ -130,31 +126,6 @@ row it closes.
   walk. Action: a campaign is a subject its writers stamp, and a sandbox is found off its owner's
   stamp, never a walk. **Rides with:** a version chain of its own. **Re-test:** a mounted subtree
   holds its ETag while another campaign of its store appends; `draftRead`'s subject is not `store:`.
-
-### passes-6 (what passes-5 and holders-3 left at landing 54)
-
-passes-5 landed a pause standing for its hold and one reader of a reply's usage; holders-3 `reindex`'s
-plan/apply pair and a temporary locked through its replace. Left:
-
-- **An arm's walk fills by key, not by what a row is** (small-13; re-read by w8-spine and a Fable
-  read, 2026-11-27): there are two rules for two concepts, and one of them is unnamed.
-  `CellSheet.merged` (`domain/scoring.py`) is the STANDING fold, joining separate readings, and the
-  later scored row wins. `ArmWalk.continued` (`bench/cycle.py`, `where(_unheld)`) and
-  `QueryLoopState.running` (`scoring/query_loop.py`) are the WALK FILL, where a re-read adds only
-  the cells the walk lacks. Making `merged`'s rule the only one moved every potter leg's elections
-  and a behaviour key, because a replay (`cached=True`) would displace the paid row that
-  `MemberRows.bought` reads. So position is the wrong axis. Root: the walk fill is named once
-  (`CellSheet.filled_from`, called by both), and it keeps a measured row over its replay and a
-  scored row over an errored one, in either order. Suspected sites where position decides today:
-  - `runner/round.py:590-593`: catch-up cells are bought before `measure_as_parent` replays them,
-    so the held row is the replay;
-  - `_unheld` holds an errored row against a later scored one, while `CatchUpPool._unstarted`
-    re-buys errored cells;
-  - `runner/round.py:898-899`: the same two sheets are joined under both rules on adjacent lines,
-    so the election reads one rule and the filed walk the other.
-  Expect a behaviour key to move; name old→new. **Re-test:** an arm that buys X and is re-read as
-  parent on X files X with `cached=False` and `bought` unchanged, and a held errored X re-read as
-  scored files the scored row, the same sheet the election read.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
@@ -494,17 +465,13 @@ and derived the knob couplings from each member's draws and the escalation ladde
   382 of ~10k a 25-s run), an immediate re-open included, which is a silent wrong read. **Held:** a
   design whose reader never reads a present file as absent; the box (Linux) is untouched.
   **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes and 0 absent reads.
-- **Run data is stat'ed bare outside `store/io.py`**: five
-  `.stat()` sites (`optimizer_manifest.py:91`, `event_stream.py:53`,
-  `run_state.py:74`, `measurement_archive.py:475`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
-  past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),
-  so every derived path carries it; `scripts/processes.py::long_path` (`a46a02722`, the gate's cache root
-  alone) is a second speller beside `store/io.py::_long_path`, and goes with it, or its definition says
-  why the gate spells before the venv exists. **Rides with:** rel 2, local and last, so the long form
-  moves every derived path on the assembled tip; its Owns gain `config/paths.py` (box's file before, § 5),
-  `store/io.py::_long_path`, `scripts/processes.py::long_path` and the `.stat()` and `os.scandir` reads
-  of the files the re-test names. **Re-test:** `git grep -lE "\.stat\(\)" -- promptpotter` names no file
-  outside `store/io.py`.
+- **Run data is read bare outside `store/io.py`** (w8-store: every `.stat()` and listing now reads
+  through it): 140 `is_file`/`is_dir`/`exists`/`glob`/`iterdir`/`read_text`/`read_bytes` calls in 53
+  files (`store/layout.py::cycle_ledgers` among them) read a long path bare, so a ledger past `MAX_PATH` reads
+  as absent. Root: the data root spelled once in its long form (`config/paths.py`), so every derived
+  path carries it. **Held:** on Windows it moves every persisted path a job file holds
+  (`domain/job.py::Job`'s `workspace`, a SURVIVOR), so it lands with that file's one-shot migration. **Re-test:** on
+  the Windows desk, a campaign under a home 200 characters deep lists, reads and resumes.
 - **Unverified, for the next change to each file**: `shell/CriticalAlertBanner` builds `Said` rows in the
   browser; `ViewTabs.show` is many `open`/`close` calls, not one workspace act;
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
@@ -590,10 +557,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
   **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
-- **`content_filtered` is fatal on one sighting, though a filter trips on one row's text**
-  (small-6's report): `domain/results_health.py::classify_result` keeps it on the fast path, against
-  its own law (a fatal code is deterministic for the whole config). **Held:** a measured case.
-  **Re-test:** an arm filtered on 1 of 18 rows is graded, never cut.
 - **`l1_critique` on minimax runs a cluster's id list to `max_tokens`** (three sightings 2026-11-18,
   `finish=length`, healed by `clean_reask` at a full call's price): ANY cluster's `sample_ids`
   repeats ids without end (outer `908474` round 1 cycles 12 ids in cluster 0; inner `1544dc`'s
@@ -669,7 +632,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 - **Every pass is a recorded pass (root C1)**: w8-spine landed its flag half (every pass's cells reach
   the ledger as `SampleScoredRecord`s). Open: overlap keeps records of its own (`.overlap` 26/15,
-  `RoundRestatedRecord` 19/6, `CatchUpPool` 7/3), and a catch-up walk records as `BACKFILL`, no arm.
+  `RoundRestatedRecord` 19/6, `CatchUpPool` 7/3), and the parent's catch-up walk records as `BACKFILL`, no arm.
   Root: a pass that measures is a record. **Closes:** **Overlap and repair keep their own pass families**,
   **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**.
   **Run data:** `RoundStatement` reshapes. **Size:** medium; it edits `runner/round.py` and `views/readout.py`.
@@ -755,8 +718,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 - **A pressed L4 outer run does not repeat** (tw-j): two pressed runs of the e2e L4 fixture differ in the
   outer `L1Critique/Generate_0,_1` requests and the inner decisions, while unpressed runs repeat, so the
-  outer's record hangs on which concurrent inner campaign files first. Root: an outer phase reads its
-  inners in an order the outer owns, not their completion order. **Rides with:** wave 6 (L4).
+  outer's record hangs on which concurrent inner campaign files first. Root (w8-l4 reproduced it: the
+  outer is deterministic; the world is not): `scripts/offline_run.py::_asker` names an inner campaign by
+  `determinism.seed` plus overlay, not the seat's `run_seed`, so seats on one arm share a turn counter
+  and, under a press, call numbering follows arrival. Keying by `run_seed` moves `estimator` (named
+  old→new). **Re-test:** two pressed runs of a ≥2-search-seat L4 leg read the same inner requests.
   **Re-test:** two pressed runs of `offline_run.py --l4` read the same outer requests.
 - **No L4 fixture buys an outer cell ahead, so an L4 outer ending is unread** (tw-j link 1):
   `query_loop.py`'s endings skip `land()` when `phase.cancels`, the connector's `cancel_stops_billing`,
@@ -800,10 +766,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   shared with `repairable_holes`'s row: `ErrorCategory` does not say which errors are fillable.
   **Rides with:** wave 6. **Re-test:** `offline_run.py --charged` crossed-resumed
   `harness.backend_cells` equals crossed's, or the retry is a decision in `docs/decisions.md`.
-- **No leg's L2 carries a steer** (tw-j2): `optimizers/potter/records.py::L2Memory.steered_onto`, which
-  `potter/members.py:442` calls when an L2 result names a steer, runs in no leg. At the base only a test
-  that seated the steer itself called it, and that test was deleted. Door: the world's L2 reply names a
-  `steer`. **Rides with:** wave 6. **Re-test:** offline `--coverage` reaches `records.py:79`.
 - **23 parked facts wait for a world door** (tw-j2; each is kept as a test until its door exists):
   - test_identity I2: a dataset with two prompt nodes.
   - I3, I4: a parent on fewer rows than its frontier.
@@ -880,15 +842,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   at $0.041 spent of a $0.30 face (hold bound $0.06). Unchecked whether the run's own ceiling was
   worded as the host's allowance. **Rides with:** money. **Re-test:** a run halted on its own
   ceiling names that ceiling, never the allowance.
-- **A dead producer's lock and its containers are reclaimed by two owners**: the box's `jobs/producers/`
-  holds 15 `.lock` files, one per past producer pid, with nothing listed live: only
-  `docker_host.py::reap_dead_producers` forgets a jobless producer's lock, and it runs only on a machine
-  step. Yet `application/jobs/registry.py::JobRegistry.reap_orphans` unlinks a dead producer's lock when it releases its
-  job, and `reap_dead_producers` finds a dead producer's containers BY that lock, so a producer that
-  died holding a job leaves its containers unreaped. A sweep that unlinks every unheld lock (w7-small
-  link 3, not landed) widens that leak to every dead producer. Root: one reclaim of a dead producer
-  removes its containers and then its lock, and every sweep calls it. **Re-test:** a producer killed with
-  a job and a labelled container leaves neither its lock nor its container after one sweep.
 - **`promptpotter-self`'s ε 0.30 is priced on the retired pairwise statistic**: its comment weighs a
   false cut against a false survival on the pairwise p_best (and a 0.15 default), but since
   5cf502c7b ε reads a field share that a 3-variant round ties at 0.25, so 0.30 cuts a tied leader
@@ -912,64 +865,24 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 ### wave-7 · what the w7 chains filed (2026-11-27)
 
-- **The masthead's candidate count names no count** (w7-line): the masthead still recounts candidates
-  beside `ServedDashboard.line`, so its number and the bars' can disagree on what they count (arms
-  scored over the line, or C0 plus every candidate). Door: a served count beside the line, named for
-  what it counts, read by the masthead. **Re-test:** the masthead derives no count of its own.
-  Blocked (w7-rows2): the masthead's figure is the hierarchy's `RunStanding.candidates` (the sum of
-  `candidates_scored`), which `run_standing.py` uses for lift per candidate. Which count is served
-  is the operator's call.
 - **`cycle_reads.py` copies the live round's candidates into a second shape** (w7-line):
   `application/cycle_reads.py:136` copies `current_round.candidates` whole. Door: its reader takes
   the served line. **Re-test:** no copy of `current_round.candidates` outside the fold. Blocked
   (w7-rows2): `LineArm` lacks `prompts`, `resolved_params`, `validation_failures` and
-  `evidence_grounding`, which `ServedArm` carries, so the line carries `ServedArm` first.
+  `evidence_grounding`, which `ServedArm` carries, so the line carries `ServedArm` first. w8-web: the
+  closed line is banked as `DashboardCandidate` with no prompts, so serving `ServedArm` there banks
+  every arm's prompts. The door is the round read serving its unfiled arms from the fold's own method.
 - **`ReviewReading.feedback` has no reader** (w7-text): `potter/l1.py::review_reading` fills it, but the
   critique reaches the readout as the round block's note. Deleting it moves capo-pobb's behaviour key,
   so it waits for a planned re-key. **Re-test:** `git grep -n "feedback=\[" -- promptpotter/application/optimizers/potter/l1.py` is empty.
 - **A bulletin dismissal has no account deleter to ride** (w7-host): no code deletes an account, so
   "an account's deletion drops its dismissals in the same write" has no writer. It lands with the
   account deleter (`bulletin_board.py` drops `dismissed[account_id]`).
-- **`open_cell` resolves a whole dataset to compile its scorer** (w7-res,
-  `measurement_log.py::open_cell`): it only compiles the scorer and refuses an unknown name. Root: the
-  archive carries its dataset's config. **Design pick (w7-res3 stopped):** which record carries it
-  (`ArchiveEntry`, `FiledAnswer`, or the bank's record), what it carries (the scoring block or the
-  whole `CampaignConfig`), and whether a cell is graded under the config as filed or as it is today.
-  `domain/sample.py::ArchiveConfig` says it holds "nothing any dataset or answer says of it". Every choice is a
-  run-data wipe, and none touches a survivor. **Not the bank (w8-resolve census):** a bank is keyed by
-  its rows alone. `tenant_dataset_store.py::put_bank` keeps the first write of equal rows, and
-  `relabel` / `cuts.jsonl` share one bank across names, so a scoring block there would grade under its
-  first writer. Compiling also needs `judges` beside `scoring`. Root: the answer carries the scoring
-  it was graded under (`FiledAnswer`), and then the read route's `{name}` goes unread. **Re-test:**
-  `open_cell` resolves no dataset.
 - **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
   inside a gate it starts beside no check (`gate.py::Check`'s `started`), and `npm test` outside one
   queues behind the clone's lock (`scripts/queue_then.py`) rather than sharing its hard-coded 90 s
   worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127
   runs). **Re-test:** five looping builders plus one gate on the Windows desk reap none.
-- **`io.py::_SUBJECTS` is a process-global registry** (w7-ver2; w7-rows4's door backed out): the
-  subject roots a write stamps are declared into a module set by each `Stores` and `JobRegistry`
-  built (`stamped_subject`), so a write in a process that built no owning store stamps nothing.
-  w7-rows4 read the subject off the path by NAME (nearest ancestor named like a workspace, `jobs` or an
-  archive home). That is unsound: a workspace holds user-named directories (`datasets/<name>`), so a
-  dataset named `jobs` or `projects` takes its workspace's stamps and its readers serve stale data;
-  matched root-first, an install path through a `projects` directory misfires instead. Backed out at
-  landing. Root: a subject is matched relative to the configured data root (`layout.py` names each
-  root under it), never by a name anywhere on the path. **Re-test:** `git grep -c "stamped_subject("
-  -- promptpotter` is 0, and a write under `datasets/jobs/` moves its workspace's version.
-- **Can a `promptpotter-self` panel seat run an optimizer other than potter?** (w7-tests3, open
-  question): `panel.inner_campaign.optimization.nodes` (`adaptive_queue`, `l1_generate`, `escalation`)
-  lays potter's nodes over each seat's inner campaign. w7-tests3's mixed test panel (a CAPO seat
-  beside potter's) had to narrow a copy per seat to open. If a seat may select its own optimizer,
-  this is a defect: the panel's geometry needs a per-optimizer layer, or the seat's optimizer owns
-  its nodes. If seats are potter by design, the family says so and refuses any other. **Re-test:** a
-  panel with a CAPO seat either opens with no potter node in that seat's config, or is refused by name.
-- **A subject's stamp grows a byte per write** (w7-ver2): `io.py::stamp` appends one byte to the
-  subject root's `.stamp` per write, and `io.py::stamp_of` reads `(st_ino, st_size)`, sound only
-  because the one inode only grows; rotating or truncating it races the `O_APPEND` writers and can hand
-  a reader a version it held before. Door: a compaction that keeps the version monotonic (a new inode
-  whose first read is never an earlier pair, taken under the subject's lock). **Re-test:** a store at
-  1M writes holds a stamp under 4 KiB, and no reader sees its version repeat across the compaction.
 
 ## Held — no wave-4 chain yet
 

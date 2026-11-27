@@ -41,7 +41,7 @@ describe("usePickedPoint — a point on a round still scoring", () => {
       const path = new URL(url, "http://x").pathname;
       asked.push(path);
       if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
-      if (path.endsWith("/hierarchy")) return Response.json({ entries: [] });
+      if (path.endsWith("/hierarchy")) return Response.json({ entries: [], docked: [] });
       if (path.endsWith("/rounds/1")) return Response.json(SCORING);
       return new Response(null, { status: 404 });
     });

@@ -441,7 +441,7 @@ class RaceStandingRecord(CycleRecord):
 
 
 class RaceCatchUpRecord(CycleRecord):
-    """The catch-up walks one just-measured cell of ``arm`` took: no pass records their cells."""
+    """The catch-up walks one just-measured cell of ``arm`` took, each prior's pass continued."""
 
     record_type: Literal["race_catch_up"] = "race_catch_up"
     round: int
