@@ -6,7 +6,8 @@ once, one batch: batch 1 was w8-gate, w8-launch, w8-resolve, w8-spine and w8-doo
 is w8-store, w8-launch2, w8-resolve2, w8-web and w8-spine2; batch 3 runs beside it (w8-l4, w8-box,
 w8-tests2, w8-resolve3). Batch 4 (on release/next eb7cf8e0c, with store, launch2, resolve2 and
 web landed): w8-job, w8-launch3, w8-web2, w8-tests3, w8-box2, running beside w8-spine2, w8-l4 and
-w8-resolve3. Each owns the paths its brief lists.
+w8-resolve3. Batch 5 (on release/next 3bb299ac4): w8-launch4, w8-fork, w8-wallet and w8-store2,
+running beside w8-web2, w8-tests3 and w8-spine3. Each owns the paths its brief lists.
 
 **BASELINE:** the surface-ledger check passes a row at or under a ceiling this branch raised. A
 chain that grows `package_lines` raises it in the BASELINE with the reason, never reports it as
