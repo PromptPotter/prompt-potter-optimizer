@@ -208,10 +208,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/27 · rec
 
-- **Fields written, never read: 13 left** (`scripts/complexity_ledger.py::_unread_fields`, the
-  `p_unread_fields` ceiling): a pack's citation (`Cited` 4, `Reported` 4), the PROV export
-  (`LineageEntity` 2, `PromptExport` 2), `NodeInput.variables`. Action: each goes, or names its
-  reader in `_READ_UNSEEN`. **Re-test:** the ceiling is 0.
 
 ### webd (the edge tail, after lw)
 
@@ -537,10 +533,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**.
   **Run data:** `RoundStatement` reshapes. **Size:** medium; it edits `runner/round.py` and `views/readout.py`.
   **Re-test:** the two rows' own.
-- **A record holds no value another record derives (root C2)**: w8-spine3 took the invalid reason and the
-  envelope's diagnostics; w8-spine4 the running fold (a reader folds a walk's rows under its
-  `FoldBasisRecord`) and the reading's union (`ReadPair` | `UnreadPair`). Open, adjacent: **Fields
-  written, never read: 13 left**. **Run data:** every link; behaviour keys move. **Size:** medium.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,
@@ -554,7 +546,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   "banks twice" where a reader forgets (`mirrored` 14/6). Root: the outer run's cost is a fold over its
   inner ledgers. Under **A nested spend book is wired beside the cell that nests it** and
   **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**. Reshapes run data.
-  **Rides with:** root C2's chain. **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
+  **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
 - **A line's fold is stated once and read by one keyed read**: `infrastructure/store/campaign_store/ledger_scan.py`
   holds 21 `scan_` functions; `for span in spans` is spelled 16/6; `scan_cell_formula` (`:827`) hand-merges the
   fold `scan_cycle_facts` (`:823`) reads on one ledger. Which ledgers answer for a hop (its cycle, its line,
@@ -564,7 +556,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `git grep -c "for span in spans" -- promptpotter` falls from 16.
 - **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
   `_Money`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
-  its own beside the spend book. **Rides with:** root C2's chain. **Re-test:**
+  its own beside the spend book. **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:**
   `git grep -n "^class Spent\|^def money_on" -- promptpotter/infrastructure/store/read_model.py` is empty.
 - **A protocol with one implementation**: `read_model.py:409 Projected` exists so the index need not import
   `infrastructure/projections/base.py::Projection`, its only implementer. Root: the index takes `Projection`
@@ -745,9 +737,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `evidence_grounding`, which `ServedArm` carries, so the line carries `ServedArm` first. w8-web: the
   closed line is banked as `DashboardCandidate` with no prompts, so serving `ServedArm` there banks
   every arm's prompts. The door is the round read serving its unfiled arms from the fold's own method.
-- **`ReviewReading.feedback` has no reader** (w7-text): `potter/l1.py::review_reading` fills it, but the
-  critique reaches the readout as the round block's note. Deleting it moves capo-pobb's behaviour key,
-  so it waits for a planned re-key. **Re-test:** `git grep -n "feedback=\[" -- promptpotter/application/optimizers/potter/l1.py` is empty.
 - **A bulletin dismissal has no account deleter to ride** (w7-host): no code deletes an account, so
   "an account's deletion drops its dismissals in the same write" has no writer. It lands with the
   account deleter (`bulletin_board.py` drops `dismissed[account_id]`).

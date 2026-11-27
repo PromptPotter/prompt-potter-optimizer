@@ -42,26 +42,18 @@ class Work(FrozenModel):
 
 class Reported(FrozenModel):
     # In the work's own units as it prints them; a lift it does not print stays None.
-    task_family: str | None
-    benchmark: str | None
-    evaluated_on_models: tuple[str, ...]
     score: float | None
     lift: float | None
-    baseline: str | None
 
 
 class Cited(FrozenModel):
     kind: Literal["cited"]
     # A key of the pack's `works`, an arXiv id; it is the block's source.
     work: str
-    locator: str
-    verbatim: bool
     # The works the text reached the pack through, nearest last.
     via: tuple[str, ...]
     technique_family: str
     role: str
-    evolved_or_authored: Literal["evolved", "authored", "selected"]
-    evolved_on_model: str | None
     reported: Reported
     notes: str | None
 

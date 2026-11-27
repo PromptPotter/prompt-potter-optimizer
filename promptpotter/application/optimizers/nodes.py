@@ -244,7 +244,6 @@ class ReviewReading:
     check_ids: tuple[str, ...]
     verdict: ReviewStat | None
     stats: tuple[ReviewStat, ...]
-    feedback: list[str]
 
 
 @dataclass(frozen=True)

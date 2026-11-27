@@ -12162,11 +12162,6 @@
               }
             ],
             "title": "Template Name"
-          },
-          "variables": {
-            "additionalProperties": true,
-            "title": "Variables",
-            "type": "object"
           }
         },
         "title": "NodeInput",

@@ -420,7 +420,6 @@ async def answer[M: BaseModel](
         trace_meta={
             "template_name": context.node,
             "template_fields": template.prompt_fields(),
-            "variables": filled.prompt_vars,
         },
         temperature=temperature,
     )

@@ -446,7 +446,9 @@ BASELINE = {
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
     # w8-spine4 (−14): `RoundAudit.interrupted`, `SampleFoldRow.sp`, `ArchiveReport.conflicts` go;
     # seven fields read by a door no name match sees are marked with it (`_READ_UNSEEN`).
-    "p_unread_fields": 13,
+    # w9-fields (−13): the pack's citation, `NodeInput.variables` and `PromptExport.tool` go; the PROV
+    # export's three fields name their readers (`_READ_UNSEEN`).
+    "p_unread_fields": 0,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
     # withdraw-bulletin (+1): `commands/bulletin_acts.py`, the one handler module of the three bulletin
@@ -764,6 +766,15 @@ _READ_UNSEEN: dict[tuple[str, str], str] = {
     ("VerifySaturated", "already_measured"): "its sentence, `run_records.py::VERIFY_WORDS`",
     ("ErrorRecord", "traceback"): "the operator, reading the ledger line",
     ("MemberAddress", "pass_role"): "`scoring/paired.py::read_pair`'s address equality",
+    ("PromptExport", "artifact_version"): "`export.py::parse_prompt_export`, by `raw.get`",
+    (
+        "LineageEntity",
+        "was_derived_from",
+    ): "a reader of `export.json`, as PROV-O's `wasDerivedFrom`",
+    (
+        "LineageEntity",
+        "was_generated_by",
+    ): "a reader of `export.json`, as PROV-O's `wasGeneratedBy`",
     ("PipelineViewEdge", "from_"): "the browser, as its alias `from` (`PipelineFlow.tsx`)",
     **{
         ("OptimizerPromptTemplate", f): "`optimizer_template.py::prompt_fields`, by its roster"

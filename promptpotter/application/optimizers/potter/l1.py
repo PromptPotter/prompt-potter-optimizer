@@ -455,7 +455,6 @@ def review_reading(
             ReviewStat("stagnation_max", stats.stagnation_max),
             ReviewStat("l2_fires", stats.l2_fires),
         ),
-        feedback=[format_l1_critique_for_prompt(r.closed_state.feedback()).strip() for r in rounds],
     )
 
 

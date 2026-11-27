@@ -39,7 +39,6 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
         input=NodeInput(
             template_name=payload.get("template_name"),
             template_fields=payload.get("template_fields") or {},
-            variables=payload.get("variables") or {},
             messages=[] if rendered else payload.get("messages") or [],
         ),
         output=NodeOutput(

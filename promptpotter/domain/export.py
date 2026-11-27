@@ -120,7 +120,6 @@ class PromptExport(_ProvModel):
 
     context: dict[str, Any] = Field(default=PROV_CONTEXT, alias="@context")
     artifact_version: int
-    tool: str
     tool_version: str
     campaign_id: str
     cycle_id: str
@@ -194,7 +193,6 @@ def build_prompt_export(
     prompts = {} if individual is None else individual.scored_prompts(schema, framing, demo=demo)
     return PromptExport(
         artifact_version=EXPORT_ARTIFACT_VERSION,
-        tool="promptpotter",
         tool_version=tool_version,
         campaign_id=campaign_id,
         cycle_id=cycle_id,

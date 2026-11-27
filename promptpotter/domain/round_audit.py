@@ -27,7 +27,6 @@ class NodeInput(FrozenModel):
 
     template_name: str | None = None
     template_fields: dict[str, Any] = Field(default_factory=dict)
-    variables: dict[str, Any] = Field(default_factory=dict)
     messages: list[dict[str, Any]] = Field(default_factory=list)
 
 

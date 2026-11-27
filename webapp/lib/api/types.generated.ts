@@ -2248,7 +2248,6 @@ export interface NodeBlock {
 export interface NodeInput {
   template_name: string | null;
   template_fields: Record<string, unknown>;
-  variables: Record<string, unknown>;
   messages: Record<string, unknown>[];
 }
 
@@ -5921,7 +5920,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "6f39b755735a4884";
+export const SERVED_CONTRACT = "d8e88d441f7e9998";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
