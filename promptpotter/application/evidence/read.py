@@ -113,11 +113,9 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import (
-    CampaignLayout,
-    CycleLayout,
     campaign_cycles_dir,
 )
-from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
@@ -560,9 +558,8 @@ def _at(stores: Stores, spec: Subject) -> _Located | None:
 
 
 def _files_read(at: _Located) -> Hashable:
-    """A fork's inherited prefix is unsigned on purpose: nothing before a cut is rewritten."""
-    signed = (CampaignLayout(at.campaign_dir).manifest, CycleLayout(at.cycle_dir).ledger)
-    return (at.stores.archive.signature(), *(file_sig(path) for path in signed))
+    """Its store's stamps: the archive, the manifest and the ledger it reads are its writers'."""
+    return at.stores.stamps()
 
 
 def _answers(at: _Located, spec: Subject) -> bool:

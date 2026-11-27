@@ -7,7 +7,6 @@ from pydantic import Field
 from promptpotter.domain.bulletin import Bulletin
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import bulletin_board
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.identity.grants import default_identity_paths
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -43,7 +42,7 @@ def account_bulletins(stores: Stores) -> AccountBulletins:
 
 
 def post_bulletin(stores: Stores, *, text: str, pops_up: bool) -> Bulletin:
-    if not is_host(stores.identity):
+    if not stores.identity.host:
         raise PayloadInvalidError(
             "Only whoever runs this box posts a bulletin.", code="bulletin_posted_by_host"
         )

@@ -74,6 +74,7 @@ from promptpotter.domain.spend import (
     usd_text,
 )
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
+from promptpotter.infrastructure.run_state import producer_stamps
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     campaign_spend,
@@ -81,7 +82,8 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
-from promptpotter.infrastructure.store.read_model import Moment, file_sig
+from promptpotter.infrastructure.store.io import stamp_of
+from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
 
@@ -557,34 +559,41 @@ def unstarted_entry(
     )
 
 
-def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
-    """Stats only: every input an entry reads in *held* — its reader's kinds (the acts it is
-    offered), run state, the archive rows its bench and lens grade, the ruler, the command log, each
-    dataset's scorer — so a client holding it is answered unread."""
-    stores = {s.base_dir: s for s in held}.values()
-    archives = {s.archive.base_dir: s.archive for s in stores}.values()
-    rulers = sorted({s.ruler.path for s in stores})
-    definitions = sorted(
-        {
-            (s.base_dir, c.dataset_name): s
-            for s in stores
-            for c in s.campaigns.list_campaigns(lifecycle="all")
-        }.items(),
-        key=lambda item: (str(item[0][0]), item[0][1]),
+def store_version(stores: Stores) -> tuple[object, ...]:
+    """The `store:` subject's version: the stamps its writers left (its campaigns and ledgers, and
+    the account's ruler, datasets, charges and archive it reads), and each producer it holds, whose
+    liveness and beat no write marks, and each definition its campaigns name, which no writer
+    stamps (`dataset_access.py::definition_version`)."""
+    jobs = JobRegistry.attach(stores.jobs_dir)
+    return (
+        *stores.stamps(),
+        *(definition_version(stores, name) for name in stores.campaigns.dataset_names()),
+        *(
+            (job.job_id, *producer_stamps(stores.campaigns.cycle_dir(job.hop), stores.jobs_dir))
+            for job in jobs.list_holding_spend()
+            if job.workspace == str(stores.base_dir)
+        ),
     )
+
+
+def account_version(stores: Stores) -> tuple[object, ...]:
+    """The `account` subject's: what the account filed (its command log and workspace state, a
+    grant) and its drafts. A run's appends move neither."""
+    return (stamp_of(stores.account_state_dir), stamp_of(stores.account_drafts_dir))
+
+
+def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
+    """Every subject an entry in *held* reads, at its version, and its reader's kinds (the acts it
+    is offered), so a client holding it is answered unread."""
+    stores = {s.base_dir: s for s in held}.values()
     return (
         *{str(s.identity.user_id) for s in stores},
         # A grant or a token's scope moves no store, yet every offer the body serves.
         *{filable(s.identity) for s in stores},
-        *(s.campaigns.version() for s in stores),
-        *(s.drafts.version() for s in stores),
+        *(store_version(s) for s in stores),
+        *{account_version(s) for s in stores},
         # A Start's stage moves no draft file: its own fact, read only where a draft could be held.
         *(sorted(draft_starts(s).items()) for s in stores if s.drafts.draft_ids()),
-        *(archive.version() for archive in archives),
-        *(file_sig(path) for path in rulers),
-        # The run state an entry serves reads its inbox, which every command filed moves.
-        *(file_sig(path) for path in sorted({s.commands.path for s in stores})),
-        *(definition_version(s, name) for (_, name), s in definitions),
     )
 
 

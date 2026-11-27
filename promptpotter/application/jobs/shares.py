@@ -45,16 +45,18 @@ def share_campaign_ceiling(
     stores: Stores,
     job_registry: JobRegistry,
     job: Job,
+    campaign_id: str | None,
     hop: CycleHop | None,
     meter: CeilingMeter,
 ) -> Budget:
-    """Other live cycles' holds count as spent, so a fork's parent holds its share until its pause is recorded."""
+    """Other live cycles' holds count as spent, so a fork's parent holds its share until its pause
+    is recorded. A fork not cut yet (*hop* ``None``) is shared beside every live cycle."""
     money = Budget(usd=ceiling.usd, tokens=ceiling.tokens)
-    if hop is None:
+    if campaign_id is None:
         return money
-    _refuse_unshared(stores, job_registry, money, hop=hop, job=job)
-    beside = _held_by_siblings(stores, job_registry, hop, meter)
-    spent = stores.campaigns.metered_spend(hop.campaign_id, meter)
+    _refuse_unshared(stores, job_registry, money, campaign_id=campaign_id, hop=hop, job=job)
+    beside = _held_by_siblings(stores, job_registry, campaign_id, hop, meter)
+    spent = stores.campaigns.metered_spend(campaign_id, meter)
     left = money.less(spent, beside)
     if left.run_out:
         held = (
@@ -72,7 +74,8 @@ def share_campaign_ceiling(
             ),
             next_acts=(NextAct(kind="set-limits"),),
         )
-    return left.bound_over(stores.campaigns.cycle_metered(hop, meter))
+    own = NOTHING_METERED if hop is None else stores.campaigns.cycle_metered(hop, meter)
+    return left.bound_over(own)
 
 
 def cycle_share(stores: Stores, job: Job) -> Budget:
@@ -93,10 +96,14 @@ def _held(share: Budget, own: Budget) -> Budget:
 
 
 def _held_by_siblings(
-    stores: Stores, job_registry: JobRegistry, hop: CycleHop, meter: CeilingMeter
+    stores: Stores,
+    job_registry: JobRegistry,
+    campaign_id: str,
+    hop: CycleHop | None,
+    meter: CeilingMeter,
 ) -> Budget:
     held = NOTHING_METERED
-    for job in _live_on(stores, job_registry, hop.campaign_id):
+    for job in _live_on(stores, job_registry, campaign_id):
         if job.hop != hop:
             own = stores.campaigns.cycle_metered(job.hop, meter)
             held = held.plus(_held(cycle_share(stores, job), own))
@@ -113,12 +120,18 @@ def _live_on(stores: Stores, job_registry: JobRegistry, campaign_id: str) -> lis
 
 
 def _refuse_unshared(
-    stores: Stores, job_registry: JobRegistry, money: Budget, *, hop: CycleHop, job: Job
+    stores: Stores,
+    job_registry: JobRegistry,
+    money: Budget,
+    *,
+    campaign_id: str,
+    hop: CycleHop | None,
+    job: Job,
 ) -> None:
     for other in job_registry.list_holding_spend(user_id=job.user_id):
         if (
             other.job_id == job.job_id
-            or not other.on_campaign(stores.campaigns.workspace, hop.campaign_id)
+            or not other.on_campaign(stores.campaigns.workspace, campaign_id)
             or other.hop == hop
         ):
             continue

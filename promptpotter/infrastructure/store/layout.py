@@ -30,6 +30,11 @@ def dataset_id_prefix(name: str) -> str:
     return validate_dataset_name(name).replace("/", ".")
 
 
+def dataset_of_campaign_id(campaign_id: str) -> str:
+    """The dataset a campaign id names: its `dataset_id_prefix`, then ``__`` and its own suffix."""
+    return campaign_id.rpartition("__")[0].replace(".", "/")
+
+
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 

@@ -98,6 +98,7 @@ class Door(StrEnum):
 
 
 _MINTS_THROUGH_CHECKIN = "the browser mints through a check-in"
+_HOST_ADMINISTERS = "the host administers from its terminal or its bot"
 
 # How a door answers a kind: inline with its applied answer, or as a task its door tracks.
 type Answering = Literal["inline", "task"]
@@ -398,6 +399,39 @@ class CommandKind(StrEnum):
         "bulletin_acts:dismiss_bulletin",
         ACCOUNT_SELF_CAP,
         person("dismiss-bulletin"),
+    )
+    # The host's administration of who may sign in and what each account holds: its terminal and its
+    # admin bot file them, refused to any other (`account.py::require_host`), decisions § 0004.
+    BLOCK_EMAIL = (
+        "block-email",
+        "operator_acts:block_email",
+        ACCOUNT_SELF_CAP,
+        Press("block-email", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    UNBLOCK_EMAIL = (
+        "unblock-email",
+        "operator_acts:unblock_email",
+        ACCOUNT_SELF_CAP,
+        Press("unblock-email", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    GRANT_DELEGATION = (
+        "grant-delegation",
+        "operator_acts:grant_delegation",
+        ACCOUNT_SELF_CAP,
+        Press("grant-delegation", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    REVOKE_DELEGATION = (
+        "revoke-delegation",
+        "operator_acts:revoke_delegation",
+        ACCOUNT_SELF_CAP,
+        Press("revoke-delegation", host=False, no_browser=_HOST_ADMINISTERS),
+        True,
+    )
+    SET_COUPON = (
+        "set-coupon",
+        "operator_acts:set_coupon",
+        ACCOUNT_SELF_CAP,
+        Press("set-coupon", host=False, no_browser=_HOST_ADMINISTERS),
     )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
@@ -1252,6 +1286,41 @@ class DismissBulletinPayload(CommandPayload, kind=CommandKind.DISMISS_BULLETIN):
     """Dismiss one bulletin for the caller's account: it pops up no more, and the list marks it."""
 
     bulletin_id: str = Field(min_length=1, max_length=64)
+
+
+class BlockEmailPayload(CommandPayload, kind=CommandKind.BLOCK_EMAIL):
+    """Refuse every sign-in of an email on this box; only its host may."""
+
+    email: str = Field(min_length=1, max_length=320)
+
+
+class UnblockEmailPayload(CommandPayload, kind=CommandKind.UNBLOCK_EMAIL):
+    """Lift an email's block on this box; only its host may."""
+
+    email: str = Field(min_length=1, max_length=320)
+
+
+class GrantDelegationPayload(CommandPayload, kind=CommandKind.GRANT_DELEGATION):
+    """Delegate capabilities, named by a comma-separated list, from the host's account to another; only its host may."""
+
+    user_id: str = Field(min_length=1, max_length=128)
+    capabilities: str = Field(min_length=1, max_length=512)
+
+
+class RevokeDelegationPayload(CommandPayload, kind=CommandKind.REVOKE_DELEGATION):
+    """Take back an account's delegation; only the host may."""
+
+    user_id: str = Field(min_length=1, max_length=128)
+
+
+class SetCouponPayload(CommandPayload, kind=CommandKind.SET_COUPON):
+    """Set an account's coupon face: dollars and tokens, `-` leaving a unit unbounded; `afresh` starts its draw now. Only the host may."""
+
+    cli_spellings: ClassVar[Mapping[str, str]] = {"afresh": "--afresh"}
+    user_id: str = Field(min_length=1, max_length=128)
+    usd: str = Field(min_length=1, max_length=32)
+    tokens: str = Field(min_length=1, max_length=32)
+    afresh: bool = False
 
 
 class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):

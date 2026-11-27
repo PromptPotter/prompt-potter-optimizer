@@ -116,10 +116,54 @@ def _long_path(p: str | Path) -> str:
     return "\\\\?\\" + os.path.abspath(s)
 
 
+# A subject's version is stamped by its writer, once, as it writes: every write here appends one
+# byte to the `.stamp` of the nearest subject root above it, so a reader stats one file per subject
+# and walks none. A root is declared by the store that owns it, in every process that opens one.
+STAMP_FILE = ".stamp"
+_SUBJECTS: set[str] = set()
+
+
+def _spelled(path: Path | str) -> str:
+    return os.path.normcase(os.path.abspath(str(path).removeprefix("\\\\?\\")))
+
+
+def stamped_subject(root: Path) -> None:
+    """*root* is a subject: a write under it, and under no nearer root, moves its version."""
+    _SUBJECTS.add(_spelled(root))
+
+
+def stamp(path: Path | str) -> None:
+    """THE stamp of a write at *path*; a root gone with its tree stamps nothing, never re-made."""
+    at = _spelled(path)
+    while at not in _SUBJECTS:
+        if (up := os.path.dirname(at)) == at:
+            return
+        at = up
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(_long_path(os.path.join(at, STAMP_FILE)), flags, 0o600)
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    try:
+        os.write(fd, b".")
+    finally:
+        os.close(fd)
+
+
+def stamp_of(root: Path) -> tuple[int, int] | None:
+    """A subject's version: its stamp's length, which only its writers move (never a clock)."""
+    try:
+        st = os.stat(_long_path(root / STAMP_FILE))
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_size
+
+
 def unlink_robust(path: Path) -> None:
     for attempt in range(4):
         try:
             path.unlink()
+            stamp(path)
             return
         except FileNotFoundError:
             return
@@ -169,6 +213,7 @@ def rmtree_robust(path: Path) -> None:
     for attempt in range(4):
         try:
             shutil.rmtree(target, onexc=_onexc)
+            stamp(path)
             return
         except OSError:
             if attempt == 3:
@@ -217,8 +262,17 @@ def prune_empty_dirs(root: Path) -> None:
         if current != top:
             below.append(current)
     for current in reversed(below):
-        with contextlib.suppress(OSError):
-            os.rmdir(current)
+        remove_bare_dir(current)
+
+
+def remove_bare_dir(path: Path | str) -> None:
+    """*path* removed once nothing but its subject's stamp is left in it: a subject with no data has
+    no version left to keep (`stamp`), so its stamp goes with it; a directory holding more stays."""
+    at = _long_path(path)
+    with contextlib.suppress(OSError):
+        if os.listdir(at) == [STAMP_FILE]:
+            os.unlink(os.path.join(at, STAMP_FILE))
+        os.rmdir(at)
 
 
 def stat_optional(path: Path) -> os.stat_result | None:
@@ -279,6 +333,7 @@ def refuse_off_workspace(workspace: Path) -> None:
 def claim_dir(directory: Path) -> None:
     """THE dir maker, by `_created`'s rule: exclusive, so a dir that stands raises `FileExistsError`."""
     _created(directory, lambda: os.mkdir(_long_path(directory)))
+    stamp(directory)
 
 
 def make_dirs(directory: Path) -> None:
@@ -335,6 +390,7 @@ def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
         raise
     if durable:
         _sync_dir(path)
+    stamp(path)
 
 
 def write_json(
@@ -646,7 +702,10 @@ def appending(path: Path, *, durable: bool = False) -> Iterator[Callable[[bytes]
     writer refusing a line the file already holds refuses it inside the write."""
     name = _long_path(path)
     with write_lock(path):
-        yield lambda line: _append_held(name, line + b"\n", durable=durable)
+        try:
+            yield lambda line: _append_held(name, line + b"\n", durable=durable)
+        finally:
+            stamp(path)
 
 
 def _append_held(name: str, data: bytes, *, durable: bool) -> range:

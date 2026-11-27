@@ -15,7 +15,6 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
-    MATERIALIZED_PANEL_FILE,
 )
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
@@ -131,17 +130,6 @@ class TenantDatasetStore:
         return _read_bank_file(
             self._bank_path(digest),
             lambda rows: {slot: banked_row(slot, rows[slot]) for slot in slots},
-        )
-
-    def held_version(self, name: str) -> tuple[object, ...]:
-        """Stats only: what moves the bank *name* holds, a bank's own rows being its hash."""
-        banks = self._base_dir / BANKS_DIR
-        return (
-            str(self._base_dir),
-            file_sig(banks),
-            file_sig(self._labels_path()),
-            file_sig(banks / CUTS_FILE),
-            file_sig(self.materialized_panel_dir(name) / MATERIALIZED_PANEL_FILE),
         )
 
     def labelled(self, label: str) -> Bank | None:

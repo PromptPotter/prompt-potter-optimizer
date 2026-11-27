@@ -39,7 +39,12 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.holders import in_flight, job_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
-from promptpotter.infrastructure.store.io import read_text_optional, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import (
+    read_text_optional,
+    stamped_subject,
+    unlink_robust,
+    write_json,
+)
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
@@ -85,6 +90,8 @@ class JobRegistry:
         staged: Mapping[Path, bytes] | None = None,
     ) -> None:
         self._dir = jobs_dir
+        # The `machine` subject: a job's move, the index and an unswept step stamp it.
+        stamped_subject(jobs_dir)
         self._staged = staged or {}
         # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
         # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.

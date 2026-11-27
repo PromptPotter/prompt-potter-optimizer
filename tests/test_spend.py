@@ -264,7 +264,6 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
@@ -1022,7 +1021,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         install_datasets_root=spec.install_datasets_root,
         shared_root=spec.shared_root,
     )
-    assert is_host(rebuilt.identity) is is_host(stores.identity) is False, (
+    assert rebuilt.identity.host is stores.identity.host is False, (
         "a signup's run, rebuilt in its own process, spent the host's own key"
     )
     assert rebuilt.base_dir == stores.base_dir, "the spawned run billed another tenant's tree"
@@ -1675,7 +1674,8 @@ def shared_ceiling(built_stores: Stores) -> _SharedCeiling:
                 stores=built_stores,
                 job_registry=shared,
                 job=job,
-                at=_at(built_stores, fork),
+                campaign=_at(built_stores, fork).campaign,
+                hop=fork,
                 step_rounds=None,
                 sends=_CELLS,
             )
@@ -1774,8 +1774,7 @@ def test_an_embedded_run_holds_a_share_at_admission_and_gives_it_back_at_its_exi
         at = _at(built_stores, fork_c)
         declared, asked = declare_run_budget(
             _budgeted(Budget(usd=1.0)).optimization.budget,
-            stores=built_stores,
-            at=at,
+            armed=built_stores.campaigns.armed_budget(at),
             requested=Budget(),
         )
         return admit_and_share(
@@ -1784,7 +1783,8 @@ def test_an_embedded_run_holds_a_share_at_admission_and_gives_it_back_at_its_exi
             stores=built_stores,
             job_registry=opening.job_registry,
             job=opening.job,
-            at=at,
+            campaign=at.campaign,
+            hop=at.hop,
             step_rounds=None,
             sends=_CELLS,
         )
@@ -2040,7 +2040,8 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
         stores=delegate,
         job_registry=shared,
         job=claim,
-        at=_at(delegate, claimed),
+        campaign=_at(delegate, claimed).campaign,
+        hop=claimed,
         step_rounds=None,
         sends=_CELLS,
     )
@@ -3642,7 +3643,7 @@ def _launch(
         stores=stores,
         job_registry=registry,
         job_id="job-a",
-        hop=None,
+        campaign_id=None,
         sends=_CELLS if door.sends is None else door.sends,
     )
 
@@ -4099,7 +4100,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
                 stores=passing,
                 job_registry=slots,
                 job_id=launch.job_id,
-                hop=None,
+                campaign_id=None,
                 sends=_CELLS,
             )[1]
         finally:
@@ -4235,7 +4236,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
         stores=forker,
         job_registry=registry,
         job_id=job.job_id,
-        hop=fork,
+        campaign_id=fork.campaign_id,
         sends=_CELLS,
     )
     assert caps.usd == pytest.approx(1.0), (
@@ -4566,7 +4567,7 @@ def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_s
         stores=resumer,
         job_registry=registry,
         job_id=job.job_id,
-        hop=at,
+        campaign_id=at.campaign_id,
         sends=_CELLS,
     )
     assert reserve.usd == pytest.approx(0.4), (

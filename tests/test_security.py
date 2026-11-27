@@ -72,6 +72,7 @@ from promptpotter.application import (
     health,
     notices,
 )
+from promptpotter.application.account import blocked_emails
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
 from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
@@ -178,6 +179,7 @@ from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
     ArmRequest,
     BankSnippetPayload,
+    BlockEmailPayload,
     CancelPayload,
     CancelQueuedRunPayload,
     CleanupEmptyCyclesPayload,
@@ -204,6 +206,7 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
     StartCheckinPayload,
     StartRunPayload,
+    UnblockEmailPayload,
     VerifyCandidatePayload,
 )
 from promptpotter.domain.cycle_paths import (
@@ -273,7 +276,6 @@ from promptpotter.infrastructure.identity.accounts import (
     host_user_id,
     identity_of_carrier,
     identity_of_session,
-    is_host,
 )
 from promptpotter.infrastructure.identity.bulletin_board import read_board
 from promptpotter.infrastructure.identity.grants import (
@@ -331,7 +333,10 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.private_root import DataRootExposedError, hold_private
-from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+from promptpotter.infrastructure.store.session_pointer import (
+    clear_active_pointer,
+    save_active_pointer,
+)
 from promptpotter.infrastructure.store.stores import (
     Stores,
     build_stores,
@@ -1479,7 +1484,7 @@ def test_a_delegate_acts_in_its_delegators_tenant_on_its_grant_clamped_to_the_ow
 
     def signed(who: str) -> tuple[str, str, frozenset[str], bool]:
         ident = identity_of_session(_session_of(who), signed_in)
-        return acting_principal(ident).id, str(ident.tenant_id), ident.capabilities, is_host(ident)
+        return acting_principal(ident).id, str(ident.tenant_id), ident.capabilities, ident.host
 
     step = frozenset({CAMPAIGN_STEP_CAP})
     for who, read in (
@@ -2541,6 +2546,34 @@ def test_a_cycle_named_alone_is_the_active_campaigns_by_an_id_prefix(
     assert cycle_target(built_stores, "", hop.cycle_id[:3]) == hop, (
         "a cycle prefix named without its campaign was taken as a full id"
     )
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_clearing_the_active_pointer_moves_the_accounts_feed_version(
+    built_stores: Stores, held_cycle: _HeldCycle, tmp_path: Path
+) -> None:
+    # The pointer is the account's state: a clear no stamp marks serves the cleared target on.
+    jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    save_active_pointer(built_stores.base_dir, held_cycle.hop)
+    pointed = cycle_reads.feed_versions(built_stores, jobs, "account")["account"]
+    clear_active_pointer(built_stores.base_dir)
+    assert cycle_reads.feed_versions(built_stores, jobs, "account")["account"].n > pointed.n, (
+        "clearing the active pointer left the account's feed version standing"
+    )
+
+
+def test_a_sandbox_emptied_by_a_reset_goes_with_its_stamp(tmp_path: Path) -> None:
+    # A reset drops a sandbox's data and prunes it; the stamp is no data, so it never holds it up.
+    sandbox = tmp_path / ".inner" / "key" / "tenant"
+    store_io.stamped_subject(sandbox)
+    ledger = sandbox / "campaigns" / "c1" / "ledger.jsonl"
+    store_io.make_dirs(ledger.parent)
+    ledger.write_text("{}", encoding="utf-8")
+    store_io.unlink_robust(ledger)
+    assert (sandbox / store_io.STAMP_FILE).is_file(), "the drop moved no stamp"
+    store_io.prune_empty_dirs(sandbox)
+    store_io.remove_bare_dir(sandbox)
+    assert not sandbox.exists(), "an emptied sandbox stood on its stamp"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -4979,6 +5012,33 @@ async def test_only_the_host_posts_a_bulletin_and_a_dismissal_is_its_accounts_al
     }
     assert read == {"host": [(True, False)], "ada": [(True, True)], "bo": [(True, False)]}, read
     assert read_board(board).dismissed == {"ada": (posted.id,)}, "a dismissal was kept twice"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_the_hosts_administration_is_filed_at_its_terminal_alone_never_at_the_api() -> None:
+    host, ada = workspace(), _uploader("ada")
+    blocked = BlockEmailPayload(email="eve@x.com")
+    for stores, door in ((ada, Door.TERMINAL), (host, Door.API)):
+        with pytest.raises(PayloadInvalidError) as refused:
+            await _filed(stores, blocked, door)
+        assert refused.value.code == "administered_by_host" and not blocked_emails()
+    await _filed(host, blocked, Door.TERMINAL)
+    assert blocked_emails() == ["eve@x.com"]
+    await _filed(host, UnblockEmailPayload(email="eve@x.com"), Door.TERMINAL)
+    assert blocked_emails() == []
+
+
+@pytest.mark.usefixtures("offline")
+async def test_the_hosts_claim_carries_the_terminals_dismissals_to_the_host() -> None:
+    terminal = workspace()
+    await _filed(terminal, PostBulletinPayload(text="a wipe at noon", pops_up=True), Door.TERMINAL)
+    (posted,) = bulletins.account_bulletins(terminal).bulletins
+    await _filed(terminal, DismissBulletinPayload(bulletin_id=posted.id), Door.TERMINAL)
+    claimed = await asyncio.to_thread(
+        claim_box, default_projects_root(), user_id="owner-9", email=None
+    )
+    assert claimed is None
+    assert read_board(default_identity_paths().bulletins).dismissed == {"owner-9": (posted.id,)}
 
 
 @pytest.mark.usefixtures("offline")

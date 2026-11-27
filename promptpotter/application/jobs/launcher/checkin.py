@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 
@@ -52,8 +52,6 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class CheckinStart(LaunchRequest):
     """Carries the claim, never the draft: the claim refuses every edit until the mint closes."""
-
-    verb: ClassVar[str] = "start-checkin"
 
     claim: DraftClaim
     # The queue's label alone (`DraftFile.dataset_name`); every decision reads the draft.

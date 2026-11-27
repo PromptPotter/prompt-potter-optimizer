@@ -8,7 +8,9 @@ from promptpotter.infrastructure.store.io import (
     HeldLock,
     make_dirs,
     rmtree_robust,
+    stamp,
     take_lock,
+    unlink_robust,
     write_bytes,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -16,9 +18,8 @@ from promptpotter.infrastructure.store.layout import (
     draft_claim_path,
     draft_dir_for,
     draft_dirs,
-    drafts_root_dir_for,
 )
-from promptpotter.infrastructure.store.read_model import file_sig, read_file
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
 DRAFT_FILE = "draft.json"
@@ -56,16 +57,6 @@ class DraftStore:
     def draft_ids(self) -> list[str]:
         return [p.name for p in draft_dirs(self._base_dir) if (p / DRAFT_FILE).is_file()]
 
-    def version(self) -> tuple[object, ...]:
-        """Stats only: moves on an open, an edit, a check-in's spend, a Start and a discard."""
-        return (
-            file_sig(drafts_root_dir_for(self._base_dir)),
-            *(
-                (p.name, file_sig(p / DRAFT_FILE), file_sig(CycleLayout(p).ledger))
-                for p in draft_dirs(self._base_dir)
-            ),
-        )
-
     def hold(self, draft_id: str) -> DraftClaim:
         lock = take_lock(draft_claim_path(self._base_dir, draft_id), wait_s=0)
         if lock is None:
@@ -99,10 +90,11 @@ class DraftStore:
         """A draft dir is laid out as a cycle's, so the mint renames it: what it billed is the
         cycle's first lines. Unlisted first, so a crash before the rename leaves no second Start."""
         source = self.draft_dir(draft_id)
-        (source / DRAFT_FILE).unlink(missing_ok=True)
+        unlink_robust(source / DRAFT_FILE)
         if source.is_dir():
             make_dirs(cycle_dir.parent)
             source.rename(cycle_dir)
+            stamp(cycle_dir)
 
     def discard(self, claim: DraftClaim) -> None:
         """A destroyer, under the claim it releases: what was commanded on it is the account log's."""

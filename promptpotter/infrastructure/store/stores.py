@@ -28,6 +28,8 @@ from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
     refuse_off_workspace,
     rmtree_robust,
+    stamp_of,
+    stamped_subject,
     unlink_robust,
     validate_path_component,
     write_bytes,
@@ -35,8 +37,10 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
+    WORKSPACE_STATE_DIR,
     ArchiveHome,
     archive_home,
+    drafts_root_dir_for,
     inner_sandbox_dir,
     tenant_workspace,
 )
@@ -80,9 +84,40 @@ class Stores:
     # The L4 sandbox chain this store sits in, outermost first: ``()`` is the account's own.
     inside: CyclePath = ()
 
+    def __post_init__(self) -> None:
+        # Every subject this store's writers stamp (`io.py::stamp`), declared in each process
+        # opening it: the store, the account's filings and drafts, the archive home.
+        for root in (
+            self.base_dir,
+            self.account_dir,
+            self.account_state_dir,
+            self.account_drafts_dir,
+            self.archive_home.root,
+        ):
+            stamped_subject(root)
+
     @property
     def tenant_id(self) -> TenantId:
         return self.identity.tenant_id
+
+    @property
+    def account_dir(self) -> WorkspaceDir:
+        """The account's own tree, a sandbox's owner's: its ruler, datasets, charges and filings."""
+        return tenant_workspace(self.shared_root, self.tenant_id)
+
+    @property
+    def account_state_dir(self) -> Path:
+        return self.account_dir / WORKSPACE_STATE_DIR
+
+    @property
+    def account_drafts_dir(self) -> Path:
+        return drafts_root_dir_for(self.account_dir)
+
+    def stamps(self) -> tuple[object, ...]:
+        """What this store's writers stamped: its campaigns and ledgers, and the account's ruler,
+        datasets and charges and the archive home it reads (`io.py::stamp`); never a walk."""
+        roots = dict.fromkeys((self.base_dir, self.account_dir, self.archive_home.root))
+        return tuple(stamp_of(root) for root in roots)
 
     @property
     def block_packs(self) -> PackShelf:

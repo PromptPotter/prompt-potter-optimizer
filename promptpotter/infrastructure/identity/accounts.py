@@ -7,10 +7,12 @@ from pathlib import Path
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
+from promptpotter.infrastructure.identity import bulletin_board
 from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
     PrincipalGrant,
     check_blocklist,
+    default_identity_paths,
     read_grant,
     resolve_effective_capabilities,
 )
@@ -71,6 +73,9 @@ def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> st
                     update={"user_id": user_id, "tenant_id": user_id, "email": email}
                 )
             )
+        bulletin_board.rekey(
+            default_identity_paths().bulletins, old_id=TERMINAL_IDENTITY_ID, new_id=user_id
+        )
         default_dir.rename(user_dir)
         logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
     return None
@@ -101,11 +106,6 @@ def host_user_id(projects_root: Path) -> str | None:
         ),
         None,
     )
-
-
-def is_host(identity: IdentityContext) -> bool:
-    """The fact its seam stamped (`IdentityContext.host`)."""
-    return identity.host
 
 
 @dataclass

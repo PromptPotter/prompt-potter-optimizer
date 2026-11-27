@@ -15,7 +15,8 @@ import { openLiveStream } from "@/lib/live-stream";
 export const READ_CACHE_MAX_KEYS = 64;
 export const GONE_CONFIRM_LIMIT = 3;
 
-// *subject* is the descriptor's: a loader sends it, and its answer says the versions it stood on.
+// *subject* is the descriptor's, its prefixes joined on `,`: a loader sends it, and its answer says
+// the versions it stood on.
 export type ReadLoad<T> = (
   signal: AbortSignal,
   validator: string | null,
@@ -49,9 +50,9 @@ export interface ReadDescriptor<T, B = T> {
   // A 404 is this read's ordinary empty answer: it lands as a null body, answered like any other —
   // no incident, no gone verdict.
   expects?: null extends B ? "gone" : never;
-  // The feed subject whose move re-asks it, by prefix (`StampedFeedFrame.subject`: `store:` and the hops
-  // above the store it reads, or `machine`); absent, it reads once.
-  subject?: string;
+  // The feed subjects whose move re-asks it, each by prefix (`StampedFeedFrame.subject`: `store:` and
+  // the hops above the store it reads, `account` or `machine`); absent, it reads once.
+  subject?: string | readonly string[];
   // An answer that says it is final: the read stops following its subject (a filed round).
   final?: (body: B) => boolean;
   // While this stays the same, a re-keyed read shows the last body the key landed as `kept`.
@@ -130,10 +131,15 @@ function resultOf(slot: Slot): ReadResult<unknown> {
   return { status: "loading", kept };
 }
 
-// The subject a read still follows: none once its answer says it is final.
-function followed(slot: Slot): string | undefined {
+// The subjects a read still follows: none once its answer says it is final.
+function followed(slot: Slot): readonly string[] | undefined {
   const read = descriptorOf(slot);
-  return slot.entry && read.final?.(slot.entry.data) ? undefined : read.subject;
+  if (read.subject === undefined || (slot.entry && read.final?.(slot.entry.data))) return undefined;
+  return typeof read.subject === "string" ? [read.subject] : read.subject;
+}
+
+function said(read: AnyRead): string | undefined {
+  return read.subject === undefined || typeof read.subject === "string" ? read.subject : read.subject.join(",");
 }
 
 function changed(slot: Slot): void {
@@ -227,7 +233,7 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
   const mine = () => slot.flight === flight && slots.get(slot.id) === slot;
   try {
     const signal = flight.abort.signal;
-    let res = await read.load(signal, slot.entry?.validator ?? null, read.subject);
+    let res = await read.load(signal, slot.entry?.validator ?? null, said(read));
     if (mine()) slot.stood = res.stood ?? null;
     if (res.kind === "not_modified") {
       const held = slot.entry;
@@ -236,7 +242,7 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
         return held.data;
       }
       // The body was dropped or cleared mid-flight, so the 304 describes nothing held.
-      res = await read.load(signal, null, read.subject);
+      res = await read.load(signal, null, said(read));
       if (res.kind === "not_modified") throw new Error(`304 to an unconditional read: ${slot.id}`);
       if (mine()) slot.stood = res.stood ?? null;
     }
@@ -394,7 +400,7 @@ let closeFeedStream: (() => void) | null = null;
 function moved({ subject, version }: Pick<StampedFeedFrame, "subject" | "version">): void {
   for (const slot of mounted()) {
     const named = followed(slot);
-    if (named === undefined || !subject.startsWith(named)) continue;
+    if (named === undefined || !named.some((n) => subject.startsWith(n))) continue;
     if (slot.flight) slot.owed.set(subject, version);
     else if (ahead(version, slot.stood?.[subject])) ask(slot, true);
   }
@@ -405,7 +411,7 @@ function owes(slot: Slot, produced: FeedVersions): boolean {
   return (
     slot.flight !== null &&
     named !== undefined &&
-    Object.entries(produced).some(([s, v]) => s.startsWith(named) && ahead(v, slot.stood?.[s]))
+    Object.entries(produced).some(([s, v]) => named.some((n) => s.startsWith(n)) && ahead(v, slot.stood?.[s]))
   );
 }
 

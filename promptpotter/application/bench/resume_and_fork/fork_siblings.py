@@ -63,13 +63,9 @@ def _fork_sibling_setup(
     campaign_store = stores.campaigns
     campaign = campaign_store.campaign(child.campaign_id)
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
-    babysat = CycleConfig.laid(
-        declared_config(stores, campaign).config,
-        [
-            *cycle_config(stores, CampaignCycle(campaign, parent.cycle_id)).spans,
-            LaidSpan(start=start, scoring_lock=None),
-        ],
-    ).steers_outside(permitted_narrowing(stores, campaign))
+    babysat = fork_config(stores, CampaignCycle(campaign, parent.cycle_id), start).steers_outside(
+        permitted_narrowing(stores, campaign)
+    )
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
@@ -93,6 +89,15 @@ def _fork_sibling_setup(
             start=start,
             babysat=babysat,
         ),
+    )
+
+
+def fork_config(stores: Stores, parent: CampaignCycle, start: CycleStart | None) -> CycleConfig:
+    """What a fork of *parent* under *start* runs, read before its cut: the declaration under its
+    parent's line and its own start."""
+    return CycleConfig.laid(
+        declared_config(stores, parent.campaign).config,
+        [*cycle_config(stores, parent).spans, LaidSpan(start=start, scoring_lock=None)],
     )
 
 
@@ -276,7 +281,7 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         stores,
         hop,
         at if keep else 0,
-        trigger=ForkTrigger.OPERATOR_REWIND if keep else ForkTrigger.OPERATOR_STEERED,
+        trigger=operator_trigger(payload),
         reason=payload.reason
         or (
             f"operator-applied from round {at} of {hop.cycle_id}"
@@ -287,6 +292,10 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         named=_named(payload),
         start=operator_start(stores, payload, start),
     )
+
+
+def operator_trigger(payload: ForkCyclePayload) -> ForkTrigger:
+    return ForkTrigger.OPERATOR_REWIND if payload.keep_rounds else ForkTrigger.OPERATOR_STEERED
 
 
 def _named(payload: ForkCyclePayload) -> RoundArm | None:

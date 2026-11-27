@@ -2238,6 +2238,23 @@
         "title": "BenchStatus",
         "type": "object"
       },
+      "BlockEmailPayload": {
+        "additionalProperties": false,
+        "description": "Refuse every sign-in of an email on this box; only its host may.",
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "BlockEmailPayload",
+        "type": "object"
+      },
       "Body_ingest_upload_api_v1_commands_ingest_upload_post": {
         "properties": {
           "file": {
@@ -2584,8 +2601,19 @@
       },
       "CampaignLaunch": {
         "additionalProperties": false,
-        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
+        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
         "properties": {
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
@@ -4335,6 +4363,11 @@
           "accept-terms",
           "post-bulletin",
           "dismiss-bulletin",
+          "block-email",
+          "unblock-email",
+          "grant-delegation",
+          "revoke-delegation",
+          "set-coupon",
           "set-api-key",
           "remove-api-key",
           "mint-api-token",
@@ -8121,6 +8154,30 @@
         "title": "GeneSource",
         "type": "object"
       },
+      "GrantDelegationPayload": {
+        "additionalProperties": false,
+        "description": "Delegate capabilities, named by a comma-separated list, from the host's account to another; only its host may.",
+        "properties": {
+          "capabilities": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Capabilities",
+            "type": "string"
+          },
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "capabilities"
+        ],
+        "title": "GrantDelegationPayload",
+        "type": "object"
+      },
       "GuardDifference": {
         "description": "One thing two bench headlines can differ on. The first seven are ``BenchSet``'s fields.",
         "enum": [
@@ -8745,10 +8802,6 @@
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
-          "service": {
-            "title": "Service",
-            "type": "string"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -8776,7 +8829,6 @@
         },
         "required": [
           "status",
-          "service",
           "timestamp",
           "version"
         ],
@@ -15122,6 +15174,23 @@
         "title": "RevokeApiTokenPayload",
         "type": "object"
       },
+      "RevokeDelegationPayload": {
+        "additionalProperties": false,
+        "description": "Take back an account's delegation; only the host may.",
+        "properties": {
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "RevokeDelegationPayload",
+        "type": "object"
+      },
       "RoleScope": {
         "description": "Which roles a reading of an individual's cells may see; two scopes never pair.",
         "enum": [
@@ -16629,6 +16698,16 @@
           "sample_coverage": {
             "$ref": "#/components/schemas/SampleCoverage"
           },
+          "series_held": {
+            "description": "The asker named this `series_version` as the one it holds: `rounds` is empty and `line` holds the round in flight's arms alone, so no frame re-sends a closed round.",
+            "title": "Series Held",
+            "type": "boolean"
+          },
+          "series_version": {
+            "description": "The closed series' version: `rounds` and their arms of `line`, as served.",
+            "title": "Series Version",
+            "type": "string"
+          },
           "skip_refusal": {
             "description": "Why `skip-searchpoint` is refused, off the run (`RunState`), which no campaign moves, and its reader (`command_kinds.py::filable`); empty where it is admitted.",
             "title": "Skip Refusal",
@@ -16733,6 +16812,8 @@
           "active",
           "successor",
           "line",
+          "series_version",
+          "series_held",
           "observed",
           "walk",
           "round_axis",
@@ -16962,6 +17043,42 @@
           "max_concurrent_cycles"
         ],
         "title": "SetConcurrentCyclesPayload",
+        "type": "object"
+      },
+      "SetCouponPayload": {
+        "additionalProperties": false,
+        "description": "Set an account's coupon face: dollars and tokens, `-` leaving a unit unbounded; `afresh` starts its draw now. Only the host may.",
+        "properties": {
+          "afresh": {
+            "default": false,
+            "title": "Afresh",
+            "type": "boolean"
+          },
+          "tokens": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Tokens",
+            "type": "string"
+          },
+          "usd": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Usd",
+            "type": "string"
+          },
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "usd",
+          "tokens"
+        ],
+        "title": "SetCouponPayload",
         "type": "object"
       },
       "SetSampleLookaheadPayload": {
@@ -18880,6 +18997,23 @@
         "title": "UnarchiveCampaignPayload",
         "type": "object"
       },
+      "UnblockEmailPayload": {
+        "additionalProperties": false,
+        "description": "Lift an email's block on this box; only its host may.",
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "UnblockEmailPayload",
+        "type": "object"
+      },
       "UnstartedCampaign": {
         "additionalProperties": false,
         "description": "An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, cycle,\nline or run. Its `address` is the draft id Start mints from and its `delete` discards.",
@@ -20345,6 +20479,24 @@
               "description": "A line of the leaf cycle's own ledger",
               "title": "At"
             }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `series_version` of the closed series the asker holds: matching, the answer does not re-send it (`series_held`)",
+              "title": "Series"
+            }
           }
         ],
         "responses": {
@@ -21271,6 +21423,79 @@
         ]
       }
     },
+    "/api/v1/commands/block-email": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "block_email_api_v1_commands_block_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockEmailPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Block-Email",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -21996,6 +22221,79 @@
           }
         },
         "summary": "Fork-Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/grant-delegation": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "grant_delegation_api_v1_commands_grant_delegation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantDelegationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Grant-Delegation",
         "tags": [
           "Commands"
         ]
@@ -23005,6 +23303,79 @@
         ]
       }
     },
+    "/api/v1/commands/revoke-delegation": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "revoke_delegation_api_v1_commands_revoke_delegation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeDelegationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Revoke-Delegation",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/set-api-key": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -23146,6 +23517,79 @@
           }
         },
         "summary": "Set-Concurrent-Cycles",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-coupon": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "set_coupon_api_v1_commands_set_coupon_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCouponPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set-Coupon",
         "tags": [
           "Commands"
         ]
@@ -23730,6 +24174,79 @@
           }
         },
         "summary": "Unarchive-Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/unblock-email": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "unblock_email_api_v1_commands_unblock_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockEmailPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Unblock-Email",
         "tags": [
           "Commands"
         ]

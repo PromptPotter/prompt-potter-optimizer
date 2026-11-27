@@ -22,6 +22,15 @@ from promptpotter.shared.measurement_context import MeasurementRole
 # The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
 
+
+def launch_campaign(holder: JobHolder, hop: CycleHop) -> str | None:
+    """The campaign a job runs on: its cycle's, or a fork's before its cut names one; ``None`` for
+    a fresh mint and a job on no campaign."""
+    if hop != UNRESOLVED_HOP:
+        return hop.campaign_id
+    return holder.campaign_id if isinstance(holder, CampaignLaunch) else None
+
+
 JobStage = LaunchStage | Literal[RunPhase.RUNNING]
 _JOB_STAGES: frozenset[RunPhase] = frozenset(
     stage for arm in get_args(JobStage) for stage in get_args(arm)
@@ -33,13 +42,15 @@ assert SLOT_STAGES < _JOB_STAGES, "a slot stage no job can be in"
 
 @dataclass(frozen=True)
 class CampaignLaunch:
-    """A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle."""
+    """A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     dataset_name: str
     # The check-in a Start mints from; null for every other launch. Its draft is served at its stage.
     draft_id: str | None = None
+    # The campaign a fork spends on before its cut names its cycle; null for every other launch.
+    campaign_id: str | None = None
     kind: Literal["campaign_launch"] = "campaign_launch"
 
 
