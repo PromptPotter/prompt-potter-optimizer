@@ -835,7 +835,6 @@ def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
             stores.ruler,
             series.stamp,
             n_min=opt.elimination_n_min,
-            enable_2pl=opt.enable_2pl_graduation,
         )
     )
     return _CycleFacts(

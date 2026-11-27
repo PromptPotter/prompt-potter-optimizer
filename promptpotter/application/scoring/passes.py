@@ -40,7 +40,7 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import PASS_REFUSAL_INFO, BenchScore
+from promptpotter.domain.bench import COLUMN_GRADE, PASS_REFUSAL_INFO, BenchColumn, BenchScore
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
@@ -127,14 +127,16 @@ def pick_fresh(
     return [*placed, *rng.sample(unplaced, len(unplaced))][:n]
 
 
-def _difference(fresh: CellSheet, recorded: CellSheet, unit: MeasurandUnit) -> Estimate | None:
-    """Fresh − recorded in the fitness column, with the band of the difference of two
-    independent means (`difference_interval`); ``None`` where a side reads no cell."""
-    fitness = ROW_GRADES["fitness"]
-    a, b = (list(sheet.column(fitness).values()) for sheet in (fresh, recorded))
+def _difference(
+    fresh: CellSheet, recorded: CellSheet, column: BenchColumn, unit: MeasurandUnit
+) -> Estimate | None:
+    """Fresh − recorded in *column*, with the band of the difference of two independent means
+    (`difference_interval`); ``None`` where a side reads no cell."""
+    grade = COLUMN_GRADE[column]
+    a, b = (list(sheet.column(ROW_GRADES[grade]).values()) for sheet in (fresh, recorded))
     if not a or not b:
         return None
-    lo, hi = difference_interval(a, b, binary="fitness" in fresh.two_valued) or (None, None)
+    lo, hi = difference_interval(a, b, binary=grade in fresh.two_valued) or (None, None)
     value = sum(a) / len(a) - sum(b) / len(b)
     return Estimate(
         value=value, ci_lo=lo, ci_hi=hi, n=len(a) + len(b), se=None, unit=unit, form="lift"
@@ -186,8 +188,7 @@ def verify_reading(
     """Fresh beside recorded, never pooled: a pooled rate moves with how many cells each holds."""
     unit = scorer.fitness_unit
     fresh_level, recorded_level = own_level(fresh, unit), own_level(recorded, unit)
-    fresh_composite, recorded_composite = fresh_level.composite, recorded_level.composite
-    difference = _difference(fresh, recorded, unit)
+    difference = _difference(fresh, recorded, "fitness", unit)
     strategy = banked.strategy
     return VerifyReading(
         label=banked.arm.label,
@@ -196,9 +197,7 @@ def verify_reading(
         fresh=fresh_level,
         recorded=recorded_level,
         fitness_difference=difference,
-        composite_increment=None
-        if fresh_composite is None or recorded_composite is None
-        else fresh_composite.value - recorded_composite.value,
+        composite_difference=_difference(fresh, recorded, "composite", "score"),
         vs_origin=read_pair(
             a=origin,
             b=measured,
@@ -348,7 +347,6 @@ async def verify_candidate(
             {sp_hash},
             objective_id=session.state.scoring.scorer.id,
             n_min=campaign_config.optimization.elimination_n_min,
-            enable_2pl=campaign_config.optimization.enable_2pl_graduation,
         ).ruler
         picked = pick_fresh(
             unmeasured,

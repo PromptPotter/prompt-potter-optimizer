@@ -1650,7 +1650,8 @@ export interface VerifyReading {
   /** `fresh` minus `recorded`, hit rate, with the band `held` reads. Unpaired — the
    * two are different cells. */
   fitness_difference: Estimate | null;
-  composite_increment: number | null;
+  /** `fresh` minus `recorded` on the composite, with its band under the same rule. */
+  composite_difference: Estimate | null;
   /** This candidate over the campaign origin, on every cell the cycle measured both
    * on outside the bench — the fresh ones and the overlap pass's included.
    * `same_individual` on the origin itself. */
@@ -1658,10 +1659,10 @@ export interface VerifyReading {
   /** Whether the fresh cells leave the recorded hit rate standing: the 95% band of
    * fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a
    * graded one reads Welch's where both sides spread, else Newcombe's
-   * construction over each side's band, a constant side's being the one its
-   * support allows). `None`: `hard` picks sit below the level whatever the
-   * candidate is worth, and a side too short for that band (no cell two-
-   * valued, under two graded) has none; read `vs_origin` there. */
+   * construction over each side's band, a constant side's SE floored at
+   * 1/(4n)). `None`: `hard` picks sit below the level whatever the candidate
+   * is worth, and a side too short for that band (no cell two-valued, under
+   * two graded) has none; read `vs_origin` there. */
   held: boolean | null;
 }
 
@@ -3481,16 +3482,6 @@ export interface CampaignLayer {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty' | null;
-  /** The fitness a best-reachable prompt would score on this dataset at this
-   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
-   * against `CEILING_FRACTION` of it, and the value is banked beside that
-   * count so a reader never has to guess the denominator. `None` (default) →
-   * the clock reports nothing, which is the honest reading: a ceiling is a
-   * joint claim about the dataset AND the model, so only the dataset owner
-   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
-   * every campaign on it publish a round count nobody can defend. DISPLAY
-   * config — it moves no gate, no selection and no stop. */
-  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * The zero split holds out only the rows the bank declares `held_out`. */
@@ -3638,15 +3629,6 @@ export interface OptimizationLayer {
    * stopped that arm on evidence) and neither is a classifier-deprecated
    * sample. */
   panel_gate: 'strict' | 'off' | null;
-  /** What each arm's lift is read against — member `a` of its `vs_reference`
-   * reading. ``best_so_far`` (default): the round's selected best-so-far
-   * individual, re-scored on the round's panel and paired with the arm on the
-   * cells both measured. ``parents``: the arm's own `parent_ids`, each re-
-   * measured on exactly the cells the arm measured; a crossover child is read
-   * against the better of its parents there, the bar it must clear to have
-   * added anything over what it recombined. An arm with no parent has no
-   * reference. */
-  lift_reference: 'best_so_far' | 'parents' | null;
   /** Halt after round 0 when the origin's degradation verdict is non-healthy,
    * instead of optimizing against a broken floor — the common failure while
    * bringing up a new connector. ``strict`` (default) halts on ``critical``
@@ -3654,13 +3636,6 @@ export interface OptimizationLayer {
    * the origin lost and grades it again; an origin still unhealthy when
    * resumed proceeds into the search. */
   origin_gate: 'strict' | 'off' | null;
-  /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
-   * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
-   * discriminating dataset wins held-out cross-validation. The switch is
-   * gated — cold/non-discriminating datasets stay 1PL — so this only ever
-   * changes the ruler where 2PL provably fits better out-of-sample; it can
-   * never regress a dataset. Off → always 1PL (the slice-2 behaviour). */
-  enable_2pl_graduation: boolean | null;
   /** Pin the optimizer's decoding and its route so a re-run reproduces this
    * campaign's trajectory and can name the host that produced each number.
    * `None` (default) → every node runs at its own file settings and the
@@ -3909,16 +3884,6 @@ export interface CampaignConfig {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty';
-  /** The fitness a best-reachable prompt would score on this dataset at this
-   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
-   * against `CEILING_FRACTION` of it, and the value is banked beside that
-   * count so a reader never has to guess the denominator. `None` (default) →
-   * the clock reports nothing, which is the honest reading: a ceiling is a
-   * joint claim about the dataset AND the model, so only the dataset owner
-   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
-   * every campaign on it publish a round count nobody can defend. DISPLAY
-   * config — it moves no gate, no selection and no stop. */
-  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * The zero split holds out only the rows the bank declares `held_out`. */
@@ -4034,15 +3999,6 @@ export interface OptimizationConfig {
    * stopped that arm on evidence) and neither is a classifier-deprecated
    * sample. */
   panel_gate: 'strict' | 'off';
-  /** What each arm's lift is read against — member `a` of its `vs_reference`
-   * reading. ``best_so_far`` (default): the round's selected best-so-far
-   * individual, re-scored on the round's panel and paired with the arm on the
-   * cells both measured. ``parents``: the arm's own `parent_ids`, each re-
-   * measured on exactly the cells the arm measured; a crossover child is read
-   * against the better of its parents there, the bar it must clear to have
-   * added anything over what it recombined. An arm with no parent has no
-   * reference. */
-  lift_reference: 'best_so_far' | 'parents';
   /** Halt after round 0 when the origin's degradation verdict is non-healthy,
    * instead of optimizing against a broken floor — the common failure while
    * bringing up a new connector. ``strict`` (default) halts on ``critical``
@@ -4050,13 +4006,6 @@ export interface OptimizationConfig {
    * the origin lost and grades it again; an origin still unhealthy when
    * resumed proceeds into the search. */
   origin_gate: 'strict' | 'off';
-  /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
-   * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
-   * discriminating dataset wins held-out cross-validation. The switch is
-   * gated — cold/non-discriminating datasets stay 1PL — so this only ever
-   * changes the ruler where 2PL provably fits better out-of-sample; it can
-   * never regress a dataset. Off → always 1PL (the slice-2 behaviour). */
-  enable_2pl_graduation: boolean;
   /** Pin the optimizer's decoding and its route so a re-run reproduces this
    * campaign's trajectory and can name the host that produced each number.
    * `None` (default) → every node runs at its own file settings and the
@@ -4622,16 +4571,6 @@ export interface ConfigEdit {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty' | null;
-  /** The fitness a best-reachable prompt would score on this dataset at this
-   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
-   * against `CEILING_FRACTION` of it, and the value is banked beside that
-   * count so a reader never has to guess the denominator. `None` (default) →
-   * the clock reports nothing, which is the honest reading: a ceiling is a
-   * joint claim about the dataset AND the model, so only the dataset owner
-   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
-   * every campaign on it publish a round count nobody can defend. DISPLAY
-   * config — it moves no gate, no selection and no stop. */
-  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * The zero split holds out only the rows the bank declares `held_out`. */
@@ -5879,7 +5818,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "d548bfd32119270c";
+export const SERVED_CONTRACT = "bbe6116f85532481";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6752,7 +6691,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
-  "panel_hole": { label: "Panel left holed", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "The round is discarded, each hole named by its category and error: resuming re-measures them, but a cell our time bound cut (HALTED) is cut again unless the connector's cell envelope first gives it room. The panel gate off elects on the holed panel.", grades_selection: true, next_acts: [{ kind: "", field: "Connector.cell_envelope_s", value: "room for a cell cut (HALTED)", reads: "" }, { kind: "", field: "optimization.panel_gate", value: "off", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
+  "panel_hole": { label: "Panel left holed", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "The round is discarded, each hole named by its category and error: resuming re-measures them. The panel gate off elects on the holed panel.", grades_selection: true, next_acts: [{ kind: "", field: "optimization.panel_gate", value: "off", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
   "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; resuming re-runs it before the next walk.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
   "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "The optimizer judged the run past recovering and said why: fix what it names, then resume, or start a fresh campaign.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }, { kind: "mint-campaign", field: "", value: "", reads: "" }] },
   "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The spend cap counts every launch so far: raise it above what it already counts, then resume.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.usd", value: "above what the cap already counts", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },

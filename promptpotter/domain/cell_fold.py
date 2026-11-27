@@ -6,7 +6,6 @@ from promptpotter.domain.paired_reading import Estimate, MeasurandUnit
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import ErrorCategory
 
 
 class CellFold(FrozenModel):
@@ -44,17 +43,10 @@ class ScoreSummary(CellFold):
         return {name: self.evaluators[name] for name in self.fitness_terms}
 
 
-def unscoreable_cells(results: Iterable[GradedCell]) -> int:
-    """Never ``walked - total``, which counts a deprecated row as a hole."""
-    return sum(1 for r in results if r.facts.errored)
-
-
 def repairable_holes(results: Iterable[GradedCell]) -> int:
-    """The unscoreable cells a re-walk can fill: ``HALTED`` is none, its declared bound cuts the
-    next attempt at the same place."""
-    return sum(
-        1 for r in results if r.facts.errored and r.facts.error_category is not ErrorCategory.HALTED
-    )
+    """The cells a re-walk can fill (`MeasuredCell.hole`): a charged error is none, and never
+    ``walked - total``, which counts a deprecated row as one."""
+    return sum(1 for r in results if r.facts.hole)
 
 
 def recall_at(results: Iterable[GradedCell]) -> dict[int, float]:

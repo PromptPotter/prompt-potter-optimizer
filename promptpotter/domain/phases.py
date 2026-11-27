@@ -575,11 +575,9 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             False,
             "The round is discarded, each hole named by its category and error: resuming re-measures "
-            "them, but a cell our time bound cut (HALTED) is cut again unless the connector's cell "
-            "envelope first gives it room. The panel gate off elects on the holed panel.",
+            "them. The panel gate off elects on the holed panel.",
             True,
             (
-                NextAct(field="Connector.cell_envelope_s", value="room for a cell cut (HALTED)"),
                 NextAct(field="optimization.panel_gate", value="off"),
                 NextAct(kind="start-run"),
             ),

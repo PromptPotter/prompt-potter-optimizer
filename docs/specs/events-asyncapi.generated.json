@@ -2354,17 +2354,6 @@
             "title": "Finished At",
             "type": "string"
           },
-          "fitness_ceiling": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fitness Ceiling"
-          },
           "fitness_unit": {
             "$ref": "#/components/schemas/MeasurandUnit"
           },
@@ -2444,17 +2433,6 @@
             "title": "Round Budget",
             "type": "integer"
           },
-          "rounds_to_ceiling": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounds To Ceiling"
-          },
           "rounds_to_improved": {
             "anyOf": [
               {
@@ -2518,8 +2496,6 @@
           "wall_clock",
           "rounds_to_separable",
           "rounds_to_improved",
-          "rounds_to_ceiling",
-          "fitness_ceiling",
           "prompt_hashes",
           "scorer_id",
           "bench",
@@ -9945,16 +9921,16 @@
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
         "properties": {
-          "composite_increment": {
+          "composite_difference": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Composite Increment"
+            "description": "`fresh` minus `recorded` on the composite, with its band under the same rule."
           },
           "fitness_difference": {
             "anyOf": [
@@ -9980,7 +9956,7 @@
                 "type": "null"
               }
             ],
-            "description": "Whether the fresh cells leave the recorded hit rate standing: the 95% band of fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads Welch's where both sides spread, else Newcombe's construction over each side's band, a constant side's being the one its support allows). `None`: `hard` picks sit below the level whatever the candidate is worth, and a side too short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there.",
+            "description": "Whether the fresh cells leave the recorded hit rate standing: the 95% band of fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads Welch's where both sides spread, else Newcombe's construction over each side's band, a constant side's SE floored at 1/(4n)). `None`: `hard` picks sit below the level whatever the candidate is worth, and a side too short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there.",
             "title": "Held"
           },
           "label": {
@@ -10017,7 +9993,7 @@
           "fresh",
           "recorded",
           "fitness_difference",
-          "composite_increment",
+          "composite_difference",
           "vs_origin",
           "held"
         ],

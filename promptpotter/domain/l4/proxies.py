@@ -239,12 +239,9 @@ class AbortOwner(StrEnum):
 
 def abort_owner(rounds: Sequence[RoundResult]) -> AbortOwner:
     """UPSTREAM where a round its line spent filed a cell the configuration does not answer for
-    (`MeasuredCell.charged`): a fault no framing refinement fixes, whatever the abort said."""
+    (`MeasuredCell.hole`): a fault no framing refinement fixes, whatever the abort said."""
     faulted = any(
-        cell.facts.errored and not cell.facts.charged
-        for rnd in rounds
-        for sheet in rnd.cells.values()
-        for cell in sheet
+        cell.facts.hole for rnd in rounds for sheet in rnd.cells.values() for cell in sheet
     )
     return AbortOwner.UPSTREAM if faulted else AbortOwner.PROMPT
 

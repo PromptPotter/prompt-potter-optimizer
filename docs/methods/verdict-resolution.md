@@ -64,7 +64,7 @@ the fit's residuals (Wedderburn 1974) — **an estimate, not a knob**, shrunk to
 inverse-gamma prior so `φ→0` cannot report infinite confidence. **A sheet whose scorer declares its objective two-valued takes `φ = 1`** (`scoring.py::CellSheet.two_valued`, never read off the values: a 0.999 for a 1.0 is still Bernoulli): its residuals against a δ fit on the same rows read as
 underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.89).
 
-**1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).
+**1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`rasch.py::graduate_ruler_model`).
 2PL is the field default, so 1PL is what needs defending —
 [`../research/external-constraints.md`](../research/external-constraints.md) § The preprint carries the
 benchmarks. 2PL adds per-sample discrimination `aₛ`; it graduates per dataset, behind the same θ
@@ -148,23 +148,16 @@ The panel's rows also feed the race and the election beside each draw (`results.
 the overlap reading is optimistic for every pick: **the unbiased headline is the bench.** Every
 surface renders this one reading.
 
-## What an arm's lift is read against — `lift_reference`
+## What an arm's lift is read against
 
 Every arm's `vs_reference` reading (blocked lift, interval, matched floor) is read against ONE
-individual per arm; a repair re-measures the arms, never the bar. `lift_reference` picks it, both
-values under every optimizer:
+individual, under every optimizer: the round's selected best-so-far, re-scored on the whole panel
+and paired on cells both measured (a truncated arm keeps lift and interval, loses the matched
+floor). Potter's parent IS this individual; a repair re-measures the arms, never the bar.
 
-- **`best_so_far` (default)** — the round's selected best-so-far, re-scored on the whole panel and
-  paired on cells both measured (a truncated arm keeps lift and interval, loses the matched floor).
-  Potter's parent IS this individual.
-- **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the arm's cells, so every
-  arm has a matched floor. A crossover child is read against the BETTER parent on those cells — a
-  conservative bar. No parent, no reference. A parent is re-measured under its round's banked
-  configuration.
-
-Neither moves what a selector reads (potter elects on θ against best-so-far; CAPO on its own
-objective). The round advance reads neither — it is the pick's lead over C0 on the origin panel and
-drives potter's stall ladder. Under `parents` a masked election is undecidable rather than guessed.
+It moves no selector's read (potter crowns on the paired lift against best-so-far; CAPO on its own
+objective). The round advance does not read it either: that is the pick's lead over C0 on the
+origin panel, and it drives potter's stall ladder.
 
 **The crowning bar** is [`candidate-elimination.md`](candidate-elimination.md) § The θ rule's.
 

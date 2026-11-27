@@ -259,13 +259,12 @@ def test_the_ruler_graduates_to_2pl_only_where_2pl_wins_held_out() -> None:
         Observation("a", "2", False),
         Observation("b", "1", False),
     ]
-    for data, enable, model, why in (
-        (varied, True, "2PL", "varied discrimination never graduated"),
-        (unit_a, True, "1PL", "2PL won on true a≡1"),
-        (varied, False, "1PL", "graduation ran while disabled"),
-        (sparse, True, "1PL", "too sparse to hold a cell out, yet graduated"),
+    for data, model, why in (
+        (varied, "2PL", "varied discrimination never graduated"),
+        (unit_a, "1PL", "2PL won on true a≡1"),
+        (sparse, "1PL", "too sparse to hold a cell out, yet graduated"),
     ):
-        graduated, post = graduate_ruler_model(data, enable=enable)
+        graduated, post = graduate_ruler_model(data)
         assert graduated == model, why
         assert bool(post.discrimination) == (model == "2PL"), "the posterior is not the model named"
 
@@ -284,9 +283,9 @@ def test_a_delta_ruler_warms_only_once_a_second_arm_answers() -> None:
     # Eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]
     arm_b = [Observation("b", str(sid), 1.0 if sid < 5 else 0.0) for sid in range(8)]
-    flat = calibrate_delta_ruler(arm_a, 4, enable_2pl=False)
+    flat = calibrate_delta_ruler(arm_a, 4)
     assert flat is None, "one arm warmed the ruler: its δ would be read off the arm under test"
-    warm = calibrate_delta_ruler(arm_a + arm_b, 4, enable_2pl=False)
+    warm = calibrate_delta_ruler(arm_a + arm_b, 4)
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
 
@@ -314,11 +313,9 @@ def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: P
 
     def judging(own: RulerOwn | None, judged: set[str]) -> Any:
         reach = RulerReach(version=store.version(), own=own)
-        return judging_ruler(
-            store, scope, reach, judged, objective_id="acc", n_min=4, enable_2pl=False
-        )
+        return judging_ruler(store, scope, reach, judged, objective_id="acc", n_min=4)
 
-    outside = calibrate_delta_ruler([Observation(*row) for row in foreign], 4, enable_2pl=False)
+    outside = calibrate_delta_ruler([Observation(*row) for row in foreign], 4)
     optimizing = judging(None, {"c0-address", "child", "never-measured"})
     assert outside is not None and optimizing.ruler is not None
     assert optimizing.ruler.anchor_id == outside.anchor_id, (
@@ -329,7 +326,7 @@ def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: P
     assert foreign_arm.ruler is None and foreign_arm.stamp.cold, (
         "an arm read another campaign's rows folded after its head-to-head opened"
     )
-    on_race = calibrate_delta_ruler(race, 4, enable_2pl=False)
+    on_race = calibrate_delta_ruler(race, 4)
     compared = judging(arm, set())
     assert on_race is not None and compared.ruler is not None, (
         "an arm's own elections never reached its ruler, so it draws one frozen subset forever"
@@ -606,7 +603,7 @@ _SCOPE = RulerScope(scorer="acc", dataset="ds")
 
 def _series(tenant: RulerStore, lines: list[Any], own: RulerOwn | None = None) -> list[Any]:
     reach = RulerReach(version=tenant.version(), own=own)
-    return level_series_of(tenant, _SCOPE, reach, lines, n_min=4, enable_2pl=False)
+    return level_series_of(tenant, _SCOPE, reach, lines, n_min=4)
 
 
 @pytest.fixture

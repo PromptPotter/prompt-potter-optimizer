@@ -273,7 +273,6 @@ from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_prior_dominated,
     repairable_holes,
-    unscoreable_cells,
 )
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_events import CommandAckRecord
@@ -2584,13 +2583,13 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
 
     timed_out = {
         "predicted": "ERROR",
-        "error_category": "UNKNOWN",
-        "error": "ran past its deadline",
+        "error_category": "SERVER",
+        "error": "504: no reply in 164s",
     }
     holed = [hole_row(i) for i in range(4)] + [hole_row(4, **timed_out), hole_row(5, **timed_out)]
-    assert unscoreable_cells(sheet(holed)) == 2, "two holes"
-    assert unscoreable_cells(sheet(hole_row(i) for i in range(5))) == 0
-    assert unscoreable_cells([]) == 0
+    assert repairable_holes(sheet(holed)) == 2, "two holes"
+    assert repairable_holes(sheet(hole_row(i) for i in range(5))) == 0
+    assert repairable_holes([]) == 0
     # A fatal-classified transient with NO error_category: the retry left nothing extractable.
     deprecated = hole_row(
         22,
@@ -2610,7 +2609,7 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
         },
     )
     assert is_deprecated(deprecated.facts), "fixture drift — this row must classify as deprecated"
-    assert unscoreable_cells(sheet([hole_row(0), hole_row(1), hole_row(2), deprecated])) == 0, (
+    assert repairable_holes(sheet([hole_row(0), hole_row(1), hole_row(2), deprecated])) == 0, (
         "a classifier-deprecated sample was counted as a hole — the gate would halt a "
         "healthy cycle on a transient retry the loop already handles"
     )
@@ -2626,6 +2625,9 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
 
     assert holes(ErrorCategory.HALTED) == 0, (
         "a cell a declared bound CUT is settled: the same bound cuts the next attempt"
+    )
+    assert holes(ErrorCategory.PIPELINE) == 0, (
+        "a charged error is the configuration's answer: a re-walk replays it, never buys it again"
     )
     assert holes(ErrorCategory.UNSCOREABLE) == 1, (
         "a cell that ran to its own end can answer differently on a re-measure"
@@ -3756,10 +3758,11 @@ def test_a_level_recorded_on_four_cells_is_a_wide_band_never_a_point() -> None:
     )
 
 
-def test_a_constant_graded_side_keeps_the_band_its_support_allows() -> None:
+def test_a_constant_graded_side_reads_its_se_floored_at_a_quarter_over_n() -> None:
+    # Five cells a side: each SE floored at 1/20, so the band of the difference is about ±0.196.
     rig = _verify_rig()
     graded = dataclasses.replace(rig.scorer, two_valued=frozenset({"hit"}))
-    for level, n, held in ((0.79, 5, True), (0.30, 5, True), (0.30, 6, False)):
+    for level, n, held in ((0.79, 5, True), (0.65, 5, True), (0.30, 5, False)):
         fell, stood = (
             graded.graded(_keyed(row, f"k{row.key}") for row in measurements([value] * n, keys))
             for value, keys in ((level, range(100, 100 + n)), (0.80, range(n)))
@@ -4902,7 +4905,6 @@ async def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_co
             spend=None,
             bench=bench,
             selected=select_optimizer(cycle.config.optimization),
-            fitness_ceiling=None,
         )
         assert result.result_round == bench.selected.round == 1, "the result names the round graded"
 

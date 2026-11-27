@@ -126,38 +126,22 @@ def pick_line(rounds: Sequence[RoundOutcome]) -> list[ArmName]:
     return list(picks.values())
 
 
-CEILING_FRACTION = 0.95
-
-
 class RoundClocks(NamedTuple):
     """``rounds_to_improved`` adopts on a bare point estimate; quote ``rounds_to_separable``."""
 
     rounds_to_separable: int | None
     rounds_to_improved: int | None
-    rounds_to_ceiling: int | None
-    fitness_ceiling: float | None
 
 
-def round_clocks(rounds: Sequence[RoundResult], *, fitness_ceiling: float | None) -> RoundClocks:
-
+def round_clocks(rounds: Sequence[RoundResult]) -> RoundClocks:
     def first(holds: Callable[[RoundResult], bool]) -> int | None:
         return next((r.round for r in rounds if holds(r)), None)
 
-    to_ceiling: int | None = None
-    if fitness_ceiling is not None:
-        target = CEILING_FRACTION * fitness_ceiling
-        to_ceiling = first(
-            lambda r: (
-                (fold := r.fold) is not None and fold.fitness is not None and fold.fitness >= target
-            )
-        )
     return RoundClocks(
         rounds_to_separable=first(
             lambda r: r.origin_panel.reading.advance is RoundAdvance.ADVANCED
         ),
         rounds_to_improved=first(lambda r: r.improved),
-        rounds_to_ceiling=to_ceiling,
-        fitness_ceiling=fitness_ceiling,
     )
 
 

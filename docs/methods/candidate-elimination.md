@@ -261,7 +261,7 @@ Departures from the paper:
 - **A scored member carries a verdict on every Pareto-set cell**; one missing any is refused, a `candidate_refused` decision (ARCHIVAL); a round seating no one reflects on the incumbent again.
 - **The draw moves to the close**: the next parent is drawn and banked at round close, so resume and fork re-seat candidates and draw together. Pareto-set scores bank at admission; a scorer change re-grades none, as LEVI's elites.
 - **`budget.rounds` counts rounds and a GEPA round is one proposal**, so the cap is the child count wanted; the runaway guard (`runner/loop.py::HARD_CAP_ARMS`) counts arms raced.
-- **The incumbent is re-scored** on the whole panel each round, minibatch included; under `lift_reference: parents` each child is read against its GEPA parent on the child's cells.
+- **The incumbent is re-scored** on the whole panel each round, minibatch included.
 
 ## On-disk shape and replay
 

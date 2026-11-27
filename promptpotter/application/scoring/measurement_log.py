@@ -319,7 +319,6 @@ def cycle_hard_samples(
             stores.ruler,
             stamp,
             n_min=knobs.elimination_n_min,
-            enable_2pl=knobs.enable_2pl_graduation,
         )
     )
     cells = NO_CELLS
@@ -336,9 +335,9 @@ def cycle_hard_samples(
 
 
 def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
-    scorer = Resolution(_dataset_campaign_config(stores, name), bank.verifier_graded).scorer
-    knobs = _dataset_campaign_config(stores, name).optimization
-    n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
+    config = _dataset_campaign_config(stores, name)
+    scorer = Resolution(config, bank.verifier_graded).scorer
+    n_min = config.optimization.elimination_n_min
 
     scope = RulerScope(scorer=scorer.id, dataset=name)
     reach = RulerReach(version=stores.ruler.version(), own=None)
@@ -357,7 +356,6 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
             (),
             objective_id=scorer.id,
             n_min=n_min,
-            enable_2pl=enable_2pl,
         )
         return build_hard_samples(
             observations,
@@ -367,7 +365,7 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
             cycle_id=None,
         )
 
-    key = ("dataset_hard_samples", stores.ruler.path, scope, bank.dataset_hash, n_min, enable_2pl)
+    key = ("dataset_hard_samples", stores.ruler.path, scope, bank.dataset_hash, n_min)
     return derived(key, sig=reach.version, compute=build)
 
 
@@ -421,16 +419,16 @@ def _leaderboard_page(
         selected = _selected(view, range(len(bank.samples)), max_unmeasured, limit)
         shown = {sid: bank.samples[sid] for sid in selected}
         wanted = {shown[sid].key: sid for sid in selected}
-        graded_under = Resolution(
-            _dataset_campaign_config(art_store, cells.name), bank.verifier_graded
-        ).scorer
+        config = _dataset_campaign_config(art_store, cells.name)
+        graded_under = Resolution(config, bank.verifier_graded).scorer
         candidates, rows, headline = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
         drawn = drawn_partition(art_store.campaigns, hop)
         at = art_store.campaigns.campaign_cycle(hop)
         graded_under = resolved(art_store, at.campaign.root_cycle).scorer
         rounds = closed_rounds(art_store, hop, graded_under, moment=None)
-        view = cycle_hard_samples(art_store, hop, rounds, cycle_config(art_store, at).config)
+        config = cycle_config(art_store, at).config
+        view = cycle_hard_samples(art_store, hop, rounds, config)
         selected = _selected(view, drawn.bank_ids, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
@@ -440,7 +438,7 @@ def _leaderboard_page(
         view,
         wanted,
         measured={shown[c.position].key for c in rows if c.fitness is not None},
-        order=order or _dataset_campaign_config(cells.stores, cells.name).hard_sample_order,
+        order=order or config.hard_sample_order,
     )
     return _LeaderboardPage(
         shown=shown,

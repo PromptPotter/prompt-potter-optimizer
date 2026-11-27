@@ -18,7 +18,6 @@ from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Folded, Lay, Layer, ScopedBy, fold_layers, rules_of
 from promptpotter.domain.origin_panel import NotSeparatedStall
-from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_params import NodeCall, laid_calls, lay_nodes
 from promptpotter.domain.pipeline_schema import (
@@ -227,18 +226,6 @@ class OptimizationConfig(OptimizerChoice):
         ),
     )
 
-    lift_reference: Annotated[LiftReference, Knob(Estimand.GATE)] = Field(
-        description=(
-            "What each arm's lift is read against — member `a` of its `vs_reference` reading. "
-            "``best_so_far`` (default): the "
-            "round's selected best-so-far individual, re-scored on the round's panel and paired "
-            "with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, "
-            "each re-measured on exactly the cells the arm measured; a crossover child is read "
-            "against the better of its parents there, the bar it must clear to have added "
-            "anything over what it recombined. An arm with no parent has no reference."
-        ),
-    )
-
     origin_gate: Annotated[GateMode, Knob(Estimand.GATE)] = Field(
         description=(
             "Halt after round 0 when the origin's degradation verdict is non-healthy, "
@@ -249,19 +236,6 @@ class OptimizationConfig(OptimizerChoice):
         ),
     )
 
-    enable_2pl_graduation: Annotated[
-        bool,
-        Knob(Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY),
-    ] = Field(
-        description=(
-            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
-            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
-            "genuinely-discriminating dataset wins held-out cross-validation. The "
-            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
-            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
-            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
-        ),
-    )
     determinism: Annotated[DeterminismClamp | None, Knob(Estimand.SEARCH)] = Field(
         None,
         description=(
@@ -375,19 +349,6 @@ class CampaignConfig(StrictModel):
         "whatever this says. DISPLAY config: it picks the order the human "
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
         "knob. Client-overridable per session, like `display_metric`.",
-    )
-    fitness_ceiling: Annotated[float | None, Knob(Estimand.DISPLAY)] = Field(
-        None,
-        gt=0.0,
-        le=1.0,
-        description="The fitness a best-reachable prompt would score on this dataset at this "
-        "campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against "
-        "`CEILING_FRACTION` of it, and the value is banked beside that count so a reader never "
-        "has to guess the denominator. `None` (default) → the clock reports nothing, which is the "
-        "honest reading: a ceiling is a joint claim about the dataset AND the model, so only the "
-        "dataset owner can declare one (`dataset.yaml::campaign`) and a "
-        "guessed value makes every campaign on it publish a round count nobody can defend. "
-        "DISPLAY config — it moves no gate, no selection and no stop.",
     )
     dataset_split: Annotated[DatasetSplit, Knob(Estimand.SELECTION)] = Field(
         description="How run init partitions the bank into the search split every optimizer draw "

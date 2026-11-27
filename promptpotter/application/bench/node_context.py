@@ -163,7 +163,7 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
 
 
 async def walk_origin(round_: RoundContext, cells: list[Sample]) -> ReadArm:
-    """Round 0's ONE walk of the origin over *cells*; the archive never replays an errored cell."""
+    """Round 0's ONE walk of the origin over *cells*; the archive never replays a hole (`MeasuredCell.hole`)."""
     cycle = round_.cycle
     append_record(PhaseRecord(phase=CampaignPhase.ORIGIN, step="enter", round=0))
     try:

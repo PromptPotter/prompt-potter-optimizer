@@ -1987,7 +1987,6 @@ INDEX: Pick = {
     "stop_reason": "stop_reason",
     "rounds_to_separable": "final.rounds_to_separable",
     "rounds_to_improved": "final.rounds_to_improved",
-    "rounds_to_ceiling": "final.rounds_to_ceiling",
     "mode": "final.mode",
     "prompt_fields": "final.result_prompt_fields",
     "pipeline_params": "final.result_pipeline_params",
@@ -2417,8 +2416,8 @@ def crossed_legs(
         "l2_context": recombined(by_l2, "l2_context"),
     }
     twins = [decided(at, after=pause_after) for at in (straight, paused)]
-    # A move of the bill alone is spend, read beside the record: an errored cell never replays.
-    # A stopped pass the resume sends again is bought twice, so each reading counts once.
+    # A move of the bill alone is spend, read beside the record: a hole never replays.
+    # A stopped pass the resume sends again replays its cells and files again: each counts once.
     cells = [twin.pop("harness")["backend_cells"] for twin in twins]
     for twin in twins:
         passes = twin["ledger"]["passes_graded"]

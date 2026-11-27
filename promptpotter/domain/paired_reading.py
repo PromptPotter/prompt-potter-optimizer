@@ -218,10 +218,6 @@ LIFT_SIDE_INFO: Worded[LiftSide, LiftSideInfo] = Worded(
 )
 
 
-#: `best_so_far`: the standing best re-scored on the round's panel; `parents`: the better parent on the arm's cells.
-LiftReference = Literal["best_so_far", "parents"]
-
-
 def instrument_of(dataset_hash: str, pipeline_params: PipelineParams | None) -> str:
     """*pipeline_params* is any searchpoint of the cycle: the stamp is the cycle's."""
     inner = inner_origin_of(pipeline_params)

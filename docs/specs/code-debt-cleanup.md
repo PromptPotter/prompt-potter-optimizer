@@ -317,15 +317,6 @@ optimizer node.
   the archive (`measurements_for_config`) and fits the ruler (`judging_ruler`); a warm verify entered
   in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
   verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
-- **A lift is read two ways**: `paired_reading.py::Estimate` is the one level and lift every surface
-  renders, and `paired.py::_lift`'s test is the measurand's (exact sign where it is declared binary,
-  paired t where graded), but a θ lift is a bare `Estimate` (`ruler.py::theta_lift`), never a
-  `MeasuredLift`, so rk-dec's bar and rk-opt's lift test read two shapes. Action: θ returns
-  `MeasuredLift` beside the paired kinds; θ and paired t stay distinct measurands (θ is unpaired and
-  model-based, which PoBB's truncation needs); CAPO, GEPA and LEVI keep their papers' bars. No
-  `EstimatorSpec.kind`: the measurand's declaration already picks the paired test, and a kind would be
-  a second door to it. **Rides with:** rk-dec. **Re-test:** the chain's census lists the estimate
-  readings; one remains.
 - **The warm gate counts no se_δ**: θ now reads each δ under its SE (`DeltaRuler.entries`), but the
   young-ruler joint MAP still shrinks δ̂ inward (slope 0.30 at 3 individuals per cell) and the warm
   gate warms on row counts alone.
@@ -338,31 +329,14 @@ optimizer node.
   `max(0.0, min(1.0, env_reward))` still fits φ. Root: a connector declares the shape of its
   observation keys (per panel where it varies), and the scorer compiles with the campaign's
   connector. **Re-test:** the clamp under harbor reads two-valued in `Scorer.two_valued`.
-- **The paired SE floor is its own rule** (readings-6's report): `statistics.py::_normal_posterior`
-  floors the SE at `1/(4n)` beside `bounded_mean_interval`'s support bound, the rule a constant
-  graded side now reads in `difference_interval`. Folding it moves CAPO's paired t race (via
-  `paired_mean_t`) and `read_arms`' SEs, so it needs an offline-run attribution of every moved pick
-  first. The support bound is an interval, not an SE, and over a paired difference's
-  support [−1, 1] it is far wider than the floor (n = 20: all ties ±0.42 against ±0.026; all wins
-  [0.64, 1] against [0.97, 1]). **Decided 2026-11-27:** one rule for a constant paired side: an exact
-  bound on the share of cells where the pair disagrees (0/1 grades at n = 20: about ±0.17 for all ties,
-  about [0.66, 1] for all wins; its bounded-variable form for graded scores), replacing both the `1/(4n)`
-  floor and the support bound; the offline run names every moved pick. **Re-test:** one rule for a constant side
-  in `statistics.py`, each moved pick named.
-- **The composite step has no band beside the fitness difference**: `domain/verification.py::VerifyReading.composite_increment`
-  (`:152`) is a bare float while `fitness_difference` (`:148`) is an `Estimate`. Root: both columns'
-  fresh − recorded are one shape. **Re-test:** one shape for both columns' fresh − recorded.
-- **`domain/cell_fold.py::repairable_holes` counts a charged error** (tw-p): every errored non-HALTED cell
-  counts, a charged one a re-walk pays again included, since `ErrorCategory` does not say which errors
-  are fillable. With the repair gone, name each reader and what it should count. **Rides with:** wave 6.
-  **Re-test:** `repairable_holes` excludes a charged error, or has no reader.
-- **A resumed walk buys a charged errored cell again** (tw-j2): `infrastructure/store/measurement_archive.py::ReplayFeed.advance`
-  skips `cell.errored`, so a pass that a charged error stopped is sent again on resume and paid twice.
-  The crossed legs compare deduplicated `passes_graded` and read the repeat as spend. **Decided 2026-11-27:** an errored,
-  charged cell on resume replays its error, never retries (§0: no retry of a (sample, candidate) pair). The root is
-  shared with `repairable_holes`'s row: `ErrorCategory` does not say which errors are fillable.
-  **Rides with:** wave 6. **Re-test:** `offline_run.py --charged` crossed-resumed
-  `harness.backend_cells` equals crossed's, or the retry is a decision in `docs/decisions.md`.
+- **A constant paired side reads the `1/(4n)` floor, not the decided exact bound** (w11-scoring):
+  `statistics.py::floored_se` is now the one constant-side rule (`_normal_posterior` and
+  `difference_interval`'s graded side read it; the support bound is gone from differences), as the
+  w11-scoring brief states decision 9. `briefs/decisions.md`'s 2026-11-27 header instead decides an
+  exact bound on the share of cells where the pair disagrees (0/1 grades at n = 20: about ±0.17 for
+  all ties, about [0.66, 1] for all wins), replacing the floor. Action: the operator names which;
+  if the bound, it replaces `floored_se`'s body and the offline run names every moved pick.
+  **Rides with:** area 04's chain. **Re-test:** `statistics.py` holds one constant-side rule, the one decided.
 - **"Which benchmark a row measures" is spelled twice**: `BenchScope` partitions by benchmark under
   the word `RulerScope` owns. Action: `BenchScope` takes a benchmark name. **Held:** l4-runs owns
   `runner/bench.py`. **Re-test:** `git grep -n "BenchScope" -- promptpotter` is empty.
@@ -1180,10 +1154,16 @@ budgets.
   desk beside its pytest.
   Second case (w10-tests' landing): `touch` phone-412 "every view fits its viewport" failed in
   `webapp/e2e/harness.ts::drawn`, with a read still open past `expect.timeout` (15 s), while
-  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Root: playwright,
-  the gate's critical path, shares the desk with its two heaviest checks. Fix it in `gate.py`'s
-  schedule, or make `drawn` wait on what the page serves rather than on a clock. **Rides with:**
-  area 14's chain.
+  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Third case
+  (w11-store/plugin/scoring): `touch` landscape-844 the same, plus `cold` onboarding-signed-in's
+  `fake_issuer.ts::waitForHealth` past its 60 s. Playwright took 962 s against 290 s alone, and pytest
+  1194 s against 638 s, yet the desk was not CPU-bound: playwright ran at 0.74 cpu/wall against 1.83
+  alone, pytest at 0.49, and the checks running together summed about 5 of 16 cores. The schedule
+  packed them up to `free_mb` (3817 MB free; playwright 1680 + offline-run 1240 + pytest 435 MB
+  declared). Suspected root: memory or disk, not cores. Measure first: page faults and disk queue
+  sampled across one full gate. Then budget the schedule against the resource that binds, or make
+  `drawn` and `waitForHealth` wait on what the server says rather than on a clock. **Rides with:**
+  area 14's chain, as its first link.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in

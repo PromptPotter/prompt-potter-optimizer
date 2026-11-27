@@ -74,7 +74,6 @@ def build_cycle_result(
     spend: SpendRollup | None,
     bench: BenchScore,
     selected: SelectedOptimizer,
-    fitness_ceiling: float | None,
 ) -> CycleResult:
     picked = cycle.selection if cycle is not None else None
     picked_sp = cycle.selected_sp if cycle is not None else None
@@ -116,7 +115,7 @@ def build_cycle_result(
             finished_at=finished_at,
             optimizer_phases=selected.phases,
         ),
-        **round_clocks(cycle_rounds, fitness_ceiling=fitness_ceiling)._asdict(),
+        **round_clocks(cycle_rounds)._asdict(),
         prompt_hashes=selected.prompt_hashes(),
         scorer_id=session.state.scoring.scorer.id,
         cycle_id=session.cycle_id,
@@ -160,7 +159,6 @@ def close_cycle(
             spend=observers.dashboard.spend,
             bench=bench,
             selected=selected,
-            fitness_ceiling=config.fitness_ceiling,
         )
         _finalize_run(
             session,

@@ -470,12 +470,11 @@ def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, fl
 def graduate_ruler_model(
     observations: list[Observation],
     *,
-    enable: bool = True,
     margin: float = 0.01,
     n_folds: int = 5,
 ) -> tuple[CalibrationModel, RaschPosterior]:
     base = fit_rasch(observations)
-    if not enable or len(base.delta) < 2:
+    if len(base.delta) < 2:
         return "1PL", base
 
     full_2pl = fit_rasch_2pl(observations)
