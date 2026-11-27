@@ -35,6 +35,8 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 # every command run BY HAND from the checkout must be handed explicitly. Unset = the tree still
 # lives under $INSTALL_DIR and the default resolves to it.
 DATA_DIR="${DATA_DIR:-}"
+# The box key the unit holds as its credential (install-service.sh): a landing seals under it.
+BOX_KEY="${BOX_KEY:-/etc/$SERVICE_NAME/box.key}"
 # The ONE env file, which the app and every verb read themselves (install-service.sh).
 ENV_FILE="$INSTALL_DIR/.env"
 
@@ -77,7 +79,9 @@ as_unit() {
   sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" "${props[@]}" \
     -p WorkingDirectory="$INSTALL_DIR" \
     -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
-    "$INSTALL_DIR/.venv/bin/python" -m promptpotter "$@"
+    -p LoadCredential=box.key:"$BOX_KEY" \
+    /bin/sh -c 'BOX_KEY_FILE="$CREDENTIALS_DIRECTORY/box.key" exec "$0" -m promptpotter "$@"' \
+    "$INSTALL_DIR/.venv/bin/python" "$@"
 }
 has_bot() { systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; }
 # The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code leaves

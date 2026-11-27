@@ -67,7 +67,12 @@ from promptpotter.application import (
     notices,
     queued_launch,
 )
-from promptpotter.application.account import account_of, blocked_emails, put_account_key
+from promptpotter.application.account import (
+    account_of,
+    blocked_emails,
+    put_account_key,
+    remove_account_key,
+)
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
 from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
@@ -271,6 +276,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.spend import NOTHING_PAID, Budget, HeldBudget
 from promptpotter.infrastructure import docker_host
+from promptpotter.infrastructure.identity import sealing
 from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
     build_identity_bundle,
@@ -412,16 +418,83 @@ _REPO = Path(__file__).resolve().parents[1]
 # 1. Leaks and the perimeter
 
 
-def test_an_accounts_held_key_rests_sealed_and_a_lost_box_key_never_reads_as_none() -> None:
-    # Read as "no keys", a key the box cannot open would bill the host's for the account's sends.
-    stores, secret = workspace(), "sk-held-0123456789abcdef"
-    put_account_key(stores, "openai", SecretStr(secret))
-    assert secret.encode() not in stores.api_keys.path.read_bytes(), "a held key rests in clear"
-    assert stores.api_keys.load()["openai"].secret.get_secret_value() == secret
-    stores.api_keys.box_key.unlink()
-    with pytest.raises(FileUnreadableError):
-        stores.api_keys.load()
-        pytest.fail("a key no box key opens read as none held")
+def _seal_refuses(read: Callable[[], object]) -> bool:
+    try:
+        read()
+    except (FileUnreadableError, sealing.SealError):
+        return True
+    return False
+
+
+def test_a_held_key_opens_only_in_its_own_slot_account_and_whole_file_under_a_32_byte_key() -> None:
+    # Read as keys, each of these bills a key its account never held, or a stranger's.
+    owner, other = workspace(_who("owner-1")), workspace(_who("other-1"))
+    for stores in (owner, other):
+        put_account_key(stores, "openai", SecretStr("sk-openai-0123456789"))
+        put_account_key(stores, "groq", SecretStr("sk-groq-0123456789ab"))
+    held, theirs = owner.api_keys.path.read_bytes(), other.api_keys.path.read_bytes()
+    assert b"sk-openai" not in held, "a held key rests in clear"
+    doc = json.loads(held)
+    keys, seal = doc["keys"], doc["keys"]["openai"]["sealed"]
+    flipped = {
+        **keys,
+        "openai": {**keys["openai"], "sealed": seal[:30] + "A_"[seal[30] == "A"] + seal[31:]},
+    }
+    slots = {"openai": keys["groq"], "groq": keys["openai"]}
+    attacks = {
+        "a flipped byte": (owner, {**doc, "keys": flipped}),
+        "a slot swap": (owner, {**doc, "keys": slots}),
+        "a dropped entry": (owner, {**doc, "keys": {"openai": keys["openai"]}}),
+        "an account swap": (other, doc),
+    }
+    for attack, (victim, planted) in attacks.items():
+        write_json(victim.api_keys.path, planted)
+        assert _seal_refuses(victim.api_keys.load), f"{attack} opened"
+        write_bytes(owner.api_keys.path, held)
+        write_bytes(other.api_keys.path, theirs)
+    assert owner.api_keys.load()["openai"].secret.get_secret_value() == "sk-openai-0123456789"
+    write_bytes(owner.api_keys.box_key, owner.api_keys.box_key.read_bytes()[:31])
+    assert _seal_refuses(owner.api_keys.load), "a 31-byte box key opened"
+    for door in (
+        lambda: sealing.seal(b"", "sk", bound=("t",)),
+        lambda: sealing.unseal(b"k" * 31, seal, bound=("t",)),
+    ):
+        assert _seal_refuses(door), "a key not 32 bytes sealed or opened"
+
+
+def test_the_seal_format_is_pinned_by_a_known_answer() -> None:
+    # A format drift would read every box's sealed keys as tampered.
+    key, bound = bytes(range(32)), ("acct", "groq", "2026-11-27T00:00:00Z")
+    vector = (
+        "AYUB7SdNPU27hS45judFYdLA4unXoDlwgVDHphK79f3ZqBTbJcNoqOK0kgzak51tmihq6JYA6knUrg7rEltl"
+        "raJBjp_GpFU4"
+    )
+    assert sealing.unseal(key, vector, bound=bound) == "sk-known-answer"
+    for moved in (("other", *bound[1:]), (bound[0], "openai", bound[2]), (*bound[:2], "2026")):
+        opened = functools.partial(sealing.unseal, key, vector, bound=moved)
+        assert _seal_refuses(opened), f"opened as {moved}"
+    assert _seal_refuses(lambda: sealing.unseal(bytes(32), vector, bound=bound)), "another key"
+    assert sealing.file_tag(key, ["acct", "groq"]) == "IA6OqGvg7TIevXcAziMngupVEhz_DLzd335BRP1laNM="
+
+
+def test_a_lost_box_key_is_never_replaced_while_a_seal_waits_and_an_account_can_drop_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A key made anew would leave every account sealed under the lost one; one read as "no keys"
+    # would bill the host's for the account's sends.
+    owner, newcomer = workspace(_who("owner-1")), workspace(_who("new-1"))
+    put_account_key(owner, "openai", SecretStr("sk-openai-0123456789"))
+    owner.api_keys.box_key.unlink()
+    assert _seal_refuses(owner.api_keys.load), "a key no box key opens read as none held"
+    assert _seal_refuses(
+        lambda: put_account_key(newcomer, "groq", SecretStr("sk-groq-0123456789ab"))
+    )
+    assert not owner.api_keys.box_key.exists(), "a lost box key was replaced"
+    assert remove_account_key(owner, "openai"), "the account could not drop a key it lost"
+    put_account_key(newcomer, "groq", SecretStr("sk-groq-0123456789ab"))
+    assert newcomer.api_keys.load()["groq"].secret.get_secret_value() == "sk-groq-0123456789ab"
+    monkeypatch.setattr(settings, "BOX_KEY_FILE", str(user_data_root() / "identity" / "box.key"))
+    assert _seal_refuses(newcomer.api_keys.load), "a box key inside the data root was read"
 
 
 def test_a_key_v0_8_21_held_in_clear_is_sealed_by_the_landing_and_still_opens() -> None:
@@ -429,9 +502,9 @@ def test_a_key_v0_8_21_held_in_clear_is_sealed_by_the_landing_and_still_opens() 
     was = {"groq": {"secret": secret, "added_at": "2026-11-20T00:00:00Z"}}
     write_json(stores.api_keys.path, was)
     staged = {one.path: one.data for one in MIGRATIONS["sealed api keys"](stores.projects_root, {})}
+    assert list(staged) == [stores.api_keys.path], "the landing staged more than the account's file"
     assert secret.encode() not in staged[stores.api_keys.path], "the landing kept a key in clear"
-    for path, data in staged.items():
-        write_bytes(path, data)
+    write_bytes(stores.api_keys.path, staged[stores.api_keys.path])
     held = stores.api_keys.load()["groq"]
     assert (held.secret.get_secret_value(), held.added_at) == (secret, was["groq"]["added_at"])
 

@@ -1032,6 +1032,12 @@ survivor.
   `accounts.py::_delegated_identity` and `_token_identity` read `default_projects_root()` while the
   bundle carries the install's paths: a global standing in for a keyed subject. **Rides with:** area
   13's next chain. **Re-test:** `git grep -c default_projects_root -- promptpotter/infrastructure/identity/accounts.py` is 0.
+- **The box's own terminal opens no account's key** (w10-seal): the unit and `update.sh::as_unit` are
+  handed the box key as a systemd credential, but a verb the login user runs by hand names no
+  `BOX_KEY_FILE`, so one reading an account's keys (`wallet_store.py::TenantApiKeyStore.load`) refuses
+  `sealed_keys_unopened`. Root: the box's terminal is handed the same credential (one door every
+  hand-run verb takes, as `as_unit` is), never a copy of the key. **Rides with:** area 13's next
+  chain. **Re-test:** on the box, a hand-run verb reading an account that holds a key opens it.
 
 
 ## 14 · Gate, offline world, tests

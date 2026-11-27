@@ -10,7 +10,7 @@
         "$defs": {
           "SealedKey": {
             "additionalProperties": false,
-            "description": "A held key as it rests: its secret sealed under the box key (`identity/sealing.py`).",
+            "description": "A held key as it rests: its secret sealed under the box key, bound to its account, slot\nand date (`identity/sealing.py`).",
             "properties": {
               "added_at": {
                 "title": "Added At",
@@ -29,9 +29,26 @@
             "type": "object"
           }
         },
-        "additionalProperties": {
-          "$ref": "#/$defs/SealedKey"
+        "additionalProperties": false,
+        "description": "`api_keys.json`: an account's held keys sealed, and a tag binding the whole map to it.",
+        "properties": {
+          "keys": {
+            "additionalProperties": {
+              "$ref": "#/$defs/SealedKey"
+            },
+            "title": "Keys",
+            "type": "object"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
         },
+        "required": [
+          "keys",
+          "tag"
+        ],
+        "title": "SealedKeys",
         "type": "object"
       }
     },
@@ -1845,13 +1862,6 @@
       "fate": "SURVIVOR",
       "patterns": [
         "identity/blocklist_audit.jsonl"
-      ],
-      "shape": null
-    },
-    "box key": {
-      "fate": "SURVIVOR",
-      "patterns": [
-        "identity/box.key"
       ],
       "shape": null
     },

@@ -44,6 +44,9 @@ ENV_FILE="$INSTALL_DIR/.env"
 # Moving the tree without setting DATA_DIR (or the reverse) starts an EMPTY workspace rather than
 # failing, so do both in one go and check the campaign list before trusting the box.
 DATA_DIR="${DATA_DIR:-}"
+# The box key every account's held provider keys are sealed under (`identity/sealing.py`): off the
+# data root, which a backup carries, and handed to the unit as its systemd credential.
+BOX_KEY="${BOX_KEY:-/etc/$SERVICE_NAME/box.key}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -91,6 +94,16 @@ if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]
     sudo restorecon -RF "$INSTALL_DIR/.venv/bin"
 fi
 
+# Made only where no account holds a sealed key: a lost key is restored from its backup, never made
+# anew, or every account's keys stay sealed under the lost one.
+if ! sudo test -f "$BOX_KEY"; then
+    grep -qs '"tag"' "${DATA_DIR:-$INSTALL_DIR/.promptpotter}"/projects/*/api_keys.json \
+        && die "no box key at $BOX_KEY while accounts hold keys sealed under one — restore it from its backup"
+    say "making the box key at $BOX_KEY — back it up apart from the data root"
+    sudo install -d -m 700 "$(dirname "$BOX_KEY")"
+    sudo sh -c "umask 077 && head -c 32 /dev/urandom > '$BOX_KEY'"
+fi
+
 UNIT_FILE=/etc/systemd/system/$SERVICE_NAME.service
 say "writing $UNIT_FILE (user=$RUN_USER, bind=$BIND_HOST:$BIND_PORT)"
 
@@ -105,6 +118,9 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$WORK_DIR
 ${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
+# Root-owned at its source; systemd hands the service its own read-only copy under %d.
+LoadCredential=box.key:$BOX_KEY
+Environment=BOX_KEY_FILE=%d/box.key
 # A benchmark's first fetch caches under HF_HOME; ProtectHome=read-only shuts ~/.cache.
 Environment=HF_HOME=$WRITE_PATH/.cache/huggingface
 ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\

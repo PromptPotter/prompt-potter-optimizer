@@ -150,6 +150,10 @@ class Settings(BaseSettings):
     DBLLMBENCH_DB_PASSWORD: SecretStr = SecretStr("")
     DBLLMBENCH_DB_TLS: bool = False
 
+    # The box key's file, which seals every account's held keys (`identity/sealing.py`): never
+    # under the data root. On the box, the unit's credential (`%d/box.key`); unset, a per-user one.
+    BOX_KEY_FILE: str = ""
+
     # Rejects binary/Office uploads at ingest: xlsx is a macro / zip-bomb / XXE vector.
     HARDENED_MODE: bool = False
 

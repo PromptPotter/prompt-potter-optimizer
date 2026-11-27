@@ -244,6 +244,10 @@ knowing:
   email, its sign-in is the host's. Unset, the terminal stays on the `default` tenant and the app
   logs a warning.
 - **Don't stack Cloudflare Access in front of the OIDC gate** — a double-gate; pick one.
+- **Back up the box key apart from the data root.** `install-service.sh` makes `/etc/$APP_NAME/box.key`
+  (`BOX_KEY` in `deploy.config`) and hands it to the unit as its credential (`BOX_KEY_FILE=%d/box.key`);
+  every account's held provider keys are sealed under it, so a data-root backup restores none
+  without it, and the script refuses to make a new one while a sealed key waits.
 
 **The one rule: a control-plane change never has an inbound door open to the internet** — owned by
 [`docs/decisions.md` § 0004](../docs/decisions.md#0004--operator-admin-channels). The blocklist edit

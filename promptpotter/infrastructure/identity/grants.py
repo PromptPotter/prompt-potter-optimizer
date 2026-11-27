@@ -57,10 +57,6 @@ class IdentityPaths:
     def bulletins(self) -> Path:
         return self.root / "bulletins.json"
 
-    @property
-    def box_key(self) -> Path:
-        return self.root / "box.key"
-
 
 IDENTITY_DIR = "identity"
 

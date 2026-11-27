@@ -48,6 +48,10 @@ RUN_USER="$USER"
 # yet — move the tree there before switching, the note in that script has the exact commands.
 #DATA_DIR="/var/lib/$APP_NAME"
 
+# The box key every account's held provider keys are sealed under: root-owned, off the data root,
+# the unit's systemd credential. Back it up apart from the data root.
+#BOX_KEY="/etc/$APP_NAME/box.key"
+
 # --- runtime ------------------------------------------------------------
 BIND_HOST="127.0.0.1"          # uvicorn host (keep loopback behind the tunnel)
 BIND_PORT="8001"               # uvicorn port

@@ -137,8 +137,8 @@ from promptpotter.infrastructure.store.wallet_store import (
     API_KEYS_FILE,
     CHARGES_FILE,
     GRANT_FILE,
-    SEALED_KEYS,
     CouponGrant,
+    SealedKeys,
 )
 from promptpotter.shared.errors import validation_reason
 from promptpotter.shared.worded import Worded
@@ -285,8 +285,6 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("grants audit", _INSTALL, _IDENTITY.grants_audit.as_posix(), _SURVIVOR, _AUDIT),
     # Who an account is: its API tokens survive as its keys do.
     Kind("api tokens", _INSTALL, _IDENTITY.tokens.as_posix(), _SURVIVOR, TypeAdapter(TokensFile)),
-    # What every account's held keys are sealed under: lost, no account's key opens again.
-    Kind("box key", _INSTALL, _IDENTITY.box_key.as_posix(), _SURVIVOR, Opaque("32 random bytes")),
     # What the host told every account, and what each dismissed: a wipe it warns of must not take it.
     Kind(
         "bulletins", _INSTALL, _IDENTITY.bulletins.as_posix(), _SURVIVOR, TypeAdapter(BulletinBoard)
@@ -364,7 +362,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     # A terms acceptance is its line alone (`UserStore.accepted_terms`).
     Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _RUN, TypeAdapter(CouponGrant)),
-    Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, SEALED_KEYS),
+    Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, TypeAdapter(SealedKeys)),
     Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, FoldedLines(charge_book_fold, Money)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, Parsed(read_bank, Bank)),
     # An upload definition's `source:` reads it.

@@ -8,20 +8,20 @@ None holds a balance: what the coupon has left is a fold of the charges
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import Field, SecretStr, TypeAdapter
+from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import short_form
 from promptpotter.domain.records.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.identity import sealing
-from promptpotter.infrastructure.store.io import append_line, write_json, write_lock
+from promptpotter.infrastructure.store.io import append_line, unlink_robust, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import FileKind
+from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 GRANT_FILE = "grant.json"
 API_KEYS_FILE = "api_keys.json"
@@ -72,66 +72,105 @@ class HeldKey(FrozenModel):
 
 
 class SealedKey(FrozenModel):
-    """A held key as it rests: its secret sealed under the box key (`identity/sealing.py`)."""
+    """A held key as it rests: its secret sealed under the box key, bound to its account, slot
+    and date (`identity/sealing.py`)."""
 
     sealed: str
     added_at: str
 
 
-SEALED_KEYS: TypeAdapter[dict[str, SealedKey]] = TypeAdapter(dict[str, SealedKey])
+class SealedKeys(FrozenModel):
+    """`api_keys.json`: an account's held keys sealed, and a tag binding the whole map to it."""
+
+    keys: dict[str, SealedKey]
+    tag: str
+
+
+def _mapped(tenant: str, keys: Mapping[str, SealedKey]) -> list[str]:
+    return [tenant, *(f for p in sorted(keys) for f in (p, keys[p].added_at, keys[p].sealed))]
+
+
+def sealed_keys(key: bytes, tenant: str, held: Mapping[str, HeldKey]) -> SealedKeys:
+    keys = {
+        p: SealedKey(
+            sealed=sealing.seal(key, k.secret.get_secret_value(), bound=(tenant, p, k.added_at)),
+            added_at=k.added_at,
+        )
+        for p, k in held.items()
+    }
+    return SealedKeys(keys=keys, tag=sealing.file_tag(key, _mapped(tenant, keys)))
+
+
+def opened_keys(key: bytes, tenant: str, file: SealedKeys) -> dict[str, HeldKey]:
+    sealing.check_file_tag(key, _mapped(tenant, file.keys), file.tag)
+    return {
+        p: HeldKey(
+            secret=SecretStr(sealing.unseal(key, k.sealed, bound=(tenant, p, k.added_at))),
+            added_at=k.added_at,
+        )
+        for p, k in file.keys.items()
+    }
 
 
 class TenantApiKeyStore:
-    """One key per provider; read on every send's resolution, so a removal binds the next send."""
+    """One key per provider; read on every send's resolution, so a removal binds the next send.
+    An account holding none has no file."""
 
-    def __init__(self, account_dir: Path, *, box_key: Path) -> None:
+    def __init__(self, account_dir: Path) -> None:
         self.path = account_dir / API_KEYS_FILE
-        self.box_key = box_key
+        self.tenant = account_dir.name
+
+    @property
+    def box_key(self) -> Path:
+        return sealing.key_path(self.path.parents[2])
 
     def load(self) -> dict[str, HeldKey]:
         # Optional, not tolerant: a corrupt file, or one its box key does not open, read as "no
         # keys" would bill the host's.
-        return read_file(self.path, self._opened, FileKind.STORED_CONFIG) or {}
+        return read_file(self.path, self._opened, FileKind.SEALED_KEYS) or {}
 
     def _opened(self, raw: bytes) -> dict[str, HeldKey]:
-        key = sealing.opened_key(self.box_key)
-        return {
-            p: HeldKey(
-                secret=SecretStr(sealing.unseal(key, k.sealed, bound=p)), added_at=k.added_at
-            )
-            for p, k in SEALED_KEYS.validate_json(raw).items()
-        }
+        file = SealedKeys.model_validate_json(raw)
+        if (key := sealing.held_key(self.box_key)) is None:
+            raise sealing.SealError(f"no box key at {self.box_key}")
+        return opened_keys(key, self.tenant, file)
 
     def put(self, provider: str, secret: SecretStr) -> HeldKey:
         held = HeldKey(secret=secret)
-        self._rewrite(lambda keys: {**keys, provider: held})
+        with write_lock(self.path):
+            self._write({**self.load(), provider: held})
         return held
 
+    def _write(self, keys: Mapping[str, HeldKey]) -> None:
+        if not keys:
+            unlink_robust(self.path)
+            return
+        key = sealing.held_key(self.box_key) or self._first_key()
+        write_json(self.path, sealed_keys(key, self.tenant, keys).model_dump(mode="json"))
+
+    def _first_key(self) -> bytes:
+        """A key is made only on an install no sealed file is on: else the key was lost."""
+        if held := list(self.path.parent.parent.glob(f"*/{API_KEYS_FILE}")):
+            reason = f"no box key, while {len(held)} account(s) hold keys sealed under one"
+            raise FileUnreadableError(FileKind.SEALED_KEYS, path=str(self.box_key), reason=reason)
+        return sealing.made_key(self.box_key)
+
     def remove(self, provider: str) -> bool:
-        removed = False
-
-        def _without(keys: dict[str, HeldKey]) -> dict[str, HeldKey]:
-            nonlocal removed
-            removed = provider in keys
-            return {p: k for p, k in keys.items() if p != provider}
-
-        self._rewrite(_without)
-        return removed
-
-    def _rewrite(self, change: Callable[[dict[str, HeldKey]], dict[str, HeldKey]]) -> None:
-        """Read and replaced under its write lock."""
+        """Re-sealed without *provider*; a file no box key opens is deleted by removing any key it
+        lists, since none of them opens and a map short of one could not be re-tagged."""
         with write_lock(self.path):
-            keys = change(self.load())
-            # The box key is made by the first key an install seals, never by an emptied file.
-            box = sealing.box_key(self.box_key) if keys else b""
-            held = {
-                p: SealedKey(
-                    sealed=sealing.seal(box, k.secret.get_secret_value(), bound=p),
-                    added_at=k.added_at,
-                )
-                for p, k in keys.items()
-            }
-            write_json(self.path, SEALED_KEYS.dump_python(held, mode="json"))
+            try:
+                keys = self.load()
+            except FileUnreadableError:
+                file = read_file(self.path, SealedKeys.model_validate_json, FileKind.SEALED_KEYS)
+                if file is None or provider not in file.keys:
+                    raise
+                unlink_robust(self.path)
+                return True
+            if provider not in keys:
+                return False
+            self._write({p: k for p, k in keys.items() if p != provider})
+            return True
 
 
 class ChargeBook:

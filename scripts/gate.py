@@ -2532,7 +2532,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="pp-gate-", ignore_cleanup_errors=True) as home:
         os.environ["PROMPTPOTTER_HOME"] = home
         os.environ["PROMPTPOTTER_ENV_FILE"] = str(Path(home) / ".env")
+        # Off the data root, as the box's credential is (`identity/sealing.py::key_path`).
+        os.environ["BOX_KEY_FILE"] = f"{home}.box.key"
         results = _schedule(checks, sel, store, budget.free_mb)
+    Path(f"{home}.box.key").unlink(missing_ok=True)
     total = time.monotonic() - started
     if store is not None:
         store.record({r.check.name: None if r.rc else r.key for r in results if not r.kept})

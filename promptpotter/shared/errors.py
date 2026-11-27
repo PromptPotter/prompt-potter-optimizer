@@ -518,6 +518,13 @@ class FileKind(enum.Enum):
     RULER = ("ruler_unreadable", 409, *_LANDED)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
     STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
+    # An account's sealed keys (`wallet_store.py::TenantApiKeyStore`): no edit opens a seal.
+    SEALED_KEYS = (
+        "sealed_keys_unopened",
+        500,
+        "Restore the box key (`BOX_KEY_FILE`), or delete the account's api_keys.json and re-add "
+        "its keys.",
+    )
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
     OPTIMIZER_PROMPT = (
         "optimizer_prompt_invalid",

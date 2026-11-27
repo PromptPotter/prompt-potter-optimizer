@@ -283,7 +283,7 @@ def _staged(projects_root: Path) -> dict[Path, Staged]:
 
 
 def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
-    """Writes nothing."""
+    """Writes nothing under the data root (the box key a seal migration makes lives off it)."""
     data_root = projects_root.parent
     staged = _staged(projects_root)
     found_at: dict[Path, Found | None] = {}

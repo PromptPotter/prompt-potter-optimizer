@@ -374,8 +374,11 @@ BASELINE = {
     # w10-jobs (+162): a queued launch waits on disk and the freed slot's holder runs it in its own
     # process (`queued_launch.py`, `spawning.py` out of `run_job.py`); the live-jobs migration goes.
     # w10-records (−625): a race's catch-ups are walks of the one loop; θ leaves the round's statement.
+    # w10-seal (+97): the box key lives off the data root (`sealing.py::key_path`), each seal names
+    # its format and key and binds its account, slot and date, a tag binds the whole file, and a
+    # lost key refuses with its remedy (`FileKind.SEALED_KEYS`) instead of being made anew.
     # Set to the measured count at the w10 landing.
-    "package_lines": 113950,
+    "package_lines": 114047,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -398,7 +401,8 @@ BASELINE = {
     "config_leaf_fields": 107,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
-    "settings_env": 39,
+    # w10-seal (+1): `BOX_KEY_FILE`, the box key's path off the data root (the unit's credential).
+    "settings_env": 40,
     # Parameters annotated `Any`.
     "any_params": 34,
     # `dict[str, Any]` maps declared in `domain/`.

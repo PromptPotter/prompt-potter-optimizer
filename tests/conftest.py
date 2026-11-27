@@ -10,6 +10,9 @@ import tempfile
 _HOME = tempfile.TemporaryDirectory(prefix="pp-tests-", ignore_cleanup_errors=True)
 os.environ["PROMPTPOTTER_HOME"] = _HOME.name
 os.environ["PROMPTPOTTER_ENV_FILE"] = os.path.join(_HOME.name, ".env")
+# Off the data root, as the box's is: a child process seals under it, a fact under its own.
+_BOX = tempfile.TemporaryDirectory(prefix="pp-tests-box-", ignore_cleanup_errors=True)
+os.environ["BOX_KEY_FILE"] = os.path.join(_BOX.name, "box.key")
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,6 +28,7 @@ from offline_world import (
 from world import World, offline_network, shared_run
 
 from promptpotter.application.maintenance.landing import complete_registries
+from promptpotter.config.settings import settings
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
 from promptpotter.infrastructure.store.stores import Stores
@@ -53,8 +57,9 @@ def own_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     `tmp_path`, never `tmp_path` itself: a landing proves every file of the data root, and a fact's
     scratch is none of them; pytest's retention takes it with `tmp_path`. Its account is bound as a
     sending entry binds the terminal's, so a spend book (`factories.py::spend_book`) draws on it
-    with no network asked for."""
+    with no network asked for. Its box key sits beside its data root, as the box's sits off it."""
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(settings, "BOX_KEY_FILE", str(tmp_path / "box.key"))
     with scoped(account=workspace()):
         yield
 
