@@ -437,6 +437,25 @@ class CommandDispatcher:
                 )
                 return await self._filed(WORKSPACE_SUBJECT, call, applier, recorded)
 
+    async def act_claimed(self, record: CommandRecord, door: Door) -> object:
+        """A queued launch's act, in the process its promoted job runs in (`queued_launch.py`): its
+        filing's handler run again, never filed again (its command was acked when it queued), on
+        the job `Inline.claimed` names. Its payload was addressed at its filing."""
+        payload, command_id = record.payload, record.command_id
+        dispatched: Dispatched[Any]
+        match payload:
+            case CyclePayload():
+                hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+                at = self.stores.campaigns.campaign_cycle(hop)
+                dispatched = DispatchedToCycle(self, payload, command_id, at, door=door)
+            case DraftPayload():
+                owned_draft(self.stores, payload.draft_id)
+                claim = self.stores.drafts.claim(payload.draft_id)
+                dispatched = DispatchedToDraft(self, payload, command_id, claim, door=door)
+            case _:
+                dispatched = Dispatched(self, payload, command_id, door=door)
+        return await (await self._applier(dispatched)).run()
+
     async def _settled(
         self, subject: str, kind: CommandKind, act_digest: str, idempotency_key: str
     ) -> tuple[CommandRecord, CommandAckRecord] | None:

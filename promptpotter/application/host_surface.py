@@ -460,7 +460,8 @@ class HostSession:
         command_id = opened.accepted.command_id
         act: Coroutine[Any, Any, object] = opened.act
         if command_answer(sent.kind) is LaunchAnswer:
-            act = launched(await opened.act, self._dispatcher(), sent.door)
+            outcome = await opened.act
+            act = launched(outcome.result, outcome.payload, self._dispatcher(), sent.door)
         acting = asyncio.create_task(act)
         self._acting[command_id] = acting
         acting.add_done_callback(functools.partial(self._settled, command_id))

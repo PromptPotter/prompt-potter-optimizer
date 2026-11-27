@@ -23,7 +23,7 @@ from promptpotter.application.jobs.mint import (
     arm_plans,
     mint_arms,
     mint_framed_arms,
-    off_loop,
+    minted_off_loop,
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
@@ -122,7 +122,9 @@ async def _mint(
                 yield cycle
         case CheckinArms(opened=opened):
             draft_id = opened.draft.draft_id
-            async for cycle in off_loop(mint_arms(plans, adopting=draft_id, openings=openings)):
+            async for cycle in minted_off_loop(
+                mint_arms(plans, adopting=draft_id, openings=openings)
+            ):
                 yield cycle
         case _:
             assert_never(source)

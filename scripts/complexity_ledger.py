@@ -371,7 +371,9 @@ BASELINE = {
     # (`identity/sealing.py`, stdlib, as core reads them), with the survivor's one-shot migration.
     # (+98): the account deleter (`account.py::delete_account`), the host's `delete-account`.
     # (−5): `IdentityContext.issuer`, which nothing read, and the host predicate's second spelling.
-    "package_lines": 114413,
+    # w10-jobs (+162): a queued launch waits on disk and the freed slot's holder runs it in its own
+    # process (`queued_launch.py`, `spawning.py` out of `run_job.py`); the live-jobs migration goes.
+    "package_lines": 114575,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -301,9 +301,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/maintenance/landing.py::_newer::ValidationError": (
         "a stamp naming no ordered version lands by key alone"
     ),
-    "application/maintenance/migrations/live_jobs_index.py::staged::FileUnreadableError": (
-        "a job file that does not load refuses the landing on its own"
-    ),
     "application/optimizers/capo/members.py::seed_instructions::ValueError": (
         "a reply out of form answers None, by contract; the call's record keeps it"
     ),

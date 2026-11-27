@@ -28,6 +28,7 @@ from promptpotter.config.paths import (
     OPTIMIZER_REUSE_DIR,
     PRODUCERS_DIR,
     PROJECTS_DIR,
+    QUEUED_JOBS_DIR,
     READOUT_POINTER,
     REFUSED_JOBS_DIR,
     UNSWEPT_DIR,
@@ -36,7 +37,7 @@ from promptpotter.config.prompt_blocks import PACK_FILE
 from promptpotter.domain.bulletin import BulletinBoard
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile
-from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
+from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER, QUEUED_LAUNCH
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.free_tier_file import FREE_TIER_ADAPTER
@@ -318,6 +319,10 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("live-jobs index", _INSTALL, f"{JOBS_DIR}/{LIVE_JOBS_INDEX}", _SURVIVOR, LIVE_JOB_IDS),
+    # A queued launch's ask: it survives a restart, which the queue outlives.
+    Kind(
+        "queued launch", _INSTALL, f"{JOBS_DIR}/{QUEUED_JOBS_DIR}/*.json", _SURVIVOR, QUEUED_LAUNCH
+    ),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
     # Run data, never the job's: a survivor's model holds no served words.
     Kind(

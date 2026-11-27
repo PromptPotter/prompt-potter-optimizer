@@ -17,8 +17,14 @@ from pydantic import (
     model_validator,
 )
 
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind, CommandPayload
+from promptpotter.domain.command_kinds import (
+    PAYLOAD_MODEL_FOR_KIND,
+    CommandKind,
+    CommandPayload,
+    Door,
+)
 from promptpotter.domain.cycle_paths import Subject
+from promptpotter.domain.job import LaunchedAs
 from promptpotter.domain.records.run_records import (
     DraftOpenedEffect,
     LaunchedEffect,
@@ -102,6 +108,18 @@ class CommandRecord(FrozenModel):
         if isinstance(raw, dict) and isinstance(kind, CommandKind):
             return _recorded_shape(kind).model_validate(raw)
         return raw
+
+
+class QueuedLaunch(LaunchedAs):
+    """A queued launch's ask, filed beside its job (`config/paths.py::QUEUED_JOBS_DIR`) once its
+    command is acked: the act a free slot runs in its own process (`JobRegistry.promote`), its
+    asker long gone or not. It lives while its job is queued, and holds no credential."""
+
+    command_id: str
+    door: Door
+
+
+QUEUED_LAUNCH = TypeAdapter(QueuedLaunch)
 
 
 CommandEffect = Annotated[

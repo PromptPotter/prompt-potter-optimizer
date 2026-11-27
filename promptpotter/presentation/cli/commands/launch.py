@@ -135,19 +135,22 @@ def inline_launch(args: argparse.Namespace) -> Inline:
     return Inline(no_wait=args.no_wait)
 
 
-async def held_run(
-    launched: object, dispatcher: CommandDispatcher, args: argparse.Namespace
-) -> HeldRun:
-    """A launch queued on a full machine says its place in line, as `machine-status` words it."""
+async def held_run(launched: object, dispatcher: CommandDispatcher) -> HeldRun | CommandResult:
+    """The run held here; a launch queued on a full machine says its place in line, as
+    `machine-status` words it, and ends this process: its own starts it when a slot frees."""
     assert isinstance(launched, Launched), "a launching command answers its launch"
-    assert launched.held is not None, "an inline launch is held, never detached"
-    if not launched.held.done() and not args.json_output:
-        status = await asyncio.to_thread(
-            served_machine_status, dispatcher.stores, dispatcher.job_registry
-        )
-        if status.notice is not None:
-            print(said_text(status.notice), flush=True)
-    return await launched.held
+    if launched.held is not None:
+        return await launched.held
+    job_id = launched.launch.job_id
+    status = await asyncio.to_thread(
+        served_machine_status, dispatcher.stores, dispatcher.job_registry
+    )
+    lines = [] if status.notice is None else [said_text(status.notice)]
+    lines.append(
+        f"Queued as job {job_id}: it starts in its own process when a slot frees. "
+        f"Withdraw it: python -m promptpotter cancel-queued {job_id}"
+    )
+    return CommandResult(data=launched.launch.model_dump(mode="json"), human="\n".join(lines))
 
 
 def ctrl_c_pauses(
@@ -356,7 +359,7 @@ async def _hold_checkin(
     dispatcher: CommandDispatcher,
     draft_id: str,
     patch: EditDraftPatch | None,
-) -> HeldRun:
+) -> HeldRun | CommandResult:
     # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     if patch is not None:
         await dispatcher.answer(
@@ -399,8 +402,9 @@ async def _hold_checkin(
     except OriginIncompleteError as refused:
         raise _said_incomplete(refused, last_turn, draft_id) from None
     _checkin_line("origin", f"complete — check-in {draft_id} started")
-    held = await held_run(launched, dispatcher, args)
-    _checkin_line("campaign", f"minted {held.session.campaign_id} from check-in {draft_id}")
+    held = await held_run(launched, dispatcher)
+    if isinstance(held, HeldRun):
+        _checkin_line("campaign", f"minted {held.session.campaign_id} from check-in {draft_id}")
     return held
 
 
@@ -444,7 +448,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     is_file = args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)
     if args.draft is None and not is_file:
         dispatcher = CommandDispatcher(local_stores(tenant=args.tenant), inline=inline_launch(args))
-        return await mint_and_run(args, dispatcher, _named_mint(args, dispatcher))
+        return await mint_and_run(dispatcher, _named_mint(args, dispatcher))
     if args.step_rounds is not None or (args.draft and args.dataset):
         raise PayloadInvalidError(
             "a check-in starts from a FILE or a kept --draft, one of them, and takes no "
@@ -459,7 +463,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     except PotterError as exc:
         exc.add_note(_draft_kept(draft_id))
         raise
-    return await _run_origin(held)
+    return held if isinstance(held, CommandResult) else await _run_origin(held)
 
 
 @contextlib.contextmanager
@@ -472,12 +476,12 @@ def _named_dataset(dispatcher: CommandDispatcher) -> Iterator[None]:
         raise
 
 
-async def mint_and_run(
-    args: argparse.Namespace, dispatcher: CommandDispatcher, mint: MintCampaignPayload
-) -> CommandResult:
+async def mint_and_run(dispatcher: CommandDispatcher, mint: MintCampaignPayload) -> CommandResult:
     with _named_dataset(dispatcher):
         launched = (await dispatcher.dispatch(CommandCall(mint, door=Door.TERMINAL))).result
-    held = await held_run(launched, dispatcher, args)
+    held = await held_run(launched, dispatcher)
+    if isinstance(held, CommandResult):
+        return held
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held)
 
@@ -654,12 +658,13 @@ def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkC
 
 async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
-) -> HeldRun:
+) -> HeldRun | CommandResult:
     """*ctx* follows the cycle the command answers (a fork) and stays put when the hold is refused."""
     dispatcher = CommandDispatcher(ctx.store, inline=inline_launch(args))
     outcome = await dispatcher.dispatch(CommandCall(payload, door=Door.TERMINAL))
-    held = await held_run(outcome.result, dispatcher, args)
-    ctx.cycle_id = held.session.hop.cycle_id
+    held = await held_run(outcome.result, dispatcher)
+    if isinstance(held, HeldRun):
+        ctx.cycle_id = held.session.hop.cycle_id
     return held
 
 
@@ -712,7 +717,6 @@ async def _pivot_to_fresh(
         "lookahead": lookahead_from_args(args),
     }
     return await mint_and_run(
-        args,
         CommandDispatcher(ctx.store, inline=inline_launch(args)),
         MintCampaignPayload.model_validate(fresh),
     )
@@ -736,6 +740,8 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
         held = await _dispatch_held(args, ctx, payload)
     except ConfigDriftError as drift:
         return await _pivot_to_fresh(args, ctx, drift)
+    if isinstance(held, CommandResult):
+        return held
 
     session = held.session
     logger.info(

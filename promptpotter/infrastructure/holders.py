@@ -9,6 +9,7 @@ from typing import ClassVar, NamedTuple, assert_never
 
 from pydantic import ValidationError
 
+from promptpotter.config.paths import QUEUED_JOBS_DIR
 from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.domain.job import JOB_ADAPTER, Job, ScoringPass
 from promptpotter.domain.phases import LaunchStage, RunPhase
@@ -31,6 +32,11 @@ def job_path(jobs_dir: Path, job_id: str) -> Path:
     except ValueError:
         # Names no file a registry could hold, so no job: refused as any absent one is.
         raise NotFoundError(f"no job {job_id!r}") from None
+
+
+def queued_path(jobs_dir: Path, job_id: str) -> Path:
+    """Where a queued job's ask is filed (`command_events.py::QueuedLaunch`)."""
+    return job_path(jobs_dir, job_id).parent / QUEUED_JOBS_DIR / f"{job_id}.json"
 
 
 def read_job(path: Path, staged: bytes | None = None) -> Job | None:
@@ -66,8 +72,13 @@ def producer_alive(jobs_dir: Path, producer_id: str) -> bool:
 
 def in_flight(jobs_dir: Path, job: Job) -> bool:
     """THE death rule: a job holds while unreleased and its producer's lock is held, whichever
-    process asks; no in-process task stands in for the lock."""
-    return not job.released and producer_alive(jobs_dir, job.producer_id)
+    process asks; no in-process task stands in for the lock. A queued one whose ask is filed
+    waits on disk, its asker gone or not, until a free slot promotes it or the sweep expires it."""
+    if job.released:
+        return False
+    if job.queued and queued_path(jobs_dir, job.job_id).is_file():
+        return True
+    return producer_alive(jobs_dir, job.producer_id)
 
 
 def hold_released(jobs_dir: Path, hold: str | None) -> bool:

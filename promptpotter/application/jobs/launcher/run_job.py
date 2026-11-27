@@ -1,10 +1,9 @@
-"""The ``JobSpec`` rides stdin, never a file: an identity rebuilt from a tenant name is the HOST's."""
+"""A held run's own process: its ``JobSpec`` rides stdin (`domain/job.py::LaunchedAs`)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import subprocess
 import sys
 import threading
@@ -12,15 +11,14 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
-
-from pydantic import TypeAdapter, model_validator
+from typing import TYPE_CHECKING
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.launcher.opening import Opening
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.spawning import adopted, start, tell_spawner
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.run_init import enter_cycle
 from promptpotter.config.logging import setup_logging
@@ -28,53 +26,50 @@ from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.job import LaunchMove
+from promptpotter.domain.job import LaunchedAs, LaunchMove
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget, HeldBudget
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import open_append, write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.identity import IdentityContext
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.mint import OpenedCycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
-# Out of the server's process group, so its Ctrl+C or a service stop signal is the server's alone.
-_DETACHED: dict[str, Any]
-if sys.platform == "win32":
-    _DETACHED = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
-else:
-    _DETACHED = {"start_new_session": True}
 
+class JobSpec(LaunchedAs):
+    """Admitted, held and its cycle on disk: the run its process opens (`run_job`)."""
 
-class JobSpec(StrictModel):
-    """Everything the run's process cannot read off disk: who admitted it, at what ceiling, and
-    which roots the admitting stores addressed."""
-
-    job_id: str
     hop: CycleHop
     mode: RunMode
-    identity: IdentityContext
     budget: HeldBudget
-    jobs_dir: Path
-    projects_root: Path
-    shared_root: Path
-    install_datasets_root: Path
-    research_datasets_root: Path | None
 
-    @model_validator(mode="after")
-    def _reads_back_as_written(self) -> Self:
-        # The run's process rebuilds every field off this JSON: one reading back otherwise is another launch.
-        wire = self.model_dump(mode="json")
-        for name, field in type(self).model_fields.items():
-            held = getattr(self, name)
-            if TypeAdapter(field.annotation).validate_python(wire[name]) != held:
-                raise ValueError(f"JobSpec.{name} does not read back as written: {held!r}")
-        return self
+
+def launched_as(stores: Stores, jobs_dir: Path, job_id: str) -> LaunchedAs:
+    """*job_id* as *stores* would act it in a process of its own."""
+    return LaunchedAs(
+        job_id=job_id,
+        identity=stores.identity,
+        jobs_dir=jobs_dir,
+        projects_root=stores.projects_root,
+        shared_root=stores.shared_root,
+        install_datasets_root=stores.install_datasets_root,
+        research_datasets_root=stores.research_datasets_root,
+    )
+
+
+def stores_of(spec: LaunchedAs) -> Stores:
+    """The stores *spec*'s admitting process addressed, rebuilt in the job's own."""
+    return build_stores(
+        spec.identity,
+        projects_root=spec.projects_root,
+        install_datasets_root=spec.install_datasets_root,
+        research_datasets_root=spec.research_datasets_root,
+        shared_root=spec.shared_root,
+    )
 
 
 async def spawn_job(held: HeldLaunch) -> asyncio.Task[None]:
@@ -88,7 +83,8 @@ async def spawn_job(held: HeldLaunch) -> asyncio.Task[None]:
     # slot back or stamp its cycle: the opening's exit does, on a raise.
     held.opening.owns(hop)
     spec = held.job_spec()
-    child = _start(spec, log_path)
+    with open_append(log_path) as log:
+        child = start(__spec__.name, spec.model_dump_json().encode(), log)
     if not await _adoption(loop, child, spec.job_id):
         raise RuntimeError(
             f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
@@ -113,31 +109,10 @@ async def spawn_job(held: HeldLaunch) -> asyncio.Task[None]:
     return exited_task
 
 
-def _start(spec: JobSpec, log_path: Path) -> subprocess.Popen[bytes]:
-    """The run's process, its spec on stdin; stdout is `_adoption`'s, stderr the job's log."""
-    with open_append(log_path) as log:
-        child = subprocess.Popen(
-            [sys.executable, "-X", "utf8", "-m", __spec__.name],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=log,
-            **_DETACHED,
-        )
-    assert child.stdin is not None
-    child.stdin.write(spec.model_dump_json().encode())
-    child.stdin.close()
-    return child
-
-
-# The one line a run's process says on its stdout: it holds the job.
-_ADOPTED = b"adopted\n"
-
-
 def _adoption(
     loop: asyncio.AbstractEventLoop, child: subprocess.Popen[bytes], job_id: str
 ) -> asyncio.Future[bool]:
-    """Whether *child* adopted its job; ``False`` once it exits without saying so. Read on a
-    daemon thread, for the reason `_await_exit` is."""
+    """`spawning.py::adopted`, read on a daemon thread for the reason `_await_exit` is."""
     said: asyncio.Future[bool] = loop.create_future()
 
     def settle(adopted: bool) -> None:
@@ -145,22 +120,12 @@ def _adoption(
             said.set_result(adopted)
 
     def read() -> None:
-        assert child.stdout is not None
-        with child.stdout:
-            adopted = any(line == _ADOPTED for line in child.stdout)
+        took = adopted(child)
         with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(settle, adopted)
+            loop.call_soon_threadsafe(settle, took)
 
     threading.Thread(target=read, name=f"job-{job_id}-adopt", daemon=True).start()
     return said
-
-
-def _tell_spawner() -> None:
-    """`spawn_job`'s handshake; stdout then joins the log, which closes the pipe."""
-    sys.stdout.flush()
-    sys.stdout.buffer.write(_ADOPTED)
-    sys.stdout.buffer.flush()
-    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,19 +141,9 @@ class HeldLaunch:
     mode: RunMode  # `launch.py::Admitted.mode`'s: no door re-derives it
 
     def job_spec(self) -> JobSpec:
-        stores = self.opening.stores
-        return JobSpec(
-            job_id=self.opening.job_id,
-            hop=self.hop,
-            mode=self.mode,
-            identity=stores.identity,
-            budget=self.budget,
-            jobs_dir=self.opening.job_registry.jobs_dir,
-            projects_root=stores.projects_root,
-            shared_root=stores.shared_root,
-            install_datasets_root=stores.install_datasets_root,
-            research_datasets_root=stores.research_datasets_root,
-        )
+        opening = self.opening
+        launched = launched_as(opening.stores, opening.job_registry.jobs_dir, opening.job_id)
+        return JobSpec(**dict(launched), hop=self.hop, mode=self.mode, budget=self.budget)
 
     async def detach(self) -> asyncio.Task[None]:
         async with self.closing:
@@ -245,20 +200,14 @@ class HeldRun(HeldLaunch):
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:
-    stores = build_stores(
-        spec.identity,
-        projects_root=spec.projects_root,
-        install_datasets_root=spec.install_datasets_root,
-        research_datasets_root=spec.research_datasets_root,
-        shared_root=spec.shared_root,
-    )
+    stores = stores_of(spec)
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
     # The job, its claim with it, now lives and dies with THIS process: a run killed before it
     # declares itself leaves the cycle free.
     if (adopted := await asyncio.to_thread(job_registry.adopt, spec.job_id)) is None:
         return None
     opening = Opening.of(stores, job_registry, adopted)
-    _tell_spawner()
+    tell_spawner()
     try:
         async with AsyncExitStack() as closing:
             closing.push_async_exit(opening)

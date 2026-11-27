@@ -3859,6 +3859,186 @@
         "type": "object"
       }
     },
+    "queued launch": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "jobs/queued/*.json"
+      ],
+      "shape": {
+        "$defs": {
+          "Door": {
+            "description": "Where a call is filed, which its kind's `Press` admits or refuses (`CommandKind.pressed_at`).",
+            "enum": [
+              "api",
+              "terminal",
+              "host"
+            ],
+            "title": "Door",
+            "type": "string"
+          },
+          "IdentityContext": {
+            "properties": {
+              "access_state": {
+                "default": "active",
+                "enum": [
+                  "active",
+                  "blocked"
+                ],
+                "title": "Access State",
+                "type": "string"
+              },
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Capabilities",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "carried_by": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "cookie",
+                      "bearer"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Carried By"
+              },
+              "claims": {
+                "additionalProperties": true,
+                "title": "Claims",
+                "type": "object"
+              },
+              "email": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Email"
+              },
+              "host": {
+                "default": false,
+                "title": "Host",
+                "type": "boolean"
+              },
+              "provider": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Provider"
+              },
+              "tenant_id": {
+                "title": "Tenant Id",
+                "type": "string"
+              },
+              "token_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Token Id"
+              },
+              "user_id": {
+                "title": "User Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "tenant_id"
+            ],
+            "title": "IdentityContext",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "A queued launch's ask, filed beside its job (`config/paths.py::QUEUED_JOBS_DIR`) once its\ncommand is acked: the act a free slot runs in its own process (`JobRegistry.promote`), its\nasker long gone or not. It lives while its job is queued, and holds no credential.",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "door": {
+            "$ref": "#/$defs/Door"
+          },
+          "identity": {
+            "$ref": "#/$defs/IdentityContext"
+          },
+          "install_datasets_root": {
+            "format": "path",
+            "title": "Install Datasets Root",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "jobs_dir": {
+            "format": "path",
+            "title": "Jobs Dir",
+            "type": "string"
+          },
+          "projects_root": {
+            "format": "path",
+            "title": "Projects Root",
+            "type": "string"
+          },
+          "research_datasets_root": {
+            "anyOf": [
+              {
+                "format": "path",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Datasets Root"
+          },
+          "shared_root": {
+            "format": "path",
+            "title": "Shared Root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "identity",
+          "jobs_dir",
+          "projects_root",
+          "shared_root",
+          "install_datasets_root",
+          "research_datasets_root",
+          "command_id",
+          "door"
+        ],
+        "title": "QueuedLaunch",
+        "type": "object"
+      }
+    },
     "route ceilings": {
       "fate": "CACHE",
       "patterns": [

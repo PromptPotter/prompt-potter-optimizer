@@ -130,7 +130,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sweep_task = asyncio.create_task(periodic_sweep(default_projects_root()))
     async with MCP_DOOR.running():
         yield
-    await registry.close_detached()
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await sweep_task

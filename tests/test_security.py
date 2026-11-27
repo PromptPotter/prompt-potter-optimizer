@@ -65,6 +65,7 @@ from promptpotter.application import (
     cycle_reads,
     health,
     notices,
+    queued_launch,
 )
 from promptpotter.application.account import account_of, blocked_emails, put_account_key
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
@@ -95,7 +96,7 @@ from promptpotter.application.host_surface import (
     TaskStatusOf,
 )
 from promptpotter.application.jobs import mint as mint_module
-from promptpotter.application.jobs import quota
+from promptpotter.application.jobs import quota, spawning
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher import run_job as run_job_module
@@ -150,7 +151,6 @@ from promptpotter.application.served_dashboard import ServedDashboard, served_da
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (
-    LIVE_JOBS_INDEX,
     PRODUCERS_DIR,
     PROJECTS_DIR,
     block_packs_root,
@@ -165,10 +165,12 @@ from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
+    QUEUED_LAUNCH,
     WORKSPACE_SUBJECT,
     CommandAckRecord,
     CommandRecord,
     KeptRefusal,
+    QueuedLaunch,
     subject_key,
 )
 from promptpotter.domain.command_kinds import (
@@ -734,6 +736,35 @@ def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
     )
 
 
+def _ask(registry: JobRegistry, job: Job, root: Path) -> QueuedLaunch:
+    """*job*'s ask as a queued launch files it."""
+    return QueuedLaunch(
+        job_id=job.job_id,
+        identity=default_identity(),
+        jobs_dir=registry.jobs_dir,
+        projects_root=root,
+        shared_root=root,
+        install_datasets_root=root,
+        research_datasets_root=None,
+        command_id=uuid.uuid4().hex,
+        door=Door.TERMINAL,
+    )
+
+
+def _promoted(monkeypatch: pytest.MonkeyPatch) -> list[QueuedLaunch]:
+    """Each ask a promotion starts a process for, that process taking its job at once."""
+    asks: list[QueuedLaunch] = []
+
+    def start(_module: str, ask: bytes, **_log: object) -> subprocess.Popen[bytes]:
+        asks.append(QUEUED_LAUNCH.validate_json(ask))
+        # The child's own line, in bytes: a text-mode stdout writes `\r\n` on Windows.
+        said = f"import sys; sys.stdout.buffer.write({spawning._ADOPTED!r})"
+        return subprocess.Popen([sys.executable, "-c", said], stdout=subprocess.PIPE)
+
+    monkeypatch.setattr(spawning, "start", start)
+    return asks
+
+
 def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_its_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -757,7 +788,10 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
     assert registry.landing() is None, "a refused landing closed admission anyway"
     registry.release(held.job_id)
     assert verdict() == "closed" and registry.landing() == elsewhere
-    assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
+    asks = _promoted(monkeypatch)
+    registry.file_ask(_ask(registry, waiting, tmp_path))
+    registry.promote()
+    assert not asks, "a landing let old code start a queued launch"
     with pytest.raises(ServiceUnavailableError):
         registry.create(
             user_id="ada-id",
@@ -767,7 +801,8 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
             holder=CampaignLaunch("ds1"),
         )
     registry.close_for_landing(CODE_REVISION)
-    assert registry.claim_next(waiting.job_id), "code on the target refused its own launches"
+    registry.promote()
+    assert [ask.job_id for ask in asks] == [waiting.job_id], "the target refused its own launches"
 
 
 @pytest.mark.usefixtures("offline")
@@ -2383,7 +2418,7 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
         research_datasets_root=built_stores.research_datasets_root,
     )
     # Its handshake writes the spawner's pipe, which this process is not.
-    monkeypatch.setattr(run_job_module, "_tell_spawner", lambda: None)
+    monkeypatch.setattr(run_job_module, "tell_spawner", lambda: None)
     assert asyncio.run(run_job_module.run_job(spec)) is StopOutcome.FAILED, (
         "a detached run never adopted its job, or ran past its campaign's refusal"
     )
@@ -3143,23 +3178,6 @@ def test_a_job_file_that_does_not_load_is_named_in_machine_status_and_the_rest_l
     )
 
 
-def test_a_job_in_flight_before_the_live_jobs_index_holds_its_slot_past_the_landing(
-    tmp_path: Path,
-) -> None:
-    projects_root = default_projects_root()
-    registry = JobRegistry.attach(jobs_dir(projects_root))
-    job = registry.create(
-        user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / "w"),
-        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
-    )  # fmt: skip
-    (jobs_dir(projects_root) / LIVE_JOBS_INDEX).unlink()
-    staged = {one.path: one.data for one in MIGRATIONS["live-jobs index"](projects_root, {})}
-    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged)
-    assert [j.job_id for j in landed.list_running()] == [job.job_id], (
-        "a run in flight across the landing lost its slot"
-    )
-
-
 def test_a_job_v0_8_21_wrote_with_how_its_run_ended_lands_counted_by_the_quota_and_live(
     tmp_path: Path,
 ) -> None:
@@ -3234,7 +3252,7 @@ class _Unread(NamedTuple):
 def unread(built_stores: Stores, offline: Router, tmp_path: Path) -> _Unread:
     campaigns = built_stores.campaigns
     # Minted first: a run lands the data root, which a stray file refuses.
-    kept_hop = asyncio.run(World(built_stores, offline, tmp_path / "world").campaign(rounds=0)).hop
+    kept_hop = asyncio.run(World(built_stores, offline, tmp_path / "world").minted())
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
     UserStore(campaigns.workspace).save(user)
     events = CycleEventLog.workspace_path(campaigns.workspace)
@@ -4272,7 +4290,7 @@ def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_
 
 
 async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_jobs_own_ending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant, offline: Router
+    tmp_path: Path, host_tenant: _HostTenant, offline: Router
 ) -> None:
     # A queued launch records the cycle its job already knows; its retry is never a relaunch.
     caller = host_tenant.caller
@@ -4288,15 +4306,11 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         "cancelled": None,
         "failed": (StopReason.CRASHED, None),
     }
-    # A waiter re-polls at once, so one woken on an ended job raises without a wall-clock wait.
-    monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     for status, ending in endings.items():
         key = uuid.uuid4().hex
         ran = await CommandDispatcher(caller.stores, job_registry=queuing).dispatch(
             CommandCall(step, key, door=Door.HOST)
         )
-        waiter = set(queuing._detached)
-        assert waiter, "guard: the queued step left no waiter to wake"
         assert isinstance(ran.result, launcher_launch.Launched)
         launched = ran.result.launch
         assert launched.hop == step_hop, "a queued step recorded no cycle its job knew"
@@ -4306,8 +4320,6 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
             stop = RunPhaseRecord.stop(ending[0], cause=ending[1])
             await asyncio.to_thread(caller.stores.declare_stop, step_hop, stop)
             await asyncio.to_thread(queuing.release, launched.job_id)
-        # Its queue waiter wakes on the ended job and raises into a release of its own.
-        await asyncio.gather(*waiter, return_exceptions=True)
         with pytest.MonkeyPatch.context() as later:
             later.setattr(registry_module, "utcnow_iso", lambda: "2999-01-01T00:00:00Z")
             await asyncio.to_thread(queuing.reap_orphans)
@@ -4319,7 +4331,38 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         read_back = await stepping.answer(TaskStatusOf(task.task_id))
         assert read_back.status == status, f"a reaped {status} launch read {read_back.status}"
         assert not queuing.list_queued(), "a retried launch launched again"
-    await queuing.close_detached()
+
+
+# One journey: the step queues, its asker gone, the freed slot promotes it, and its process runs it.
+async def test_a_step_queued_behind_a_running_cycle_runs_in_its_own_process_once_the_slot_frees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant, offline: Router
+) -> None:
+    stores = host_tenant.caller.stores
+    hop = await _mint(stores, offline, tmp_path)
+    machine = JobRegistry(tmp_path / "machine" / "jobs", capacity=lambda _live: 1)
+    running = await asyncio.to_thread(
+        machine.request_slot, user_id="ada-id", principal_id="ada-id",
+        workspace=WorkspaceDir(tmp_path), holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    step = StartRunPayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, step_rounds=1)
+    asked = await CommandDispatcher(stores, job_registry=machine).dispatch(
+        CommandCall(step, door=Door.API)
+    )
+    assert isinstance(asked.result, launcher_launch.Launched) and asked.result.held is None
+    (queued,) = machine.list_queued()
+    asks = _promoted(monkeypatch)
+    await asyncio.to_thread(machine.release, running.job_id)
+    (ask,) = asks
+    assert ask.job_id == queued.job_id, "the freed slot promoted nothing"
+    dispatcher = await asyncio.to_thread(queued_launch.adopt, ask)
+    assert dispatcher is not None
+    outcome = await queued_launch.act_queued(ask, dispatcher)
+    assert outcome is not StopOutcome.FAILED, "the promoted step failed"
+    # A mint closes no round: the origin's round 0 is the step's.
+    assert stores.campaigns.standing_rounds(hop, moment=None).last_closed == 0, (
+        "the promoted step ran no round"
+    )
+    assert not machine.list_running() and not machine.list_queued(), "its job outlived its run"
 
 
 class _HeldTask(NamedTuple):
@@ -4340,7 +4383,6 @@ async def _held_at_arms_gate(
     hop = await _mint(stores, offline, tmp_path)
     queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     session = HostSession(Caller(stores, queuing))
-    monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     monkeypatch.setattr(host_surface, "_SETTLE_POLL_S", 0.0)
     step = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, "step_rounds": 1}
     task = (await session.answer(CallTool("start-run", {**step, IDEMPOTENCY_KEY: "go"}))).task
@@ -4421,7 +4463,6 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     assert tied == {"taskId": task.task_id}, "the input request named no task"
     assert not result.is_error, result.content
     assert len(_arms_filed(stores)) == 1, "an answer retried filed a second submit-arms"
-    await queuing.close_detached()
 
 
 async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answer_by_update(
@@ -4455,7 +4496,6 @@ async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answe
         for _ in range(2):  # a host retrying its answer sends it again
             await host.session.send_request(update, mcp_types.EmptyResult)
     assert len(_arms_filed(stores)) == 1, "a task's update filed no answer, or filed it twice"
-    await held.queuing.close_detached()
 
 
 # An act a refusal serves is pressed as served: its value is the field's own JSON type.

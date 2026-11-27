@@ -3,15 +3,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
-import time
+import subprocess
+import threading
 from collections import Counter
-from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from promptpotter.application.jobs import spawning
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import AdmissionGate
 from promptpotter.application.run_stop import run_stop_reason
@@ -23,6 +25,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.campaign import CampaignRefusedError
+from promptpotter.domain.command_events import QueuedLaunch
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     JOB_ADAPTER,
@@ -39,24 +42,25 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.infrastructure.holders import in_flight, job_path, read_job
+from promptpotter.infrastructure.holders import in_flight, job_path, queued_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.io import (
+    read_bytes_optional,
     read_text_optional,
     unlink_robust,
+    write_bytes,
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
-    ConflictError,
     FileUnreadableError,
     PotterError,
     ServiceUnavailableError,
 )
 
-# Each ask takes the machine-wide admission lock.
-_QUEUE_POLL_S = 2.0
+# What runs a promoted launch's ask in its own process: a process boundary, never an import.
+_QUEUED_LAUNCH_MODULE = "promptpotter.application.queued_launch"
 # How long a reaped job's ending stays readable by its id.
 _ENDED_KEPT = timedelta(days=7)
 
@@ -96,22 +100,6 @@ class JobRegistry:
         # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.
         self._gate = AdmissionGate(jobs_dir)
         self._capacity = capacity
-        # Its queued launches' detached waits, held so the loop cannot collect one mid-wait.
-        self._detached: set[asyncio.Task[object]] = set()
-
-    def detach(self, waiting: Coroutine[Any, Any, object]) -> None:
-        """*waiting* runs on past its launch's answer, until `close_detached`; its fault is its
-        job's release (`launch.py::hold`), read here so asyncio never warns it unread."""
-        task = asyncio.ensure_future(waiting)
-        self._detached.add(task)
-        task.add_done_callback(self._detached.discard)
-        task.add_done_callback(lambda t: t.cancelled() or t.exception())
-
-    async def close_detached(self) -> None:
-        """Its owner's close: each detached wait cancelled, so each releases its job."""
-        for task in self._detached:
-            task.cancel()
-        await asyncio.gather(*self._detached, return_exceptions=True)
 
     def create(
         self,
@@ -186,41 +174,48 @@ class JobRegistry:
             live = len(self.list_running())
             return all(live + i < self._capacity(live + i) for i in range(count))
 
-    async def await_claim(self, job_id: str) -> None:
-        """A poll, not a signal: the slot frees in another process, and only the jobs dir is shared."""
-        deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
-        while not await asyncio.to_thread(self.claim_next, job_id):
-            job = self.get(job_id)
-            if job is None or job.released:
-                raise ConflictError(
-                    "This launch was withdrawn from the queue. Nothing ran and nothing was spent.",
-                    code="queue_withdrawn",
-                )
-            if time.monotonic() >= deadline:
-                raise ConflictError(
-                    f"This launch waited {settings.QUEUE_MAX_WAIT_S / 3600:.0f}h for a free slot "
-                    f"and was withdrawn. Nothing ran and nothing was spent; start it again when "
-                    f"the machine is quieter.",
-                    code="queue_expired",
-                )
-            await asyncio.sleep(_QUEUE_POLL_S)
+    def file_ask(self, ask: QueuedLaunch) -> None:
+        """A queued launch's ask, filed beside its job once its command is acked: from here the
+        job waits on disk, its asker free to go (`holders.py::in_flight`)."""
+        with self.admission_gate():
+            if (job := self.get(ask.job_id)) is not None and job.queued:
+                write_bytes(queued_path(self._dir, ask.job_id), ask.model_dump_json().encode())
 
     def queue_order(self) -> list[Job]:
         """Least-served first: plain FIFO lets one account's burst push everyone else behind it."""
         held = Counter(j.user_id for j in self.list_running())
         return sorted(self.list_queued(), key=lambda j: (held[j.user_id], j.created_at, j.job_id))
 
-    def claim_next(self, job_id: str) -> bool:
-        """Only the head of :meth:`queue_order`: a waiter that skipped past it would starve it."""
+    def promote(self) -> None:
+        """Each queued launch a free slot takes, the head of `queue_order` first, run in its own
+        process: what frees a slot (a release, the sweep) promotes, never a waiter's clock. One
+        whose process exits before taking its job is ended, and the next promoted. Off the gate:
+        the process it starts takes it."""
+        while (claimed := self._claim_head()) is not None:
+            job_id, ask = claimed
+            child = spawning.start(_QUEUED_LAUNCH_MODULE, ask, log=None)
+
+            def watch(job_id: str = job_id, child: subprocess.Popen[bytes] = child) -> None:
+                if not spawning.adopted(child):
+                    self.move(job_id, LaunchMove.END)
+                    self.promote()
+
+            # A daemon: this process may exit first, and the sweep then ends a job never taken.
+            threading.Thread(target=watch, name=f"job-{job_id}-promote", daemon=True).start()
+
+    def _claim_head(self) -> tuple[str, bytes] | None:
+        """The first queued job with its ask filed, claimed for this process; ``None`` while the
+        machine is full or a landing holds the queue (what an older process promotes, it starts on
+        older code)."""
         with self.admission_gate():
             live = len(self.list_running())
-            # A landing holds the queue: what an older process promotes, it starts on older code.
             if live >= self._capacity(live) or self._gate.landing() is not None:
-                return False
-            first = next(iter(self.queue_order()), None)
-            if first is None or first.job_id != job_id:
-                return False
-            return self.move(job_id, LaunchMove.CLAIM) is not None
+                return None
+            for job in self.queue_order():
+                if (ask := read_bytes_optional(queued_path(self._dir, job.job_id))) is not None:
+                    self.move(job.job_id, LaunchMove.CLAIM)
+                    return job.job_id, ask
+        return None
 
     def cancel_queued(self, job_id: str) -> Job | None:
         """The job withdrawn; ``None`` where it is no longer queued. Whose act it is, the caller asks."""
@@ -239,7 +234,12 @@ class JobRegistry:
         stamp: dict[str, Any]
         match move:
             case LaunchMove.CLAIM:
-                stamp = {"stage": RunPhase.STARTING}
+                # The claimer holds it until the process it starts adopts it.
+                stamp = {
+                    "stage": RunPhase.STARTING,
+                    "producer_id": this_producer(self._dir),
+                    "code_revision": CODE_REVISION,
+                }
             case LaunchMove.ADMIT:
                 stamp = {"admitted_at": utcnow_iso()}
             case LaunchMove.LAND:
@@ -260,7 +260,10 @@ class JobRegistry:
                 raise LaunchMoveError(f"job {job_id}: {move} from {job.state} reads {moved.state}")
             return stamp
 
-        return self._stamp(job_id, change)
+        moved = self._stamp(job_id, change)
+        if moved is not None and not moved.queued:
+            unlink_robust(queued_path(self._dir, job_id))
+        return moved
 
     def _stamp(self, job_id: str, change: Callable[[Job], Mapping[str, Any] | None]) -> Job | None:
         """The one read-modify-write of a job file, read and persisted under the gate: a stamp
@@ -299,22 +302,22 @@ class JobRegistry:
         once admitted, is the stop it reads as (`run_stop_reason`); ``None`` where it was withdrawn
         from the queue, refused (before its run started, or by its campaign at any point), or
         returned. How it ended is its cycle's stop, never the job's (`command_reading.py`); a
-        refusal is filed beside it, before its release, so no reader finds it released unsaid."""
+        refusal is filed beside it, before its release, so no reader finds it released unsaid. The
+        slot it frees promotes the queue's head."""
         with self.admission_gate():
             job = self.get(job_id)
             if job is None or job.released:
                 return None
-            if ended is None or job.queued:
-                self.move(job_id, LaunchMove.END)
-                return None
-            refused = isinstance(ended, CampaignRefusedError) or (
-                job.started_at is None and not launch_interrupted(ended)
+            refused = ended is not None and (
+                isinstance(ended, CampaignRefusedError)
+                or (job.started_at is None and not launch_interrupted(ended))
             )
-            if refused:
+            if refused and not job.queued:
                 said = ended if isinstance(ended, PotterError) else PotterError(str(ended))
                 write_json(self._refused_path(job_id), Refusal.of(said).model_dump(mode="json"))
             self.move(job_id, LaunchMove.END)
-        return None if refused else run_stop_reason(ended)
+        self.promote()
+        return None if ended is None or refused or job.queued else run_stop_reason(ended)
 
     def refusal(self, job_id: str) -> Refusal | None:
         """What *job_id* was refused with, where its release refused it."""
@@ -457,9 +460,14 @@ class JobRegistry:
             if (ended := self._read(path)) is not None and (ended.released_at or "") < kept_from:
                 unlink_robust(self._refused_path(ended.job_id))
                 unlink_robust(path)
+        waited_from = iso_z(datetime.now(UTC) - timedelta(seconds=settings.QUEUE_MAX_WAIT_S))
         for job in self.list_all():
             if job.released and not _counted_on(job, today):
                 self._persist(job)
+            # A launch queued past the longest wait is withdrawn: nothing ran or was spent.
+            if job.queued and job.created_at < waited_from:
+                self.move(job.job_id, LaunchMove.END)
+                continue
             if job.released or self.in_flight(job):
                 continue
             with self.admission_gate():
@@ -468,6 +476,8 @@ class JobRegistry:
                 if self.move(job.job_id, LaunchMove.END) is None:
                     continue
             reaped.append(job)
+        # A slot a dead producer held, or a landing reopened, is the queue's head's.
+        self.promote()
         return reaped
 
     def _persist(self, job: Job) -> None:

@@ -4,12 +4,15 @@ import enum
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal, assert_never, get_args
+from pathlib import Path
+from typing import Annotated, ClassVar, Literal, Self, assert_never, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.identity import IdentityContext
 from promptpotter.shared.measurement_context import MeasurementRole
 
 # The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
@@ -210,6 +213,32 @@ class Job:
     @property
     def holds_slot(self) -> bool:
         return self.holds_spend and not isinstance(self.holder, EmbeddedRun | InnerRun | PaidCall)
+
+
+class LaunchedAs(StrictModel):
+    """Everything a job's own process cannot read off disk: who admitted it, and which roots the
+    admitting stores addressed. Carried as JSON alone, never rebuilt from a tenant name (that
+    identity is the HOST's)."""
+
+    job_id: str
+    identity: IdentityContext
+    jobs_dir: Path
+    projects_root: Path
+    shared_root: Path
+    install_datasets_root: Path
+    research_datasets_root: Path | None
+
+    @model_validator(mode="after")
+    def _reads_back_as_written(self) -> Self:
+        # The process rebuilds every field off this JSON: one reading back otherwise is another launch.
+        wire = self.model_dump(mode="json")
+        for name, field in type(self).model_fields.items():
+            held = getattr(self, name)
+            if TypeAdapter(field.annotation).validate_python(wire[name]) != held:
+                raise ValueError(
+                    f"{type(self).__name__}.{name} does not read back as written: {held!r}"
+                )
+        return self
 
 
 JOB_ADAPTER = TypeAdapter(Job)

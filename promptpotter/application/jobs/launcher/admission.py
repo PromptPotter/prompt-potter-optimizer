@@ -329,18 +329,12 @@ def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
 async def admit_and_hold(
     request: LaunchRequest, opening: Opening
 ) -> tuple[HeldBudget, LaunchRequest]:
-    """The request's config is resolved IN here, after the queue wait, so the budget admitted is
-    the one the run starts under; answered with what it opens (`LaunchRequest.stand`)."""
+    """The request's config is resolved IN here, in the process its run holds in (a queued one's,
+    past its wait), so the budget admitted is the one the run starts under; answered with what it
+    opens (`LaunchRequest.stand`)."""
     stores, job_registry, job = opening.stores, opening.job_registry, opening.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     at, campaign = request.at, request.campaign
-    if job.queued:
-        await job_registry.await_claim(job.job_id)
-        if campaign is not None:
-            # Asked again past the wait: the slot door's claim held off an archive or a delete,
-            # never a definition moved while the job waited.
-            refuse_campaign(stores, campaign)
-
     await refuse_unreachable(
         stores, request.dataset_name, request.connector(stores), request.endpoint(stores)
     )

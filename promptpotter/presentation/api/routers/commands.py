@@ -133,7 +133,8 @@ class _Dispatching:
         stood = await _stood(dispatcher)
         outcome = await dispatcher.dispatch(call)
         if self.answers is LaunchAnswer:
-            outcome = replace(outcome, result=await launched(outcome, dispatcher, call.door))
+            ran = await launched(outcome.result, outcome.payload, dispatcher, call.door)
+            outcome = replace(outcome, result=ran)
         await _stamped(response, dispatcher, stood)
         return outcome.answer
 

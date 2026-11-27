@@ -699,12 +699,12 @@ def mint_arms(
     plans: Sequence[CyclePlan], *, adopting: str | None, openings: Sequence[Opening] = ()
 ) -> Iterator[OpenedCycle]:
     """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing. One per
-    *openings*' job, each naming its cycle off the loop (`off_loop`)."""
+    *openings*' job, each naming its cycle off the loop (`minted_off_loop`)."""
     with _record_held(plans) as stored:
         yield from _mint_all(plans, adopting=adopting, stored=stored, openings=openings)
 
 
-async def off_loop(minting: Iterator[OpenedCycle]) -> AsyncIterator[OpenedCycle]:
+async def minted_off_loop(minting: Iterator[OpenedCycle]) -> AsyncIterator[OpenedCycle]:
     """Each mint off the loop: one naming its job waits on the admission gate."""
     while (cycle := await asyncio.to_thread(next, minting, None)) is not None:
         yield cycle
@@ -721,20 +721,18 @@ async def mint_framed_arms(
     arm. The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or
     a refusal discards."""
     description = _description_to_decompose(session, plans[0].cycle.config, task_text)
+    if description is None:
+        async for cycle in minted_off_loop(mint_arms(plans, adopting=None, openings=openings)):
+            yield cycle
+        return
     with _record_held(plans) as stored:
-        if description is None:
-            async for cycle in off_loop(
-                _mint_all(plans, adopting=None, stored=stored, openings=openings)
-            ):
-                yield cycle
-            return
         drafts = session.store.drafts
         draft_id = mint_draft_id()
         make_dirs(drafts.draft_dir(draft_id))
         try:
             framed = await _framed(session, plans, description, draft_id)
             minting = _mint_all(framed, adopting=draft_id, stored=stored, openings=openings)
-            async for cycle in off_loop(minting):
+            async for cycle in minted_off_loop(minting):
                 yield cycle
         except BaseException:
             drafts.discard(drafts.hold(draft_id))

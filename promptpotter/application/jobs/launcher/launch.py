@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Coroutine
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, ExitStack
 from dataclasses import dataclass
 from typing import Any, assert_never
 
@@ -16,11 +16,13 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.mint_and_start import Hosted, LaunchRequest
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun
+from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun, launched_as
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.command_events import QueuedLaunch
+from promptpotter.domain.command_kinds import Door
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun, Job
 from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
@@ -28,11 +30,20 @@ from promptpotter.infrastructure.store.stores import Stores
 
 @dataclass(frozen=True, slots=True)
 class Inline:
-    """A launch answered held in the process that filed it: a person's terminal, or a host's run
-    (*hosted*), which the launch kinds open slotless."""
+    """A launch answered held in this process: a person's terminal, a host's run (*hosted*), which
+    the launch kinds open slotless, or a queued launch's own process, its job *claimed* for it."""
 
     no_wait: bool = False
     hosted: Hosted | None = None
+    claimed: Job | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """The command a launch acts for, which a queued one's process acts again (`QueuedLaunch`)."""
+
+    command_id: str
+    door: Door
 
 
 class LaunchOutcome:
@@ -47,8 +58,8 @@ class LaunchOutcome:
 
 @dataclass(frozen=True, slots=True)
 class Launched(LaunchOutcome):
-    """What the launch answers, as its ack records it; ``held`` is the inline run's hold, answered
-    before its queue wait, and ``None`` where the run goes to its own process."""
+    """What the launch answers, as its ack records it; ``held`` is the inline run's hold, and
+    ``None`` where the run goes to its own process, a queued one's included."""
 
     launch: LaunchedJob
     held: asyncio.Future[HeldRun] | None
@@ -99,7 +110,11 @@ class Admitted(LaunchOutcome):
         return [LaunchedJob.of(self.opening.job)]
 
     async def withdraw(self, exc: BaseException) -> None:
-        """Its slot given back, where the act that admitted it raised before any run held it."""
+        """Its slot or its place given back, where the act that admitted it raised before any run
+        held it."""
+        if self.opening.job.queued:
+            await asyncio.to_thread(self.opening.job_registry.cancel_queued, self.opening.job_id)
+            return
         await self.opening.abandon(exc)
 
     async def held(self) -> HeldRun:
@@ -112,13 +127,16 @@ class Admitted(LaunchOutcome):
 
     async def hand_over(self, holding: Coroutine[Any, Any, HeldLaunch]) -> Launched:
         """*holding* — `handed`, or a held step that acts once the run is held (a fork's cut on its
-        parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
+        parent) — awaited where the run goes: inline or detached. A queued one answers its place:
+        its own process holds it once a slot frees (`JobRegistry.promote`)."""
         job = self.opening.job
+        if job.queued:
+            holding.close()
+            if isinstance(self.request, CheckinStart):
+                self.request.claim.release()
+            return Launched(LaunchedJob.of(job), None)
         if self.inline is not None:
-            # A queued one answers its place first, as a detached one does; its door awaits the rest.
             hold = asyncio.ensure_future(_here(holding))
-            if job.queued:
-                return Launched(LaunchedJob.of(job), hold)
             return Launched(LaunchedJob.of(job, (await hold).hop), hold)
 
         async def hold_and_detach() -> CycleHop:
@@ -126,9 +144,6 @@ class Admitted(LaunchOutcome):
             await held.detach()
             return held.hop
 
-        if job.queued:
-            self.opening.job_registry.detach(hold_and_detach())
-            return Launched(LaunchedJob.of(job), None)
         return Launched(LaunchedJob.of(job, await hold_and_detach()), None)
 
 
@@ -139,18 +154,36 @@ def admit(
     stores: Stores,
     job_registry: JobRegistry,
     inline: Inline | None,
+    asked: Asked | None = None,
 ) -> Admitted:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost.
     Every slotted launch first reclaims what a dead producer left, so the machine it counts is
-    live; its sweep and its admission wait on the gate, so every async door offloads it once."""
+    live; its sweep and its admission wait on the gate, so every async door offloads it once. A
+    queued one files its ask and waits on disk; its process asks its campaign again."""
     hop = UNRESOLVED_HOP if request.at is None else request.at.hop
     match holder := request.holder:
+        case CampaignLaunch() if inline is not None and inline.claimed is not None:
+            opening = Opening.of(stores, job_registry, inline.claimed)
+            with ExitStack() as refused:
+                refused.push(opening)
+                # The slot door's claim held off an archive or a delete, never a moved definition.
+                if (campaign := request.campaign) is not None:
+                    refuse_campaign(stores, campaign)
+                refused.pop_all()
         case CampaignLaunch():
             sweep(stores.projects_root)
             (job,) = request_jobs(stores=stores, job_registry=job_registry, holder=holder, hop=hop)
-            if inline is not None and job.queued and inline.no_wait:
-                refuse_as_busy(job_registry, job)
+            if job.queued:
+                if inline is not None and inline.no_wait:
+                    refuse_as_busy(job_registry, job)
+                assert asked is not None, "a slotted launch acts for a command"
+                launch = launched_as(stores, job_registry.jobs_dir, job.job_id)
+                ask = QueuedLaunch(**dict(launch), command_id=asked.command_id, door=asked.door)
+                job_registry.file_ask(ask)
             opening = Opening.of(stores, job_registry, job)
+            if job.queued:
+                # Its own process, started when a slot frees, holds it and releases it.
+                opening.hand_off()
         case EmbeddedRun():
             if (campaign := request.campaign) is not None:
                 refuse_campaign(stores, campaign)

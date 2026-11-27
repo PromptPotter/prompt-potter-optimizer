@@ -11,7 +11,6 @@ from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
     CommandDispatcher,
-    CommandOutcome,
     Dispatched,
     DispatchedToCycle,
     DispatchedToDraft,
@@ -33,6 +32,7 @@ from promptpotter.application.jobs.launcher.head_to_head import (
 )
 from promptpotter.application.jobs.launcher.launch import (
     Admitted,
+    Asked,
     Inline,
     Launched,
     LaunchOutcome,
@@ -315,6 +315,7 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
+            asked=Asked(dispatched.command_id, dispatched.door),
         )
         held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.handed())
         return await admitted.hand_over(held)
@@ -337,6 +338,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
             stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
+            asked=Asked(dispatched.command_id, dispatched.door),
         )
         held = _held_fork(dispatched, admitted)
         return await admitted.hand_over(
@@ -409,6 +411,7 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
+            asked=Asked(dispatched.command_id, dispatched.door),
         )
         held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.handed())
         return await admitted.hand_over(held)
@@ -468,6 +471,7 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
+            asked=Asked(dispatched.command_id, dispatched.door),
         )
 
     async def _admit_arms(request: HeadToHeadRequest) -> AdmittedHeadToHead:
@@ -491,11 +495,10 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
 
 
 async def launched(
-    outcome: CommandOutcome[Any, Any], dispatcher: CommandDispatcher, door: Door
+    result: object, payload: CommandPayload, dispatcher: CommandDispatcher, door: Door
 ) -> Launched | HeadToHeadLaunched:
     """A launch kind's act carried past its ack: a Start's admission, minted and launched at the
     depth it asked, as every door that waits on the launch takes it."""
-    result, payload = outcome.result, outcome.payload
     if isinstance(result, Admitted):
         press = payload.lookahead if isinstance(payload, LaunchPayload) else None
         return await result.hand_over(_held_at_depth(dispatcher, door, press, result.handed()))
@@ -514,4 +517,5 @@ async def dispatch_start_checkin(
 ) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    return await launched(await dispatcher.answer(start_checkin, call), dispatcher, call.door)
+    outcome = await dispatcher.answer(start_checkin, call)
+    return await launched(outcome.result, outcome.payload, dispatcher, call.door)

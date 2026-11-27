@@ -100,6 +100,8 @@ UNSWEPT_DIR = "unswept"
 ENDED_JOBS_DIR = "ended"
 # What a launch refused before its admission was refused with, by job id (`JobRegistry.refusal`).
 REFUSED_JOBS_DIR = "refused"
+# A queued launch's ask, by job id, while its job waits for a slot (`command_events.py::QueuedLaunch`).
+QUEUED_JOBS_DIR = "queued"
 
 
 def default_projects_root() -> Path:

@@ -464,12 +464,6 @@ written under the gate.
 `jobs/launcher/head_to_head.py`, `jobs/reaper.py`, `store/command_log.py`, `domain/command_kinds.py`,
 `jobs/launcher/admission.py`
 
-- **A queued launch dies with the asking process**: the queue wait runs in the caller
-  (`jobs/launcher/launch.py`). Action (the operator, 2026-11-11): a queued launch is a job on disk; the
-  job file holds the principal's id, never a credential, and `jobs/registry.py::claim_next`'s promoter
-  re-checks admission and spawns it when the slot frees; `application/CLAUDE.md` § Run admission's rule ("a queued job's intent
-  never leaves the process that authenticated it") is restated in the same link. **Rides with:**
-  admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
 - **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
   each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
@@ -481,26 +475,27 @@ written under the gate.
   a rebase applies. **Decided 2026-11-27:** a narrowed `param_allowed_values` is fork-only: one
   `ForkProposal` member mapped to one `ConfigOverrides` edit. **Rides with:** tune 1. **Re-test:**
   `git grep -n "class ForkProposal" -A20 -- promptpotter`.
-- **Queue and task-result waits re-read on a clock** (tw-m): `application/jobs/registry.py::_QUEUE_POLL_S`
-  and `host_surface.py::_SETTLE_POLL_S` each wait on a write another process makes, and no signal in
-  this process carries it, so tests patch both to 0 (`test_security.py::_held_at_arms_gate` and the
-  reaped-queued test). Root: a cross-process wake on the jobs dir or ledger write (a lock handoff or a
-  file watch). **Re-test:** neither constant exists and no test patches a poll.
+- **A command's settle and a retry's wait re-read on a clock** (tw-m): `host_surface.py::_SETTLE_POLL_S`
+  and `commands/dispatcher.py::_ACTING_POLL_S` each wait on a command end another process may file, and
+  no signal carries it, so `test_security.py::_held_at_arms_gate` patches the first to 0. Root: a
+  cross-process wake on the command log's end write (a lock handoff or a file watch). **Rides with:**
+  area 06's chain. **Re-test:** neither constant exists and no test patches a poll.
+- **A queued check-in Start leaves its draft unguarded** (w10-jobs): the draft claim is re-taken only in
+  the promoted child, so a second Start or an edit can land while the Start waits in `jobs/queued/`;
+  and a queued child's stderr is discarded until its cycle exists. Root: the queued ask holds its draft
+  claim on disk, and the child's output has a home from its spawn. **Rides with:** area 06's chain.
+  **Re-test:** a second Start on a draft whose Start is queued is refused.
+- **A queued launch's ending files where an unasked one does** (w10-jobs): a released queued launch
+  files at `jobs/refused/` though its ask carries its command id, and `commands/opening.py` stamps a fork
+  child it then withdraws on `__exit__`. Root: a launch's ending is its command's, filed once by kind.
+  **Rides with:** area 06's chain. **Re-test:** a released queued launch's ending is read off its
+  command, and an opened-then-withdrawn fork leaves no child stamp.
 - **Child-process facts idle the parent ~8 s** (tw-v, tw-v2): `conftest.py::dspy_child` (2.9 s), the
   API-start child (2.7 s) and the stdio host (2.4 s) run serially. Each peaks at 160–165 MB, so
   overlapping them breaks pytest's 435 MB cap. `-X importtime` finds no extra loaded by a boot that
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
-- **A first landing leaves `jobs/.live-jobs` unwritten** (tw-v, `tests/test_security.py` `moved`
-  fixture): on a tree that never ran, a first landing writes no live-jobs index, and a second landing
-  stages it, so the fixture keeps `campaign(rounds=0)` rather than a mint. This is a state the system
-  enters but does not report. Suspected root: the landing's index row is written only once a run has
-  started. **Rides with:** wave 6. **Re-test:** a first landing on an empty root writes the index, and
-  the fixture mints.
-- **A fork's cut opens beside its admission** (w7-open, not re-tested): `commands/launching.py::fork_cycle`
-  opens the cut itself, not through its request's `open`. Root: one door opens a launch. **Rides with:**
-  area 06's chain. **Re-test:** the cut opens inside the request `admission.py::request_jobs` admits.
 
 ## 07 · Config, pipeline, datasets
 
