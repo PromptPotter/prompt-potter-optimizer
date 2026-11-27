@@ -14,6 +14,8 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
     ReadingStateKind,
+    UnreadPair,
+    UnreadState,
 )
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel
@@ -29,16 +31,18 @@ class StallEffect(StrEnum):
 
 
 class RoundEnding(StrEnum):
-    """How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved
-    to, or held on its parent. Round 0 crowns the origin it adopts."""
+    """How a round's election ended: on the origin round 0 adopts, on the arm it crowned, on its
+    uncrowned leader the line moved to, or held on its parent."""
 
+    ADOPTED = "adopted"
     CROWNED = "crowned"
     MOVED = "moved"
     HELD = "held"
 
     @property
     def moves_line(self) -> bool:
-        return self is not RoundEnding.HELD
+        """Off the round before it: an adopted origin starts the line, a held round stands on it."""
+        return self in (RoundEnding.CROWNED, RoundEnding.MOVED)
 
 
 #: What a crown the origin panel does not separate from the origin does to the stall
@@ -118,9 +122,9 @@ ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
 assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)
 
 
-def round_advance(round_num: int, ending: RoundEnding, lead: PairedReading) -> RoundAdvance:
+def round_advance(ending: RoundEnding, lead: PairedReading) -> RoundAdvance:
     """Only *lead* (pick over C0, origin panel) advances the line, separated where its interval clears."""
-    if round_num == 0:
+    if ending is RoundEnding.ADOPTED:
         return RoundAdvance.ORIGIN
     if ending is not RoundEnding.CROWNED:
         return RoundAdvance.MOVED_UNCROWNED if ending.moves_line else RoundAdvance.HELD
@@ -130,10 +134,9 @@ def round_advance(round_num: int, ending: RoundEnding, lead: PairedReading) -> R
         case ReadingStateKind.WAITING | ReadingStateKind.ABSENT | ReadingStateKind.REFUSED:
             return RoundAdvance.UNREAD
         case ReadingStateKind.READ:
-            lift = lead.headline
-            assert lift is not None, "a read pair carries its lift"
+            assert lead.state is ReadingState.READ
             # ONE interval read: the pick over C0, never a point compare beside it.
-            separated = lift.side == "above"
+            separated = lead.headline.side == "above"
             return RoundAdvance.ADVANCED if separated else RoundAdvance.NOT_SEPARATED
 
 
@@ -195,7 +198,6 @@ class OverlapReading(FrozenModel):
     @classmethod
     def of(
         cls,
-        round_num: int,
         ending: RoundEnding,
         *,
         positions: Sequence[int],
@@ -205,7 +207,7 @@ class OverlapReading(FrozenModel):
         vs_previous_pick: PairedReading | None,
         not_separated: NotSeparatedStall | None,
     ) -> OverlapReading:
-        advance = round_advance(round_num, ending, lead)
+        advance = round_advance(ending, lead)
         return cls(
             positions=tuple(positions),
             lead=lead,
@@ -217,13 +219,12 @@ class OverlapReading(FrozenModel):
         )
 
     @classmethod
-    def unpaired(cls, state: ReadingState, round_num: int, ending: RoundEnding) -> OverlapReading:
+    def unpaired(cls, state: UnreadState, ending: RoundEnding) -> OverlapReading:
         """No lead is read, so no round closes ``NOT_SEPARATED`` and no switch is read."""
         return cls.of(
-            round_num,
             ending,
             positions=(),
-            lead=PairedReading.unread(state),
+            lead=UnreadPair.of(state),
             earlier=(),
             triggered=(),
             vs_previous_pick=None,
@@ -246,35 +247,29 @@ def overlap_line(overlap: OverlapReading) -> list[LineRate]:
         (
             reading
             for reading in (overlap.lead, *(t.reading for t in overlap.triggered))
-            if reading.headline is not None and reading.a is not None
+            if reading.state is ReadingState.READ
         ),
         None,
     )
-    if (
-        anchor is None
-        or anchor.headline is None
-        or anchor.a is None
-        or anchor.a.address.arm is None
-    ):
+    if anchor is None or anchor.a.address.arm is None:
         return []
     head = anchor.headline
     line = [
         LineRate(arm=anchor.a.address.arm, rate=head.rate_a, unit=head.measurand.unit, n=anchor.a.n)
     ]
     for pick in (*overlap.earlier, overlap.lead):
-        lift, b = pick.headline, pick.b
-        if lift is not None and b is not None and (arm := b.address.arm) is not None:
-            line.append(LineRate(arm=arm, rate=lift.rate_b, unit=lift.measurand.unit, n=b.n))
+        if pick.state is ReadingState.READ and (arm := pick.b.address.arm) is not None:
+            lift = pick.headline
+            line.append(LineRate(arm=arm, rate=lift.rate_b, unit=lift.measurand.unit, n=pick.b.n))
     return line
 
 
 def triggered_rates(overlap: OverlapReading) -> list[LineRate]:
     return [
-        LineRate(arm=arm, rate=headline.rate_b, unit=headline.measurand.unit, n=b.n)
+        LineRate(arm=arm, rate=read.headline.rate_b, unit=read.headline.measurand.unit, n=read.b.n)
         for t in overlap.triggered
-        if (headline := t.reading.headline) is not None
-        and (b := t.reading.b) is not None
-        and (arm := b.address.arm) is not None
+        if (read := t.reading).state is ReadingState.READ
+        and (arm := read.b.address.arm) is not None
     ]
 
 

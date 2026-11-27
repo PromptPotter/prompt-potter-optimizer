@@ -8,7 +8,7 @@ from promptpotter.application.scoring.row_diagnostics import extract_sample_diag
 from promptpotter.domain.arms import ArmState, Concluded
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.origin_panel import OverlapReading
-from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, UnreadState
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import (
@@ -30,12 +30,11 @@ def ended_on(
     *,
     round: int,
     arms: dict[ArmKey, ArmState],
-    reference: RoundArm | None,
     folds: dict[ArmKey, ScoreSummary],
     cells: dict[ArmKey, CellSheet],
     overlap_results: dict[str, CellSheet],
     priors: Sequence[RoundResult],
-    overlap: ReadingState,
+    overlap: UnreadState,
 ) -> RoundResult:
     """A round ending on *election*: what it reads off that arm (election, health, overlap) stated
     once, for its selector at the close and for a layer that re-elects it
@@ -46,13 +45,12 @@ def ended_on(
     return RoundResult(
         round=round,
         arms=arms,
-        reference=reference,
         folds=folds,
         cells=cells,
         overlap_results=overlap_results,
         election=election,
         health=head_health(round, head, cells[election.ended_on], picked=picked, priors=priors),
-        overlap=OverlapReading.unpaired(overlap, round, election.ending),
+        overlap=OverlapReading.unpaired(overlap, election.ending),
     )
 
 

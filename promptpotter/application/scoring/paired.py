@@ -1,4 +1,4 @@
-"""A state only a pass or a run knows (stopped, pending) is the caller's, through ``absent_pair``."""
+"""A state only a pass or a run knows (stopped, pending) is the caller's, its own ``UnreadPair``."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from typing import NamedTuple
 
 from promptpotter.application.scoring.formula.compiler import (
     CompiledExpression,
-    cell_channels_of,
     compile_expression,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.fitness_fold import cell_channels_of
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -32,7 +32,10 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     PairMember,
     ReadingState,
+    ReadPair,
     TestFamily,
+    UnreadPair,
+    UnreadState,
     interval_side,
 )
 from promptpotter.domain.round_health import ConstantFloor
@@ -147,30 +150,6 @@ def grade_measurands(scorer: Scorer) -> list[Measurand]:
     ]
 
 
-def absent_pair(
-    *,
-    state: ReadingState,
-    a: PairMember | None,
-    b: PairMember | None,
-    cell_set: CellSet | None,
-    scope: RoleScope,
-    spec: EstimatorSpec,
-    instrument_id: str | None,
-) -> PairedReading:
-    return PairedReading(
-        state=state,
-        a=a,
-        b=b,
-        cell_set=cell_set,
-        instrument_id=instrument_id,
-        scope=scope,
-        spec=spec,
-        coverage=None,
-        headline=None,
-        beside=(),
-    )
-
-
 def read_pair(
     *,
     a: MemberRows,
@@ -205,8 +184,8 @@ def read_pair(
     member_a = _member(a, read_a)
     member_b = _member(b, read_b)
 
-    def absent(state: ReadingState) -> PairedReading:
-        return absent_pair(
+    def absent(state: UnreadState) -> PairedReading:
+        return UnreadPair(
             state=state,
             a=member_a,
             b=member_b,
@@ -265,8 +244,7 @@ def read_pair(
         )
         for measurand, read in zip(measurands, readers, strict=True)
     ]
-    return PairedReading(
-        state=ReadingState.READ,
+    return ReadPair(
         a=member_a,
         b=member_b,
         cell_set=named,
@@ -295,8 +273,13 @@ def read_pair(
 
 def as_family(readings: Sequence[PairedReading], family_id: str) -> list[PairedReading]:
     """A reading that was not read was not tested: it carries no family and counts for none."""
-    lifts = iter(in_family([r.headline for r in readings], family_id))
-    return [r.model_copy(update={"headline": next(lifts)}) for r in readings]
+    lifts = iter(
+        in_family([r.headline for r in readings if r.state is ReadingState.READ], family_id)
+    )
+    return [
+        r.model_copy(update={"headline": next(lifts)}) if r.state is ReadingState.READ else r
+        for r in readings
+    ]
 
 
 def in_family(lifts: Sequence[MeasuredLift | None], family_id: str) -> list[MeasuredLift | None]:

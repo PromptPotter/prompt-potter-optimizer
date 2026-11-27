@@ -41,10 +41,10 @@ from factories import (
     measurements,
     mint_fork,
     optimizer_state,
+    pipeline_schema,
     pobb_knobs,
     round_result,
     samples,
-    score_summary,
     scorer_of,
     sheet,
     workspace,
@@ -143,6 +143,7 @@ from promptpotter.domain.cycle_paths import (
     CycleHop,
     Subject,
 )
+from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.hierarchy import (
     HierarchyCampaign,
     HierarchyCandidate,
@@ -639,7 +640,9 @@ def test_compaction_round_trips_every_field_it_moved(
     assert hot.pipeline.result_ranking == (1, 2, 3)
     assert all(answer.compaction for answer in mid)
     moved_back = restore_measurement_archive(built_stores, dataset="compacted", apply=True)
-    assert (moved_back.files_touched, moved_back.conflicts) == (1, 0)
+    assert (moved_back.files_touched, moved_back.notes) == (1, ()), (
+        "a clean restore refuses no file"
+    )
     assert archive.population(whole) == before, "a restore did not return every moved field"
 
 
@@ -849,10 +852,9 @@ def line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
 def _round(**kw: Any) -> RoundResult:
     return RoundResult(
         **{
-            "reference": None,
             "folds": {},
             "election": None,
-            "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, RoundEnding.HELD),
+            "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, RoundEnding.HELD),
             "health": degradation_health(),
             "optimizer_state": optimizer_state(),
         }
@@ -1560,7 +1562,6 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(world: World, line: Shar
         rnd=1,
         individual=state.individual.id,
         role=MeasurementRole.PANEL,
-        running=score_summary(),
     )
     [rewind] = [
         rec
@@ -1568,6 +1569,7 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(world: World, line: Shar
         if isinstance(rec, RoundEnteredRecord) and rec.rewound and rec.round == 1
     ]
     folds.announce(walk)
+    folds.basis = FoldBasis.of(scorer, pipeline_schema([]))
     folds.take(cell)
     assert folds.fold(1, walk.arm) is not None, "guard"
     folds.enter(rewind.round)

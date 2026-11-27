@@ -90,4 +90,3 @@ class RoundAudit(StrictModel):
     finished_at: str | None = Field(description="Null until the round closes.")
     nodes: dict[str, NodeBlock]
     warnings: list[LoopWarning]
-    interrupted: bool = Field(description="The run stopped with this round open.")

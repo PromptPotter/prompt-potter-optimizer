@@ -18,6 +18,7 @@ from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
@@ -412,6 +413,7 @@ _RoundStep = (
     | RoundRestatedRecord
     | ArmRecord
     | SampleScoredRecord
+    | FoldBasisRecord
 )
 
 
@@ -434,6 +436,9 @@ class _StandingFold:
         if isinstance(record, CycleMintedRecord):
             # A fork's mint is its rewound entry at its cut: the rounds below are its parent line's.
             self._held = self._held._replace(entered=record.cut_round, rewound=record.cut_round)
+            return
+        if isinstance(record, FoldBasisRecord):
+            self._arms.read(self.at_offset, record)
             return
         rnd = record.round
         if rnd is None:

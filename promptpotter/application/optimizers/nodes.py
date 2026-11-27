@@ -437,7 +437,7 @@ class MeasuredRound:
     parent: ReadArm
     # Every arm as the round files it, its walk's rows whole: the panel in slot order, then each reference.
     filed: dict[ArmKey, ReadArm]
-    # Each filed arm's fold of those rows (`scoring/metrics.py::arm_folds`); none for an arm refused before a cell.
+    # Each filed arm's fold of those rows (`domain/fitness_fold.py::arm_folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     fit: dict[ArmKey, ArmFit]
     # Every draw-electable arm's θ over `raced` against the parent: the one fit the election reads.

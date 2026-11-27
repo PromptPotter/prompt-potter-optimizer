@@ -1845,7 +1845,7 @@ CHECKS: tuple[Check, ...] = (
         "pytest",
         "py",
         _pytest,
-        mb=393,  # 38 MB above a warm 355 MB: tw-0's suite peaks 15 MB under 7dce00a96's (331 vs 346)
+        mb=435,  # 38 MB above 397, the top of eight full gates on release/next (366 to 397)
         # Every script, as the suite imports them bare off pytest's `pythonpath`.
         reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),

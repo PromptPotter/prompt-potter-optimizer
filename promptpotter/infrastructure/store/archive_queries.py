@@ -195,7 +195,6 @@ def signed_populations(stores: Stores, bank: Bank) -> list[tuple[ArchiveEntry, l
 
 class SampleFoldRow(FrozenModel):
     config_key: str
-    sp: str
     fk: str
     sig: list[list[Any]]
     # ``(Sample.key, objective, provenance)`` per graded cell.

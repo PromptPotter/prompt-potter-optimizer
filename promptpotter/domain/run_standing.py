@@ -49,7 +49,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     start, cap = lives
     bank = max(0, min(cap, start))
     for rr in rounds:
-        if rr.round == 0 or rr.election is None or rr.election.electable == 0:
+        if rr.election is None or rr.election.electable == 0:
             continue
         match rr.overlap.stall:
             case StallEffect.RESETS:
@@ -233,15 +233,18 @@ def _per_unit_time(seconds: float) -> str:
 
 def _climb(standing: RunStanding) -> Climb | None:
     pair, tested = standing.vs_origin, standing.candidates_tested
-    if (headline := pair.headline) is None:
+    if pair.state is not ReadingState.READ:
         return None
+    headline = pair.headline
     lift, unit = headline.estimate.value, headline.measurand.unit
     fmt = UNIT_FORMATS[unit]
     gained = fmt.scale * lift
     usd, worked = standing.search_usd, standing.worked_s
     cost = LiftCost.of(pair, usd)
     previous = standing.vs_previous_pick
-    over = None if previous is None else previous.headline
+    over = (
+        previous.headline if previous is not None and previous.state is ReadingState.READ else None
+    )
     return Climb(
         candidate=standing.selection_name,
         lift=lift_text(lift, unit),
@@ -353,7 +356,7 @@ class RunStanding(FrozenModel):
     def score_line(self) -> str:
         """Both rates on the origin panel, or why there is no pair: the line beneath the climb."""
         pair = self.vs_origin
-        if pair.headline is None or pair.coverage is None:
+        if pair.state is not ReadingState.READ:
             return READING_STATE_INFO[pair.state].sentence
         unit = pair.headline.measurand.unit
         return (
@@ -392,9 +395,7 @@ class RunStanding(FrozenModel):
                 for rr in reversed(rounds)
                 if rr.round >= declared.round
                 for reading in (rr.overlap.lead, *rr.overlap.earlier)
-                if reading.headline is not None
-                and reading.b is not None
-                and reading.b.address.individual_id == chosen
+                if reading.state is ReadingState.READ and reading.b.address.individual_id == chosen
             ),
             (declared.overlap.lead, declared.overlap),
         )

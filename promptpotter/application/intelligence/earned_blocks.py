@@ -10,7 +10,7 @@ from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
-from promptpotter.domain.paired_reading import MemberAddress, PairedReading
+from promptpotter.domain.paired_reading import MemberAddress, ReadingState, ReadPair
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
@@ -92,9 +92,9 @@ def _answer_space_signature(stores: Stores, closed: RoundStatement, dataset: str
     )
 
 
-def _credible_lift(reading: PairedReading | None) -> float | None:
+def _credible_lift(reading: ReadPair) -> float | None:
     """Fitness, never the composite: blocks pool across campaigns, each pricing cells its own way."""
-    lift = reading.on_whole_set if reading else None
+    lift = reading.on_whole_set
     if lift is None or lift.estimate.ci_lo is None or lift.estimate.ci_lo <= 0:
         return None
     return lift.estimate.value
@@ -111,9 +111,12 @@ def _accumulate(
     earned: list[tuple[OptSearchPoint, str, float]] = []
     for key, arm in closed.proposed.items():
         reading = None if (fit := closed.fit(key)) is None else fit.vs_reference
-        if (lift := _credible_lift(reading)) is None:
+        if (
+            reading is None
+            or reading.state is not ReadingState.READ
+            or (lift := _credible_lift(reading)) is None
+        ):
             continue
-        assert reading is not None and reading.a is not None and reading.b is not None
         # A reading is its address: a fork's chain and a repair's re-close each carry it again.
         if reading.b.address not in counted:
             counted.add(reading.b.address)

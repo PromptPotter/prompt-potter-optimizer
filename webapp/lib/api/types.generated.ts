@@ -794,14 +794,14 @@ export interface RunStanding {
   /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
-  vs_origin: PairedReading;
+  vs_origin: ReadPair | UnreadPair;
   /** `selection` (`b`) over the declared pick it displaced (`a`), which its lineage
    * parent is only where the line never moved uncrowned between them, on the
    * origin panel, from the round reading `vs_origin` comes from
    * (`OverlapReading.vs_previous_pick`); `vs_origin` itself where the
    * previous pick is C0. Null while the selection is the origin, or where
    * that reading pairs no such two. */
-  vs_previous_pick: PairedReading | null;
+  vs_previous_pick: ReadPair | UnreadPair | null;
   /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
   rounds_closed: number;
   /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
@@ -843,21 +843,29 @@ export interface ArmName {
   label: string;
 }
 
-/** One pair of addressed individuals read on one cell set. */
-export interface PairedReading {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  a: PairMember | null;
-  b: PairMember | null;
-  cell_set: CellSet | null;
-  /** What measured both members' cells: their dataset, and on the recursion the
-   * inner origin. Null where the reading names no pair. */
-  instrument_id: string | null;
+/** One pair of addressed individuals read on one cell set: both members, the set,
+ * the lifts. */
+export interface ReadPair {
   scope: 'decision' | 'report' | 'bench';
   spec: EstimatorSpec;
-  coverage: Coverage | null;
-  headline: MeasuredLift | null;
+  state: 'read';
+  a: PairMember;
+  b: PairMember;
+  cell_set: CellSet;
+  /** What measured both members' cells: their dataset, and on the recursion the
+   * inner origin. */
+  instrument_id: string;
+  coverage: Coverage;
+  headline: MeasuredLift;
   /** Other measurands over the SAME scored cells as `headline`. */
   beside: MeasuredLift[];
+}
+
+/** How a lift's two-sided interval and test were taken, against no change; the
+ * estimate is the mean paired difference. The test is the measurand's: exact
+ * sign where it is declared binary. */
+export interface EstimatorSpec {
+  alpha: number;
 }
 
 /** One side of a pair, and what it holds on the pair's cell set. */
@@ -891,13 +899,6 @@ export interface CellSet {
   dataset_hash: string | null;
   /** How many cells the set names — the N of `n of N`. */
   size: number;
-}
-
-/** How a lift's two-sided interval and test were taken, against no change; the
- * estimate is the mean paired difference. The test is the measurand's: exact
- * sign where it is declared binary. */
-export interface EstimatorSpec {
-  alpha: number;
 }
 
 /** How much of the cell set a lift stands on. */
@@ -980,6 +981,18 @@ export interface TestFamily {
   p_adjusted: number;
 }
 
+/** A pair not read, for its ONE reason: the members and set it names where a read
+ * was tried. */
+export interface UnreadPair {
+  scope: 'decision' | 'report' | 'bench';
+  spec: EstimatorSpec;
+  state: 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  a: PairMember | null;
+  b: PairMember | null;
+  cell_set: CellSet | null;
+  instrument_id: string | null;
+}
+
 /** What a run's spend caps have counted, in the units they meter, by kind, and
  * its words. */
 export interface MeteredSpend {
@@ -1041,7 +1054,7 @@ export interface BenchScore {
   /** `selected` over `origin`, paired on the bench rows both scored.
    * `same_individual` where the origin is the selection: nothing was
    * compared. */
-  vs_origin: PairedReading;
+  vs_origin: ReadPair | UnreadPair;
   cost: LiftCost;
   /** Per dataset, where the bench rows measure several; empty on one. The two
    * levels above then read no column, since two datasets' levels never
@@ -1126,7 +1139,7 @@ export interface BenchScope {
   selected: OwnLevel | null;
   /** `selected` over `origin` on this dataset's rows alone; `None` where either
    * read nothing. */
-  vs_origin: PairedReading | null;
+  vs_origin: ReadPair | UnreadPair | null;
 }
 
 /** One individual's own level on one set of rows, in both columns; never one side
@@ -1564,7 +1577,7 @@ export interface ArmReading {
   ability: ArmAbility | null;
   /** This arm (`b`) over the individual it was judged against (`a`), on the cells
    * both scored. Null on the origin and until the election stamps it. */
-  vs_reference: PairedReading | null;
+  vs_reference: ReadPair | UnreadPair | null;
   election: ArmElection;
   /** This arm's individual on the held-out bench set; null unless a pass graded it. */
   bench: BenchReading | null;
@@ -1655,7 +1668,7 @@ export interface VerifyReading {
   /** This candidate over the campaign origin, on every cell the cycle measured both
    * on outside the bench — the fresh ones and the overlap pass's included.
    * `same_individual` on the origin itself. */
-  vs_origin: PairedReading;
+  vs_origin: ReadPair | UnreadPair;
   /** Whether the fresh cells leave the recorded hit rate standing: the 95% band of
    * fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a
    * graded one reads Welch's where both sides spread, else Newcombe's
@@ -1846,9 +1859,9 @@ export interface ServedRound {
    * `panel_precision` is measured on it. Null where the selector could read
    * no arm. */
   leading: ArmName | null;
-  /** How the round ended on `leading` (`Election.ending`); null at round 0, which
-   * holds no election. */
-  ending: 'crowned' | 'moved' | 'held' | null;
+  /** How the round ended on `leading` (`Election.ending`); `adopted` at round 0;
+   * null where the round holds no election. */
+  ending: 'adopted' | 'crowned' | 'moved' | 'held' | null;
   verdict_reason: string | null;
   candidates: DashboardCandidate[];
   selection: number[];
@@ -1908,9 +1921,9 @@ export interface OverlapReading {
   /** The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope.
    * `bought` on each member is what this round paid to put it back on the
    * whole panel. */
-  lead: PairedReading;
+  lead: ReadPair | UnreadPair;
   /** Each earlier pick on the line over C0 on the same panel, oldest first. */
-  earlier: PairedReading[];
+  earlier: (ReadPair | UnreadPair)[];
   /** Every arm off the line a `PanelTrigger` fired for this cycle, by first walk.
    * It moves no `advance`. */
   triggered: TriggeredReading[];
@@ -1918,7 +1931,7 @@ export interface OverlapReading {
    * panel: the cells it gained and lost against the last pick it displaced.
    * Null where that pick is C0, which `lead` reads, or where the line went
    * unread. It moves no `advance`. */
-  vs_previous_pick: PairedReading | null;
+  vs_previous_pick: ReadPair | UnreadPair | null;
   advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'moved_uncrowned' | 'held' | 'unread';
   /** What `advance` does to the stall clock L1 patience, `rounds_without_advance`
    * and the life bank read, stamped at the close under `not_separated_stall`. */
@@ -1930,7 +1943,7 @@ export interface OverlapReading {
 export interface TriggeredReading {
   trigger: 'n_min';
   /** The arm (`b`) over C0 (`a`) on the origin panel. */
-  reading: PairedReading;
+  reading: ReadPair | UnreadPair;
 }
 
 /** How sharply each cell was measured, against how far apart the cells landed. */
@@ -2592,22 +2605,31 @@ export interface Election {
    * the origin. Rank 1 of `RoundView.candidates`. `null` where the selector
    * could read no arm. */
   leading: string | null;
-  /** `crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`:
-   * the line moved to `leading` uncrowned (potter's `next_parent`); `held`:
-   * it stands on `parent`, re-read on this round's cells. */
-  ending: 'crowned' | 'moved' | 'held';
-  /** The arm every arm was read against, which a held round ends on; null at round
+  /** `adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned
+   * `leading`; `moved`: the line moved to `leading` uncrowned (potter's
+   * `next_parent`); `held`: it stands on `parent`, re-read on this round's
+   * cells. */
+  ending: 'adopted' | 'crowned' | 'moved' | 'held';
+  /** The candidate the line stood on entering the round, re-read on its cells: the
+   * arm every arm was read against, which a held round ends on; null at round
    * 0, which reads none. */
-  parent: string | null;
+  parent: RoundArm | null;
   electable: number;
   fit: Record<string, ArmFit>;
   elects_on: 'fitness' | 'composite' | 'ability';
   /** `leading` (`b`) over `parent` (`a`) on the cells its selector paired them on:
    * the reading the round was decided on. Null where the selector banks none. */
-  deciding_pair: PairedReading | null;
+  deciding_pair: ReadPair | UnreadPair | null;
   verdict_reason: string | null;
   reelection: Reelection | null;
   ruler: RulerStamp;
+}
+
+/** One arm of one round, by its record's own address: an id alone names no
+ * candidate, since a later round can propose the same individual again. */
+export interface RoundArm {
+  round: number;
+  arm: string;
 }
 
 /** What the election read of one arm: θ lives here and nowhere else. */
@@ -2615,7 +2637,7 @@ export interface ArmFit {
   theta: number | null;
   theta_se: number | null;
   theta_caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
-  vs_reference: PairedReading | null;
+  vs_reference: ReadPair | UnreadPair | null;
   lift: Estimate | null;
 }
 
@@ -2656,8 +2678,6 @@ export interface RoundAudit {
   finished_at: string | null;
   nodes: Record<string, NodeBlock>;
   warnings: LoopWarning[];
-  /** The run stopped with this round open. */
-  interrupted: boolean;
 }
 
 /** One optimizer-loop degradation the self-healing rails recovered from. */
@@ -2675,7 +2695,7 @@ export interface StampedEnvelope {
   /** The served contract (`X-Served-Contract`), compared as a fetch's answer is. */
   contract: string;
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fold_basis' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -3150,11 +3170,11 @@ export interface PairwiseComparison {
   /** `subject_b` over `subject_a` under the selected metric, on the cells both
    * scored under it. Its headline's `family` is Holm across this table's
    * pairs. */
-  reading: PairedReading;
+  reading: ReadPair | UnreadPair;
   /** The same pair on the hit grade, whatever metric the read selected, on the
    * cells both graded: its headline's `flips` are what a level nets against
    * each other. */
-  hit: PairedReading;
+  hit: ReadPair | UnreadPair;
   /** The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — as
    * `Sample.key`s. */
   gained: string[];
@@ -3314,7 +3334,7 @@ export interface RankedEdit {
    * cells both scored. Its headline's `family` is Holm across the edits
    * ranked here. An edit whose reading is not `read` is listed after them,
    * unranked. */
-  reading: PairedReading;
+  reading: ReadPair | UnreadPair;
 }
 
 /** Where one occurrence of an edit was measured on disk. */
@@ -5220,7 +5240,6 @@ export interface ArchiveReport {
   bytes_after: number;
   cold_bytes: number;
   archive_writers: number;
-  conflicts: number;
   purged: number;
   rows_skipped_by_role: unknown;
   applied: boolean;
@@ -5902,7 +5921,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "f98fd49f4ed3cf83";
+export const SERVED_CONTRACT = "6f39b755735a4884";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

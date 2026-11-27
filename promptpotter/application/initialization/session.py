@@ -10,6 +10,7 @@ from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.partition import PartitionRecord
@@ -48,6 +49,8 @@ class ScorerSetup:
     degradation_checks: tuple[StopRule, ...]
     # One per declared term, built once per run so every judge validation precedes spend.
     judges: tuple[SampleEvaluator, ...]
+    # What `scorer`'s walks fold under on the session's chain, filed before their first row.
+    basis: FoldBasis
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,9 @@ class LaunchState:
     resumed_from_round: int = 1
     # Seated once, before any cell is read: by run init (`runner/run_init.py`) or a pass's opener.
     scoring: ScorerSetup = field(init=False)
+    # The ledger the seated scorer's basis was last filed on, and that basis: a re-seat or a fork
+    # files it again.
+    filed_basis: tuple[object, FoldBasis] | None = None
     # Seeded off the cycle's index at init; afterwards written only by `act`.
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)

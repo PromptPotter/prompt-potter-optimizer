@@ -213,8 +213,6 @@ from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
 from promptpotter.application.scoring.evaluators import (
     SampleEvaluator,
-    compute_degraded_rate,
-    compute_error_rate,
     compute_fitness,
 )
 from promptpotter.application.scoring.formula import compiler
@@ -227,11 +225,9 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING
 from promptpotter.application.scoring.judges.registry import two_valued_terms
-from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
     RoundPairs,
-    absent_pair,
     as_family,
     grade_measurands,
     origin_floor,
@@ -244,7 +240,6 @@ from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
     crowning_cells,
-    level_band,
     ranked_first,
     readable_lifts,
 )
@@ -302,6 +297,14 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.crowning_bar import CrowningBar, NextParent
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.fitness_fold import (
+    cell_channels_of,
+    compute_composite_fitness,
+    compute_degraded_rate,
+    compute_error_rate,
+    fold_cells,
+    level_band,
+)
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -333,6 +336,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
     RoundArm,
+    UnreadPair,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.phases import (
@@ -966,10 +970,10 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(
     assert (at_rate.grade.objective, billed.grade.objective) == (0.5, 0.25), (
         "a cost term reads the provider's bill, else our rate's price"
     )
-    assert "cost" not in compiler.cell_channels_of(solve(0, "a", 692), None), (
+    assert "cost" not in cell_channels_of(solve(0, "a", 692), None), (
         "most cells report no dollars, and an unpriced cell has no cost term"
     )
-    assert "cost" not in compiler.cell_channels_of(solve(0, "a", 692, cost=9.0), None), (
+    assert "cost" not in cell_channels_of(solve(0, "a", 692, cost=9.0), None), (
         "a dataset observation named for a core channel filled it, undeclared"
     )
 
@@ -1179,7 +1183,7 @@ def test_a_reported_core_channel_is_one_value_on_a_dial_and_in_a_formula() -> No
             "step_tokens": {"n": {"input": 1, "output": 1, "cost_usd": 2.0}},
         },
     )
-    channel = compiler.cell_channels_of(spent.facts, spent.grade)["cost"]
+    channel = cell_channels_of(spent.facts, spent.grade)["cost"]
     assert compiler.objective_namespace(spent.facts, spent.grade)["cost"] == channel == 2.0, (
         "a reported core channel read one value on a dial and another in a formula"
     )
@@ -2285,8 +2289,8 @@ def _check_bench_row(
     )
     bench = read_bench(stores, passes, scorer, line=line)
     assert (bench.status.state, bench.status.can_run) == (state, can_run), case
-    headline = bench.vs_origin.headline
-    assert (None if headline is None else headline.estimate.value) == lift, case
+    read = bench.vs_origin
+    assert (read.headline.estimate.value if read.state is ReadingState.READ else None) == lift, case
     assert bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
     pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
     on_line = round_result(1, arms=[pick_arm], cells={})
@@ -2805,7 +2809,6 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
 
 
 def _line_read(
-    round_num: int,
     improved: bool,
     *picks: tuple[str, Sequence[float | None]],
     c0: Sequence[float | None],
@@ -2850,7 +2853,6 @@ def _line_read(
     origin = ("C0", c0)
     readings = [read(label, grades, origin) for label, grades in picks]
     return OverlapReading.of(
-        round_num,
         RoundEnding.CROWNED if improved else RoundEnding.HELD,
         positions=range(len(c0)),
         lead=readings[-1],
@@ -3077,9 +3079,9 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     drained = [close(i, improved=False) for i in (8, 9)]
     assert stalls_left([*stated, *drained], (2, 4)) == 0
     lines = [
-        _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
-        _line_read(2, True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL),
-        _line_read(3, True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL),
+        _line_read(True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
+        _line_read(True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL),
+        _line_read(True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL),
     ]
     assert [line.advance for line in lines] == [
         RoundAdvance.ADVANCED,
@@ -3087,18 +3089,18 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
         RoundAdvance.NOT_SEPARATED,
     ]
     watched = _line_read(
-        2, True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL, triggered=[("C2.2", _CLEAN_PANEL)]
+        True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL, triggered=[("C2.2", _CLEAN_PANEL)]
     )
     assert watched.advance is RoundAdvance.NOT_SEPARATED, "a triggered arm is read, never adopted"
     assert line_by_individual(watched)["c2.2"].rate == 1.0, "and served beside the line"
     held = close(2, improved=False).overlap.stall
     switch: tuple[tuple[NotSeparatedStall, int], ...] = (("counts", 3), ("resets", 1), ("skips", 2))
     for not_separated, stalled in switch:
-        tied = _line_read(3, True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL, not_separated=not_separated)
+        tied = _line_read(True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL, not_separated=not_separated)
         assert observed([lines[0].stall, held, tied.stall, held]).l1_stall_count == stalled, (
             f"a crown inside the noise did not pace the ladder as `{not_separated}` says"
         )
-    moved = OverlapReading.unpaired(ReadingState.NOT_HELD, 4, RoundEnding.MOVED)
+    moved = OverlapReading.unpaired(ReadingState.NOT_HELD, RoundEnding.MOVED)
     assert (moved.advance, moved.stall) == (RoundAdvance.MOVED_UNCROWNED, StallEffect.COUNTS), (
         "a step onto an uncrowned leader read as an advance"
     )
@@ -3108,14 +3110,13 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
     stall_reads: _StallReads,
 ) -> None:
     close, observed = stall_reads
-    won = _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL)
+    won = _line_read(True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL)
     origin_close = close(0, improved=False, electable=0)
     lead = won.lead
     stopped = OverlapReading.of(
-        3,
         RoundEnding.CROWNED,
         positions=won.positions,
-        lead=absent_pair(
+        lead=UnreadPair(
             state=ReadingState.PASS_STOPPED,
             a=lead.a,
             b=lead.b,
@@ -3150,8 +3151,8 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
 
 
 def test_a_pick_one_panel_cell_holed_reads_on_the_cells_both_scored() -> None:
-    holed = _line_read(1, True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
-    assert holed.lead.coverage is not None and holed.lead.headline is not None
+    holed = _line_read(True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
+    assert holed.lead.state is ReadingState.READ
     assert (holed.lead.coverage.scored, holed.lead.coverage.excluded_faulted) == (8, 1)
     assert holed.lead.headline.side == "above" and holed.advance is RoundAdvance.ADVANCED, (
         "one of nine panel cells errored: read on the eight both scored, and it decides"
@@ -3159,7 +3160,7 @@ def test_a_pick_one_panel_cell_holed_reads_on_the_cells_both_scored() -> None:
 
 
 def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_evidence() -> None:
-    lead = _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL).lead
+    lead = _line_read(True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL).lead
     alone, no_evidence = RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD
     promoted_on = {
         ReadingState.READ: RoundAdvance.ADVANCED,
@@ -3181,11 +3182,11 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
         ReadingState.INSTRUMENT_DIFFERS: no_evidence,
     }
     for state, advance in promoted_on.items():
-        pair = lead if state is ReadingState.READ else PairedReading.unread(state)
-        assert round_advance(1, RoundEnding.CROWNED, pair) is advance, state
-        assert round_advance(1, RoundEnding.HELD, pair) is RoundAdvance.HELD, state
-        assert round_advance(1, RoundEnding.MOVED, pair) is RoundAdvance.MOVED_UNCROWNED, state
-        assert round_advance(0, RoundEnding.CROWNED, pair) is RoundAdvance.ORIGIN, state
+        pair = lead if state is ReadingState.READ else UnreadPair.of(state)
+        assert round_advance(RoundEnding.CROWNED, pair) is advance, state
+        assert round_advance(RoundEnding.HELD, pair) is RoundAdvance.HELD, state
+        assert round_advance(RoundEnding.MOVED, pair) is RoundAdvance.MOVED_UNCROWNED, state
+        assert round_advance(RoundEnding.ADOPTED, pair) is RoundAdvance.ORIGIN, state
 
 
 _LIVED = defaulted_config({"optimization": {"lives": {"start": 2, "cap": 4}}}).optimization
@@ -3221,13 +3222,13 @@ def test_the_bench_stops_a_line_on_spent_lives() -> None:
 
 def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resolved() -> None:
     readings = {
-        RoundAdvance.ADVANCED: _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
-        RoundAdvance.NOT_SEPARATED: _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
+        RoundAdvance.ADVANCED: _line_read(True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
+        RoundAdvance.NOT_SEPARATED: _line_read(True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
         RoundAdvance.ADVANCED_UNPAIRED: OverlapReading.unpaired(
-            ReadingState.NOT_HELD, 1, RoundEnding.CROWNED
+            ReadingState.NOT_HELD, RoundEnding.CROWNED
         ),
         RoundAdvance.UNREAD: OverlapReading.unpaired(
-            ReadingState.PASS_STOPPED, 1, RoundEnding.CROWNED
+            ReadingState.PASS_STOPPED, RoundEnding.CROWNED
         ),
     }
     assert all(reading.advance is advance for advance, reading in readings.items())
@@ -3241,7 +3242,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
         standing = RunStanding.after(line, lives=None, outlay=_UNPAID)
         return standing_tripped(standing, _LIVED.model_copy(update={"halt_at_fitness": target}))
 
-    swept = _line_read(1, True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
+    swept = _line_read(True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
     for reading, target, stop, why in (
         (readings[RoundAdvance.ADVANCED_UNPAIRED], 0.0, None, "an unpaired pick met a ceiling"),
         (readings[RoundAdvance.UNREAD], 0.0, None, "an unread pick met a ceiling"),
@@ -3544,8 +3545,8 @@ def _shared_pair() -> tuple[list[Sample], MemberRows, MemberRows, PairedReading]
 
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     _, _, _, reading = _shared_pair()
+    assert reading.state is ReadingState.READ
     lift, coverage = reading.headline, reading.coverage
-    assert lift is not None and coverage is not None and reading.cell_set is not None
     assert reading.cell_set.size == 7
     assert (coverage.shared, coverage.scored) == (7, 5), "the pair reads the cells both scored"
     assert (coverage.excluded_faulted, coverage.excluded_unscored) == (1, 1)
@@ -3566,12 +3567,14 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
 
 def test_the_floor_gates_a_pair_claim_whose_interval_clears_zero() -> None:
     sparse = samples(34, "t", query="w")
-    gained = _read_pair(
+    read = _read_pair(
         member_rows("a", measurements([0.0] * 34), sparse),
         member_rows("b", measurements([1.0] * 4 + [0.0] * 30), sparse),
         sparse,
-    ).headline
-    assert gained is not None and (gained.estimate.ci_lo or 0.0) > 0.0
+    )
+    assert read.state is ReadingState.READ
+    gained = read.headline
+    assert (gained.estimate.ci_lo or 0.0) > 0.0
     assert (gained.side, gained.p_value) == ("spans", 0.125), (
         "the floor gates the claim: Student-t's interval clears zero, yet four differing cells cap p"
     )
@@ -3579,7 +3582,7 @@ def test_the_floor_gates_a_pair_claim_whose_interval_clears_zero() -> None:
 
 def test_a_measurand_beside_the_headline_is_read_over_the_same_scored_cells() -> None:
     bank, a, b, reading = _shared_pair()
-    assert reading.headline is not None
+    assert reading.state is ReadingState.READ
     composite = Measurand(
         kind=MeasurandKind.GRADE,
         key="objective",
@@ -3587,7 +3590,9 @@ def test_a_measurand_beside_the_headline_is_read_over_the_same_scored_cells() ->
         binary=False,
         unit="score",
     )
-    (beside,) = _read_pair(a, b, bank, measurands=[reading.headline.measurand, composite]).beside
+    paired = _read_pair(a, b, bank, measurands=[reading.headline.measurand, composite])
+    assert paired.state is ReadingState.READ
+    (beside,) = paired.beside
     assert not beside.measurand.binary
     assert beside.estimate.value == pytest.approx(0.6 * reading.headline.estimate.value), (
         "a measurand beside the headline is read over the SAME scored cells"
@@ -3601,15 +3606,15 @@ def test_a_tables_pairs_share_one_holm_correction() -> None:
         member_rows("b", measurements([1.0] * 6), bank),
         bank,
     )
-    assert reading.headline is not None and clear.headline is not None
+    assert reading.state is ReadingState.READ and clear.state is ReadingState.READ
     p_wide, p_clear = reading.headline.p_value, clear.headline.p_value
     assert 2 * p_clear < p_wide
     spanning, unheld, tight = as_family(
-        [reading, PairedReading.unread(ReadingState.PENDING), clear], "table"
+        [reading, UnreadPair.of(ReadingState.PENDING), clear], "table"
     )
-    assert unheld.headline is None, "a pair nobody read is no test"
-    assert spanning.headline is not None and spanning.headline.family is not None
-    assert tight.headline is not None and tight.headline.family is not None
+    assert unheld.state is not ReadingState.READ, "a pair nobody read is no test"
+    assert spanning.state is ReadingState.READ and spanning.headline.family is not None
+    assert tight.state is ReadingState.READ and tight.headline.family is not None
     assert (spanning.headline.family.n_tests, tight.headline.family.n_tests) == (2, 2), (
         "one table's pairs share one Holm correction"
     )
@@ -3667,8 +3672,8 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
     once = member_rows("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
+    assert unmoved.state is ReadingState.READ
     lift, coverage = unmoved.headline, unmoved.coverage
-    assert lift is not None and coverage is not None
     assert (coverage.scored, coverage.excluded_faulted) == (4, 0)
     assert (lift.rate_a, lift.rate_b, lift.estimate.value) == (0.75, 0.75, 0.0), (
         "paired against an individual that walked each cell once at those grades, nothing moved"
@@ -3682,8 +3687,10 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     }
     level = level_band(ungraded.sheet, "fitness", "rate")
     assert level is not None and level.value == pytest.approx(2 / 3)
-    short = _read_pair(once, ungraded, four).coverage
-    assert short is not None and short.scored == 3, "an unscored cell left the pair"
+    short = _read_pair(once, ungraded, four)
+    assert short.state is ReadingState.READ and short.coverage.scored == 3, (
+        "an unscored cell left the pair"
+    )
     with pytest.raises(UngradedCellError):
         ROW_GRADES["fitness"].read(ungraded.sheet.cells[-1])
 
@@ -3721,22 +3728,6 @@ def test_a_pair_that_cannot_be_read_says_why_instead_of_reading_zero() -> None:
         ),
     ):
         assert _read_pair(left, member, panel, **asked).state is state, f"{state} misread"
-    read = _read_pair(left, right(), panel)
-
-    def said(as_state: ReadingState) -> PairedReading:
-        return absent_pair(
-            state=as_state,
-            a=read.a,
-            b=read.b,
-            cell_set=read.cell_set,
-            scope=read.scope,
-            spec=read.spec,
-            instrument_id=read.instrument_id,
-        )
-
-    assert said(ReadingState.PASS_STOPPED).headline is None
-    with pytest.raises(ValidationError):
-        said(ReadingState.READ)
 
 
 def test_an_arm_is_read_on_the_cells_its_reference_was_read_on() -> None:
@@ -3777,12 +3768,12 @@ def test_an_arm_is_read_on_the_cells_its_reference_was_read_on() -> None:
         ),
     ):
         on_reference = _reference_reading(ref_grades, arm_grades, cut=cast(CutKind | None, cut))
+        assert on_reference.state is ReadingState.READ, coverage_state
         lift, coverage, set_read = (
             on_reference.headline,
             on_reference.coverage,
             on_reference.cell_set,
         )
-        assert lift is not None and coverage is not None and set_read is not None
         assert (set_read.name, set_read.size) == (CellSetName.REFERENCE_CELLS, size), coverage_state
         assert (coverage.state, coverage.scored) == (coverage_state, scored), coverage_state
         assert (lift.rate_a, lift.rate_b) == rates, f"{coverage_state}: rates over the shared cells"
@@ -3906,7 +3897,7 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert verify.fitness_difference is not None
     assert verify.fitness_difference.value == pytest.approx(-0.5)
     pair = verify.vs_origin
-    assert pair.coverage is not None and pair.headline is not None
+    assert pair.state is ReadingState.READ
     assert (verify.fresh.n, verify.recorded.n, pair.coverage.scored) == (10, 20, 30)
     assert pair.headline.estimate.value == pytest.approx(0.5), (
         "paired per cell both scored, never the difference of two rates over different cells"
@@ -3958,7 +3949,6 @@ def test_a_verify_of_the_origin_has_nothing_to_be_lifted_over() -> None:
     assert at_origin.vs_origin.state is ReadingState.SAME_INDIVIDUAL, (
         "the origin has nothing to be lifted over, and 0.0 there would read as no better than C0"
     )
-    assert at_origin.vs_origin.headline is None
 
 
 def test_an_individuals_cells_are_one_set_and_a_decision_never_reads_an_overlap_row() -> None:
@@ -4088,11 +4078,9 @@ def standing_run() -> _StandingRun:
         return RunStanding.after(run, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None))
 
     # C0 is re-read between the lines: the panel cell it took in round 1 it misses by round 3.
-    first_line = _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL, ids=ids)
-    newest = _line_read(
-        3, True, ("C1.1", _TIED_PANEL), ("C3.2", _CLEAN_PANEL), c0=[0.0] * 9, ids=ids
-    )
-    reread = _line_read(4, False, ("C3.2", _CLEAN_PANEL), c0=_C0_PANEL, ids=ids)
+    first_line = _line_read(True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL, ids=ids)
+    newest = _line_read(True, ("C1.1", _TIED_PANEL), ("C3.2", _CLEAN_PANEL), c0=[0.0] * 9, ids=ids)
+    reread = _line_read(False, ("C3.2", _CLEAN_PANEL), c0=_C0_PANEL, ids=ids)
     run = [
         closed(0, origin, "C0", selected="C0"),
         closed(1, first_pick, "C1.1", "C1.2", selected="C1.1", overlap=first_line),
@@ -4113,7 +4101,7 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
     at_c0 = stands(run[:1])
     assert at_c0.selection is not None
     assert at_c0.selection.label == "C0"
-    assert at_c0.vs_origin == PairedReading.unread(ReadingState.SAME_INDIVIDUAL)
+    assert at_c0.vs_origin == UnreadPair.of(ReadingState.SAME_INDIVIDUAL)
     held = stands(run[:3])
     assert held.selection is not None
     assert held.selection.label == "C1.1", "a held round keeps the selection before it"
@@ -4135,24 +4123,23 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
         "never the parent each re-read"
     )
     vs_c0 = standing_now.vs_origin
-    assert vs_c0.coverage is not None and vs_c0.headline is not None
+    assert vs_c0.state is ReadingState.READ
     assert (vs_c0.coverage.scored, vs_c0.headline.rate_a, vs_c0.headline.rate_b) == (9, 0.0, 1.0), (
         "C0 on the reading its selection sat beside: rates differenced must have sat one exam"
     )
     held_on = stands([*run, closed(4, second_pick, "C4.1", overlap=reread)])
     assert held_on.selection == standing_now.selection
-    assert held_on.vs_origin.headline is not None
+    assert held_on.vs_origin.state is ReadingState.READ
     assert held_on.vs_origin.headline.rate_a == pytest.approx(1 / 9), (
         "a later round that holds re-reads the line, and the standing follows the NEWEST reading"
     )
-    pass_stopped = OverlapReading.unpaired(ReadingState.PASS_STOPPED, 5, RoundEnding.CROWNED)
+    pass_stopped = OverlapReading.unpaired(ReadingState.PASS_STOPPED, RoundEnding.CROWNED)
     unread = stands([*run, closed(5, third_pick, "C5.1", selected="C5.1", overlap=pass_stopped)])
     assert unread.selection is not None
     assert unread.selection.label == "C5.1"
-    assert (unread.vs_origin.state, unread.vs_origin.headline) == (
-        ReadingState.PASS_STOPPED,
-        None,
-    ), "a pick nobody has read against C0 yet says so — never the pick before it under its name"
+    assert unread.vs_origin.state is ReadingState.PASS_STOPPED, (
+        "a pick nobody has read against C0 yet says so — never the pick before it under its name"
+    )
     assert (standing_now.rounds_without_advance, unread.rounds_without_advance) == (0, 0), (
         "round 3 advanced, and an unread pick is no stall"
     )
@@ -4416,10 +4403,12 @@ def test_a_two_valued_scorers_headline_separates_on_its_paired_flips() -> None:
         return member_rows(name, rows, bank)
 
     measurands = grade_measurands(dataclasses.replace(scorer_of(), id="s"))
-    lift = _read_pair(
+    read = _read_pair(
         member("c0", [0.0] * 11 + [1.0]), member("c1", [1.0] * 12), bank, measurands=measurands
-    ).headline
-    assert lift is not None and lift.measurand.binary, "a matcher's 0/1 fitness read as graded"
+    )
+    assert read.state is ReadingState.READ
+    lift = read.headline
+    assert lift.measurand.binary, "a matcher's 0/1 fitness read as graded"
     assert lift.side == "above", "11 gained, 0 lost read inside the noise"
 
 

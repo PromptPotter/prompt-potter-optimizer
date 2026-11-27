@@ -20,11 +20,11 @@ from promptpotter.application.scoring.formula.compiler import (
     parse_dials,
     realize_dials,
 )
-from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk, filed_entry
 from promptpotter.domain.arms import ArmPosition, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.fitness_fold import compute_composite_fitness
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only

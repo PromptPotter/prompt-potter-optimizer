@@ -18,7 +18,7 @@ from promptpotter.application.scoring.formula.matchers import (
 )
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
-from promptpotter.domain.results_health import is_degraded
+from promptpotter.domain.fitness_fold import ROW_HEALTH, cell_channels_of
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
     PIPELINE_KEYS,
@@ -34,7 +34,7 @@ from promptpotter.domain.scoring import (
     ScoringTermMissingError,
     anchored_criterion,
 )
-from promptpotter.domain.spend import StepUsage, TokenAccount, bill_or_rate_usd
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import stable_hash
 
@@ -238,77 +238,9 @@ def _unit(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _number(value: float | None) -> float | None:
-    return None if value is None else float(value)
-
-
-def _step_cost(steps: Mapping[str, StepUsage]) -> float | None:
-    """``None`` where any node carries neither figure: a partial sum reads as the whole cost."""
-    costs = [bill_or_rate_usd(usage.cost_usd, usage.rate_priced_usd) for usage in steps.values()]
-    if not costs or any(cost is None for cost in costs):
-        return None
-    return sum(cost for cost in costs if cost is not None)
-
-
-def _step_tokens(steps: Mapping[str, StepUsage]) -> float | None:
-    account = TokenAccount.from_step_tokens(steps)
-    return None if account is None else float(account.total)
-
-
-ChannelReader = Callable[[MeasuredCell, Grade | None], float | None]
-
-# The core's own channels: where its reader cannot answer, a connector's report does.
-_CHANNEL_READERS: dict[str, ChannelReader] = {
-    "fitness": lambda _facts, grade: None if grade is None else _number(grade.fitness),
-    # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
-    "latency": lambda facts, _grade: facts.cost_s,
-    "unworked": lambda facts, _grade: facts.pipeline.unworked_s,
-    "cost": lambda facts, _grade: _step_cost(facts.pipeline.step_tokens),
-    "tokens": lambda facts, _grade: _step_tokens(facts.pipeline.step_tokens),
-}
-
-# Channels whose value another owner serves, so no report answers them: the rank the cell's
-# grade binds, the prompt length its `PipelineData` carries.
-_BORROWED_CHANNELS: dict[str, ChannelReader] = {
-    "ground_truth_rank": lambda _facts, grade: (
-        None if grade is None else _number(grade.ground_truth_rank)
-    ),
-    # Characters, not tokens: no tokenizer ships.
-    "target_prompt_chars": lambda facts, _grade: _number(facts.pipeline.target_prompt_chars),
-}
-
-# Deliberately NOT channels: a predicate answers for ANY cell, measured or not.
-_ROW_HEALTH: dict[str, Callable[[MeasuredCell], float]] = {
-    "errored": lambda facts: float(facts.errored),
-    "degraded": lambda facts: float(is_degraded(facts)),
-    "cached": lambda facts: float(facts.cached),
-}
-
-CELL_CHANNELS: tuple[str, ...] = tuple(
-    name for name in CELL_TERMS if name in _CHANNEL_READERS or name in _BORROWED_CHANNELS
-)
-assert set(CELL_TERMS) == {*CELL_CHANNELS, *_ROW_HEALTH}, "a per-cell term went untaught"
-# The core terms a report may answer; a health term is the row's own, never a report's.
-REPORTABLE_CORE_TERMS: frozenset[str] = frozenset(_CHANNEL_READERS)
-ROW_HEALTH_TERMS: frozenset[str] = frozenset(_ROW_HEALTH)
-
-
 def campaign_terms(connector: Connector) -> dict[str, CellTerm]:
     """What a campaign's criterion, dial or anchor may name: the core's terms, then its connector's own."""
     return {**CELL_TERMS, **{term.name: term for term in connector.cell_terms}}
-
-
-def cell_channels_of(facts: MeasuredCell, grade: Grade | None) -> dict[str, float]:
-    """A key absent from the result is a channel the cell cannot answer."""
-    out: dict[str, float] = {}
-    for name, read in (*_CHANNEL_READERS.items(), *_BORROWED_CHANNELS.items()):
-        value = read(facts, grade)
-        if value is not None:
-            out[name] = value
-    for name, value in facts.pipeline.cell_report.items():
-        if isinstance(value, int | float) and not isinstance(value, bool):
-            out.setdefault(name, float(value))
-    return out
 
 
 def cell_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
@@ -365,7 +297,7 @@ assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
 
 def objective_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
     """The per-sample side wins every collision: one term never means two things across formulas."""
-    health = {name: read(facts) for name, read in _ROW_HEALTH.items()}
+    health = {name: read(facts) for name, read in ROW_HEALTH.items()}
     return {**cell_channels_of(facts, grade), **health, **cell_namespace(facts, grade)}
 
 

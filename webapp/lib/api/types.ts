@@ -15,9 +15,11 @@ import type {
   HierarchyCycle,
   HierarchyResponse,
   HierarchyRound,
+  ReadPair,
   ServedDashboard,
   SubtreeCampaign,
   SubtreeCycle,
+  UnreadPair,
 } from "./types.generated";
 
 // served: `domain/hierarchy.py::ListedCampaign` — a started campaign, or an open check-in
@@ -33,6 +35,8 @@ export type HierarchyEntry = HierarchyCampaign | HierarchyCycle | HierarchyCandi
 // served: `domain/hierarchy.py::HierarchyEntry` — what `GET /hierarchy/{address}` answers.
 export type SubtreeEntry = SubtreeCampaign | SubtreeCycle | HierarchyRound | HierarchyCandidate;
 export type CycleMint = CycleEntryFacts["mint"];
+// served: `domain/paired_reading.py::PairedReading` — narrow on `state === "read"` once.
+export type PairedReading = ReadPair | UnreadPair;
 
 // A partial config, as sent: every key omittable at any depth.
 export type DraftPatch = Partial<Omit<EditDraftPatch, "config">> &

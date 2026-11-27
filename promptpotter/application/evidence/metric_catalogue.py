@@ -5,11 +5,10 @@ from collections.abc import Iterable, Mapping
 from pydantic import Field, computed_field
 
 from promptpotter.application.scoring.formula.compiler import (
-    CELL_CHANNELS,
     CompiledExpression,
-    cell_channels_of,
     compile_expression,
 )
+from promptpotter.domain.fitness_fold import CELL_CHANNELS, cell_channels_of
 from promptpotter.domain.paired_reading import Estimate, EstimateForm, MeasurandUnit
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel

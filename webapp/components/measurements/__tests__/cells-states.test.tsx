@@ -65,7 +65,7 @@ describe("a cells read's answer, as its panes say it", () => {
       subject_a: "candidate:c/y/r0/a0",
       subject_b: "candidate:c/y/r1/a1",
       reading: hit,
-      hit: { ...hit, headline: { ...hit.headline!, flips: { gained: 1, lost: 0, unchanged: 9 } } },
+      hit: { ...hit, headline: { ...hit.headline, flips: { gained: 1, lost: 0, unchanged: 9 } } },
       gained: ["s1"],
       lost: [],
     };

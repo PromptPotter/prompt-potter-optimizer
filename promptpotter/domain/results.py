@@ -59,12 +59,13 @@ class RoundCells(FrozenModel):
 
     arms: dict[ArmKey, list[WalkedCell]] = Field(default_factory=dict)
     overlap: dict[str, list[WalkedCell]] = Field(default_factory=dict)
+    line: dict[str, list[WalkedCell]] = Field(default_factory=dict)
 
     def walks(self) -> list[IndividualWalk[WalkedCell]]:
-        return _round_walks(arms=self.arms, overlap=self.overlap)
+        return _round_walks(arms=self.arms, overlap=self.overlap, line=self.line)
 
     def sample_keys(self) -> set[str]:
-        walked = [*self.arms.values(), *self.overlap.values()]
+        walked = [*self.arms.values(), *self.overlap.values(), *self.line.values()]
         return {key for cells in walked for key, _, _ in cells}
 
 
@@ -72,6 +73,7 @@ class RoundCells(FrozenModel):
 _ROW_SET_ROLES: dict[str, frozenset[MeasurementRole]] = {
     "arms": SCOPE_ROLES[RoleScope.DECISION],
     "overlap": frozenset({MeasurementRole.OVERLAP}),
+    "line": frozenset({MeasurementRole.OVERLAP}),
 }
 assert _ROW_SET_ROLES.keys() == RoundCells.model_fields.keys()
 
@@ -82,7 +84,7 @@ def _round_walks[C: tuple[Any, ...]](
     """An arm's cells are its individual's: a refused arm walked none, so its slot key holds none."""
     return [
         IndividualWalk(individual_id, _ROW_SET_ROLES[row_set], cells)
-        for row_set in ("arms", "overlap")
+        for row_set in _ROW_SET_ROLES
         for individual_id, cells in by_individual[row_set].items()
     ]
 
@@ -105,13 +107,15 @@ class Election(FrozenModel):
         "`RoundView.candidates`. `null` where the selector could read no arm."
     )
     ending: RoundEnding = Field(
-        description="`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: "
+        description="`adopted`: round 0 adopted the origin `leading`; `crowned`: the round "
+        "crowned `leading`; `moved`: "
         "the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on "
         "`parent`, re-read on this round's cells."
     )
-    parent: ArmKey | None = Field(
-        description="The arm every arm was read against, which a held round ends on; null at "
-        "round 0, which reads none."
+    parent: RoundArm | None = Field(
+        description="The candidate the line stood on entering the round, re-read on its cells: the "
+        "arm every arm was read against, which a held round ends on; null at round 0, which reads "
+        "none."
     )
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
@@ -132,23 +136,26 @@ class Election(FrozenModel):
 
     @model_validator(mode="after")
     def _ends_on_an_arm(self) -> Self:
-        if self.ending.moves_line and self.leading is None:
+        held = self.ending is RoundEnding.HELD
+        if not held and self.leading is None:
             raise ValueError(f"a round {self.ending.value} on its leader, and it names none")
-        if not self.ending.moves_line and self.parent is None:
+        if held and self.parent is None:
             raise ValueError("a held round ends on its parent, and it names none")
         return self
 
     @property
     def selected(self) -> ArmKey | None:
         """THE pick: round 0 selects the origin it adopted."""
-        return self.leading if self.ending is RoundEnding.CROWNED else None
+        return self.leading if self.ending in (RoundEnding.ADOPTED, RoundEnding.CROWNED) else None
 
     @property
     def ended_on(self) -> ArmKey:
         """WHOSE numbers the round's headline carries, and the reference the next round is read against."""
-        ended_on = self.leading if self.ending.moves_line else self.parent
-        assert ended_on is not None
-        return ended_on
+        if self.ending is not RoundEnding.HELD:
+            assert self.leading is not None
+            return self.leading
+        assert self.parent is not None
+        return self.parent.arm
 
 
 class RoundOutcome(FrozenModel):
@@ -159,8 +166,6 @@ class RoundOutcome(FrozenModel):
     round: int
     # Its proposed arms in slot order, then each reference the round re-read: one key, one state.
     arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
-    # The candidate its line stood on entering it, which the election reads every arm against.
-    reference: RoundArm | None
     # Each arm's fold of the cells the round files for it; none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     election: Election | None
@@ -197,13 +202,8 @@ class RoundOutcome(FrozenModel):
 
     @property
     def improved(self) -> bool:
-        """A promotion: the round's selector crowned an arm; round 0 adopts its origin and
-        promotes nothing."""
-        return (
-            self.round > 0
-            and self.election is not None
-            and self.election.ending is RoundEnding.CROWNED
-        )
+        """A promotion: the round's selector crowned an arm; an adopted origin promotes nothing."""
+        return self.election is not None and self.election.ending is RoundEnding.CROWNED
 
     @property
     def ruler(self) -> RulerStamp | None:
@@ -227,17 +227,11 @@ class RoundOutcome(FrozenModel):
     def fit(self, key: ArmKey) -> ArmFit | None:
         return None if self.election is None else self.election.fit.get(key)
 
-    def arm_election(self, key: ArmKey, *, held: bool = True) -> ArmElection:
-        election = self.election
-        return ArmElection.of(
-            key,
-            held=held and election is not None,
-            selected=None if election is None else election.selected,
-            leading=None if election is None else election.leading,
-            electable=None if election is None else election.electable,
-        )
-
     def arm_readings(self) -> list[ArmReading]:
+        e = self.election
+        selected, leading, electable = (
+            (None, None, None) if e is None else (e.selected, e.leading, e.electable)
+        )
         counts = {key: panel_counts(arm, self.folds.get(key)) for key, arm in self.arms.items()}
         proposed = list(self.proposed)
         cuts = dict(zip(proposed, panel_cuts([counts[key] for key in proposed]), strict=True))
@@ -250,7 +244,9 @@ class RoundOutcome(FrozenModel):
                 arm,
                 fold=self.folds.get(key),
                 cut=cuts[key],
-                election=self.arm_election(key),
+                election=ArmElection.of(
+                    key, held=e is not None, selected=selected, leading=leading, electable=electable
+                ),
                 fit=self.fit(key),
             ).on_line(line)
             for key, arm in self.arms.items()
@@ -286,6 +282,9 @@ class RoundResult(RoundOutcome):
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
     # Keyed by the MEASURED individual, outside the arms: `raced` reads them beside the draw.
     overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
+    # What the line's origin-panel reading bought after the election (`round.py::measure_overlap`),
+    # by individual: the race the election read never holds them, so `raced` does not.
+    line_results: dict[str, CellSheet] = Field(default_factory=dict)
 
     @property
     def results(self) -> CellSheet:
@@ -296,9 +295,13 @@ class RoundResult(RoundOutcome):
         return self.cells.get(key, NO_CELLS)
 
     def raced(self, key: ArmKey) -> CellSheet:
-        """The ONE row set the race, the election's θ and the δ fold read: the draw, then the
-        origin-panel cells it lacks."""
+        """The ONE row set the race and the election's θ read: the draw, then the origin-panel
+        cells it lacks."""
         return self.rows(key).merged(self.overlap_results.get(key, NO_CELLS))
+
+    def closed_rows(self, key: ArmKey) -> CellSheet:
+        """Every row the round closed holding of *key*: its race, then what the line bought."""
+        return self.raced(key).merged(self.line_results.get(key, NO_CELLS))
 
     def reference_rows(self, key: ArmKey) -> CellSheet:
         """The rows of the arm *key* was judged against, re-read on this round's cells."""
@@ -310,6 +313,7 @@ class RoundResult(RoundOutcome):
         return RoundCells(
             arms={k: v.addresses() for k, v in self.cells.items()},
             overlap={k: v.addresses() for k, v in self.overlap_results.items()},
+            line={k: v.addresses() for k, v in self.line_results.items()},
         )
 
     @property
@@ -335,6 +339,7 @@ class InRunCells:
                 _round_walks(
                     arms={k: _by_sample(v) for k, v in rr.cells.items()},
                     overlap={k: _by_sample(v) for k, v in rr.overlap_results.items()},
+                    line={k: _by_sample(v) for k, v in rr.line_results.items()},
                 ),
             )
             for rr in rounds

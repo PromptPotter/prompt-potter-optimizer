@@ -140,6 +140,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
@@ -292,7 +293,7 @@ RESUME_APPENDS = ("phases", "run_phases", "arms", "rounds_entered", "standings")
 # reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
 # that name elsewhere, such as the fitness term `evaluators.tokens`.
 READING_SIDES, SIDE_SPLIT = ("a", "b"), ("bought",)
-CELL_ROWS, ROW_SPLIT = ("cells", "overlap_results"), ("cached",)
+CELL_ROWS, ROW_SPLIT = ("cells", "overlap_results", "line_results"), ("cached",)
 FOLDS, FOLD_SPLIT = "folds", ("cached", "tokens")
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 
@@ -1824,7 +1825,7 @@ ARM_KEYS = (
     "state", "role", "reason", "locked_in", "position", "overlay", "resolved_params",
     "expected_samples", "validation_failures",
 )  # fmt: skip
-ROUND_KEYS = ("round", "overlap", "overlap_results", "optimizer_state")
+ROUND_KEYS = ("round", "overlap", "overlap_results", "line_results", "optimizer_state")
 ELECTION_KEYS = (
     "leading", "ending", "parent", "electable", "fit", "elects_on", "deciding_pair",
     "verdict_reason",
@@ -2400,7 +2401,7 @@ def read_straight(name: str, workspace: Path) -> int:
     ran = BehaviourTrace.read(workspace).decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
     bench = ran["bench"]
-    lift = None if bench is None else bench["vs_origin"]["headline"]
+    lift = None if bench is None else bench["vs_origin"].get("headline")
     headline = (
         f"{lift['estimate']['value']:+.3f}"
         if lift is not None
@@ -2572,17 +2573,17 @@ def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
 
 
 def graded_line(workspace: Path) -> tuple[list[str], Counter[str]]:
-    """A leg's line, the individual each crowning election adopted (round 0's the origin), and the
-    bench cells it graded per individual, off its ledger."""
-    crowned: list[str] = []
+    """A leg's line, the origin round 0 adopted and the individual each crowning election moved
+    to, and the bench cells it graded per individual, off its ledger."""
+    line: list[str] = []
     graded: Counter[str] = Counter()
     for record in leg_ledger(workspace):
         match record.get("record_type"):
-            case "election" if record.get("ending") == "crowned":
-                crowned.append(record["leading"])
+            case "election" if record.get("ending") in (RoundEnding.ADOPTED, RoundEnding.CROWNED):
+                line.append(record["leading"])
             case "sample_scored" if record.get("role") == "bench":
                 graded[record["individual_id"]] += 1
-    return crowned, graded
+    return line, graded
 
 
 def adopted_leg(name: str, home: Path, leg: Future[int]) -> bool:

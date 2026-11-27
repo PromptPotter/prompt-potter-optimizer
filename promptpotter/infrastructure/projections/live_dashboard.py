@@ -27,6 +27,7 @@ from promptpotter.domain.dashboard_rows import (
     VerificationMark,
     sample_status,
 )
+from promptpotter.domain.fitness_fold import level_band
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_acts import (
@@ -40,6 +41,7 @@ from promptpotter.domain.phases import CampaignPhase, DashboardState, RunPhase, 
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -75,6 +77,7 @@ from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import (
     Grade,
+    GradedCell,
     MeasuredCell,
     SampleStatus,
     graded_answer,
@@ -422,8 +425,9 @@ class LiveDashboardProjection(Projection):
         self._open_samples: dict[tuple[str, int], tuple[str, ArmKey | None, bool]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None] | None = None
-        # Between a bench or verify bracket: its cells move no run state.
+        # Between a bench or verify bracket: its cells move no run state, and its rows so far.
         self._in_pass = False
+        self._pass_rows: list[GradedCell] = []
         self._flight: tuple[int, int, int] = (0, 0, 0)
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
@@ -495,6 +499,9 @@ class LiveDashboardProjection(Projection):
     def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
         self._narration.read(self.at_offset, record)
 
+    def _handle_fold_basis(self, record: FoldBasisRecord) -> None:
+        self._narration.read(self.at_offset, record)
+
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
         self._enter(record.round)
 
@@ -561,7 +568,7 @@ class LiveDashboardProjection(Projection):
             case InitOpened() | InitClosed():
                 s.composite_fitness_formula = act.formula.formula
             case PassOpened():
-                self._in_pass = True
+                self._in_pass, self._pass_rows = True, []
                 self._mark(_opened(act.verification, act.arm, act.rows))
         self._open_phases.pop(record.phase, None)
         if record.step == "enter" and (node := self._phase_node(record)) is not None:
@@ -679,9 +686,10 @@ class LiveDashboardProjection(Projection):
                 and held.kind == record.role.value
                 and held.arm.key == record.individual_id
             ):
-                running = None if record.running is None else record.running.fitness_band
-
-                self._mark(held.scored_one(running))
+                self._pass_rows.append(record.result)
+                basis = self._narration.basis_of(record)
+                sheet = basis.sheet(self._pass_rows)
+                self._mark(held.scored_one(level_band(sheet, "fitness", basis.fitness_unit)))
                 return
 
     def _handle_flight(self, record: FlightRecord) -> None:

@@ -95,6 +95,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
+from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.job import CampaignLaunch, LaunchMove
 from promptpotter.domain.l4.cells import InnerCell, InnerCells
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -106,9 +107,9 @@ from promptpotter.domain.paired_reading import (
     ArmName,
     Estimate,
     MemberAddress,
-    PairedReading,
     ReadingState,
     RoundArm,
+    UnreadPair,
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -119,6 +120,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     Bill,
@@ -808,13 +810,14 @@ def arm_walk(
     rnd: int = 0,
     individual: str = "c0",
     role: ArmRole = MeasurementRole.ORIGIN,
-    running: ScoreSummary | None = None,
 ) -> list[SampleScoredRecord]:
-    """*individual* announced as an arm of round *rnd*, then each filed cell scored at its slot."""
+    """*individual* announced as an arm of round *rnd*, then each filed cell scored at its slot,
+    under the default scorer's basis."""
     announced = Proposed(
         role=role, position=ArmPosition(round=rnd, idx=0, total=1), individual=prompted()
     )
     ledger.append(ArmRecord(round=rnd, arm=ArmKey(individual), state=announced))
+    ledger.append(FoldBasisRecord(basis=FoldBasis.of(scorer_of(), pipeline_schema([]))))
     rows = [
         SampleScoredRecord(
             round=rnd,
@@ -822,7 +825,6 @@ def arm_walk(
             role=role,
             position=slot,
             result=GradedCell.from_wire({"sample_key": key, "answer": answer}),
-            running=running,
         )
         for slot, (key, answer, _) in cells
     ]
@@ -968,9 +970,11 @@ def election(
     *,
     moved_to: str | None = None,
     parent: str = PARENT,
+    parent_round: int = 0,
     **overrides: Any,
 ) -> Election:
-    """*selected* crowns, else the line moves to *moved_to* uncrowned, else it holds on *parent*."""
+    """*selected* crowns, else the line moves to *moved_to* uncrowned, else it holds on *parent*,
+    walked in *parent_round*."""
     pick = None if selected is None else ArmKey(selected)
     moved = None if moved_to is None else ArmKey(moved_to)
     fields: dict[str, Any] = {
@@ -980,7 +984,7 @@ def election(
         else RoundEnding.MOVED
         if moved is not None
         else RoundEnding.HELD,
-        "parent": ArmKey(parent),
+        "parent": RoundArm(round=parent_round, arm=ArmKey(parent)),
         "electable": int(pick is not None),
         "elects_on": "ability",
         "ruler": RulerStamp(
@@ -1050,12 +1054,19 @@ def round_result(
             k for k, a in keyed.items() if isinstance(a, Measured) and a.position is not None
         )
         selected = next(measured, None)
-    vote = election(selected, **{"electable": candidates_scored} | (voted or {}))
+    vote = election(
+        selected,
+        **{"electable": candidates_scored, "parent_round": max(rnd - 1, 0)} | (voted or {}),
+    )
+    if not rnd and vote.ending is RoundEnding.CROWNED:
+        # Round 0 adopts its origin, which no arm was elected against.
+        vote = vote.model_copy(
+            update={"ending": RoundEnding.ADOPTED, "parent": None, "electable": 0}
+        )
     # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field.
     base: dict[str, Any] = {
         "round": rnd,
         "arms": keyed,
-        "reference": RoundArm(round=rnd - 1, arm=PARENT) if rnd else None,
         "folds": {
             key: score_summary(total=arm.expected_samples)
             for key, arm in keyed.items()
@@ -1065,7 +1076,6 @@ def round_result(
         # No pair read: a test that bends the advance passes the reading that derives it.
         "overlap": OverlapReading.unpaired(
             ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
-            rnd,
             vote.ending,
         ),
         "cells": {
@@ -1308,7 +1318,7 @@ def cycle_result(
     if bench_levels is None:
         bench_levels = [bench_origin if bench_origin is not None else 0.5] * len(levels)
     curve = bench_curve(bench_origin, bench_levels)
-    unheld = PairedReading.unread(ReadingState.NOT_HELD)
+    unheld = UnreadPair.of(ReadingState.NOT_HELD)
     bench = BenchScore(
         bench_size=0,
         scorer_id="",

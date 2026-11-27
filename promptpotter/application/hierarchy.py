@@ -58,6 +58,7 @@ from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
     ReadingState,
+    UnreadPair,
     level_text,
     lift_versus,
 )
@@ -149,10 +150,11 @@ def _lifetime_row(spent: UserSpend) -> Figure:
 
 
 def _lift_row(key: FigureKey, pair: PairedReading, over: str) -> Figure:
-    lift, label = pair.headline, f"Lift {lift_versus(over, pair.cell_set)}"
-    if lift is None or pair.coverage is None:
+    label = f"Lift {lift_versus(over, pair.cell_set)}"
+    if pair.state is not ReadingState.READ:
         info = READING_STATE_INFO[pair.state]
         return _figure(key, label, info.label, info.sentence)
+    lift = pair.headline
     unit = lift.measurand.unit
     return _figure(
         key,
@@ -216,7 +218,7 @@ def _cycle_figures(
         rows.append(_bench_row(bench.status.state, bench))
     rows.append(_rounds_row(facts.rounds_closed, cap))
     if (standing := facts.standing) is None:
-        unread = PairedReading.unread(ReadingState.PENDING)
+        unread = UnreadPair.of(ReadingState.PENDING)
         return [*rows, _lift_row("lift", unread, "origin")]
     rows.append(_figure("selection", "Leader", standing.selection_name))
     rows.append(_lift_row("lift", standing.vs_origin, "origin"))

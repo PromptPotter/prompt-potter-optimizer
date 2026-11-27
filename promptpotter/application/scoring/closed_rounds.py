@@ -106,6 +106,7 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
         at_offset=held.at_offset,
         cells={k: rows(v) for k, v in close.cells.arms.items()},
         overlap_results={k: rows(v) for k, v in close.cells.overlap.items()},
+        line_results={k: rows(v) for k, v in close.cells.line.items()},
     )
 
 

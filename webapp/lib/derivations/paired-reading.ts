@@ -6,11 +6,10 @@ type PairRead =
   | { read: false; label: string; sentence: string };
 
 export function readPaired(reading: PairedReading): PairRead {
-  const { headline, coverage, state } = reading;
-  if (headline !== null && coverage !== null) {
-    return { read: true, lift: headline, cells: coverage.scored };
+  if (reading.state === "read") {
+    return { read: true, lift: reading.headline, cells: reading.coverage.scored };
   }
-  const { label, sentence } = READING_STATE_INFO[state];
+  const { label, sentence } = READING_STATE_INFO[reading.state];
   return { read: false, label, sentence };
 }
 

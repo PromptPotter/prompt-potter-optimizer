@@ -86,14 +86,13 @@ class AbReport:
 
 
 def _regraded(rd: RoundResult, scorer: Scorer) -> RoundResult:
-    """Both row sets: a replayer reads an individual across them, and a sheet holds one scorer."""
+    """Every row set: a replayer reads an individual across them, and a sheet holds one scorer."""
 
     def under[K: str](sheets: dict[K, CellSheet]) -> dict[K, CellSheet]:
         return {key: scorer.sheet(cell.facts for cell in sheet) for key, sheet in sheets.items()}
 
-    return rd.model_copy(
-        update={"cells": under(rd.cells), "overlap_results": under(rd.overlap_results)}
-    )
+    sets = ("cells", "overlap_results", "line_results")
+    return rd.model_copy(update={name: under(getattr(rd, name)) for name in sets})
 
 
 def _identity(rd: RoundResult, current: Mapping[str, str]) -> list[ReplayMismatch]:

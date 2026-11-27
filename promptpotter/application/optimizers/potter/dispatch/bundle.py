@@ -132,7 +132,7 @@ class ElectionRow(NamedTuple):
 def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
     rows: list[ElectionRow] = []
     for rr in rounds:
-        if rr.round == 0 or rr.election is None:
+        if rr.election is None or rr.election.ending is RoundEnding.ADOPTED:
             continue
         picked = rr.election.selected
         moved_to = rr.election.leading if rr.election.ending is RoundEnding.MOVED else None

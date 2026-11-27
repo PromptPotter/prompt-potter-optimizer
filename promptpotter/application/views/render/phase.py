@@ -27,7 +27,7 @@ from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import ServedRound
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, OverlapReading, StallEffect
-from promptpotter.domain.paired_reading import Estimate, level_text
+from promptpotter.domain.paired_reading import Estimate, ReadingState, level_text
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     PauseCause,
@@ -149,7 +149,7 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     selected = None if election is None else election.selected
     fit = None if selected is None else round_result.fit(selected)
     reading = None if fit is None else fit.vs_reference
-    if reading is not None and reading.headline is not None and reading.coverage is not None:
+    if reading is not None and reading.state is ReadingState.READ:
         lift = reading.headline
         verdict = (
             f"{YELLOW}spans 0 — not separated from its reference{RESET}"

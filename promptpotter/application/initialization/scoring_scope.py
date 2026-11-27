@@ -28,6 +28,7 @@ from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import CampaignCycle, Compare, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import Sample
@@ -55,12 +56,14 @@ def scorer_setup(
         session.backend_client.connector, session.bound_resolution.chain.observation_keys
     )
     graded = Resolution(campaign_config, session.bank.verifier_graded)
+    scorer = graded.proven_scorer(owners)
     return ScorerSetup(
-        scorer=graded.proven_scorer(owners),
+        scorer=scorer,
         grading=graded.grading,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
         judges=build_evaluators(campaign_config.judges, beside=owners),
+        basis=FoldBasis.of(scorer, session.bound_resolution.chain),
     )
 
 

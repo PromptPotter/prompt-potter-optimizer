@@ -25,7 +25,6 @@ from pydantic_core import CoreSchema
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmRole, ArmState, Proposal, arm_name
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import lift_prior
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
@@ -40,6 +39,7 @@ from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ArmName, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_acts import PhaseAct
@@ -269,7 +269,10 @@ class RoundStatement(RoundOutcome):
     ) -> Self:
         rr = line[-1]
         cells = rr.addresses()
-        leading = None if rr.election is None or not rr.round else rr.election.leading
+        election = rr.election
+        leading = (
+            None if election is None or election.ending is RoundEnding.ADOPTED else election.leading
+        )
         return cls(
             **{name: getattr(rr, name) for name in RoundOutcome.model_fields},
             cells=cells,
@@ -296,8 +299,8 @@ class RoundStatement(RoundOutcome):
             leading=None
             if election is None or election.leading is None
             else name(election.leading),
-            ending=None if self.round == 0 or election is None else election.ending,
-            verdict_reason=None if self.round == 0 or election is None else election.verdict_reason,
+            ending=None if election is None else election.ending,
+            verdict_reason=None if election is None else election.verdict_reason,
             candidates=[
                 DashboardCandidate(reading=reading)
                 for reading in self.arm_readings()
@@ -403,7 +406,6 @@ class SampleScoredRecord(_Pass):
     # The row's slot in the bank this cycle drew, as `SampleStartedRecord` names it: the cell carries none.
     position: int
     result: LedgerCell
-    running: ScoreSummary | None = None
 
 
 class FlightWaiting(FrozenModel):

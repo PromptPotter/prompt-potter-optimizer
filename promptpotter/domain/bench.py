@@ -456,17 +456,11 @@ class LiftCost(FrozenModel):
     @classmethod
     def of(cls, vs_origin: PairedReading, usd: float | None) -> LiftCost:
         """*usd* is what the search incurred, `None` on unpriced search tokens."""
-        absent = (
-            CostAbsence.NO_LIFT
-            if vs_origin.headline is None
-            else CostAbsence.UNPRICED_TOKENS
-            if usd is None
-            else CostAbsence.ZERO_SPEND
-            if usd <= 0.0
-            else None
-        )
-        if absent is not None or vs_origin.headline is None or usd is None:
-            return cls(lift_per_usd=None, absent=absent)
+        if vs_origin.state is not ReadingState.READ:
+            return cls(lift_per_usd=None, absent=CostAbsence.NO_LIFT)
+        if usd is None or usd <= 0.0:
+            unpriced = CostAbsence.UNPRICED_TOKENS if usd is None else CostAbsence.ZERO_SPEND
+            return cls(lift_per_usd=None, absent=unpriced)
         return cls(lift_per_usd=vs_origin.headline.estimate.value / usd, absent=None)
 
 

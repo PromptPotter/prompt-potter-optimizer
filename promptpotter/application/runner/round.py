@@ -50,11 +50,9 @@ from promptpotter.application.scoring.arm_states import (
     measuring,
 )
 from promptpotter.application.scoring.catch_up import CatchUpPool
-from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.paired import (
     MemberRows,
     RoundPairs,
-    absent_pair,
     fresh_cells,
     grade_measurands,
     read_pair,
@@ -86,6 +84,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
 from promptpotter.domain.command_kinds import SubmittedArm
+from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.origin_panel import (
@@ -106,6 +105,8 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     PairMember,
     ReadingState,
+    UnreadPair,
+    UnreadState,
 )
 from promptpotter.domain.phase_acts import (
     CountFact,
@@ -304,8 +305,9 @@ async def read_origin_panel(
 async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample], panel: Sequence[int]
 ) -> tuple[OverlapReading, dict[str, CellSheet]]:
-    """After the election, on the panel it pooled; a member the election's pass read is never topped up again."""
-    passed = dict(round_result.overlap_results)
+    """After the election, on the panel it pooled; a member the election's pass read is never topped up again.
+    What it buys is the round's `line_results`, never the race the election read."""
+    passed = round_result.overlap_results
     election = round_result.election
     assert election is not None, "the origin panel is read after the round's election"
     ending = election.ending
@@ -316,14 +318,13 @@ async def measure_overlap(
     held = cycle.in_run_cells
     origin = ordered[0]
     keep = set(panel)
-    bought = dict(passed)
+    bought: dict[str, CellSheet] = {}
 
     def spent() -> dict[str, int]:
-        return {cid: fresh_cells(rows) for cid, rows in bought.items()}
+        return {cid: fresh_cells(rows) for cid, rows in (passed | bought).items()}
 
-    def not_read(state: ReadingState) -> OverlapReading:
+    def not_read(state: UnreadState) -> OverlapReading:
         return OverlapReading.of(
-            round_result.round,
             ending,
             positions=panel,
             lead=pairs.absent(state, origin, ordered[-1], held, keep, spent()),
@@ -372,14 +373,13 @@ async def measure_overlap(
     stopped = [(step, trigger) for step, trigger in fired if not whole(step)]
 
     # Read again off the round as it will CLOSE, so what was bought joins by the one read.
-    closing = round_result.model_copy(update={"overlap_results": bought})
+    closing = round_result.model_copy(update={"line_results": bought})
     closed = [closing if rr.round == round_result.round else rr for rr in cycle.rounds]
     c0, *picks = sorted(best_line(closed), key=lambda s: s.arm.round)
     topped_up = InRunCells(closed)
     paid = spent()
     readings = [pairs.read(c0, pick, topped_up, keep, paid) for pick in picks]
     reading = OverlapReading.of(
-        round_result.round,
         ending,
         positions=panel,
         lead=readings[-1]
@@ -468,7 +468,7 @@ class _OriginPanelPairs:
 
     def absent(
         self,
-        state: ReadingState,
+        state: UnreadState,
         c0: LineStep,
         pick: LineStep,
         held: InRunCells,
@@ -482,7 +482,7 @@ class _OriginPanelPairs:
                 bought=paid.get(step.opt_sp.id, 0),
             )
 
-        return absent_pair(
+        return UnreadPair(
             state=state,
             a=member(c0),
             b=member(pick),
@@ -921,7 +921,6 @@ def _open_arm(
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it.
         measured=arm.individual.id,
         skip_at=skip_at,
-        held=ctx.held(ArmKey(arm.individual.id)),
         budget=len(panel.order),
     )
 
@@ -1010,7 +1009,7 @@ def _round_result(
             leading=selection.leading,
             ending=selection.ending,
             # A round ending on its parent headlines it RE-SCORED on this panel, never a union.
-            parent=measured.parent.key,
+            parent=reference,
             electable=selection.electable,
             fit=measured.fit,
             elects_on=elects_on,
@@ -1022,7 +1021,6 @@ def _round_result(
         overlap=ReadingState.PENDING,
         round=ctx.round_num,
         arms={key: read.state for key, read in measured.filed.items()},
-        reference=reference,
         folds=measured.folds,
         cells={key: read.rows for key, read in measured.filed.items()},
         overlap_results=measured.on_panel,
@@ -1258,7 +1256,7 @@ async def _adapt_beside_overlap(
     cycle = ctx.cycle
     reading, bought = await measure_overlap(cycle, round_result, pool, list(measured.origin_panel))
     seated = cycle.seat(
-        round_result.model_copy(update={"overlap": reading, "overlap_results": bought})
+        round_result.model_copy(update={"overlap": reading, "line_results": bought})
     )
     # An adapter writes for the NEXT round, so none runs when no round follows: the standing the
     # close will state decides it, the one reading the close stops on.

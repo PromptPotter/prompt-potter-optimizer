@@ -110,7 +110,6 @@ class ArchiveReport(StrictModel):
     bytes_after: int = 0
     cold_bytes: int = 0
     archive_writers: int = 0
-    conflicts: int = 0
     purged: int = 0
     """Answers whose payload is gone for good: a purged cold payload, or a reclaimed answer whole.
 
@@ -401,7 +400,6 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str
         bytes_before=before,
         bytes_after=after,
         cold_bytes=cold,
-        conflicts=conflicts,
         purged=purged + unrestorable,
         rows_skipped_by_role=dict(skipped),
         applied=applied,

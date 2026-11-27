@@ -389,7 +389,8 @@ def _layer_control(
     ):
         raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{fired.layer.layer_id}: {reason}")
     if isinstance(fork, RebaseRequest):
-        raise StopLoop(StopReason.REBASED, fork=fork)
+        cut = f"forked at round {fork.fork_from_round} by {fork.issued_by.display}"
+        raise StopLoop(StopReason.REBASED, fork=fork, detail=f"{cut}: {fork.reason}")
 
 
 def _rebase_request(

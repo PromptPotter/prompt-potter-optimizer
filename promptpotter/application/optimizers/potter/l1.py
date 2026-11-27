@@ -84,6 +84,7 @@ from promptpotter.domain.optimizer_state import (
     Critique,
     CritiqueReadout,
 )
+from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import OptimizerFact, RoundResult
@@ -554,7 +555,7 @@ def _top_lifts(rounds: list[RoundResult]) -> list[float]:
             for key in r.proposed
             if (fit := r.fit(key)) is not None
             and fit.vs_reference is not None
-            and fit.vs_reference.headline is not None
+            and fit.vs_reference.state is ReadingState.READ
         ]
         if lifts:
             tops.append(max(lifts))

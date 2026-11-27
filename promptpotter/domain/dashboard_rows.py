@@ -414,8 +414,8 @@ class RoundSummary(FrozenModel):
         "measured on it. Null where the selector could read no arm."
     )
     ending: RoundEnding | None = Field(
-        description="How the round ended on `leading` (`Election.ending`); null at round 0, "
-        "which holds no election."
+        description="How the round ended on `leading` (`Election.ending`); `adopted` at round 0; "
+        "null where the round holds no election."
     )
     verdict_reason: str | None = None
     # The round's own arms: a reference it re-read is no row of it.

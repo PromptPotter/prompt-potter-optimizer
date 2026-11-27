@@ -15,7 +15,7 @@ from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import Door, HeldOutPayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate
+from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate, ReadingState
 from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -139,7 +139,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         f"  composite {_level(reading.recorded.composite)} → {_level(reading.fresh.composite)}",
     ]
     pair = reading.vs_origin
-    if pair.headline is None or pair.coverage is None:
+    if pair.state is not ReadingState.READ:
         lines.append(f"  lift over C0: {READING_STATE_INFO[pair.state].sentence}")
     else:
         lifts = ", ".join(

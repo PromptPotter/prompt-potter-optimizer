@@ -53,7 +53,7 @@ row it closes.
   (`decisions.ledger.arms`). No offline leg catches up a proposed prior (all 19 `race_catch_up`
   records are the parent's). **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the
   close counts the cells `rows(leader)` holds; `git grep -c BACKFILL -- promptpotter` is 0.
-- **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
+- **Overlap and repair keep their own pass families**: `RoundCells.overlap`/`.line` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
   fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
   `RoundResult.overlap_results` derives from them, while `RoundOutcome.overlap` (the `OverlapReading`,
@@ -208,18 +208,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/27 · rec
 
-- **`PairedReading` is a tagged union spelled as optional fields and a validator**:
-  `domain/paired_reading.py::PairedReading`'s `_state_fits_content` guards "a lift, its members,
-  cell set and coverage exist exactly where `state` is `read`", and 138 reads across 27 files re-check
-  `headline` / `coverage` for None. Action: a read arm and an unread arm discriminated on `state`, the
-  validator and the readers' None branches deleted. A reshape wipes run data. **Re-test:**
-  `git grep -c "_state_fits_content" -- promptpotter/domain/paired_reading.py` is 0.
-- **Fields written, never read: 27 left** (`scripts/complexity_ledger.py::_unread_fields`, the
-  `p_unread_fields` ceiling). Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
-- **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Its
-  readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
-  which no domain fold holds. Action: the readers fold `StandingArm.cells` through
-  `metrics.py::compute_composite_fitness` in `application/`, and the field goes (run data wiped).
+- **Fields written, never read: 13 left** (`scripts/complexity_ledger.py::_unread_fields`, the
+  `p_unread_fields` ceiling): a pack's citation (`Cited` 4, `Reported` 4), the PROV export
+  (`LineageEntity` 2, `PromptExport` 2), `NodeInput.variables`. Action: each goes, or names its
+  reader in `_READ_UNSEEN`. **Re-test:** the ceiling is 0.
 
 ### webd (the edge tail, after lw)
 
@@ -546,12 +538,9 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **Run data:** `RoundStatement` reshapes. **Size:** medium; it edits `runner/round.py` and `views/readout.py`.
   **Re-test:** the two rows' own.
 - **A record holds no value another record derives (root C2)**: w8-spine3 took the invalid reason and the
-  envelope's diagnostics. Open: `.running` (31/11) stamped on every cell, whose readers
-  (`Narration.fold`, `ledger_scan.py::StandingArm.fold`, the live board) sit in `domain/` and
-  `infrastructure/projections/`, where no scorer folds a cell.
-  **Closes:** **`SampleScoredRecord.running` stamps a running fold on every cell** (its field; B gives the readers the scorer);
-  adjacent: **`PairedReading` is a tagged union**, **Fields written, never read: 27 left**. **Run data:** every link; behaviour keys move.
-  **Size:** medium. **Re-test:** `git grep -c "running=" -- promptpotter/application/scoring/query_loop.py` is 0.
+  envelope's diagnostics; w8-spine4 the running fold (a reader folds a walk's rows under its
+  `FoldBasisRecord`) and the reading's union (`ReadPair` | `UnreadPair`). Open, adjacent: **Fields
+  written, never read: 13 left**. **Run data:** every link; behaviour keys move. **Size:** medium.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,
@@ -718,7 +707,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   production no larger.
 - **Child-process facts idle the parent ~8 s** (tw-v, tw-v2): `conftest.py::dspy_child` (2.9 s), the
   API-start child (2.7 s) and the stdio host (2.4 s) run serially. Each peaks at 160–165 MB, so
-  overlapping them breaks pytest's 393 MB cap. `-X importtime` finds no extra loaded by a boot that
+  overlapping them breaks pytest's 435 MB cap. `-X importtime` finds no extra loaded by a boot that
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
@@ -731,12 +720,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 ### wave-6 · what the v0.8.21 box test showed (2026-11-26)
 
-- **"Rebased to fork" names no fork**: the readout's stop line names neither the round the fork was
-  cut at nor the layer's reason, so the run that continues reads as unexplained. The stop renders in
-  `views/readout.py`, but no record carries either fact: `escalation.py`'s
-  `StopLoop(StopReason.REBASED, fork=…)` and `runner/entry.py::open_line`'s stop pass no detail.
-  Door: the stop's record carries the cut round and the `RebaseRequest.reason`, and its words read
-  them. **Rides with:** wave 6.
+- **"Rebased to fork" names no fork**: a layer's rebase stop names its cut round, issuer and reason
+  (`escalation.py`'s detail), but no stop names the fork the run continues on: that rebase is cut
+  after its stop is declared (`runner/entry.py::_run_single_cycle`), and `runner/entry.py::open_line`'s
+  divergence stop passes no detail. Door: the cut precedes the stop, whose detail names the child
+  cycle. **Rides with:** the next `runner/entry.py` chain (w8-fork landed without it).
 - **A library connector's cells are planned as the box's whatever keys the account holds** (w8-box2,
   w8-wallet): `connectors/dspy_module.py` and `connectors/harbor.py` declare `Connector.cell_payer=
   "host"`, but since w8-box2 their cells send on `wallet.py::sending_key`'s key, the account's own
@@ -747,21 +735,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   alone reserves nothing for an own-keyed run that the planners still hold as host-paid, so the run
   halts at its first cell. **Rides with:** money. **Re-test:** an account holding its own
   openrouter key launches a DSPy cell with no coupon reserved.
-
-### wave-6 · what the round-decision restructure left (2026-11-26)
-
-- **Round 0 is CROWNED on its `Election` and holds no election as served**: `Election.ending` says
-  `crowned` where the origin is adopted, `RoundResult.improved` and the readout's hold exclude it by
-  `round > 0`, and `run_records.py` serves `ending: null` and no `verdict_reason`. Door: round 0's
-  ending is its own state (`adopted`), so no reader tests the round number. **Rides with:** θ off the
-  round's statement (roadmap § Sequence).
-- **`RoundOutcome.reference` and `Election.parent` name one arm twice** (`results.py`,
-  `layer_state.py` reads the first): the parent the round re-read is the election's input. Door: one
-  field, the round's `RoundArm`. **Rides with:** θ off the round's statement.
-- **The race a round closes on can differ from the one its election read**
-  (`round.py::measure_overlap`): a pick cut short, a line gap or a trigger buys after the election,
-  and the closed reading is the later one. Door: the election reads the round's last race, or the
-  closed record names which it read. **Rides with:** θ off the round's statement.
 
 ### wave-7 · what the w7 chains filed (2026-11-27)
 

@@ -251,11 +251,11 @@ class DifficultyView:
 
     def fold(self, rr: RoundResult) -> None:
         """After the round's election, which read the scale as the round opened: every cell the
-        round bought (`RoundResult.raced`) reaches the next round's draw and θ."""
+        round bought (`RoundResult.closed_rows`) reaches the next round's draw and θ."""
         session = self.session
         assert session.campaign_id, "an election runs inside a campaign"
         sheets = [
-            (arm.config_key, rr.raced(key))
+            (arm.config_key, rr.closed_rows(key))
             for key, arm in rr.arms.items()
             if isinstance(arm, Concluded)
         ]

@@ -17,7 +17,13 @@ from promptpotter.application.scoring.selection import crowned, ranked_first
 from promptpotter.domain.arms import ArmState, Concluded, arm_name
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, NextParent, Vote
 from promptpotter.domain.origin_panel import RoundEnding, panel_trigger
-from promptpotter.domain.paired_reading import ArmKey, ArmName, CellSetName, PairedReading
+from promptpotter.domain.paired_reading import (
+    ArmKey,
+    ArmName,
+    CellSetName,
+    PairedReading,
+    ReadingState,
+)
 from promptpotter.domain.scoring import CellSheet
 
 
@@ -96,8 +102,7 @@ def _verdict_reason(
                 f"no arm cleared the parent; the line moves on to {labels[leading]}, uncrowned, "
                 f"on {said}; {census}{scale}"
             )
-        case RoundEnding.HELD:
-            return f"no arm cleared the parent: best {labels[leading]} {said}; {census}{scale}"
+    return f"no arm cleared the parent: best {labels[leading]} {said}; {census}{scale}"
 
 
 def seated(
@@ -160,7 +165,7 @@ class RoundWinner(Replayed, kind="round_winner"):
         subjects: dict[ArmKey, BarSubject] = {}
         for key, pair in pairings.items():
             lift = theta_lift_over_parent(abilities, key)
-            if pair.headline is None or (self.bar.reads_theta and lift is None):
+            if pair.state is not ReadingState.READ or (self.bar.reads_theta and lift is None):
                 continue
             subject = BarSubject(pair.headline, lift)
             if self.covered(key, subject, abilities) >= self.coverage_floor:

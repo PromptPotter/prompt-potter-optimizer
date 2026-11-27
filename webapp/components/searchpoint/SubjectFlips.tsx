@@ -18,9 +18,9 @@ export function SubjectFlips({
   before: ObservePoint | null;
   after: ObservePoint | null;
 }) {
-  const counts = vsOrigin?.hit.headline?.flips;
-  const coverage = vsOrigin?.hit.coverage;
-  if (!vsOrigin || !counts || !coverage) return null;
+  if (!vsOrigin || vsOrigin.hit.state !== "read") return null;
+  const { flips: counts } = vsOrigin.hit.headline;
+  const { coverage } = vsOrigin.hit;
   const { gained, lost } = vsOrigin;
   const arms = { before, after };
   return (

@@ -332,14 +332,17 @@ def _election_line(row: ElectionRow, later: Sequence[RoundOutcome]) -> str:
             f"{_how_won(rr, row.moved_to)}"
         ]
     else:
-        ref = rr.reference
+        ref = None if rr.election is None else rr.election.parent
         held = f" (the parent read {_read(rr, ref.arm)})" if ref and ref.arm in rr.arms else ""
         parts = [f"r{rr.round}: none elected{held}"]
     if (stood := row.stood_on) is not None:
         reads = [
             f"r{s.round} {_read(s, stood)}"
             for s in later
-            if s.round > rr.round and s.reference is not None and s.reference.arm == stood
+            if s.round > rr.round
+            and s.election is not None
+            and s.election.parent is not None
+            and s.election.parent.arm == stood
         ]
         if reads:
             parts.append("as parent: " + ", ".join(reads))

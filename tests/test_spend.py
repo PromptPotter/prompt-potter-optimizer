@@ -55,7 +55,6 @@ from factories import (
     run_holding,
     run_wiring,
     samples,
-    score_summary,
     spend_book,
     workspace,
 )
@@ -144,7 +143,6 @@ from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.passes import grade_line_bench
@@ -187,6 +185,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import ArmedCaps
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.fitness_fold import cell_channels_of
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
@@ -939,11 +938,10 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
         for cid, n, cut in superseding:
             arm_walk(
                 skips,
-                [(n, (f"k{n}", "a", False))],
+                [(i, (f"k{i}", "a", False)) for i in range(n)],
                 rnd=2,
                 individual=cid,
                 role=MeasurementRole.PANEL,
-                running=score_summary(walked=n),
             )
             skips.append(ArmRecord(round=2, arm=ArmKey(cid), state=arm_state(cid, cut=cut)))
 

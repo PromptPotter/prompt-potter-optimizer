@@ -11,6 +11,7 @@ from promptpotter.domain.campaign_config import (
     GateMode,
     OptimizationConfig,
 )
+from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
@@ -122,7 +123,7 @@ def standing_tripped(standing: RunStanding, optimization: OptimizationConfig) ->
     if standing.lives is not None and standing.lives.spent:
         return StopReason.LIVES_EXHAUSTED
     target, read = optimization.halt_at_fitness, standing.vs_origin
-    if target is None or read.headline is None or read.b is None:
+    if target is None or read.state is not ReadingState.READ:
         return None
     floor = anytime_level_lower(read.headline.rate_b * read.b.n, read.b.n, _CEILING_ALPHA)
     if floor is not None and floor >= target:

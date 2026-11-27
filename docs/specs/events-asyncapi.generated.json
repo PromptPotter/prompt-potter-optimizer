@@ -1756,6 +1756,63 @@
         "title": "ConstantFloor",
         "type": "object"
       },
+      "ContractRow": {
+        "additionalProperties": false,
+        "description": "One field of a node's output contract, flattened at the depth its schema has.",
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "description": {
+            "description": "The declaration site's, else its `$defs` target's: the site says the role.",
+            "title": "Description",
+            "type": "string"
+          },
+          "enums": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enums",
+            "type": "array"
+          },
+          "limit": {
+            "description": "Its caps; the declaration site's bind where it sets any.",
+            "title": "Limit",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "description": "Dotted from the root, the key a row is told apart by.",
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "A `$defs` name, a JSON type, `T[]` for an array, `A | B` for a union; empty where only `fields` names the field.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "depth",
+          "type",
+          "required",
+          "description",
+          "limit",
+          "enums"
+        ],
+        "title": "ContractRow",
+        "type": "object"
+      },
       "CostAbsence": {
         "description": "Why a bench lift carries no price.",
         "enum": [
@@ -2144,6 +2201,7 @@
             "election": "#/components/schemas/ElectionRecord",
             "error": "#/components/schemas/ErrorRecord",
             "flight": "#/components/schemas/FlightRecord",
+            "fold_basis": "#/components/schemas/FoldBasisRecord",
             "health": "#/components/schemas/HealthRecord",
             "hold": "#/components/schemas/Hold",
             "launch_clock": "#/components/schemas/LaunchClockRecord",
@@ -2225,6 +2283,9 @@
           },
           {
             "$ref": "#/components/schemas/FlightRecord"
+          },
+          {
+            "$ref": "#/components/schemas/FoldBasisRecord"
           },
           {
             "$ref": "#/components/schemas/HealthRecord"
@@ -3012,7 +3073,7 @@
           },
           "ending": {
             "$ref": "#/components/schemas/RoundEnding",
-            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
+            "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -3036,14 +3097,13 @@
           "parent": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RoundArm"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
-            "title": "Parent"
+            "description": "The candidate the line stood on entering the round, re-read on its cells: the arm every arm was read against, which a held round ends on; null at round 0, which reads none."
           },
           "reelection": {
             "anyOf": [
@@ -3108,7 +3168,7 @@
           },
           "ending": {
             "$ref": "#/components/schemas/RoundEnding",
-            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
+            "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -3132,14 +3192,13 @@
           "parent": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RoundArm"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
-            "title": "Parent"
+            "description": "The candidate the line stood on entering the round, re-read on its cells: the arm every arm was read against, which a held round ends on; null at round 0, which reads none."
           },
           "record_type": {
             "const": "election",
@@ -3610,6 +3669,74 @@
           "unchanged"
         ],
         "title": "FlipCounts",
+        "type": "object"
+      },
+      "FoldBasis": {
+        "additionalProperties": false,
+        "description": "What a walk's recorded rows fold under: its scorer's declaration and the chain it ran.",
+        "properties": {
+          "chain": {},
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Terms",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "two_valued": {
+            "items": {
+              "enum": [
+                "fitness",
+                "objective",
+                "hit"
+              ],
+              "type": "string"
+            },
+            "title": "Two Valued",
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "scorer_id",
+          "two_valued",
+          "fitness_unit",
+          "terms",
+          "chain"
+        ],
+        "title": "FoldBasis",
+        "type": "object"
+      },
+      "FoldBasisRecord": {
+        "additionalProperties": false,
+        "description": "Filed as a scorer is seated: every reader folds a walk's recorded rows under the last one.",
+        "properties": {
+          "basis": {
+            "$ref": "#/components/schemas/FoldBasis"
+          },
+          "record_type": {
+            "const": "fold_basis",
+            "default": "fold_basis",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "basis"
+        ],
+        "title": "FoldBasisRecord",
         "type": "object"
       },
       "ForkSpec": {
@@ -4249,6 +4376,55 @@
           "node"
         ],
         "title": "LLMCallStartRecord",
+        "type": "object"
+      },
+      "LLMSpendBound": {
+        "additionalProperties": false,
+        "description": "In the counts its BACKEND enforces, never a price (``infrastructure/llm/pricing.py::rate_ceiling``).",
+        "properties": {
+          "attempts": {
+            "minimum": 1,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "hosts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hosts"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "llm",
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_tokens": {
+            "minimum": 1,
+            "title": "Max Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "attempts",
+          "input_tokens",
+          "max_tokens"
+        ],
+        "title": "LLMSpendBound",
         "type": "object"
       },
       "LaunchClockRecord": {
@@ -4968,6 +5144,56 @@
         "additionalProperties": true,
         "type": "object"
       },
+      "NodeKind": {
+        "description": "Closed: an unlisted ``type:`` is refused at parse. A GATEWAY runs another pipeline and owns no config.",
+        "enum": [
+          "llm",
+          "agent",
+          "retriever",
+          "tool",
+          "cache",
+          "measurement",
+          "sampler",
+          "eliminator",
+          "selector",
+          "algorithm",
+          "controller"
+        ],
+        "title": "NodeKind",
+        "type": "string"
+      },
+      "NodeOutputSchema": {
+        "additionalProperties": false,
+        "description": "The structured output a target pipeline node produces, parsed from ``GET /pipeline``.",
+        "properties": {
+          "contract": {
+            "description": "SERVED: every field of `json_schema` at every depth it has, parents first, else one row per `fields` name; empty on a node that answers in free text.",
+            "items": {
+              "$ref": "#/components/schemas/ContractRow"
+            },
+            "readOnly": true,
+            "title": "Contract",
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "json_schema": {
+            "additionalProperties": true,
+            "title": "Json Schema",
+            "type": "object"
+          }
+        },
+        "required": [
+          "contract"
+        ],
+        "title": "NodeOutputSchema",
+        "type": "object"
+      },
       "NodePrompt": {
         "additionalProperties": false,
         "description": "One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``.",
@@ -4991,6 +5217,65 @@
         },
         "title": "NodePrompt",
         "type": "object"
+      },
+      "NodePromptInfo": {
+        "description": "Its PRESENCE marks the node prompt-bearing: the injection point for the candidate prompt.",
+        "properties": {
+          "field_wise": {
+            "default": false,
+            "title": "Field Wise",
+            "type": "boolean"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "rewrite_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rewrite Field"
+          },
+          "start": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Start",
+            "type": "object"
+          },
+          "template_variables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Template Variables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "title": "NodePromptInfo",
+        "type": "object"
+      },
+      "NodeRole": {
+        "description": "What a node's OUTPUT is to the scorer; :class:`NodeKind` is the other axis, what it IS.",
+        "enum": [
+          "candidate_source",
+          "ranker",
+          "enricher",
+          "cache"
+        ],
+        "title": "NodeRole",
+        "type": "string"
       },
       "NodeSearchNarrowing": {
         "additionalProperties": false,
@@ -5146,6 +5431,37 @@
         ],
         "title": "NurseOwner",
         "type": "string"
+      },
+      "ObservationMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "is_llm": {
+            "default": false,
+            "title": "Is Llm",
+            "type": "boolean"
+          },
+          "output_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Field"
+          },
+          "pipeline_key": {
+            "title": "Pipeline Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipeline_key"
+        ],
+        "title": "ObservationMapping",
+        "type": "object"
       },
       "OptSearchPoint": {
         "additionalProperties": false,
@@ -5498,103 +5814,37 @@
         "type": "object"
       },
       "PairedReading": {
-        "additionalProperties": false,
-        "description": "One pair of addressed individuals read on one cell set.",
-        "properties": {
-          "a": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairMember"
-              },
-              {
-                "type": "null"
-              }
-            ]
+        "discriminator": {
+          "mapping": {
+            "cell_set_differs": "#/components/schemas/UnreadPair",
+            "dataset_differs": "#/components/schemas/UnreadPair",
+            "held_elsewhere": "#/components/schemas/UnreadPair",
+            "instrument_differs": "#/components/schemas/UnreadPair",
+            "measurand_differs": "#/components/schemas/UnreadPair",
+            "member_unscoreable": "#/components/schemas/UnreadPair",
+            "no_holdout": "#/components/schemas/UnreadPair",
+            "no_selection": "#/components/schemas/UnreadPair",
+            "not_asked": "#/components/schemas/UnreadPair",
+            "not_held": "#/components/schemas/UnreadPair",
+            "pass_stopped": "#/components/schemas/UnreadPair",
+            "past_tolerance": "#/components/schemas/UnreadPair",
+            "pending": "#/components/schemas/UnreadPair",
+            "read": "#/components/schemas/ReadPair",
+            "run_failed": "#/components/schemas/UnreadPair",
+            "same_individual": "#/components/schemas/UnreadPair",
+            "scope_differs": "#/components/schemas/UnreadPair",
+            "under_two_cells": "#/components/schemas/UnreadPair"
           },
-          "b": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairMember"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "beside": {
-            "description": "Other measurands over the SAME scored cells as `headline`.",
-            "items": {
-              "$ref": "#/components/schemas/MeasuredLift"
-            },
-            "title": "Beside",
-            "type": "array"
-          },
-          "cell_set": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CellSet"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "coverage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Coverage"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "headline": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MeasuredLift"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "instrument_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What measured both members' cells: their dataset, and on the recursion the inner origin. Null where the reading names no pair.",
-            "title": "Instrument Id"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/RoleScope"
-          },
-          "spec": {
-            "$ref": "#/components/schemas/EstimatorSpec"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ReadingState"
-          }
+          "propertyName": "state"
         },
-        "required": [
-          "state",
-          "a",
-          "b",
-          "cell_set",
-          "instrument_id",
-          "scope",
-          "spec",
-          "coverage",
-          "headline",
-          "beside"
-        ],
-        "title": "PairedReading",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReadPair"
+          },
+          {
+            "$ref": "#/components/schemas/UnreadPair"
+          }
+        ]
       },
       "PanelPrecision": {
         "additionalProperties": false,
@@ -6076,6 +6326,216 @@
         "title": "PhaseRecord",
         "type": "object"
       },
+      "PipelineNode": {
+        "additionalProperties": false,
+        "properties": {
+          "current_config": {
+            "$ref": "#/components/schemas/NodeCall"
+          },
+          "fired_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fired On",
+            "type": "array"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "knob_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Knob Schema"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nested_datasets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Nested Datasets",
+            "type": "array"
+          },
+          "observation_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationMapping"
+            },
+            "title": "Observation Mappings",
+            "type": "array"
+          },
+          "observation_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Observation Name"
+          },
+          "output_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeOutputSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "param_allowed_values": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Param Allowed Values",
+            "type": "object"
+          },
+          "param_descriptions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Param Descriptions",
+            "type": "object"
+          },
+          "param_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Param Keys",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "param_keys_held": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Param Keys Held",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "param_types": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Param Types",
+            "type": "object"
+          },
+          "param_values_narrowed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Param Values Narrowed",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "prompt_fields_held": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prompt Fields Held",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "prompt_info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodePromptInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "spend_bound": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "llm": "#/components/schemas/LLMSpendBound",
+                    "web": "#/components/schemas/WebSpendBound"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/LLMSpendBound"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WebSpendBound"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Spend Bound"
+          },
+          "tunes_llm": {
+            "title": "Tunes Llm",
+            "type": "boolean"
+          },
+          "wire_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Wire Keys"
+          }
+        },
+        "required": [
+          "name",
+          "tunes_llm"
+        ],
+        "title": "PipelineNode",
+        "type": "object"
+      },
       "PipelineParams": {
         "additionalProperties": true,
         "type": "object"
@@ -6138,6 +6598,179 @@
           "dataset_overlay"
         ],
         "title": "PipelineRead",
+        "type": "object"
+      },
+      "PipelineSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "available_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Models",
+            "type": "array"
+          },
+          "declared_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineNode"
+            },
+            "title": "Declared Nodes",
+            "type": "array"
+          },
+          "default_routes": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "title": "Default Routes",
+            "type": "object"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "model_capabilities": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/ModelCapability"
+              },
+              "type": "object"
+            },
+            "title": "Model Capabilities",
+            "type": "object"
+          },
+          "pipelines": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Pipelines",
+            "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "PipelineSchema",
+        "type": "object"
+      },
+      "PipelineView": {
+        "additionalProperties": false,
+        "description": "The graph projection derived from a manifest's nodes and pipelines; no manifest declares one.\nIts nodes stand in flow order (by tier, then rank), which the browser lays out as served.",
+        "properties": {
+          "cycle": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cycle",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineViewEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineViewNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "title": "PipelineView",
+        "type": "object"
+      },
+      "PipelineViewEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "kind": {
+            "default": "forward",
+            "enum": [
+              "forward",
+              "loop",
+              "directive",
+              "alternative"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "PipelineViewEdge",
+        "type": "object"
+      },
+      "PipelineViewNode": {
+        "additionalProperties": false,
+        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs, tier n>0 the n-th nested alternative pipeline; rank is the tier-0 position it acts on.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "io",
+              "llm",
+              "tool",
+              "retriever",
+              "cache",
+              "measurement",
+              "member"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "rank": {
+            "default": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "tier": {
+            "default": 0,
+            "title": "Tier",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "title": "PipelineViewNode",
         "type": "object"
       },
       "PricedKeyRecord": {
@@ -6216,6 +6849,7 @@
               "election",
               "error",
               "flight",
+              "fold_basis",
               "health",
               "hold",
               "launch_clock",
@@ -6660,6 +7294,65 @@
         "title": "RaceStandingRecord",
         "type": "object"
       },
+      "ReadPair": {
+        "additionalProperties": false,
+        "description": "One pair of addressed individuals read on one cell set: both members, the set, the lifts.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/PairMember"
+          },
+          "b": {
+            "$ref": "#/components/schemas/PairMember"
+          },
+          "beside": {
+            "description": "Other measurands over the SAME scored cells as `headline`.",
+            "items": {
+              "$ref": "#/components/schemas/MeasuredLift"
+            },
+            "title": "Beside",
+            "type": "array"
+          },
+          "cell_set": {
+            "$ref": "#/components/schemas/CellSet"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          },
+          "headline": {
+            "$ref": "#/components/schemas/MeasuredLift"
+          },
+          "instrument_id": {
+            "description": "What measured both members' cells: their dataset, and on the recursion the inner origin.",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RoleScope"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/EstimatorSpec"
+          },
+          "state": {
+            "const": "read",
+            "default": "read",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "spec",
+          "a",
+          "b",
+          "cell_set",
+          "instrument_id",
+          "coverage",
+          "headline",
+          "beside"
+        ],
+        "title": "ReadPair",
+        "type": "object"
+      },
       "ReadingState": {
         "description": "Whether a pair was read, and the ONE reason it was not.",
         "enum": [
@@ -6857,6 +7550,29 @@
             "title": "Arms",
             "type": "object"
           },
+          "line": {
+            "additionalProperties": {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "title": "Line",
+            "type": "object"
+          },
           "overlap": {
             "additionalProperties": {
               "items": {
@@ -6979,16 +7695,6 @@
             "title": "Record Type",
             "type": "string"
           },
-          "reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundArm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -7003,7 +7709,6 @@
         },
         "required": [
           "round",
-          "reference",
           "folds",
           "election",
           "overlap",
@@ -7019,8 +7724,9 @@
         "type": "object"
       },
       "RoundEnding": {
-        "description": "How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved\nto, or held on its parent. Round 0 crowns the origin it adopts.",
+        "description": "How a round's election ended: on the origin round 0 adopts, on the arm it crowned, on its\nuncrowned leader the line moved to, or held on its parent.",
         "enum": [
+          "adopted",
           "crowned",
           "moved",
           "held"
@@ -7244,16 +7950,6 @@
             "title": "Record Type",
             "type": "string"
           },
-          "reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundArm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -7268,7 +7964,6 @@
         },
         "required": [
           "round",
-          "reference",
           "folds",
           "election",
           "overlap",
@@ -7872,17 +8567,6 @@
           "round": {
             "title": "Round",
             "type": "integer"
-          },
-          "running": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ScoreSummary"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           },
           "sample_idx": {
             "anyOf": [
@@ -9131,6 +9815,93 @@
         "title": "Unframed",
         "type": "object"
       },
+      "UnreadPair": {
+        "additionalProperties": false,
+        "description": "A pair not read, for its ONE reason: the members and set it names where a read was tried.",
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairMember"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairMember"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cell_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CellSet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RoleScope"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/EstimatorSpec"
+          },
+          "state": {
+            "enum": [
+              "not_asked",
+              "pending",
+              "not_held",
+              "no_holdout",
+              "held_elsewhere",
+              "pass_stopped",
+              "past_tolerance",
+              "member_unscoreable",
+              "under_two_cells",
+              "no_selection",
+              "same_individual",
+              "run_failed",
+              "scope_differs",
+              "measurand_differs",
+              "dataset_differs",
+              "cell_set_differs",
+              "instrument_differs"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "spec",
+          "state",
+          "a",
+          "b",
+          "cell_set",
+          "instrument_id"
+        ],
+        "title": "UnreadPair",
+        "type": "object"
+      },
       "UntakenBoughtRecord": {
         "additionalProperties": false,
         "description": "The answers a phase's walks BOUGHT and none took (a look-ahead cell its cut discarded,\narrived before the close or after it): filed, so another campaign remembers them, and kept\nout of this campaign's own memory until one of its walks takes them.",
@@ -9609,6 +10380,33 @@
           "elapsed_s"
         ],
         "title": "WallClock",
+        "type": "object"
+      },
+      "WebSpendBound": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "web",
+            "title": "Kind",
+            "type": "string"
+          },
+          "queries": {
+            "minimum": 0,
+            "title": "Queries",
+            "type": "integer"
+          },
+          "usd_per_query": {
+            "minimum": 0,
+            "title": "Usd Per Query",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "queries",
+          "usd_per_query"
+        ],
+        "title": "WebSpendBound",
         "type": "object"
       }
     }

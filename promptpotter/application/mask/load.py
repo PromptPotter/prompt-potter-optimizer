@@ -22,7 +22,6 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.application.scoring.judges.registry import judge_instrument
-from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.arms import ArmState, arm_elimination, is_electable
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, start_layer
@@ -30,6 +29,7 @@ from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import Lens
+from promptpotter.domain.fitness_fold import fold_cells
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.results import RoundResult
@@ -231,8 +231,9 @@ def load_mask_record(
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
             crowned = crowns.get(rn, "")
-            reference = round_file.reference
-            bar = NO_CELLS if reference is None else round_file.rows(reference.arm)
+            election = round_file.election
+            parent = None if election is None else election.parent
+            bar = NO_CELLS if parent is None else round_file.rows(parent.arm)
             candidates = [
                 _mask_candidate(key, arm, sheet, scorer, bar, crowned)
                 for key, arm, sheet in _arm_rows(round_file, keys)

@@ -357,7 +357,13 @@ BASELINE = {
     # taking its `Opening`, so the landing keeps the torn mint its job names, not its workspace.
     # Windows long-root fix (+9): `paths.py::short_form` relates two paths in one spelling and
     # `long_form` normalizes through it; `cell_signatures` reads `file_sig` per file.
-    "package_lines": 114067,
+    # w8-round (+10): the line's post-election buys are their own row set (`line_results`), so the
+    # race a closed round names is the one its election read.
+    # w8-spine4 (+93): a walk files its `FoldBasisRecord` and every reader folds its recorded rows
+    # under it (`Narration`, the live board's pass), so no row stamps a running fold. (+39): a
+    # `PairedReading` is a `ReadPair` or an `UnreadPair`, each arm's fields declared on it. (−8):
+    # three fields nobody read go. (−3): round's and spine4's overlap, merged.
+    "package_lines": 114198,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -438,7 +444,9 @@ BASELINE = {
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
-    "p_unread_fields": 27,
+    # w8-spine4 (−14): `RoundAudit.interrupted`, `SampleFoldRow.sp`, `ArchiveReport.conflicts` go;
+    # seven fields read by a door no name match sees are marked with it (`_READ_UNSEEN`).
+    "p_unread_fields": 13,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
     # withdraw-bulletin (+1): `commands/bulletin_acts.py`, the one handler module of the three bulletin
@@ -458,7 +466,9 @@ BASELINE = {
     # round (+1): `LevelSeries.hold`, the lift a round that moved the line held on every row it
     # met, one read for the readout and the dashboard.
     # w8-spine2 (+1): `CellSheet.filled_from`, the walk fill, beside `merged`, the standing fold.
-    "p_reads": 294,
+    # w8-round (+1): `RoundResult.closed_rows`, the race plus the line's post-election buys, which
+    # the δ fold and the parent's own rows read where `raced` is the election's alone.
+    "p_reads": 295,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     # webd-2 (+1): `test_stream_stamp.py`, its brief's own file, since store-2f lands in the others.
     # rates-1 (+1): `test_world_edges.py`, what a run meets at its edges: the rates it prices by
@@ -749,9 +759,23 @@ def _recorded_models() -> list[object]:
     return models
 
 
+# Read by a door no name match sees, each named: a mark is a reader, never an exemption.
+_READ_UNSEEN: dict[tuple[str, str], str] = {
+    ("VerifySaturated", "already_measured"): "its sentence, `run_records.py::VERIFY_WORDS`",
+    ("ErrorRecord", "traceback"): "the operator, reading the ledger line",
+    ("MemberAddress", "pass_role"): "`scoring/paired.py::read_pair`'s address equality",
+    ("PipelineViewEdge", "from_"): "the browser, as its alias `from` (`PipelineFlow.tsx`)",
+    **{
+        ("OptimizerPromptTemplate", f): "`optimizer_template.py::prompt_fields`, by its roster"
+        for f in ("persona", "task_intent", "thinking_style")
+    },
+}
+
+
 def _unread_fields(sites: dict[Path, str], recorded: list[object]) -> list[tuple[str, str]]:
     """A declared field no production code reads by name (`.field`, `["field"]`, a destructured
-    binding, a class pattern's keyword) and no stamp: written and never read."""
+    binding, a class pattern's keyword), no stamp and no `_READ_UNSEEN` door: written and never
+    read."""
     read: set[str] = set()
     for path, text in sites.items():
         code = _without_types(text) if path.suffix in (".ts", ".tsx") else text
@@ -763,7 +787,7 @@ def _unread_fields(sites: dict[Path, str], recorded: list[object]) -> list[tuple
     return sorted(
         (model, name)
         for model, name in _declared_fields(recorded)
-        if name not in read and name not in _STAMPS
+        if name not in read and name not in _STAMPS and (model, name) not in _READ_UNSEEN
     )
 
 

@@ -1694,15 +1694,10 @@
             },
             "title": "Sig",
             "type": "array"
-          },
-          "sp": {
-            "title": "Sp",
-            "type": "string"
           }
         },
         "required": [
           "config_key",
-          "sp",
           "fk",
           "sig",
           "graded"

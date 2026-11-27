@@ -17,8 +17,8 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
-from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.connectors.protocol import Connector, PricedPair
+from promptpotter.domain.fitness_fold import cell_channels_of
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import (
     LLMSpendBound,

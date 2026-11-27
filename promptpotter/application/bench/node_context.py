@@ -136,7 +136,7 @@ def own_rows(line: Sequence[RoundResult], parent: ArmKey) -> CellSheet:
     """Each sample's latest cell of *parent* ITSELF, panel top-ups included, never another's."""
     rows = NO_CELLS
     for rr in line:
-        rows = rows.merged(rr.raced(parent))
+        rows = rows.merged(rr.closed_rows(parent))
     return rows
 
 
@@ -240,7 +240,6 @@ async def measure_as_parent(
         kind=role,
         sample_index=cycle.sample_index,
         measured=individual.id,
-        held=round_.held(key),
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.
     read = ReadArm(key, conclude(arm, walked, round_num=round_.round_num), walked.sheet)
@@ -315,7 +314,6 @@ class Lineage(CycleRead):
             election,
             round=held.round,
             arms=held.arms,
-            reference=held.reference,
             folds=held.folds,
             cells=held.cells,
             overlap_results=held.overlap_results,

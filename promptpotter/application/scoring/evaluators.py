@@ -1,22 +1,27 @@
-"""A REPORTING surface: nothing here decides a round, the election reads the per-cell ``objective``."""
+"""A cell's per-sample evaluators and the names its namespace binds; the round's fold is `domain/fitness_fold.py`."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import (
     EVAL_BUILTIN_NAMES,
     PIPELINE_BOUND_NAMES,
-    REPORTABLE_CORE_TERMS,
-    ROW_HEALTH_TERMS,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
-from promptpotter.domain.pipeline_schema import NodeRole, PipelineNode, PipelineSchema
-from promptpotter.domain.results_health import is_degraded
+from promptpotter.domain.fitness_fold import (
+    REPORTABLE_CORE_TERMS,
+    ROUND_EVALUATORS,
+    ROW_HEALTH_TERMS,
+    Evaluator,
+    has_limit_node,
+    limit_nodes,
+)
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import (
     ROW_GRADES,
     TURN_SCALAR_KEYS,
@@ -24,8 +29,6 @@ from promptpotter.domain.scoring import (
     GradedCell,
     JudgeReading,
     MeasuredCell,
-    all_verifier_graded,
-    extract_item_label,
 )
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.worded import Worded
@@ -43,80 +46,12 @@ def compute_fitness(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     return sum(fitness.read(cell) for cell in scoreable) / len(scoreable)
 
 
-def compute_error_rate(*, results: Sequence[GradedCell], **_: Any) -> float | None:
-    if not results:
-        return None
-    return sum(1 for r in results if r.facts.errored) / len(results)
-
-
-def compute_degraded_rate(*, results: Sequence[GradedCell], **_: Any) -> float | None:
-    if not results:
-        return None
-    return sum(1 for r in results if is_degraded(r.facts)) / len(results)
-
-
-def _compute_recall(
-    *,
-    results: Sequence[GradedCell],
-    node: PipelineNode,
-    **_: Any,
-) -> float | None:
-    def _step_ran(facts: MeasuredCell) -> bool:
-        pd = facts.pipeline
-        return pd.terminal_node == node.name or node.name in pd.step_timings
-
-    scoped = [r.facts for r in results if _step_ran(r.facts) and not r.facts.errored]
-    if not scoped:
-        return None
-    found = 0
-    for facts in scoped:
-        candidates = node.ranking_in(facts.pipeline.observations) or []
-        if any(extract_item_label(c) == facts.ground_truth for c in candidates):
-            found += 1
-    return found / len(scoped)
-
-
-def compute_cache_hit_rate(
-    *, results: Sequence[GradedCell], node: PipelineNode, **_: Any
-) -> float | None:
-    cache_hits = non_error = 0
-    for r in results:
-        if r.facts.errored:
-            continue
-        non_error += 1
-        if node.name in r.facts.pipeline.step_timings:
-            cache_hits += 1
-    return cache_hits / non_error if non_error else None
-
-
-_LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_tokens")
-
-
-def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
-    out: list[tuple[PipelineNode, str, int]] = []
-    for node in schema.running_nodes:
-        cfg = node.current_config.laid_keys()
-        for key in cfg:
-            if not any(key == s or key.endswith(s) for s in _LIMIT_KEY_SUFFIXES):
-                continue
-            target = cfg.get(key)
-            if not isinstance(target, int) or target <= 0:
-                continue
-            out.append((node, key, target))
-            break
-    return out
-
-
-def has_limit_node(schema: PipelineSchema) -> bool:
-    return bool(_limit_nodes(schema))
-
-
 async def compute_retrieval_shortfall_per_sample(
     *, result: MeasuredCell, schema: PipelineSchema, **_: Any
 ) -> float | None:
     observed = result.pipeline.observations
     ratios: list[float] = []
-    for node, _key, target in _limit_nodes(schema):
+    for node, _key, target in limit_nodes(schema):
         for mapping in node.observation_mappings:
             val = observed.get(mapping.pipeline_key)
             if isinstance(val, list):
@@ -125,16 +60,6 @@ async def compute_retrieval_shortfall_per_sample(
     if not ratios:
         return None
     return sum(ratios) / len(ratios)
-
-
-def compute_mean_retrieval_shortfall(*, results: Sequence[GradedCell], **_: Any) -> float | None:
-    """What each cell BANKED under its own limits, never re-derived against this round's schema."""
-    values = [
-        float(banked)
-        for r in results
-        if isinstance(banked := r.facts.pipeline.observations.get("retrieval_shortfall"), float)
-    ]
-    return sum(values) / len(values) if values else None
 
 
 class JudgedTerm(NamedTuple):
@@ -150,70 +75,11 @@ class SampleTerms(NamedTuple):
 Computed = float | JudgedTerm | None
 
 
-# Unenforced: no per-candidate constant (on the logistic link its θ shift varies with δ), no channel-map quantity.
 @dataclass(frozen=True, kw_only=True)
-class _Evaluator:
-    name: str
-    description: str
-    direction: Literal["high", "low"] = "high"
-    # True ⇒ a comparison AGAINST A LABEL: undefined, not 0.0, on a verifier-graded backend.
-    needs_labels: bool = False
-    requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
-
-
-@dataclass(frozen=True, kw_only=True)
-class SampleEvaluator(_Evaluator):
+class SampleEvaluator(Evaluator):
     # ``None`` = nothing to measure, and the key is OMITTED: a zero is a verdict, an absence is not.
     compute: Callable[..., Awaitable[Computed]]
 
-
-@dataclass(frozen=True, kw_only=True)
-class RoundEvaluator(_Evaluator):
-    # Sync: a round materializer re-derives over archived rows, so an awaiting one re-bills every refresh.
-    compute: Callable[..., float | None]
-    node_role: NodeRole | None = None
-
-
-_ROUND_EVALUATORS: tuple[RoundEvaluator, ...] = (
-    RoundEvaluator(
-        name="error_rate",
-        description="Fraction of queries that errored (ERROR predicted or exception).",
-        compute=compute_error_rate,
-        direction="low",
-    ),
-    RoundEvaluator(
-        name="degraded_rate",
-        description="Fraction of queries where a pipeline node did not finish cleanly.",
-        compute=compute_degraded_rate,
-        direction="low",
-    ),
-    RoundEvaluator(
-        name="source_recall",
-        description="Fraction of queries where GT appears in a candidate_source node's output.",
-        compute=_compute_recall,
-        node_role=NodeRole.CANDIDATE_SOURCE,
-        needs_labels=True,
-    ),
-    RoundEvaluator(
-        name="candidate_recall",
-        description="Fraction of queries where GT appears in a ranker node's output.",
-        compute=_compute_recall,
-        node_role=NodeRole.RANKER,
-        needs_labels=True,
-    ),
-    RoundEvaluator(
-        name="cache_hit_rate",
-        description="Fraction of queries resolved by a cache node (non-null timing).",
-        compute=compute_cache_hit_rate,
-        node_role=NodeRole.CACHE,
-    ),
-    RoundEvaluator(
-        name="mean_retrieval_shortfall",
-        description="Mean of retrieval_shortfall across the round's results.",
-        compute=compute_mean_retrieval_shortfall,
-        requires=has_limit_node,
-    ),
-)
 
 _SAMPLE_EVALUATORS: tuple[SampleEvaluator, ...] = (
     SampleEvaluator(
@@ -277,7 +143,7 @@ def bound_by(
 def _validate_registry() -> None:
     """At import: each package evaluator, then ONE owner per name, the package's included."""
     seen: set[str] = set()
-    for ev in (*_ROUND_EVALUATORS, *_SAMPLE_EVALUATORS):
+    for ev in (*ROUND_EVALUATORS, *_SAMPLE_EVALUATORS):
         if ev.name in seen:
             raise ValueError(f"evaluator {ev.name!r}: declared twice in the registry.")
         seen.add(ev.name)
@@ -363,42 +229,6 @@ CELL_TERM_META: Worded[str, CellTerm] = Worded(
         },
     }
 )
-
-
-def _concrete_round_entries(
-    schema: PipelineSchema,
-) -> list[tuple[str, RoundEvaluator, PipelineNode | None]]:
-    out: list[tuple[str, RoundEvaluator, PipelineNode | None]] = []
-    for ev in _ROUND_EVALUATORS:
-        if not ev.requires(schema):
-            continue
-        if ev.node_role is None:
-            out.append((ev.name, ev, None))
-            continue
-        matching = [n for n in schema.running_nodes if n.role == ev.node_role]
-        namespace = len(matching) > 1
-        for node in matching:
-            display_name = f"{node.name}_{ev.name}" if namespace else ev.name
-            out.append((display_name, ev, node))
-    return out
-
-
-def materialize_round_values(
-    schema: PipelineSchema,
-    results: Sequence[GradedCell],
-) -> dict[str, float]:
-    values: dict[str, float] = {}
-    labelless = all_verifier_graded(r.facts.ground_truth for r in results)
-    for display_name, ev, node in _concrete_round_entries(schema):
-        if ev.needs_labels and labelless:
-            continue
-        kwargs: dict[str, Any] = {"results": results, "schema": schema}
-        if node is not None:
-            kwargs["node"] = node
-        value = ev.compute(**kwargs)
-        if value is not None:
-            values[display_name] = float(value)
-    return values
 
 
 async def materialize_sample_values(

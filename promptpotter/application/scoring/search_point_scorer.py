@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -17,7 +16,7 @@ from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import ArchiveEntry, Sample
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.run_scope import run_scope, scope_context, scoped
@@ -85,15 +84,8 @@ class _ArchiveRecorder:
     kind: MeasurementRole
     entry: ArchiveEntry
 
-    def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
-        return self.session.state.scoring.scorer.graded(results)
-
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
-        return compute_composite_fitness(
-            self.sheet(results),
-            self.session.state.scoring.scorer,
-            self.session.bound_resolution.chain,
-        )
+        return self.session.state.scoring.basis.fold(results)
 
     def provenance(self, facts: MeasuredCell) -> str:
         return grade_answer(
@@ -129,7 +121,6 @@ async def score_search_point(
     kind: MeasurementRole,
     sample_index: SampleIndex | None = None,
     measured: str | None,
-    held: CellSheet = NO_CELLS,
 ) -> ScoredWalk:
     """``measured`` has NO default on purpose: it decides what the numbers MEAN."""
     (scored,) = (
@@ -138,7 +129,6 @@ async def score_search_point(
             session,
             kind=kind,
             sample_index=sample_index,
-            held=held,
         )
     ).values()
     return scored
@@ -150,7 +140,6 @@ async def score_search_points[K: Hashable](
     *,
     kind: MeasurementRole,
     sample_index: SampleIndex | None = None,
-    held: CellSheet = NO_CELLS,
     race: Decider[K] | None = None,
 ) -> dict[K, ScoredWalk]:
     """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum;
@@ -166,7 +155,6 @@ async def score_search_points[K: Hashable](
                 kind=kind,
                 sample_index=sample_index,
                 measured=measured,
-                held=held,
             )
             for key, (search_point, dataset, measured) in points.items()
         }
@@ -218,7 +206,6 @@ def open_walk(
     sample_index: SampleIndex | None = None,
     measured: str | None,
     skip_at: int | None = None,
-    held: CellSheet = NO_CELLS,
     budget: int | None = None,
 ) -> Walk:
     """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
@@ -240,7 +227,6 @@ def open_walk(
         recorder=_ArchiveRecorder(
             session=session, search_point=search_point, kind=kind, entry=entry
         ),
-        held=held,
     )
     return Walk(
         order=dataset,

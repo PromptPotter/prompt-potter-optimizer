@@ -5,21 +5,9 @@ from collections.abc import Mapping, Sequence
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.rasch import RoundAbilities, theta_lift_over_parent
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior, lift_prior
-from promptpotter.domain.paired_reading import ArmKey, CellSetName, Estimate, MeasurandUnit
+from promptpotter.domain.paired_reading import ArmKey, CellSetName, Estimate, ReadingState
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.scoring import ROW_GRADES, CellGrade, CellSheet
-from promptpotter.shared.statistics import bounded_mean_interval
-
-
-def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estimate | None:
-    values = list(sheet.column(ROW_GRADES[grade]).values())
-    if not values:
-        return None
-    level = sum(values) / len(values)
-    lo, hi = bounded_mean_interval(values, binary=grade in sheet.two_valued) or (None, None)
-    return Estimate(
-        value=level, ci_lo=lo, ci_hi=hi, n=len(values), se=None, unit=unit, form="level"
-    )
+from promptpotter.domain.scoring import ROW_GRADES
 
 
 def crowning_cells(
@@ -37,7 +25,7 @@ def crowning_cells(
         if election is None or election.selected != parent or election.deciding_pair is None:
             continue
         pair = election.deciding_pair
-        assert pair.a is not None and pair.cell_set is not None, "a crown is decided on a read pair"
+        assert pair.state is ReadingState.READ, "a crown is decided on a read pair"
         own = rr.raced(ArmKey(parent)).by_key()
         against = rr.raced(ArmKey(pair.a.address.individual_id)).by_key()
         on = (

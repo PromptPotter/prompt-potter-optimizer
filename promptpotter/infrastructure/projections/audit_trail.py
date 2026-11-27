@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.records.run_records import (
     Ended,
     LLMCallRecord,
@@ -84,7 +83,7 @@ class RoundAudits:
 
     def feed(self, record: _Record) -> None:
         if isinstance(record, RoundEnteredRecord):
-            self._settle(interrupted=False)
+            self._settle()
             self._round, self._closed = record.round, False
             self._started_at, self._finished_at = record.timestamp, None
             if record.rewound:
@@ -93,12 +92,11 @@ class RoundAudits:
             return
         if isinstance(record, RoundClosedRecord):
             self._closed, self._finished_at = True, record.timestamp
-            self._settle(interrupted=False)
+            self._settle()
             return
         if isinstance(record, RunPhaseRecord):
             if isinstance(record.state, Paused | Ended):
-                cuts = STOP_REASON_INFO[record.state.stop_reason].halts_mid_round
-                self._settle(interrupted=cuts and not self._closed)
+                self._settle()
             return
         if isinstance(record, LLMCallRecord):
             self._nodes[record.node] = build_node_block(record)
@@ -114,9 +112,9 @@ class RoundAudits:
                 )
             )
         if self._closed:
-            self._settle(interrupted=False)
+            self._settle()
 
-    def _settle(self, *, interrupted: bool) -> None:
+    def _settle(self) -> None:
         if not self._nodes and not self._warnings:
             return
         prior = self._audits.get(self._round)
@@ -126,7 +124,6 @@ class RoundAudits:
             finished_at=self._finished_at,
             nodes={**(prior.nodes if prior else {}), **self._nodes},
             warnings=[*(prior.warnings if prior else []), *self._warnings],
-            interrupted=interrupted,
         )
         self._nodes, self._warnings = {}, []
 

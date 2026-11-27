@@ -167,7 +167,6 @@ class SampleIndex:
         sheet = scorer.sheet(answer.cell for answer in population)
         row = SampleFoldRow(
             config_key=entry.config_key,
-            sp=entry.individual,
             fk=scorer.id,
             sig=sig,
             graded=[

@@ -34,7 +34,7 @@ PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel
 
 The **origin panel's top-up is one more stretch of the same race** (`runner/round.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/round.py::panel_triggers` reads, so the monitor never buys it back.
 
-**The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election.
+**The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election, with what the origin panel's line bought after it (`results.py::RoundResult.closed_rows`), which no race read.
 
 **The `posterior` bar** admits an arm on
 

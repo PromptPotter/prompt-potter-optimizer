@@ -57,9 +57,9 @@ from promptpotter.application.intelligence.rasch import (
     graduate_ruler_model,
 )
 from promptpotter.application.runner.bench import LineSpan, own_level
-from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.fitness_fold import compute_composite_fitness
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
     compute_outer_proxies,

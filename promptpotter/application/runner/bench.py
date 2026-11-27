@@ -16,10 +16,8 @@ from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
     walked_rows,
 )
-from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.paired import (
     MemberRows,
-    absent_pair,
     grade_measurands,
     mean_lift,
     read_pair,
@@ -28,7 +26,6 @@ from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     score_search_point,
 )
-from promptpotter.application.scoring.selection import level_band
 from promptpotter.domain.arms import (
     BankedSearchPointError,
     Concluded,
@@ -60,6 +57,7 @@ from promptpotter.domain.campaign import Campaign, CampaignCycle, worked_seconds
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.fitness_fold import cell_channels_of, level_band
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -70,6 +68,7 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
     ReadingState,
+    UnreadPair,
 )
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
@@ -389,8 +388,10 @@ def read_bench(
     )
     vs_origin = None if graded is None else graded.vs_origin
     if vs_origin is None:
-        vs_origin = absent_pair(
-            state=status.state,
+        state = status.state
+        assert state is not ReadingState.READ, "a read bench carries its pair"
+        vs_origin = UnreadPair(
+            state=state,
             a=None,
             b=None,
             cell_set=None if passes is None else bench_split(passes.origin.sample_keys),

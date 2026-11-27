@@ -17,6 +17,7 @@ from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, Su
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
+    ReadingState,
     level_text,
 )
 from promptpotter.domain.treatment import Treatment
@@ -224,9 +225,9 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
 def _pair_line(pair: PairedReading, unit: MeasuredUnit) -> str:
     member = pair.a
     against = "parent" if member is None or member.address.arm is None else member.address.arm.label
-    lift, coverage = pair.headline, pair.coverage
-    if lift is None or coverage is None:
+    if pair.state is not ReadingState.READ:
         return f"vs {against}: {READING_STATE_INFO[pair.state].label}"
+    lift, coverage = pair.headline, pair.coverage
 
     level_unit = lift.measurand.unit
     estimate = lift.estimate
@@ -321,10 +322,9 @@ def dataset_card(p: ExportProvenance, data_file: str) -> str:
 
 def _bench_readout(export: PromptExport) -> tuple[str, str]:
     reading = export.bench.vs_origin
-    lift = reading.headline
-    if lift is None:
+    if reading.state is not ReadingState.READ:
         return READING_STATE_INFO[reading.state].label, "—"
-    return lift.estimate.point, lift.estimate.band or "—"
+    return reading.headline.estimate.point, reading.headline.estimate.band or "—"
 
 
 def skill_md(export: PromptExport, p: ExportProvenance) -> str:

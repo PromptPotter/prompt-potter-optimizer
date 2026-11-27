@@ -586,11 +586,6 @@
             "title": "Cold Bytes",
             "type": "integer"
           },
-          "conflicts": {
-            "default": 0,
-            "title": "Conflicts",
-            "type": "integer"
-          },
           "files_touched": {
             "default": 0,
             "title": "Files Touched",
@@ -6773,7 +6768,7 @@
           },
           "ending": {
             "$ref": "#/components/schemas/RoundEnding",
-            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
+            "description": "`adopted`: round 0 adopted the origin `leading`; `crowned`: the round crowned `leading`; `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -6797,14 +6792,13 @@
           "parent": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RoundArm"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
-            "title": "Parent"
+            "description": "The candidate the line stood on entering the round, re-read on its cells: the arm every arm was read against, which a held round ends on; null at round 0, which reads none."
           },
           "reelection": {
             "anyOf": [
@@ -13814,103 +13808,37 @@
         "type": "object"
       },
       "PairedReading": {
-        "additionalProperties": false,
-        "description": "One pair of addressed individuals read on one cell set.",
-        "properties": {
-          "a": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairMember"
-              },
-              {
-                "type": "null"
-              }
-            ]
+        "discriminator": {
+          "mapping": {
+            "cell_set_differs": "#/components/schemas/UnreadPair",
+            "dataset_differs": "#/components/schemas/UnreadPair",
+            "held_elsewhere": "#/components/schemas/UnreadPair",
+            "instrument_differs": "#/components/schemas/UnreadPair",
+            "measurand_differs": "#/components/schemas/UnreadPair",
+            "member_unscoreable": "#/components/schemas/UnreadPair",
+            "no_holdout": "#/components/schemas/UnreadPair",
+            "no_selection": "#/components/schemas/UnreadPair",
+            "not_asked": "#/components/schemas/UnreadPair",
+            "not_held": "#/components/schemas/UnreadPair",
+            "pass_stopped": "#/components/schemas/UnreadPair",
+            "past_tolerance": "#/components/schemas/UnreadPair",
+            "pending": "#/components/schemas/UnreadPair",
+            "read": "#/components/schemas/ReadPair",
+            "run_failed": "#/components/schemas/UnreadPair",
+            "same_individual": "#/components/schemas/UnreadPair",
+            "scope_differs": "#/components/schemas/UnreadPair",
+            "under_two_cells": "#/components/schemas/UnreadPair"
           },
-          "b": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairMember"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "beside": {
-            "description": "Other measurands over the SAME scored cells as `headline`.",
-            "items": {
-              "$ref": "#/components/schemas/MeasuredLift"
-            },
-            "title": "Beside",
-            "type": "array"
-          },
-          "cell_set": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CellSet"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "coverage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Coverage"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "headline": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MeasuredLift"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "instrument_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What measured both members' cells: their dataset, and on the recursion the inner origin. Null where the reading names no pair.",
-            "title": "Instrument Id"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/RoleScope"
-          },
-          "spec": {
-            "$ref": "#/components/schemas/EstimatorSpec"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ReadingState"
-          }
+          "propertyName": "state"
         },
-        "required": [
-          "state",
-          "a",
-          "b",
-          "cell_set",
-          "instrument_id",
-          "scope",
-          "spec",
-          "coverage",
-          "headline",
-          "beside"
-        ],
-        "title": "PairedReading",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReadPair"
+          },
+          {
+            "$ref": "#/components/schemas/UnreadPair"
+          }
+        ]
       },
       "PairwiseComparison": {
         "additionalProperties": false,
@@ -15034,6 +14962,65 @@
         "title": "RankedEdit",
         "type": "object"
       },
+      "ReadPair": {
+        "additionalProperties": false,
+        "description": "One pair of addressed individuals read on one cell set: both members, the set, the lifts.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/PairMember"
+          },
+          "b": {
+            "$ref": "#/components/schemas/PairMember"
+          },
+          "beside": {
+            "description": "Other measurands over the SAME scored cells as `headline`.",
+            "items": {
+              "$ref": "#/components/schemas/MeasuredLift"
+            },
+            "title": "Beside",
+            "type": "array"
+          },
+          "cell_set": {
+            "$ref": "#/components/schemas/CellSet"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          },
+          "headline": {
+            "$ref": "#/components/schemas/MeasuredLift"
+          },
+          "instrument_id": {
+            "description": "What measured both members' cells: their dataset, and on the recursion the inner origin.",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RoleScope"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/EstimatorSpec"
+          },
+          "state": {
+            "const": "read",
+            "default": "read",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "spec",
+          "a",
+          "b",
+          "cell_set",
+          "instrument_id",
+          "coverage",
+          "headline",
+          "beside"
+        ],
+        "title": "ReadPair",
+        "type": "object"
+      },
       "ReadingState": {
         "description": "Whether a pair was read, and the ONE reason it was not.",
         "enum": [
@@ -15289,6 +15276,26 @@
         "title": "RoundAdvance",
         "type": "string"
       },
+      "RoundArm": {
+        "additionalProperties": false,
+        "description": "One arm of one round, by its record's own address: an id alone names no candidate, since a\nlater round can propose the same individual again.",
+        "properties": {
+          "arm": {
+            "title": "Arm",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "arm"
+        ],
+        "title": "RoundArm",
+        "type": "object"
+      },
       "RoundAudit": {
         "additionalProperties": false,
         "description": "One round's audit twin: each optimizer node's call in firing order, and the warnings the round raised.",
@@ -15304,11 +15311,6 @@
             ],
             "description": "Null until the round closes.",
             "title": "Finished At"
-          },
-          "interrupted": {
-            "description": "The run stopped with this round open.",
-            "title": "Interrupted",
-            "type": "boolean"
           },
           "nodes": {
             "additionalProperties": {
@@ -15346,8 +15348,7 @@
           "started_at",
           "finished_at",
           "nodes",
-          "warnings",
-          "interrupted"
+          "warnings"
         ],
         "title": "RoundAudit",
         "type": "object"
@@ -15411,8 +15412,9 @@
         "type": "object"
       },
       "RoundEnding": {
-        "description": "How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved\nto, or held on its parent. Round 0 crowns the origin it adopts.",
+        "description": "How a round's election ended: on the origin round 0 adopts, on the arm it crowned, on its\nuncrowned leader the line moved to, or held on its parent.",
         "enum": [
+          "adopted",
           "crowned",
           "moved",
           "held"
@@ -16896,7 +16898,7 @@
                 "type": "null"
               }
             ],
-            "description": "How the round ended on `leading` (`Election.ending`); null at round 0, which holds no election."
+            "description": "How the round ended on `leading` (`Election.ending`); `adopted` at round 0; null where the round holds no election."
           },
           "health": {
             "$ref": "#/components/schemas/RoundHealth"
@@ -17474,6 +17476,7 @@
               "election",
               "error",
               "flight",
+              "fold_basis",
               "health",
               "hold",
               "launch_clock",
@@ -19094,6 +19097,93 @@
           "email"
         ],
         "title": "UnblockEmailPayload",
+        "type": "object"
+      },
+      "UnreadPair": {
+        "additionalProperties": false,
+        "description": "A pair not read, for its ONE reason: the members and set it names where a read was tried.",
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairMember"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairMember"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cell_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CellSet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RoleScope"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/EstimatorSpec"
+          },
+          "state": {
+            "enum": [
+              "not_asked",
+              "pending",
+              "not_held",
+              "no_holdout",
+              "held_elsewhere",
+              "pass_stopped",
+              "past_tolerance",
+              "member_unscoreable",
+              "under_two_cells",
+              "no_selection",
+              "same_individual",
+              "run_failed",
+              "scope_differs",
+              "measurand_differs",
+              "dataset_differs",
+              "cell_set_differs",
+              "instrument_differs"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "spec",
+          "state",
+          "a",
+          "b",
+          "cell_set",
+          "instrument_id"
+        ],
+        "title": "UnreadPair",
         "type": "object"
       },
       "UnstartedCampaign": {

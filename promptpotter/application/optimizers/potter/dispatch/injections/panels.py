@@ -56,7 +56,13 @@ from promptpotter.domain.connector import unit_count, unit_plural
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
-from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading, level_text
+from promptpotter.domain.paired_reading import (
+    ArmKey,
+    LiftSide,
+    PairedReading,
+    ReadingState,
+    level_text,
+)
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
@@ -255,7 +261,8 @@ def _evolution(b: PotterView) -> list[Item]:
         f"  origin panel, {n} fixed rows: "
         + " → ".join(f"{m.arm.label} {level_text(m.rate, m.unit)}" for m in line)
     )
-    if (headline := overlap.lead.headline) is not None:
+    if (lead := overlap.lead).state is ReadingState.READ:
+        headline = lead.headline
         lines.append(
             f"  standing pick vs C0: lift {headline.estimate.band}, {_SIDE_VERDICT[headline.side]}"
         )
@@ -270,8 +277,9 @@ def _evolution(b: PotterView) -> list[Item]:
 
 
 def _vs_previous_pick(reading: PairedReading | None) -> str | None:
-    lift = None if reading is None else reading.on_whole_set
-    if reading is None or lift is None or reading.a is None or reading.b is None:
+    if reading is None or reading.state is not ReadingState.READ:
+        return None
+    if (lift := reading.on_whole_set) is None:
         return None
     pick, previous = reading.b.address.arm, reading.a.address.arm
     if pick is None or previous is None:

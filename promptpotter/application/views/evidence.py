@@ -30,6 +30,7 @@ from promptpotter.domain.paired_reading import (
     CellSet,
     Estimate,
     PairedReading,
+    ReadingState,
     level_text,
     lift_text,
 )
@@ -307,7 +308,8 @@ def _h2h_row(r: HeadToHeadRow, h2h: HeadToHead, beside: BenchColumn) -> Row:
         else (_ABSENT,) * 7
     )
     spend, metered = r.spend, r.spend_metered
-    per, headline = b.cost.lift_per_usd, b.vs_origin.headline
+    per = b.cost.lift_per_usd
+    headline = b.vs_origin.headline if b.vs_origin.state is ReadingState.READ else None
     spent: Row = (
         (
             f"{spend.total_used_usd:.4f}",
@@ -671,9 +673,9 @@ _PAIRS = (
 
 
 def _pair_row(label: str, pair: PairedReading) -> Row:
-    lift = pair.headline
-    if lift is None or pair.coverage is None:
+    if pair.state is not ReadingState.READ:
         return (label, READING_STATE_INFO[pair.state].sentence, *(_ABSENT,) * 3)
+    lift = pair.headline
     floored = "*" if lift.p_value <= lift.p_floor else " "
     return (
         label,
@@ -858,13 +860,12 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
     rows: list[Row] = []
     unranked: list[str] = []
     for c in ev.edits[:top]:
-        lift, coverage = c.reading.headline, c.reading.coverage
-        if lift is None or coverage is None:
+        if (reading := c.reading).state is not ReadingState.READ:
             unranked.append(
-                f"unranked {c.campaign_id[:10]} {c.label}: "
-                f"{READING_STATE_INFO[c.reading.state].sentence}"
+                f"unranked {c.campaign_id[:10]} {c.label}: {READING_STATE_INFO[reading.state].sentence}"
             )
             continue
+        lift, coverage = reading.headline, reading.coverage
         rows.append(
             (
                 lift.estimate.point,

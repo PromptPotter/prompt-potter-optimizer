@@ -26,6 +26,7 @@ from promptpotter.domain.paired_reading import (
     Measurand,
     MeasurandKind,
     PairedReading,
+    ReadingState,
 )
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.strict_model import StrictModel
@@ -259,7 +260,7 @@ def metric_reading(
         scored_cells=shared,
         covered_cells=sorted({c for r in rows for c in (*r.values, *r.unscorable_cells)}),
         pairwise=pairwise,
-        n_tests=sum(1 for p in pairwise if p.reading.headline is not None),
+        n_tests=sum(1 for p in pairwise if p.reading.state is ReadingState.READ),
     )
 
 

@@ -7,11 +7,13 @@ from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO
+from promptpotter.domain.fitness_fold import FoldBasis, level_band
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, level_text
 from promptpotter.domain.phase_acts import InitOpened, PassOpened
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, stop_said
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     ArmsGate,
@@ -30,7 +32,9 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     SampleScoredRecord,
 )
+from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.said import Said, Tone
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.spend import prefix_reading
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import duration_words
@@ -43,6 +47,7 @@ NarratedRecord = (
     | CellBeatRecord
     | ArmRecord
     | SampleScoredRecord
+    | FoldBasisRecord
     | PhaseRecord
     | RunPhaseRecord
     | RoundEnteredRecord
@@ -83,7 +88,10 @@ class _Line(NamedTuple):
 
 class _Announced(NamedTuple):
     state: ArmState
-    running: ScoreSummary | None
+    # Its walks' rows by the walk fill and their basis; the close's fold, else theirs once read.
+    rows: CellSheet
+    basis: FoldBasis | None
+    fold: ScoreSummary | None
 
 
 class _BenchPass(NamedTuple):
@@ -91,6 +99,13 @@ class _BenchPass(NamedTuple):
     label: str | None
     who: str
     rows: int | None
+    taken: list[GradedCell]
+
+
+def _shown_stale(cell: GradedCell) -> bool:
+    """A stale answer shown while its cell is re-measured: no row of its walk, since a replay
+    taken is never deprecated (`QueryLoopState.replay`)."""
+    return cell.facts.cached and is_deprecated(cell.facts)
 
 
 def _num(value: object) -> float | None:
@@ -114,7 +129,8 @@ def _joined(bits: Iterable[str | None]) -> str | None:
 class Narration:
     """The ledger narrated once: each record kind's row, and the arms, labels and holds every row reads.
 
-    Each announced arm's last state and running fold is held by ``(round, key)``; a re-read continues it.
+    Each announced arm's last state and the rows it walked are held by ``(round, key)``, folded on
+    read under the basis its walk filed; a re-read continues it.
     """
 
     records: ClassVar[tuple[type[StrictModel], ...]] = get_args(NarratedRecord)
@@ -128,6 +144,7 @@ class Narration:
         # Each held sender's hold and the row that said it: the one hold tracker every reader shares.
         self._held: dict[str, tuple[ProviderHoldRecord, str]] = {}
         self._bench: _BenchPass | None = None
+        self.basis: FoldBasis | None = None
         self._declared = 0
         self._launched = 0
         self._entered = 0
@@ -156,6 +173,9 @@ class Narration:
                 return self._arm(record)
             case SampleScoredRecord():
                 return self._sample_scored(record)
+            case FoldBasisRecord():
+                self.basis = record.basis
+                return None
             case PhaseRecord():
                 return self._phase(record)
             case RunPhaseRecord():
@@ -210,9 +230,8 @@ class Narration:
 
     def announce(self, record: ArmRecord) -> None:
         held = self._arms.get((record.round, record.arm))
-        self._arms[record.round, record.arm] = _Announced(
-            record.state, None if held is None else held.running
-        )
+        held = held or _Announced(record.state, NO_CELLS, None, None)
+        self._arms[record.round, record.arm] = held._replace(state=record.state)
         self._labels[record.arm] = record.state.label
 
     def take(self, record: SampleScoredRecord) -> ArmKey | None:
@@ -224,14 +243,22 @@ class Narration:
                 f"a round {record.round} cell names arm {arm}, which its own cycle file never "
                 "announced: the SSE tail and the ray fold one file, so each file announces its arms"
             )
-        if record.running is not None:
-            self._arms[record.round, arm] = held._replace(running=record.running)
+        if not _shown_stale(record.result):
+            basis = self.basis_of(record)
+            rows = held.rows.filled_from(basis.sheet([record.result]))
+            self._arms[record.round, arm] = _Announced(held.state, rows, basis, None)
         return arm
+
+    def basis_of(self, record: SampleScoredRecord) -> FoldBasis:
+        assert self.basis is not None, f"a round {record.round} row lands before its fold basis"
+        return self.basis
 
     def close(self, record: RoundStatement, keys: Iterable[ArmKey]) -> None:
         """The statement is each arm's last record: its fold covers the reference reads too."""
         for key in keys:
-            self._arms[record.round, key] = _Announced(record.arms[key], record.folds.get(key))
+            # No basis: the statement's fold stands, an arm it folds none for included.
+            fold = record.folds.get(key)
+            self._arms[record.round, key] = _Announced(record.arms[key], NO_CELLS, None, fold)
 
     def enter(self, round_num: int) -> None:
         """Every launch re-enters ``origin`` at round 0 to replay it."""
@@ -245,7 +272,11 @@ class Narration:
 
     def fold(self, round_num: int, key: ArmKey) -> ScoreSummary | None:
         held = self._arms[round_num, key]
-        return None if isinstance(held.state, Proposed) else held.running
+        if isinstance(held.state, Proposed):
+            return None
+        if held.fold is None and held.basis is not None and held.rows:
+            held = self._arms[round_num, key] = held._replace(fold=held.basis.fold(held.rows.cells))
+        return held.fold
 
     def label(self, key: ArmKey) -> str | None:
         return self._labels.get(key)
@@ -376,20 +407,25 @@ class Narration:
         return _Line(tone, arm.label, detail or None, round=record.round, arm=record.arm)
 
     def _sample_scored(self, record: SampleScoredRecord) -> _Line:
-        at, running = record.round, record.running
+        at = record.round
         scored, total = (record.sample_idx or 0) + 1, record.sample_total
         count = f"{scored}/{total}" if total else None
         # A pass no arm walks (a bench pass, a verify) is no candidate of the round.
         if (arm := self.take(record)) is not None:
             label = f"{self._labels[arm]} · scoring"
-            level = None if running is None else _level(running.composite_fitness, "score")
+            composite = level_band(self._arms[at, arm].rows, "objective", "score")
+            level = None if composite is None else _level(composite.value, "score")
             return _Line("quiet", f"{label} {count}" if count else label, level, round=at, arm=arm)
         if self._bench is None:
             return _Line("quiet", f"scoring {count}" if count else "scoring", round=at)
         # The candidate and the count lead: a ray chip truncates.
-        arm, candidate, who, rows = self._bench
+        arm, candidate, who, rows, taken = self._bench
         tally = f"bench {scored}/{total or ('?' if rows is None else rows)}"
-        so_far = None if running is None else _level(running.fitness, running.fitness_unit)
+        if not _shown_stale(record.result):
+            taken.append(record.result)
+        basis = self.basis_of(record)
+        fitness = level_band(basis.sheet(taken), "fitness", basis.fitness_unit)
+        so_far = None if fitness is None else _level(fitness.value, basis.fitness_unit)
         label = f"{candidate} · {tally}" if candidate else tally
         return _Line("quiet", label, f"{who} · {so_far} so far" if so_far else who, arm=arm)
 
@@ -411,6 +447,6 @@ class Narration:
             return None
         candidate = view.arm.label or None
         who = "origin" if view.subject == "origin" else f"R{view.arm.round} selection"
-        self._bench = _BenchPass(view.arm.key, candidate, who, view.rows)
+        self._bench = _BenchPass(view.arm.key, candidate, who, view.rows, [])
         label = f"{candidate} · bench pass" if candidate else "bench pass"
         return _Line("quiet", label, f"{who} · {view.rows} held-out rows", arm=view.arm.key)

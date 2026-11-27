@@ -94,6 +94,7 @@ from promptpotter.domain.paired_reading import (
     MeasurandUnit,
     MemberAddress,
     PairedReading,
+    ReadingState,
     level_text,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
@@ -919,8 +920,8 @@ def _reading_row(
 
 
 def _lift(edit: RankedEdit) -> float | None:
-    headline = edit.reading.headline
-    return None if headline is None else headline.estimate.value
+    reading = edit.reading
+    return reading.headline.estimate.value if reading.state is ReadingState.READ else None
 
 
 def _edit_spread(rows: list[RankedEdit]) -> EditSpread:

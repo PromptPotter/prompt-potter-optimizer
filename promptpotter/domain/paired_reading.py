@@ -6,7 +6,7 @@ import math
 from collections.abc import Collection
 from enum import StrEnum
 from statistics import NormalDist
-from typing import Literal, NamedTuple, NewType, Self, assert_never
+from typing import Annotated, Literal, NamedTuple, NewType, Self, assert_never, get_args
 
 from pydantic import Field, model_validator
 
@@ -595,49 +595,34 @@ class Coverage(FrozenModel):
         return self
 
 
-class PairedReading(FrozenModel):
-    """One pair of addressed individuals read on one cell set."""
-
-    state: ReadingState
-    a: PairMember | None
-    b: PairMember | None
-    cell_set: CellSet | None
-    instrument_id: str | None = Field(
-        description="What measured both members' cells: their dataset, and on the recursion "
-        "the inner origin. Null where the reading names no pair."
-    )
+class _Paired(FrozenModel):
     scope: RoleScope
     spec: EstimatorSpec
-    coverage: Coverage | None
-    headline: MeasuredLift | None
+
+
+class ReadPair(_Paired):
+    """One pair of addressed individuals read on one cell set: both members, the set, the lifts."""
+
+    state: Literal[ReadingState.READ] = ReadingState.READ
+    a: PairMember
+    b: PairMember
+    cell_set: CellSet
+    instrument_id: str = Field(
+        description="What measured both members' cells: their dataset, and on the recursion "
+        "the inner origin."
+    )
+    coverage: Coverage
+    headline: MeasuredLift
     beside: tuple[MeasuredLift, ...] = Field(
         description="Other measurands over the SAME scored cells as `headline`."
     )
 
-    @classmethod
-    def unread(cls, state: ReadingState) -> PairedReading:
-        return cls(
-            state=state,
-            a=None,
-            b=None,
-            cell_set=None,
-            instrument_id=None,
-            scope=RoleScope.REPORT,
-            spec=ROUND_LIFT_SPEC,
-            coverage=None,
-            headline=None,
-            beside=(),
-        )
-
     @property
     def on_whole_set(self) -> MeasuredLift | None:
         """Only here is ``rate_a`` `a`'s level on the set: elsewhere it is over the cells `b` reached."""
-        whole = self.coverage is not None and self.coverage.state is CoverageState.COMPLETE
-        return self.headline if whole else None
+        return self.headline if self.coverage.state is CoverageState.COMPLETE else None
 
     def lift(self, key: str) -> MeasuredLift | None:
-        if self.headline is None:
-            return None
         return next(
             (lift for lift in (self.headline, *self.beside) if lift.measurand.key == key), None
         )
@@ -647,15 +632,7 @@ class PairedReading(FrozenModel):
         return None if lift is None else lift.rate_a
 
     @model_validator(mode="after")
-    def _state_fits_content(self) -> Self:
-        if self.headline is None:
-            if self.state is ReadingState.READ or self.beside or self.coverage is not None:
-                raise ValueError("a lift and its coverage exist exactly where the state is read")
-            return self
-        if self.state is not ReadingState.READ:
-            raise ValueError("a lift exists exactly where the state is read")
-        if self.a is None or self.b is None or self.cell_set is None or self.coverage is None:
-            raise ValueError("a read pair names both members, its cell set and its coverage")
+    def _lifts_read_off_their_tests(self) -> Self:
         if not 2 <= self.coverage.scored <= self.coverage.shared <= self.cell_set.size:
             raise ValueError("a read pair scored two or more of the cells its set names")
         for lift in (self.headline, *self.beside):
@@ -672,3 +649,63 @@ class PairedReading(FrozenModel):
             if lift.flips.gained + lift.flips.lost + lift.flips.unchanged != self.coverage.scored:
                 raise ValueError("flips partition the scored cells")
         return self
+
+
+UnreadState = Literal[
+    ReadingState.NOT_ASKED,
+    ReadingState.PENDING,
+    ReadingState.NOT_HELD,
+    ReadingState.NO_HOLDOUT,
+    ReadingState.HELD_ELSEWHERE,
+    ReadingState.PASS_STOPPED,
+    ReadingState.PAST_TOLERANCE,
+    ReadingState.MEMBER_UNSCOREABLE,
+    ReadingState.UNDER_TWO_CELLS,
+    ReadingState.NO_SELECTION,
+    ReadingState.SAME_INDIVIDUAL,
+    ReadingState.RUN_FAILED,
+    ReadingState.SCOPE_DIFFERS,
+    ReadingState.MEASURAND_DIFFERS,
+    ReadingState.DATASET_DIFFERS,
+    ReadingState.CELL_SET_DIFFERS,
+    ReadingState.INSTRUMENT_DIFFERS,
+]
+
+
+class UnreadPair(_Paired):
+    """A pair not read, for its ONE reason: the members and set it names where a read was tried."""
+
+    state: UnreadState
+    a: PairMember | None
+    b: PairMember | None
+    cell_set: CellSet | None
+    instrument_id: str | None
+
+    @classmethod
+    def of(cls, state: UnreadState) -> UnreadPair:
+        return cls(
+            state=state,
+            a=None,
+            b=None,
+            cell_set=None,
+            instrument_id=None,
+            scope=RoleScope.REPORT,
+            spec=ROUND_LIFT_SPEC,
+        )
+
+    @property
+    def on_whole_set(self) -> None:
+        return None
+
+    def lift(self, _key: str) -> None:
+        return None
+
+    def reference_level(self, _key: str) -> None:
+        return None
+
+
+type PairedReading = Annotated[ReadPair | UnreadPair, Field(discriminator="state")]
+
+assert {ReadingState.READ, *get_args(UnreadState)} == set(ReadingState), (
+    "every reading state is one arm's"
+)

@@ -532,8 +532,8 @@ def _read_alike(a: _Entry, b: _Entry, scorer: Scorer) -> bool:
         scorer=scorer,
         sample_keys=a.sample_keys,
         instrument_id=a.origin.instrument_id,
-    ).headline
-    return gap is None or gap.side == "spans"
+    )
+    return gap.state is not ReadingState.READ or gap.headline.side == "spans"
 
 
 def _status(stores: Stores, campaign: Campaign) -> RunStatus:

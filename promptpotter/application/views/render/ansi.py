@@ -29,7 +29,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.origin_panel import RoundEnding
-from promptpotter.domain.paired_reading import READING_STATE_INFO, level_text
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ReadingState, level_text
 from promptpotter.domain.phase_acts import (
     CellFormula,
     CountFact,
@@ -458,8 +458,8 @@ def _render_verify_graded(r: VerifyReading) -> str:
     verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r.held]
     lift = ""
     pair = r.vs_origin
-    if (paired := pair.headline) is not None and pair.coverage is not None:
-        lift = f", lift over C0 {paired.estimate.text} on {fmt_coverage(pair.coverage)}"
+    if pair.state is ReadingState.READ:
+        lift = f", lift over C0 {pair.headline.estimate.text} on {fmt_coverage(pair.coverage)}"
     return (
         f"  {DIM}verify {r.label}: fitness {levels} on {r.fresh.n} unseen cells"
         f"{lift}{verdict}{RESET}"

@@ -4573,7 +4573,6 @@ def test_no_held_out_row_reaches_the_index_the_optimizers_panels_read() -> None:
         index.replay_row(
             SampleFoldRow(
                 config_key=f"bench_{n}",
-                sp=f"bench_{n}",
                 fk="formula",
                 sig=[],
                 graded=[],

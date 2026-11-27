@@ -15,13 +15,13 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import RoundSamples
-from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.selection import banked_lift_prior
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.crowning_bar import LiftPrior
+from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
 from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
@@ -92,12 +92,11 @@ def _origin_round(
     return RoundResult(
         round=0,
         arms={key: arm},
-        reference=None,
         cells={key: results},
         folds=arm_folds({key: arm}, {key: results}, scorer, schema),
         election=Election(
             leading=key,
-            ending=RoundEnding.CROWNED,
+            ending=RoundEnding.ADOPTED,
             parent=None,
             electable=0,
             fit=fit,
@@ -106,7 +105,7 @@ def _origin_round(
         ),
         # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
         health=head_health(0, arm, results, picked=True, priors=()),
-        overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, 0, RoundEnding.CROWNED),
+        overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, RoundEnding.ADOPTED),
         optimizer_state=optimizer_state,
     )
 
@@ -496,10 +495,6 @@ class RoundContext:
         """What a walk of *key* on *cells* is asked: those, and every cell its walk was asked before."""
         held = self.walks.get(key)
         return frozenset(s.key for s in cells) | (frozenset() if held is None else held.asked)
-
-    def held(self, key: ArmKey) -> CellSheet:
-        held = self.walks.get(key)
-        return NO_CELLS if held is None else held.arm.rows
 
     def walked(self, read: ReadArm, asked: frozenset[str]) -> None:
         held = self.walks.get(read.key)

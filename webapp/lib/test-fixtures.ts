@@ -26,8 +26,8 @@ import type {
   MeteredSpend,
   NodeConfigParam,
   OverlapReading,
-  PairedReading,
   ProducerReading,
+  ReadPair,
   ProviderRoute,
   RoundHealth,
   RoundView,
@@ -160,10 +160,10 @@ export function estimate(
 export function pairedReading(
   lift: number,
   [lo, hi]: [number, number],
-  over: { rateA?: number; coverage?: NonNullable<PairedReading["coverage"]>["state"] } = {},
-): PairedReading {
+  over: { rateA?: number; coverage?: ReadPair["coverage"]["state"] } = {},
+): ReadPair {
   const rateA = over.rateA ?? 0.5;
-  const measured = (key: string, unit: "rate" | "score"): PairedReading["beside"][number] => ({
+  const measured = (key: string, unit: "rate" | "score"): ReadPair["beside"][number] => ({
     measurand: { kind: "grade", key, scorer_id: "s", binary: false, unit },
     rate_a: rateA,
     rate_b: rateA + lift,
@@ -174,7 +174,7 @@ export function pairedReading(
     flips: { gained: 0, lost: 0, unchanged: 0 },
     family: null,
   });
-  const member = (id: string): NonNullable<PairedReading["a"]> => ({
+  const member = (id: string): ReadPair["a"] => ({
     address: { path: [], individual_id: id, arm: null, pass_role: null },
     n: 10,
     bought: 0,
@@ -210,9 +210,6 @@ export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReadin
       instrument_id: null,
       scope: "report",
       spec: { alpha: 0.05 },
-      coverage: null,
-      headline: null,
-      beside: [],
     },
     earlier: [],
     triggered: [],

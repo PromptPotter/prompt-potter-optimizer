@@ -13,7 +13,7 @@ from promptpotter.application.scoring.query_loop import QueryLoopResult
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.command_log import LookaheadWindow
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -71,8 +71,7 @@ class CatchUpPool:
         """Nothing is written or graded until :meth:`commit_backfills` takes them."""
         started: list[asyncio.Future[Any]] = []
         for cid in self._unstarted(sample)[: max(room, 0)]:
-            held = self._race.priors[cid]
-            backfill = _catch_up(self._session, self._index, self._walks[cid], sample, cid, held)
+            backfill = _catch_up(self._session, self._index, self._walks[cid], sample, cid)
             self._pending[(cid, sample.id)] = backfill
             started.append(backfill[0])
         return started
@@ -122,13 +121,10 @@ def _catch_up(
     walk_of: tuple[JobSearchPoint, MeasurementRole],
     sample: Sample,
     prior: ArmKey,
-    held: CellSheet,
 ) -> CatchUp:
     # The PRIOR's own pass, never the triggering arm's. No stop rule: it recurses into the eliminator.
     sp, role = walk_of
-    walk = open_walk(
-        sp, [sample], session, kind=role, sample_index=sample_index, measured=prior, held=held
-    )
+    walk = open_walk(sp, [sample], session, kind=role, sample_index=sample_index, measured=prior)
     walk.release()
     _, cell = walk.launch(0, LookaheadWindow(1, 1))
 

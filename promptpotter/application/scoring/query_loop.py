@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import operator
 import sys
 import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
@@ -38,6 +39,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
     FlightWaiting,
@@ -52,7 +54,6 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import FiledAnswer, Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
-    CellSheet,
     GradedCell,
     MeasuredCell,
     Scorer,
@@ -164,8 +165,6 @@ class QueryLoopState:
     recorded: MeasuredPass | None
     sample_index: SampleIndex | None
     recorder: WalkRecorder
-    # The rows of the walk this one continues: its running fold covers them, then its own they lack.
-    held: CellSheet
     # The archive's answers by sample key, first read when a row is first sent or taken, never at
     # open: a row the walk never reaches costs no read.
     filed: dict[str, FiledAnswer] | None = None
@@ -207,31 +206,23 @@ class QueryLoopState:
     def scorer(self) -> Scorer:
         return self.session.state.scoring.scorer
 
-    def running(self, results: Sequence[GradedCell]) -> ScoreSummary:
-        return self.recorder.scores(self.held.filled_from(self.scorer.graded(results)).cells)
-
-    def sample_scored(
-        self,
-        cell: GradedCell,
-        sample: Sample,
-        idx: int,
-        total: int,
-        *,
-        running: ScoreSummary | None,
-    ) -> None:
-        if (recorded := self.recorded) is not None:
-            append_record(
-                SampleScoredRecord(
-                    round=bound_round(),
-                    individual_id=recorded.individual_id,
-                    role=recorded.role,
-                    sample_idx=idx,
-                    sample_total=total,
-                    position=sample.id,
-                    result=cell,
-                    running=running,
-                )
-            )
+    def sample_scored(self, cell: GradedCell, sample: Sample, idx: int, total: int) -> None:
+        if (recorded := self.recorded) is None:
+            return
+        scored = SampleScoredRecord(
+            round=bound_round(),
+            individual_id=recorded.individual_id,
+            role=recorded.role,
+            sample_idx=idx,
+            sample_total=total,
+            position=sample.id,
+            result=cell,
+        )
+        # Its basis first, once per seated scorer on each ledger: every reader folds the row under it.
+        state, filing = self.session.state, (run_scope().ledger, self.session.state.scoring.basis)
+        filed = state.filed_basis is not None and all(map(operator.is_, state.filed_basis, filing))
+        state.filed_basis = filing
+        append_record(*(() if filed else (FoldBasisRecord(basis=filing[1]),)), scored)
 
     def claim_price(self, sample: Sample) -> bool:
         """True on its campaign's first reading of the cell, which this call claims: the one a
@@ -491,7 +482,7 @@ class Walk:
                 pipeline = acq.result.facts.pipeline
                 emit_replayed_step_tokens(pipeline.step_tokens, pipeline.step_timings)
         elif acq.deprecated_display is not None:
-            ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n, running=None)
+            ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n)
 
         # Before the snapshot below, which names the cell by its answer's address.
         taken = ctx.recorder.take(acq.result)
@@ -502,7 +493,6 @@ class Walk:
             # A refusal is never a row: the ceiling refused the cell, it measured nothing.
             raise StopLoop(stop, unmeasured=n - idx, detail=taken.facts.error or "")
         self.results.append(taken)
-        running = ctx.running(self.results)
         if stop is not None:
             raise StopLoop(stop, unmeasured=n - idx, detail=taken.facts.error or "")
 
@@ -514,7 +504,7 @@ class Walk:
             else:
                 self.consecutive_errors = 0
 
-        ctx.sample_scored(taken, acq.sample, idx, n, running=running)
+        ctx.sample_scored(taken, acq.sample, idx, n)
         return None
 
     def _abort_reason(self, result: GradedCell) -> WalkEnd | None:

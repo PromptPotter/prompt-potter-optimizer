@@ -31,6 +31,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
+from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
@@ -230,8 +231,9 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
         for key, arm in rr.proposed.items():
             fold, fit = rr.folds.get(key), rr.fit(key)
             reading = None if fit is None else fit.vs_reference
-            lift = None if reading is None else reading.headline
-            if not (fold and fold.total and lift is not None and lift.side == "below"):
+            if not (fold and fold.total and reading and reading.state is ReadingState.READ):
+                continue
+            if reading.headline.side != "below":
                 continue
 
             prompts = arm.individual.prompts

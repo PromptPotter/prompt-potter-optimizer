@@ -93,6 +93,7 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.records.cell_beat import CellBeatRecord
+from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -464,6 +465,9 @@ class ReadoutProjection(Projection):
         self._write(f"  {DIM}⇉ sample look-ahead {lookahead_axes(*window)}{tail}{RESET}")
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
+        self._narration.read(self.at_offset, record)
+
+    def _handle_fold_basis(self, record: FoldBasisRecord) -> None:
         self._narration.read(self.at_offset, record)
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
