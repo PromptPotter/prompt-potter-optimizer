@@ -232,6 +232,24 @@ class OverlapReading(FrozenModel):
         )
 
 
+class OriginPanel(FrozenModel):
+    """The round's ONE origin-panel record: the line's reading there, and whose panel rows the
+    election pooled; the rest of a round's panel rows `reading` bought after it
+    (`round.py::measure_overlap`), which the race never held."""
+
+    reading: OverlapReading
+    # By measured individual: `RoundResult.raced` reads their panel rows beside the draw.
+    raced: tuple[str, ...] = ()
+
+    @classmethod
+    def unread(cls, state: UnreadState, ending: RoundEnding) -> OriginPanel:
+        return cls(reading=OverlapReading.unpaired(state, ending))
+
+    def with_reading(self, reading: OverlapReading) -> OriginPanel:
+        """The same pooled rows under the line's later *reading* of the panel."""
+        return OriginPanel(reading=reading, raced=self.raced)
+
+
 class LineRate(FrozenModel):
     """One member of the best-so-far line as an overlap reading holds it."""
 

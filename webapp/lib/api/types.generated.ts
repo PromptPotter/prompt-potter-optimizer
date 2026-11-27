@@ -315,7 +315,7 @@ export interface CampaignLaunch {
 /** A paid pass scoring outside any run: its hop is the cycle it scores, or none
  * at all. */
 export interface ScoringPass {
-  pass_kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
+  pass_kind: 'origin' | 'panel' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
   kind: 'scoring_pass';
 }
 
@@ -887,7 +887,7 @@ export interface MemberAddress {
   /** The arm the individual was measured as; null for a pass that is no arm. */
   arm: ArmName | null;
   /** Which pass, where the same individual is read by more than one. */
-  pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor' | null;
+  pass_role: 'origin' | 'panel' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor' | null;
 }
 
 /** The cells a pair is read on, as an identity two readings can be compared by. */
@@ -1866,7 +1866,7 @@ export interface ServedRound {
   candidates: DashboardCandidate[];
   selection: number[];
   health: RoundHealth;
-  overlap: OverlapReading;
+  panel_reading: OverlapReading;
   panel_precision: PanelPrecision | null;
   optimizer_facts: OptimizerFact[];
   lift_prior: LiftPrior | null;
@@ -2016,7 +2016,7 @@ export interface RulerScope {
 
 /** The latest verify or bench pass on one arm, as its records left it. */
 export interface VerificationMark {
-  kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
+  kind: 'origin' | 'panel' | 'parent' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
   /** The arm the pass measures; `arm.key` joins it to its row. */
   arm: ArmName;
   state: 'running' | 'done' | 'failed';
@@ -2694,7 +2694,7 @@ export interface StampedEnvelope {
   /** The served contract (`X-Served-Contract`), compared as a fetch's answer is. */
   contract: string;
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fold_basis' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fold_basis' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -5920,7 +5920,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "d8e88d441f7e9998";
+export const SERVED_CONTRACT = "28631d7de1286416";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

@@ -85,7 +85,7 @@ def answer_space_signature(labels: Iterable[Any], *, dataset: str) -> str:
 
 
 def _answer_space_signature(stores: Stores, closed: RoundStatement, dataset: str) -> str:
-    walked = {cell[0]: cell for cells in closed.cells.arms.values() for cell in cells}
+    walked = {cell[0]: cell for cells in closed.cells.values() for cell in cells}
     return answer_space_signature(
         (cell.ground_truth for cell in walked_answers(stores, walked.values())),
         dataset=dataset,

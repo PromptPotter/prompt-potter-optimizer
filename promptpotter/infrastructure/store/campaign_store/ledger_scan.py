@@ -46,7 +46,6 @@ from promptpotter.domain.records.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundRestatedRecord,
     RoundStatement,
     RunPhaseRecord,
     RunWiringRecord,
@@ -57,7 +56,7 @@ from promptpotter.domain.records.run_records import (
     StandingBudgetRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.results import RoundCells
+from promptpotter.domain.results import round_walks
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
@@ -410,7 +409,6 @@ _RoundStep = (
     | DecisionRecord
     | RoundClosedRecord
     | RoundProposedRecord
-    | RoundRestatedRecord
     | ArmRecord
     | SampleScoredRecord
     | FoldBasisRecord
@@ -462,20 +460,13 @@ class _StandingFold:
                 held.decisions.setdefault(rnd, []).append(record)
             case RoundClosedRecord():
                 self._arms.close(record, record.arms)
+                # A restatement is its round WHOLE, so the ledger holding it owns every arm it never walked.
                 for arm_key in record.arms:
-                    self._cells.setdefault((rnd, arm_key), {})
+                    walked = record.cells.get(arm_key, ())
+                    self._cells.setdefault((rnd, arm_key), {c[0]: c for c in walked})
                 self._freeze(rnd, record.arms)
                 held.rounds[rnd] = StandingRound(record, offset)
                 held.reads.pop(rnd, None)
-            case RoundRestatedRecord():
-                # A restatement is its round WHOLE, so the ledger holding it owns every arm.
-                self._arms.close(record, record.arms)
-                for arm_key in record.arms:
-                    self._cells[rnd, arm_key] = {
-                        c[0]: c for c in record.cells.arms.get(arm_key, ())
-                    }
-                self._freeze(rnd, record.arms)
-                held.rounds[rnd] = StandingRound(record, offset)
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record
             case RoundProposedRecord():
@@ -550,7 +541,7 @@ class _StandingFold:
         )
 
 
-_MOVES_ROUNDS = (RoundEnteredRecord, RoundClosedRecord, RoundRestatedRecord)
+_MOVES_ROUNDS = (RoundEnteredRecord, RoundClosedRecord)
 assert set(_MOVES_ROUNDS) <= set(_StandingFold.records)
 
 
@@ -561,13 +552,7 @@ def moves_index(record: CycleRecord) -> bool:
     return isinstance(record, (*_CycleFactsFold.records, *_MOVES_ROUNDS))
 
 
-_Naming = (
-    SampleScoredRecord
-    | RoundClosedRecord
-    | RoundRestatedRecord
-    | RaceCatchUpRecord
-    | PassGradedRecord
-)
+_Naming = SampleScoredRecord | RoundClosedRecord | RaceCatchUpRecord | PassGradedRecord
 
 
 class _Answers:
@@ -585,8 +570,8 @@ class _Answers:
         match record:
             case SampleScoredRecord():
                 walked = [] if (cell := _walked_cell(record)) is None else [cell]
-            case RoundClosedRecord() | RoundRestatedRecord():
-                walks = record.cells.walks()
+            case RoundClosedRecord():
+                walks = record.walks()
                 walked = [cell for walk in walks for cell in walk.cells]
             case RaceCatchUpRecord():
                 walked = list(record.cells.values())
@@ -865,13 +850,13 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
     chain = list(spans)
     standing = scan_standing_rounds(chain)
     closed = standing.rounds
-    walks = [walk for held in closed.values() for walk in held.close.cells.walks()]
+    walks = [walk for held in closed.values() for walk in held.close.walks()]
     # Per round: one individual walked in two open rounds is two walks.
     open_rounds: dict[int, dict[ArmKey, list[WalkedCell]]] = {}
     for (round_num, key), fold in standing.arms.items():
         if round_num not in closed and fold.cells:
             open_rounds.setdefault(round_num, {})[key] = list(fold.cells.values())
-    walks += [walk for arms in open_rounds.values() for walk in RoundCells(arms=arms).walks()]
+    walks += [walk for arms in open_rounds.values() for walk in round_walks(arms, {})]
     walks += [
         IndividualWalk(individual_id, frozenset({role}), list(taken.values()))
         for (round_num, individual_id, role), taken in standing.passes.items()

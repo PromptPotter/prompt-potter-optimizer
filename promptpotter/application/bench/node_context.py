@@ -69,7 +69,6 @@ from promptpotter.domain.records.run_records import (
     RaceStandingRecord,
     RoundClosedRecord,
     RoundProposedRecord,
-    RoundRestatedRecord,
     RoundStatement,
     WalkRead,
 )
@@ -100,38 +99,6 @@ if TYPE_CHECKING:
     )
 
 
-def stated_line(
-    closing: RoundResult,
-    prior: Sequence[RoundResult],
-    difficulty: DifficultyView,
-    *,
-    lives: LivesConfig | None,
-    outlay: LineOutlay,
-) -> tuple[list[RoundResult], LevelSeries, RunStanding]:
-    """The line a statement of *closing* reads, and the level and standing it reads it at."""
-    line = [*(rr for rr in prior if rr.round < closing.round), closing]
-    standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
-    [series] = difficulty.level_series([line])
-    return line, series, standing
-
-
-def restated_round(
-    closing: RoundResult,
-    prior: Sequence[RoundResult],
-    difficulty: DifficultyView,
-    *,
-    lives: LivesConfig | None,
-    close: RoundStatement,
-    position_of: Mapping[str, int],
-) -> RoundRestatedRecord:
-    """*closing* stated again under its round's own outlay (*close*), never the
-    launch restating it."""
-    line, series, standing = stated_line(
-        closing, prior, difficulty, lives=lives, outlay=close.run_standing.outlay
-    )
-    return RoundRestatedRecord.of(line, position_of, series, standing)
-
-
 def own_rows(line: Sequence[RoundResult], parent: ArmKey) -> CellSheet:
     """Each sample's latest cell of *parent* ITSELF, panel top-ups included, never another's."""
     rows = NO_CELLS
@@ -149,8 +116,11 @@ def closed_round(
     position_of: Mapping[str, int],
     outlay: LineOutlay,
 ) -> RoundClosedRecord:
-    """*closing*'s close over *prior*, read under the line's *outlay* as it closes."""
-    line, series, standing = stated_line(closing, prior, difficulty, lives=lives, outlay=outlay)
+    """*closing*'s close over *prior*, read under the line's *outlay* as it closes; a
+    restatement reads under its round's own, never the launch restating it."""
+    line = [*(rr for rr in prior if rr.round < closing.round), closing]
+    standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
+    [series] = difficulty.level_series([line])
     return RoundClosedRecord.of(line, position_of, series, standing)
 
 
@@ -316,28 +286,28 @@ class Lineage(CycleRead):
             arms=held.arms,
             folds=held.folds,
             cells=held.cells,
-            overlap_results=held.overlap_results,
+            panel_rows=held.panel_rows,
             priors=cycle.rounds,
-            overlap=ReadingState.NOT_ASKED,
+            panel=ReadingState.NOT_ASKED,
         )
         rr = held.model_copy(
             update={
                 "election": stated.election,
                 "health": stated.health,
-                "overlap": stated.overlap,
+                "origin_panel": held.origin_panel.with_reading(stated.origin_panel.reading),
                 "optimizer_state": held.closed_state.model_copy(
                     update={"population": [held.arms[at.arm].individual]}
                 ),
             }
         )
         standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
-        return restated_round(
+        return closed_round(
             rr,
             cycle.rounds,
             cycle.difficulty,
             lives=cycle.config.optimization.lives,
-            close=standing.rounds[at.round].close,
             position_of=session.bank.position_of,
+            outlay=standing.rounds[at.round].close.run_standing.outlay,
         )
 
     def branch_round(self, *, changing: bool) -> int | ForkDecline:

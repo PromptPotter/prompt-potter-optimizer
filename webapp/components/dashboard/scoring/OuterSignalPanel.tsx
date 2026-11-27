@@ -28,12 +28,12 @@ type Lift = {
   advance: RoundAdvance;
 };
 
-// served: `overlap.lead` is the pick over C0 on the origin panel, the one reading `advance` judges.
+// served: `panel_reading.lead` is the pick over C0 on the origin panel, the one reading `advance` judges.
 function liftsOf(rounds: ServedRound[]): Lift[] {
   const out: Lift[] = [];
   for (const r of rounds) {
     if (r.round === 0) continue;
-    const { lead, advance } = r.overlap;
+    const { lead, advance } = r.panel_reading;
     const lift = liftOf(lead);
     const label = lead.b?.address.arm?.label;
     if (!lift || !label) continue;

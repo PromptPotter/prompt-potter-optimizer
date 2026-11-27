@@ -136,6 +136,7 @@ from promptpotter.domain.run_standing import (
     best_line,
     line_reference,
     rounds_without_advance,
+    walked_position,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
@@ -305,8 +306,8 @@ async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample], panel: Sequence[int]
 ) -> tuple[OverlapReading, dict[str, CellSheet]]:
     """After the election, on the panel it pooled; a member the election's pass read is never topped up again.
-    What it buys is the round's `line_results`, never the race the election read."""
-    passed = round_result.overlap_results
+    What it buys is the panel's `bought`, never the race the election read."""
+    passed = {key: round_result.panel_rows[key] for key in round_result.origin_panel.raced}
     election = round_result.election
     assert election is not None, "the origin panel is read after the round's election"
     ending = election.ending
@@ -372,7 +373,7 @@ async def measure_overlap(
     stopped = [(step, trigger) for step, trigger in fired if not whole(step)]
 
     # Read again off the round as it will CLOSE, so what was bought joins by the one read.
-    closing = round_result.model_copy(update={"line_results": bought})
+    closing = round_result.read_on_panel(round_result.origin_panel.reading, bought)
     closed = [closing if rr.round == round_result.round else rr for rr in cycle.rounds]
     c0, *picks = sorted(best_line(closed), key=lambda s: s.arm.round)
     topped_up = InRunCells(closed)
@@ -586,9 +587,9 @@ async def measure_population(
     parent = await measure_as_parent(
         ctx, cycle.parent, cycle.parent_point, cells, role=MeasurementRole.PARENT
     )
-    if parent.key not in arms and (backfilled := caught.get(parent.key)):
+    if parent.key not in arms and (caught_up := caught.get(parent.key)):
         # The cells its race caught the parent up on are its round reading's rows, as an arm's are.
-        taken = ReadArm(parent.key, parent.state, replace(parent.rows, cells=tuple(backfilled)))
+        taken = ReadArm(parent.key, parent.state, replace(parent.rows, cells=tuple(caught_up)))
         ctx.walked(taken, ctx.asked(parent.key, ()))
         parent = ctx.walks[parent.key].arm
     key_of = {s.id: s.key for s in pool}
@@ -827,13 +828,17 @@ async def _walk_population(
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
     pool: CatchUpPool | None = None
     if eliminator is not None and race is not None:
+        if (parent := ArmKey(cycle.parent.id)) not in proposed:
+            # Announced before the walks, so its catch-up is its arm's pass, which its read continues.
+            at = walked_position(cycle.rounds, parent)
+            state = Proposed(role=MeasurementRole.PARENT, position=at, individual=cycle.parent)
+            append_record(ArmRecord(round=round_num, arm=parent, state=state))
         pool = CatchUpPool(
             race,
             cycle.session,
             cycle.sample_index,
             eliminator.name,
-            # The parent's read opens after the walks, so its catch-up is a pass of its own.
-            {ArmKey(cycle.parent.id): (cycle.parent_point, MeasurementRole.BACKFILL)}
+            {parent: (cycle.parent_point, MeasurementRole.PARENT)}
             | {key: (sp, MeasurementRole.PANEL) for key, sp in sps.items()},
         )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
@@ -891,7 +896,7 @@ async def _walk_population(
         on_decided=on_decided,
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one
-    # sheet; the parent's, no arm, are handed on to its read.
+    # sheet; the parent's are handed on to its read, which continues its arm.
     caught = {} if pool is None else pool.caught
     for key, cells in caught.items():
         if key in concluded:
@@ -1017,12 +1022,12 @@ def _round_result(
             ruler=cycle.difficulty.stamp,
         ),
         priors=cycle.rounds,
-        overlap=ReadingState.PENDING,
+        panel=ReadingState.PENDING,
         round=ctx.round_num,
         arms={key: read.state for key, read in measured.filed.items()},
         folds=measured.folds,
         cells={key: read.rows for key, read in measured.filed.items()},
-        overlap_results=measured.on_panel,
+        panel_rows=measured.on_panel,
     )
 
 
@@ -1254,9 +1259,7 @@ async def _adapt_beside_overlap(
 ) -> RoundResult:
     cycle = ctx.cycle
     reading, bought = await measure_overlap(cycle, round_result, pool, list(measured.origin_panel))
-    seated = cycle.seat(
-        round_result.model_copy(update={"overlap": reading, "line_results": bought})
-    )
+    seated = cycle.seat(round_result.read_on_panel(reading, bought))
     # An adapter writes for the NEXT round, so none runs when no round follows: the standing the
     # close will state decides it, the one reading the close stops on.
     lives = cycle.config.optimization.lives

@@ -41,7 +41,7 @@ from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ArmName, RoundArm
-from promptpotter.domain.pass_kinds import PASSES
+from promptpotter.domain.pass_kinds import PASSES, IndividualWalk
 from promptpotter.domain.phase_acts import PhaseAct
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -65,7 +65,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.records import CycleRecord
-from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
+from promptpotter.domain.results import Election, RoundOutcome, RoundResult, round_walks
 from promptpotter.domain.ruler import LevelSeries, RulerReach
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import LedgerCell, WalkedCell
@@ -248,7 +248,9 @@ class RoundStatement(RoundOutcome):
     """A closed round as a ledger states it: the last statement per round stands and IS the round."""
 
     optimizer_state: OptimizerState
-    cells: RoundCells
+    # Its arms' rows as archive addresses, in walk order, then its origin-panel rows by individual.
+    cells: dict[ArmKey, list[WalkedCell]]
+    panel_cells: dict[str, list[WalkedCell]]
     # Each walked cell's position in the bank the cycle drew: a cell carries its key alone.
     positions: dict[str, int]
     # Every standing round re-read on this close's one scale: the series moves with the clock.
@@ -273,10 +275,13 @@ class RoundStatement(RoundOutcome):
         leading = (
             None if election is None or election.ending is RoundEnding.ADOPTED else election.leading
         )
+        panel = {key: rows.addresses() for key, rows in rr.panel_rows.items()}
+        walked = {key for walk in (*cells.values(), *panel.values()) for key, _, _ in walk}
         return cls(
             **{name: getattr(rr, name) for name in RoundOutcome.model_fields},
             cells=cells,
-            positions={key: position_of[key] for key in cells.sample_keys()},
+            panel_cells=panel,
+            positions={key: position_of[key] for key in walked},
             level_series=level_series,
             run_standing=run_standing,
             panel_precision=None
@@ -287,7 +292,7 @@ class RoundStatement(RoundOutcome):
 
     def summary(self) -> RoundSummary:
         """This round as the dashboard banks it."""
-        arms = self.cells.arms
+        arms = self.cells
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
         election = self.election
 
@@ -308,7 +313,7 @@ class RoundStatement(RoundOutcome):
             ],
             selection=list(dict.fromkeys(self.positions[key] for key, _, _ in longest)),
             health=RoundHealth.of(self.round, self.health),
-            overlap=self.overlap,
+            panel_reading=self.origin_panel.reading,
             panel_precision=self.panel_precision,
             optimizer_facts=self.optimizer_facts,
             lift_prior=None
@@ -316,24 +321,22 @@ class RoundStatement(RoundOutcome):
             else lift_prior(f.lift for f in election.fit.values() if f.lift is not None),
         )
 
-    def restated(self, optimizer_state: OptimizerState) -> RoundRestatedRecord:
+    def walks(self) -> list[IndividualWalk[WalkedCell]]:
+        return round_walks(self.cells, self.panel_cells)
+
+    def restated(self, optimizer_state: OptimizerState) -> RoundClosedRecord:
         """This round holding *optimizer_state*: what a member banks once the round has closed."""
         body = {name: getattr(self, name) for name in RoundStatement.model_fields}
         del body["timestamp"]
-        return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state})
+        return RoundClosedRecord(**body | {"optimizer_state": optimizer_state})
 
 
 class RoundClosedRecord(RoundStatement, CycleRecord):
-    """The run's clock: a close is its line's latest round, so its standing is the run's."""
-
-    record_type: Literal["round_closed"] = "round_closed"
-
-
-class RoundRestatedRecord(RoundStatement, CycleRecord):
-    """A closed round stated again, never a close: it moves no clock and announces nothing. It is
+    """A round's statement, and the run's clock: a close is its line's latest round, so its
+    standing is the run's. A round stated again is a restatement, which announces nothing: it is
     the round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it."""
 
-    record_type: Literal["round_restated"] = "round_restated"
+    record_type: Literal["round_closed"] = "round_closed"
 
 
 class WalkRead(FrozenModel):
@@ -1254,7 +1257,7 @@ class SpawnedBy(StrictModel):
     )
     role: MeasurementRole | None = Field(
         default=None,
-        description="WHY this cell ran. A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
+        description="WHY this cell ran. A pass beside the arms (an overlap top-up) is spawned outside the round's shared order, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
     )
     cycle_id: str | None = Field(
         default=None,

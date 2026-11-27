@@ -101,7 +101,7 @@ from promptpotter.domain.l4.cells import InnerCell, InnerCells
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
-from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
+from promptpotter.domain.origin_panel import OriginPanel, OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -1073,9 +1073,13 @@ def round_result(
         },
         "election": vote,
         # No pair read: a test that bends the advance passes the reading that derives it.
-        "overlap": OverlapReading.unpaired(
-            ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
-            vote.ending,
+        # Every origin-panel row it is handed was pooled beside the draw, as an election pools them.
+        "origin_panel": OriginPanel(
+            reading=OverlapReading.unpaired(
+                ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
+                vote.ending,
+            ),
+            raced=tuple(overrides.get("panel_rows", {})),
         ),
         "cells": {
             ArmKey(arm.individual.id): sheet(

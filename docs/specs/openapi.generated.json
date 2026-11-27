@@ -11119,7 +11119,6 @@
         "enum": [
           "origin",
           "panel",
-          "backfill",
           "parent",
           "overlap",
           "verify",
@@ -16945,9 +16944,6 @@
             "title": "Optimizer Facts",
             "type": "array"
           },
-          "overlap": {
-            "$ref": "#/components/schemas/OverlapReading"
-          },
           "panel_precision": {
             "anyOf": [
               {
@@ -16973,6 +16969,9 @@
             ],
             "description": "Which lever `panel_precision` calls for, null where it is.",
             "title": "Panel Precision Verdict"
+          },
+          "panel_reading": {
+            "$ref": "#/components/schemas/OverlapReading"
           },
           "round": {
             "title": "Round",
@@ -17028,7 +17027,7 @@
           "leading",
           "ending",
           "health",
-          "overlap",
+          "panel_reading",
           "panel_precision_verdict",
           "selection_movement",
           "measured",
@@ -17489,7 +17488,6 @@
               "round_closed",
               "round_entered",
               "round_proposed",
-              "round_restated",
               "round_warning",
               "run_phase",
               "run_wiring",

@@ -208,7 +208,7 @@ def build_prompt_export(
             formula=formula,
             own=own,
             vs_reference=selected.vs_reference if selected else None,
-            vs_origin=winner.overlap.lead,
+            vs_origin=winner.origin_panel.reading.lead,
             ability=level,
         ),
         bench=bench,

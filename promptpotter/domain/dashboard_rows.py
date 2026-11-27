@@ -424,7 +424,7 @@ class RoundSummary(FrozenModel):
     selection: list[int] = Field(default_factory=list)
     health: RoundHealth
     # C0 and each new best since on ONE shared set of cells: the only basis two rounds can be differenced on.
-    overlap: OverlapReading
+    panel_reading: OverlapReading
     # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
     panel_precision: PanelPrecision | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
@@ -505,7 +505,7 @@ def served_rounds(
 ) -> list[ServedRound]:
     ordered = sorted(rounds, key=lambda r: r.round)
     line = line_by_individual(
-        next((r.overlap for r in reversed(ordered) if overlap_line(r.overlap)), None)
+        next((r.panel_reading for r in reversed(ordered) if overlap_line(r.panel_reading)), None)
     )
     movements: list[list[SampleMovement]] = []
     previous: Sequence[int] = ()

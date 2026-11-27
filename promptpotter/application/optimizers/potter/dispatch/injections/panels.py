@@ -240,7 +240,8 @@ def _evolution(b: PotterView) -> list[Item]:
     if not rounds:
         return []
     labels = " · ".join(
-        f"r{rr.round} {ROUND_ADVANCE_INFO[rr.overlap.advance].label}" for rr in rounds[-5:]
+        f"r{rr.round} {ROUND_ADVANCE_INFO[rr.origin_panel.reading.advance].label}"
+        for rr in rounds[-5:]
     )
     lines = [
         f"EVOLUTION — L1 stall: {b.l1_stall_depth} rounds since the best-so-far line "
@@ -248,9 +249,9 @@ def _evolution(b: PotterView) -> list[Item]:
     ]
     line, overlap = next(
         (
-            (line, rr.overlap)
+            (line, rr.origin_panel.reading)
             for rr in reversed(b.measured_rounds)
-            if (line := overlap_line(rr.overlap))
+            if (line := overlap_line(rr.origin_panel.reading))
         ),
         ([], None),
     )

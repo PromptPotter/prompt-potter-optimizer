@@ -310,6 +310,7 @@ from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoi
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
     NotSeparatedStall,
+    OriginPanel,
     OverlapReading,
     PanelTrigger,
     RoundAdvance,
@@ -1639,7 +1640,9 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
         update={
             "election": won.election
             and won.election.model_copy(update={"deciding_pair": on_panel}),
-            "overlap": won.overlap.model_copy(update={"positions": (31, 32, 33)}),
+            "origin_panel": OriginPanel(
+                reading=won.origin_panel.reading.model_copy(update={"positions": (31, 32, 33)})
+            ),
         }
     )
     key_of = {slot: str(slot) for slot in range(30, 35)}
@@ -2411,7 +2414,7 @@ def test_a_parents_own_rows_are_its_latest_cell_per_sample_its_panel_top_ups_inc
         cells = {parent: sheet(measurement(s, g) for s, g in parents.items())}
         cells[other] = sheet([measurement(9, 1.0)])
         top_ups = {parent: sheet(measurement(s, g) for s, g in (panel or {}).items())}
-        return round_result(n, cells=cells, overlap_results=top_ups)
+        return round_result(n, cells=cells, panel_rows=top_ups)
 
     for line, read in (
         ([], {}),
@@ -2874,7 +2877,8 @@ _TIED_PANEL: Sequence[float | None] = [1.0, 0.0] + [0.0] * 6 + [1.0]
 def _stamped(rnd: int, stall: StallEffect) -> RoundResult:
     """A round closed with *stall*, the one stream L1 patience, the lives and L2/L3 patience read."""
     closed = round_result(rnd)
-    return closed.model_copy(update={"overlap": closed.overlap.model_copy(update={"stall": stall})})
+    read = closed.origin_panel.reading.model_copy(update={"stall": stall})
+    return closed.model_copy(update={"origin_panel": OriginPanel(reading=read)})
 
 
 def test_a_layer_resets_on_a_later_reset_round_and_stalls_on_any_other() -> None:
@@ -3067,7 +3071,7 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     close, observed = stall_reads
     sequence = [(True, 2), (True, 2), (True, 2), (True, 2), (False, 0), (False, 2), (False, 2)]
     closes = [close(i, improved=up, electable=n) for i, (up, n) in enumerate(sequence, start=1)]
-    assert observed([c.overlap.stall for c in closes]).l1_stall_count == 3, (
+    assert observed([c.origin_panel.reading.stall for c in closes]).l1_stall_count == 3, (
         "three trailing non-improving rounds, one uncompared — all three advance the stall"
     )
     origin_close = close(0, improved=False, electable=0)
@@ -3092,7 +3096,7 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     )
     assert watched.advance is RoundAdvance.NOT_SEPARATED, "a triggered arm is read, never adopted"
     assert line_by_individual(watched)["c2.2"].rate == 1.0, "and served beside the line"
-    held = close(2, improved=False).overlap.stall
+    held = close(2, improved=False).origin_panel.reading.stall
     switch: tuple[tuple[NotSeparatedStall, int], ...] = (("counts", 3), ("resets", 1), ("skips", 2))
     for not_separated, stalled in switch:
         tied = _line_read(True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL, not_separated=not_separated)
@@ -3132,18 +3136,20 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
     assert stopped.advance is RoundAdvance.UNREAD
     rounds = [
         round_result(0, improved=False),
-        round_result(1, improved=True, overlap=won),
+        round_result(1, improved=True, origin_panel=OriginPanel(reading=won)),
         round_result(2, improved=False),
-        round_result(3, improved=True, overlap=stopped),
+        round_result(3, improved=True, origin_panel=OriginPanel(reading=stopped)),
     ]
     assert [rounds_without_advance(rounds[:n]) for n in (2, 3, 4)] == [0, 1, 1], (
         "the unread round neither clears the held round nor adds to it"
     )
     assert rounds_without_advance([*rounds, round_result(4, improved=False)]) == 2
-    assert observed([rr.overlap.stall for rr in rounds[1:]]).l1_stall_count == 1, (
+    assert observed([rr.origin_panel.reading.stall for rr in rounds[1:]]).l1_stall_count == 1, (
         "the live stall reads what the standing reads"
     )
-    unread_close = round_result(3, improved=True, overlap=stopped, voted={"electable": 2})
+    unread_close = round_result(
+        3, improved=True, origin_panel=OriginPanel(reading=stopped), voted={"electable": 2}
+    )
     assert stalls_left([origin_close, unread_close], (2, 4)) == 2, (
         "the life bank reads the stall column: an unread pick banks no life"
     )
@@ -3235,7 +3241,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     # One ceiling stop: the pick's own level on the origin panel at its one-sided anytime-valid
     # lower bound, `halt_at_fitness` its target; no pair, no stop.
     def outcome(reading: OverlapReading, target: float) -> StopReason | None:
-        closing = round_result(1, improved=True, overlap=reading)
+        closing = round_result(1, improved=True, origin_panel=OriginPanel(reading=reading))
         folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
         line = [round_result(0, improved=False), closing.model_copy(update={"folds": folds})]
         standing = RunStanding.after(line, lives=None, outlay=_UNPAID)
@@ -3968,7 +3974,7 @@ def test_an_individuals_cells_are_one_set_and_a_decision_never_reads_an_overlap_
                 ArmKey(edit_sp.id): walk("c1", {2: 1.0, 3: 1.0}),
                 ArmKey(origin_sp.id): walk("r1", {2: 0.0, 3: 1.0}),
             },
-            overlap_results={origin_sp.id: walk("ov", {4: 1.0, 5: 1.0})},
+            panel_rows={origin_sp.id: walk("ov", {4: 1.0, 5: 1.0})},
         ),
     ]
     in_run = InRunCells(rounds)
@@ -4082,9 +4088,23 @@ def standing_run() -> _StandingRun:
     reread = _line_read(False, ("C3.2", _CLEAN_PANEL), c0=_C0_PANEL, ids=ids)
     run = [
         closed(0, origin, "C0", selected="C0"),
-        closed(1, first_pick, "C1.1", "C1.2", selected="C1.1", overlap=first_line),
+        closed(
+            1,
+            first_pick,
+            "C1.1",
+            "C1.2",
+            selected="C1.1",
+            origin_panel=OriginPanel(reading=first_line),
+        ),
         closed(2, first_pick, "C2.1"),  # held: nobody promoted, no line re-read
-        closed(3, second_pick, "C3.1", "C3.2", selected="C3.2", overlap=newest),
+        closed(
+            3,
+            second_pick,
+            "C3.1",
+            "C3.2",
+            selected="C3.2",
+            origin_panel=OriginPanel(reading=newest),
+        ),
     ]
     return _StandingRun(run, closed, stands, first_line, newest, reread, second_pick, third_pick)
 
@@ -4126,14 +4146,27 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
     assert (vs_c0.coverage.scored, vs_c0.headline.rate_a, vs_c0.headline.rate_b) == (9, 0.0, 1.0), (
         "C0 on the reading its selection sat beside: rates differenced must have sat one exam"
     )
-    held_on = stands([*run, closed(4, second_pick, "C4.1", overlap=reread)])
+    held_on = stands(
+        [*run, closed(4, second_pick, "C4.1", origin_panel=OriginPanel(reading=reread))]
+    )
     assert held_on.selection == standing_now.selection
     assert held_on.vs_origin.state is ReadingState.READ
     assert held_on.vs_origin.headline.rate_a == pytest.approx(1 / 9), (
         "a later round that holds re-reads the line, and the standing follows the NEWEST reading"
     )
     pass_stopped = OverlapReading.unpaired(ReadingState.PASS_STOPPED, RoundEnding.CROWNED)
-    unread = stands([*run, closed(5, third_pick, "C5.1", selected="C5.1", overlap=pass_stopped)])
+    unread = stands(
+        [
+            *run,
+            closed(
+                5,
+                third_pick,
+                "C5.1",
+                selected="C5.1",
+                origin_panel=OriginPanel(reading=pass_stopped),
+            ),
+        ]
+    )
     assert unread.selection is not None
     assert unread.selection.label == "C5.1"
     assert unread.vs_origin.state is ReadingState.PASS_STOPPED, (
@@ -4175,7 +4208,7 @@ def test_the_climb_prices_c0s_lift_by_what_the_line_paid_and_an_absent_denominat
     assert held.vs_previous_pick == held.vs_origin and held.climb is not None
     assert held.climb.vs_previous_pick == held.climb.lift, "one pair read on two sheets at round 1"
     assert standing_now.vs_previous_pick is not None
-    assert standing_now.vs_previous_pick == run[-1].overlap.vs_previous_pick
+    assert standing_now.vs_previous_pick == run[-1].origin_panel.reading.vs_previous_pick
 
 
 def _guarded(**moved: Any) -> GuardMember:
@@ -4941,7 +4974,7 @@ def _closed_origin(cycle: Cycle) -> _ClosedOrigin:
     origin = cycle.origin_round.origin.individual
     round_zero = session.store.campaigns.standing_rounds(session.hop, moment=None).rounds[0].close
     assert round_zero.election is not None
-    recorded_keys = {key for key, _, _ in round_zero.cells.arms[round_zero.election.ended_on]}
+    recorded_keys = {key for key, _, _ in round_zero.cells[round_zero.election.ended_on]}
     drawn = [s for s in session.bank.samples if s.key in recorded_keys]
     kept = [s for s in session.bank.samples if s.key != drawn[0].key]
     return _ClosedOrigin(

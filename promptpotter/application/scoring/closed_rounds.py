@@ -5,11 +5,7 @@ from dataclasses import replace
 
 from promptpotter.application.initialization.session import LaunchState, drawn_partition
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.run_records import (
-    RoundClosedRecord,
-    RoundEnteredRecord,
-    RoundRestatedRecord,
-)
+from promptpotter.domain.records.run_records import RoundClosedRecord, RoundEnteredRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer, WalkedCell
@@ -104,9 +100,8 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
     return RoundResult(
         **{name: getattr(close, name) for name in RoundOutcome.model_fields},
         at_offset=held.at_offset,
-        cells={k: rows(v) for k, v in close.cells.arms.items()},
-        overlap_results={k: rows(v) for k, v in close.cells.overlap.items()},
-        line_results={k: rows(v) for k, v in close.cells.line.items()},
+        cells={k: rows(v) for k, v in close.cells.items()},
+        panel_rows={k: rows(v) for k, v in close.panel_cells.items()},
     )
 
 
@@ -130,9 +125,6 @@ class RoundFileProjection(Projection):
                 unlink_robust(path)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._check_out(record.round)
-
-    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
         self._check_out(record.round)
 
     def _check_out(self, round_num: int) -> None:

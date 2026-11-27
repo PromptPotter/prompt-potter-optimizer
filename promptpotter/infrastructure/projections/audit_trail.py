@@ -90,6 +90,9 @@ class RoundAudits:
                 self._audits = {n: a for n, a in self._audits.items() if n < record.round}
             return
         if isinstance(record, RoundClosedRecord):
+            # A round stated again (a restatement) closes nothing.
+            if record.round != self._round or self._closed:
+                return
             self._closed, self._finished_at = True, record.timestamp
             self._settle()
             return

@@ -617,7 +617,7 @@ class Escalation(nodes.Controller):
         evidence_starved = evidence_starved_node(round_result.health.node_failure_rates) is not None
         ladder, event = bank_and_route(
             ctx.slice(Ladder),
-            stall=round_result.overlap.stall,
+            stall=round_result.origin_panel.reading.stall,
             l1_patience=knobs.l1_patience,
             escalation_ladder=knobs.escalation_ladder,
             l1_mandatory_breach=l1_mandatory_breach,

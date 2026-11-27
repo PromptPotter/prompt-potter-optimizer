@@ -152,7 +152,7 @@ from promptpotter.domain.hierarchy import (
 )
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.narration import Narration
-from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
+from promptpotter.domain.origin_panel import OriginPanel, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.records.run_records import (
@@ -852,7 +852,7 @@ def _round(**kw: Any) -> RoundResult:
         **{
             "folds": {},
             "election": None,
-            "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, RoundEnding.HELD),
+            "origin_panel": OriginPanel.unread(ReadingState.NOT_HELD, RoundEnding.HELD),
             "health": degradation_health(),
             "optimizer_state": optimizer_state(),
         }
@@ -2355,7 +2355,6 @@ def test_an_inner_run_hangs_on_the_arm_its_spawn_record_names_or_says_why_none_h
         (None, ran, None, "it carries no spawn record"),
         (spawned(None), ran, None, "spawned by an origin pass"),
         (spawned(MeasurementRole.OVERLAP), ran, None, "(overlap) is not one of a round's arms"),
-        (spawned(MeasurementRole.BACKFILL), ran, None, "(backfill) is not one of a round's arms"),
     ]
     for record, asker, host, why in rows:
         assert inner_host(record, asker) == host, f"{record} hangs on another candidate"

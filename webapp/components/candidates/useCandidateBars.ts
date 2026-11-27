@@ -26,7 +26,7 @@ export function useCandidateBars(index: LineageIndex) {
 
   const lineRoundNum = dash?.overlap_line_round ?? null;
   const overlap = useMemo(
-    () => history.find((r) => r.round === lineRoundNum)?.overlap ?? null,
+    () => history.find((r) => r.round === lineRoundNum)?.panel_reading ?? null,
     [history, lineRoundNum],
   );
 

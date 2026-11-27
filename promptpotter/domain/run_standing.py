@@ -34,7 +34,7 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
 def rounds_without_advance(rounds: Sequence[RoundOutcome]) -> int:
     depth = 0
     for rr in reversed(rounds):
-        match rr.overlap.stall:
+        match rr.origin_panel.reading.stall:
             case StallEffect.STARTS | StallEffect.RESETS:
                 break
             case StallEffect.COUNTS:
@@ -51,7 +51,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.election is None or rr.election.electable == 0:
             continue
-        match rr.overlap.stall:
+        match rr.origin_panel.reading.stall:
             case StallEffect.RESETS:
                 bank = min(cap, bank + 1)
             case StallEffect.COUNTS:
@@ -152,7 +152,9 @@ def round_clocks(rounds: Sequence[RoundResult], *, fitness_ceiling: float | None
             )
         )
     return RoundClocks(
-        rounds_to_separable=first(lambda r: r.overlap.advance is RoundAdvance.ADVANCED),
+        rounds_to_separable=first(
+            lambda r: r.origin_panel.reading.advance is RoundAdvance.ADVANCED
+        ),
         rounds_to_improved=first(lambda r: r.improved),
         rounds_to_ceiling=to_ceiling,
         fitness_ceiling=fitness_ceiling,
@@ -389,22 +391,22 @@ class RunStanding(FrozenModel):
         chosen = picked[-1]
         arms: dict[str, ArmName] = {arm.key: arm for arm in pick_line(rounds)}
         before = [individual for individual in picked if individual != chosen]
-        vs_origin, overlap = next(
+        vs_origin, panel = next(
             (
-                (reading, rr.overlap)
+                (reading, rr.origin_panel.reading)
                 for rr in reversed(rounds)
                 if rr.round >= declared.round
-                for reading in (rr.overlap.lead, *rr.overlap.earlier)
+                for reading in (rr.origin_panel.reading.lead, *rr.origin_panel.reading.earlier)
                 if reading.state is ReadingState.READ and reading.b.address.individual_id == chosen
             ),
-            (declared.overlap.lead, declared.overlap),
+            ((read := declared.origin_panel.reading).lead, read),
         )
         # Both legs read one sheet: where the previous pick is C0, its leg IS the origin leg.
         displaced = (before[-1], chosen) if before else None
         vs_previous_pick = next(
             (
                 pair
-                for pair in (vs_origin, overlap.vs_previous_pick)
+                for pair in (vs_origin, panel.vs_previous_pick)
                 if pair is not None
                 and pair.a is not None
                 and pair.b is not None
@@ -426,7 +428,9 @@ class RunStanding(FrozenModel):
             vs_previous_pick=vs_previous_pick,
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
-            advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
+            advanced=sum(
+                1 for rr in after_origin if rr.origin_panel.reading.advance is RoundAdvance.ADVANCED
+            ),
             candidates_tested=sum(rr.candidates_scored for rr in after_origin),
             search_usd=outlay.search_usd,
             worked_s=outlay.worked_s,

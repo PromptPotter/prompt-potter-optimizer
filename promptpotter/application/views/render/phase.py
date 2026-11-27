@@ -161,7 +161,7 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
         )
 
     # The ONLY line two rounds can be differenced on: every other number is read on the subset this round bought.
-    if series := overlap_series(round_result.overlap):
+    if series := overlap_series(round_result.origin_panel.reading):
         lines.append(f"overlap ({series})")
     return lines
 

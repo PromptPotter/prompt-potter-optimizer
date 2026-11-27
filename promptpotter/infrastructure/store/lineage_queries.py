@@ -163,7 +163,9 @@ def read_cycle(
     spans = _cycle_spans(stores, hop, index, moment=moment)
     standing = scan_standing_rounds(spans)
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
-    line = line_by_individual(next((c.overlap for c in closes if overlap_line(c.overlap)), None))
+    line = line_by_individual(
+        next((c.origin_panel.reading for c in closes if overlap_line(c.origin_panel.reading)), None)
+    )
     # A replay reads no verify: the verdict a fresh read banks is the head's, never the moment's.
     verify = (
         {}

@@ -29,7 +29,7 @@ def crowning_cells(
         own = rr.raced(ArmKey(parent)).by_key()
         against = rr.raced(ArmKey(pair.a.address.individual_id)).by_key()
         on = (
-            {key_of[slot] for slot in rr.overlap.positions}
+            {key_of[slot] for slot in rr.origin_panel.reading.positions}
             if pair.cell_set.name is CellSetName.ORIGIN_PANEL
             else own.keys() & against.keys()
         )

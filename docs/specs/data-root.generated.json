@@ -430,7 +430,6 @@
             "enum": [
               "origin",
               "panel",
-              "backfill",
               "parent",
               "overlap",
               "verify",
@@ -2734,7 +2733,6 @@
             "enum": [
               "origin",
               "panel",
-              "backfill",
               "parent",
               "overlap",
               "verify",

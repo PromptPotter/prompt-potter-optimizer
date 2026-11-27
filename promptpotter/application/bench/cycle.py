@@ -24,7 +24,7 @@ from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
-from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
+from promptpotter.domain.origin_panel import OriginPanel, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -105,7 +105,7 @@ def _origin_round(
         ),
         # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
         health=head_health(0, arm, results, picked=True, priors=()),
-        overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, RoundEnding.ADOPTED),
+        origin_panel=OriginPanel.unread(ReadingState.SAME_INDIVIDUAL, RoundEnding.ADOPTED),
         optimizer_state=optimizer_state,
     )
 

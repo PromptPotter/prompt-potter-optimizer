@@ -67,7 +67,6 @@ PASSES: dict[MeasurementRole, Pass] = {
     for row in (
         _pass(MeasurementRole.ORIGIN, _DECISION, arm=True),
         _pass(MeasurementRole.PANEL, _DECISION, arm=True, checks=True),
-        _pass(MeasurementRole.BACKFILL, _DECISION),
         _pass(MeasurementRole.PARENT, _DECISION, arm=True),
         _pass(MeasurementRole.OVERLAP, _REPORT),
         _pass(

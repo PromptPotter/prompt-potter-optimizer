@@ -2219,7 +2219,6 @@
             "round_closed": "#/components/schemas/RoundClosedRecord",
             "round_entered": "#/components/schemas/RoundEnteredRecord",
             "round_proposed": "#/components/schemas/RoundProposedRecord",
-            "round_restated": "#/components/schemas/RoundRestatedRecord",
             "round_warning": "#/components/schemas/RoundWarningRecord",
             "run_phase": "#/components/schemas/RunPhaseRecord",
             "run_wiring": "#/components/schemas/RunWiringRecord",
@@ -2337,9 +2336,6 @@
           },
           {
             "$ref": "#/components/schemas/RoundProposedRecord"
-          },
-          {
-            "$ref": "#/components/schemas/RoundRestatedRecord"
           },
           {
             "$ref": "#/components/schemas/RoundWarningRecord"
@@ -4817,7 +4813,6 @@
         "enum": [
           "origin",
           "panel",
-          "backfill",
           "parent",
           "overlap",
           "verify",
@@ -5674,6 +5669,28 @@
           "campaigns"
         ],
         "title": "OriginAlreadyRun",
+        "type": "object"
+      },
+      "OriginPanel": {
+        "additionalProperties": false,
+        "description": "The round's ONE origin-panel record: the line's reading there, and whose panel rows the\nelection pooled; the rest of a round's panel rows `reading` bought after it\n(`round.py::measure_overlap`), which the race never held.",
+        "properties": {
+          "raced": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Raced",
+            "type": "array"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/OverlapReading"
+          }
+        },
+        "required": [
+          "reading"
+        ],
+        "title": "OriginPanel",
         "type": "object"
       },
       "OriginSource": {
@@ -6867,7 +6884,6 @@
               "round_closed",
               "round_entered",
               "round_proposed",
-              "round_restated",
               "round_warning",
               "run_phase",
               "run_wiring",
@@ -7523,86 +7539,9 @@
         "title": "RoundArm",
         "type": "object"
       },
-      "RoundCells": {
-        "additionalProperties": false,
-        "description": "A :class:`RoundResult`'s rows as archive addresses, in walk order.",
-        "properties": {
-          "arms": {
-            "additionalProperties": {
-              "items": {
-                "maxItems": 3,
-                "minItems": 3,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "boolean"
-                  }
-                ],
-                "type": "array"
-              },
-              "type": "array"
-            },
-            "title": "Arms",
-            "type": "object"
-          },
-          "line": {
-            "additionalProperties": {
-              "items": {
-                "maxItems": 3,
-                "minItems": 3,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "boolean"
-                  }
-                ],
-                "type": "array"
-              },
-              "type": "array"
-            },
-            "title": "Line",
-            "type": "object"
-          },
-          "overlap": {
-            "additionalProperties": {
-              "items": {
-                "maxItems": 3,
-                "minItems": 3,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "boolean"
-                  }
-                ],
-                "type": "array"
-              },
-              "type": "array"
-            },
-            "title": "Overlap",
-            "type": "object"
-          }
-        },
-        "title": "RoundCells",
-        "type": "object"
-      },
       "RoundClosedRecord": {
         "additionalProperties": false,
-        "description": "The run's clock: a close is its line's latest round, so its standing is the run's.",
+        "description": "A round's statement, and the run's clock: a close is its line's latest round, so its\nstanding is the run's. A round stated again is a restatement, which announces nothing: it is\nthe round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it.",
         "properties": {
           "arms": {
             "additionalProperties": {
@@ -7634,7 +7573,27 @@
             "type": "object"
           },
           "cells": {
-            "$ref": "#/components/schemas/RoundCells"
+            "additionalProperties": {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "object"
           },
           "election": {
             "anyOf": [
@@ -7669,8 +7628,31 @@
           "optimizer_state": {
             "$ref": "#/components/schemas/OptimizerState"
           },
-          "overlap": {
-            "$ref": "#/components/schemas/OverlapReading"
+          "origin_panel": {
+            "$ref": "#/components/schemas/OriginPanel"
+          },
+          "panel_cells": {
+            "additionalProperties": {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "title": "Panel Cells",
+            "type": "object"
           },
           "panel_precision": {
             "anyOf": [
@@ -7711,10 +7693,11 @@
           "round",
           "folds",
           "election",
-          "overlap",
+          "origin_panel",
           "health",
           "optimizer_state",
           "cells",
+          "panel_cells",
           "positions",
           "level_series",
           "run_standing",
@@ -7853,129 +7836,6 @@
           "opened_on"
         ],
         "title": "RoundProposedRecord",
-        "type": "object"
-      },
-      "RoundRestatedRecord": {
-        "additionalProperties": false,
-        "description": "A closed round stated again, never a close: it moves no clock and announces nothing. It is\nthe round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it.",
-        "properties": {
-          "arms": {
-            "additionalProperties": {
-              "discriminator": {
-                "mapping": {
-                  "cut": "#/components/schemas/Cut",
-                  "measured": "#/components/schemas/Measured",
-                  "measuring": "#/components/schemas/Measuring",
-                  "proposed": "#/components/schemas/Proposed"
-                },
-                "propertyName": "state"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/Proposed"
-                },
-                {
-                  "$ref": "#/components/schemas/Measuring"
-                },
-                {
-                  "$ref": "#/components/schemas/Cut"
-                },
-                {
-                  "$ref": "#/components/schemas/Measured"
-                }
-              ]
-            },
-            "title": "Arms",
-            "type": "object"
-          },
-          "cells": {
-            "$ref": "#/components/schemas/RoundCells"
-          },
-          "election": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Election"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "folds": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ScoreSummary"
-            },
-            "title": "Folds",
-            "type": "object"
-          },
-          "health": {
-            "$ref": "#/components/schemas/DegradationHealth"
-          },
-          "level_series": {
-            "$ref": "#/components/schemas/LevelSeries"
-          },
-          "optimizer_facts": {
-            "items": {
-              "$ref": "#/components/schemas/OptimizerFact"
-            },
-            "title": "Optimizer Facts",
-            "type": "array"
-          },
-          "optimizer_state": {
-            "$ref": "#/components/schemas/OptimizerState"
-          },
-          "overlap": {
-            "$ref": "#/components/schemas/OverlapReading"
-          },
-          "panel_precision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PanelPrecision"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "positions": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Positions",
-            "type": "object"
-          },
-          "record_type": {
-            "const": "round_restated",
-            "default": "round_restated",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "run_standing": {
-            "$ref": "#/components/schemas/RunStanding"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "round",
-          "folds",
-          "election",
-          "overlap",
-          "health",
-          "optimizer_state",
-          "cells",
-          "positions",
-          "level_series",
-          "run_standing",
-          "panel_precision"
-        ],
-        "title": "RoundRestatedRecord",
         "type": "object"
       },
       "RoundWarningRecord": {
@@ -8914,7 +8774,7 @@
               }
             ],
             "default": null,
-            "description": "WHY this cell ran. A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass."
+            "description": "WHY this cell ran. A pass beside the arms (an overlap top-up) is spawned outside the round's shared order, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass."
           },
           "round": {
             "description": "Outer round; 0 is the origin (C0).",

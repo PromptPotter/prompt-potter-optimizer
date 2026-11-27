@@ -198,7 +198,9 @@ def _read_layer(layer: LayerCounters, rounds: Sequence[RoundResult]) -> LayerRea
     entered = layer.entered_round
     if entered is None:
         return LayerReading(layer.stall_count, now)
-    if any(rr.round > entered and rr.overlap.stall is StallEffect.RESETS for rr in rounds):
+    if any(
+        rr.round > entered and rr.origin_panel.reading.stall is StallEffect.RESETS for rr in rounds
+    ):
         return LayerReading(0, now)
     return LayerReading(layer.stall_count + 1, entered)
 

@@ -918,7 +918,7 @@ def _serve(
     formula = state.composite_fitness_formula
     dials = None if formula is None else anchored_criterion_dials(formula)
     live = standing is not None and run.producer.appending
-    line_round = next((r for r in reversed(rounds) if overlap_line(r.overlap)), None)
+    line_round = next((r for r in reversed(rounds) if overlap_line(r.panel_reading)), None)
     axis = _round_axis(state, live=live)
     closed_line = [
         LineArm(address=owners(r.round, c.reading.arm.key), reading=c.reading)
@@ -959,7 +959,7 @@ def _serve(
         skip_refusal=skip_refusal,
         stop=run.stop,
         overlap_line_round=None if line_round is None else line_round.round,
-        overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
+        overlap_line_n=None if line_round is None else len(line_round.panel_reading.positions),
         composite_fitness_weights=None
         if dials is None
         else {name: d.weight for name, d in dials.items()},

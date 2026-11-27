@@ -7,7 +7,7 @@ from promptpotter.application.scoring.paired import origin_floor
 from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
 from promptpotter.domain.arms import ArmState, Concluded
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.origin_panel import OriginPanel, OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, UnreadState
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import Election, RoundResult
@@ -32,11 +32,11 @@ def ended_on(
     arms: dict[ArmKey, ArmState],
     folds: dict[ArmKey, ScoreSummary],
     cells: dict[ArmKey, CellSheet],
-    overlap_results: dict[str, CellSheet],
+    panel_rows: dict[str, CellSheet],
     priors: Sequence[RoundResult],
-    overlap: UnreadState,
+    panel: UnreadState,
 ) -> RoundResult:
-    """A round ending on *election*: what it reads off that arm (election, health, overlap) stated
+    """A round ending on *election*: what it reads off that arm (election, health, panel) stated
     once, for its selector at the close and for a layer that re-elects it
     (`node_context.py::Lineage.reelected`)."""
     head = arms[election.ended_on]
@@ -47,10 +47,13 @@ def ended_on(
         arms=arms,
         folds=folds,
         cells=cells,
-        overlap_results=overlap_results,
+        panel_rows=panel_rows,
         election=election,
         health=head_health(round, head, cells[election.ended_on], picked=picked, priors=priors),
-        overlap=OverlapReading.unpaired(overlap, election.ending),
+        origin_panel=OriginPanel(
+            reading=OverlapReading.unpaired(panel, election.ending),
+            raced=tuple(panel_rows),
+        ),
     )
 
 

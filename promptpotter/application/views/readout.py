@@ -113,7 +113,6 @@ from promptpotter.domain.records.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundRestatedRecord,
     RoundStatement,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -385,8 +384,14 @@ class ReadoutProjection(Projection):
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
         self._say(record)
 
-    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
+    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
+        """A round already closed here is stated again: a restatement announces nothing."""
+        restated = record.round in self._closed
         self._closed[record.round] = record
+        if not restated:
+            self._narration.read(self.at_offset, record)
+            self.on_round_complete(record)
+            return
         election = record.election
         if election is not None and election.selected and (stated := election.reelection):
             picked = arm_name(election.selected, record.arms[election.selected], record.round)
@@ -394,11 +399,6 @@ class ReadoutProjection(Projection):
                 f"  {DIM}· r{record.round} re-elected {picked.label} by {stated.by.display}: "
                 f"{stated.reason}{RESET}"
             )
-
-    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._narration.read(self.at_offset, record)
-        self._closed[record.round] = record
-        self.on_round_complete(record)
 
     def _say(self, record: NarratedRecord) -> None:
         """The narration's row as one line: its tone's glyph, its label, then its detail."""
@@ -677,5 +677,9 @@ class ReadoutProjection(Projection):
                 [] if review is None else review.checks[at], schema_repairs(audits[at])
             ):
                 self._write(line)
-        self._write(render_advance_status(round_result.overlap, standing.rounds_without_advance))
+        self._write(
+            render_advance_status(
+                round_result.origin_panel.reading, standing.rounds_without_advance
+            )
+        )
         self._write(_node_bottom())

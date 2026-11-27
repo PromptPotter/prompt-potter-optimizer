@@ -38,20 +38,6 @@ row it closes.
   `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
   fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
   `git grep -n "class EscalationLayer" -- promptpotter` is empty.
-- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**: a
-  proposed prior's catch-up continues its arm's pass (w8-spine2). Open: the PARENT's catch-up still
-  records as `BACKFILL`, no arm, because its read (`node_context.py::measure_as_parent`) opens after
-  the walks; announcing its arm first moves potter's and capo-pobb's behaviour keys
-  (`decisions.ledger.arms`). No offline leg catches up a proposed prior (all 19 `race_catch_up`
-  records are the parent's). **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the
-  close counts the cells `rows(leader)` holds; `git grep -c BACKFILL -- promptpotter` is 0.
-- **Overlap and repair keep their own pass families**: `RoundCells.overlap`/`.line` and `RoundRestatedRecord`
-  carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
-  fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
-  `RoundResult.overlap_results` derives from them, while `RoundOutcome.overlap` (the `OverlapReading`,
-  17 files) stays; or (b) the reading and its cells are one origin-panel record the round and its
-  restatement carry, so `.overlap` goes whole. Both reshape `RoundStatement` (a wipe). **Re-test:**
-  `git grep -n "\.overlap\b" -- promptpotter` is empty.
 
 ### batch/26 · narr (links 1-2, on stream-rk's tip)
 
@@ -493,12 +479,12 @@ Each root closes the rows it names by title; it does not restate them, and each 
 its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/` unless a path is named.
 
 - **Every pass is a recorded pass (root C1)**: w8-spine landed its flag half (every pass's cells reach
-  the ledger as `SampleScoredRecord`s). Open: overlap keeps records of its own (`.overlap` 26/15,
-  `RoundRestatedRecord` 19/6, `CatchUpPool` 7/3), and the parent's catch-up walk records as `BACKFILL`, no arm.
-  Root: a pass that measures is a record. **Closes:** **Overlap and repair keep their own pass families**,
-  **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**.
-  **Run data:** `RoundStatement` reshapes. **Size:** medium; it edits `runner/round.py` and `views/readout.py`.
-  **Re-test:** the two rows' own.
+  the ledger as `SampleScoredRecord`s); w9-pass the rest but one (the origin panel is one record
+  on the round, a restatement is one more close, the parent's catch-up is its arm's pass). Open: the
+  race's catch-ups are scheduled by a pool of their own (`catch_up.py::CatchUpPool`, 7/3) beside
+  `query_loop.py::run_walks`, which walks every other pass.
+  Root: a pass that measures is a record. **Size:** small; it edits `scoring/query_loop.py`.
+  **Re-test:** `git grep -c CatchUpPool -- promptpotter` is 0.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,

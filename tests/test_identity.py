@@ -4839,7 +4839,7 @@ async def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never
             1,
             arms=[arm_state("parent")],
             cells={PARENT: sheet(own)},
-            overlap_results={PARENT: sheet([ran(4, grades[4])])},
+            panel_rows={PARENT: sheet([ran(4, grades[4])])},
         )
         set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
         view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_critique")), Ladder())

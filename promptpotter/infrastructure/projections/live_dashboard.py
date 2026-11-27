@@ -62,8 +62,6 @@ from promptpotter.domain.records.run_records import (
     RaceCatchUpRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundRestatedRecord,
-    RoundStatement,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
@@ -377,7 +375,6 @@ _AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
         ProviderEasedRecord,
         RoundEnteredRecord,
         RoundClosedRecord,
-        RoundRestatedRecord,
         PhaseRecord,
         PassGradedRecord,
         BenchScoredRecord,
@@ -538,12 +535,6 @@ class LiveDashboardProjection(Projection):
             self._reset_live(self.state.round)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._stated(record)
-
-    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
-        self._stated(record)
-
-    def _stated(self, record: RoundStatement) -> None:
         self._standings[record.round] = (record.level_series, record.run_standing)
         self._stand()
         prior = [r for r in self.state.rounds if r.round != record.round]

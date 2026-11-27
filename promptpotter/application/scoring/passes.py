@@ -473,7 +473,7 @@ async def measure_noise_floor(
     round_file = stores.campaigns.standing_rounds(session.hop, moment=None).rounds[0].close
     assert round_file.election is not None, "round 0 elects the origin it adopted"
     origin = round_file.origin
-    recorded_cells = round_file.cells.arms[round_file.election.ended_on]
+    recorded_cells = round_file.cells[round_file.election.ended_on]
     sample_keys = {key for key, _, _ in recorded_cells}
     scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
     scorer = session.state.scoring.scorer

@@ -91,7 +91,7 @@ def _regraded(rd: RoundResult, scorer: Scorer) -> RoundResult:
     def under[K: str](sheets: dict[K, CellSheet]) -> dict[K, CellSheet]:
         return {key: scorer.sheet(cell.facts for cell in sheet) for key, sheet in sheets.items()}
 
-    sets = ("cells", "overlap_results", "line_results")
+    sets = ("cells", "panel_rows")
     return rd.model_copy(update={name: under(getattr(rd, name)) for name in sets})
 
 

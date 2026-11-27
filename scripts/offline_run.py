@@ -291,10 +291,9 @@ def data_root(leg: Path) -> Path:
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
 RESUME_APPENDS = ("phases", "run_phases", "arms", "rounds_entered", "standings")
-# Which of a round's cells a launch paid and which it replayed, by where each count sits: a
-# reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
-# that name elsewhere, such as the fitness term `evaluators.tokens`.
-CELL_ROWS, ROW_SPLIT = ("cells", "overlap_cells", "line_cells"), ("cached",)
+# Which of a round's cells a launch paid and which it replayed: a cell row's `cached`, under the
+# round picks that hold rows (`ROUND`).
+CELL_ROWS, ROW_SPLIT = ("cells", "panel_cells"), ("cached",)
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 
 BENCH: dict[str, Any] = {
@@ -1863,11 +1862,14 @@ ROUND: Pick = {
     "round": "round",
     "election": One("election", ELECTION),
     "health": {"grade": "health.grade", "cause": "health.cause"},
-    "overlap": One("overlap", {
-        "advance": "advance", "stall": "stall", "positions": "positions",
-        "lead": One("lead", PAIR), "vs_previous_pick": One("vs_previous_pick", PAIR),
-        "earlier": Each("earlier", PAIR),
-        "triggered": Each("triggered", {"trigger": "trigger", "reading": One("reading", PAIR)}),
+    "origin_panel": One("origin_panel", {
+        "reading": One("reading", {
+            "advance": "advance", "stall": "stall", "positions": "positions",
+            "lead": One("lead", PAIR), "vs_previous_pick": One("vs_previous_pick", PAIR),
+            "earlier": Each("earlier", PAIR),
+            "triggered": Each("triggered", {"trigger": "trigger", "reading": One("reading", PAIR)}),
+        }),
+        "raced": "raced",
     }),
     "arms": Each("arms", {
         "state": "state", "role": "role", "reason": "reason.kind",
@@ -1881,8 +1883,7 @@ ROUND: Pick = {
         "total": "total", "walked": "walked", "degraded": "degraded", "deprecated": "deprecated",
     }),
     "cells": Each("cells", Each("", ROW, by="position")),
-    "overlap_cells": Each("overlap_results", Each("", ROW)),
-    "line_cells": Each("line_results", Each("", ROW)),
+    "panel_cells": Each("panel_rows", Each("", ROW)),
     "population": Each("optimizer_state.population", {
         "parents": "lineage.parent_ids", "changes": "lineage.changes_description",
     }),

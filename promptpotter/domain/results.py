@@ -20,7 +20,12 @@ from promptpotter.domain.arm_reading import (
 from promptpotter.domain.arms import ArmState, Concluded, arm_name, is_leader_eligible
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.origin_panel import OverlapReading, RoundEnding, line_by_individual
+from promptpotter.domain.origin_panel import (
+    OriginPanel,
+    OverlapReading,
+    RoundEnding,
+    line_by_individual,
+)
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
 from promptpotter.domain.round_health import DegradationHealth
@@ -40,7 +45,8 @@ from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 def round_document_digest(rr: RoundResult) -> str:
     """The WHOLE outcome, never a chosen subset: under-firing goes stale in silence."""
     outcome = rr.model_dump(mode="json", include=set(RoundOutcome.model_fields))
-    return stable_hash([outcome, rr.addresses().model_dump(mode="json")])
+    panel = {key: rows.addresses() for key, rows in rr.panel_rows.items()}
+    return stable_hash([outcome, rr.addresses(), panel])
 
 
 class OptimizerFact(FrozenModel):
@@ -54,39 +60,21 @@ class OptimizerFact(FrozenModel):
     kind: Literal["stat", "note"]
 
 
-class RoundCells(FrozenModel):
-    """A :class:`RoundResult`'s rows as archive addresses, in walk order."""
-
-    arms: dict[ArmKey, list[WalkedCell]] = Field(default_factory=dict)
-    overlap: dict[str, list[WalkedCell]] = Field(default_factory=dict)
-    line: dict[str, list[WalkedCell]] = Field(default_factory=dict)
-
-    def walks(self) -> list[IndividualWalk[WalkedCell]]:
-        return _round_walks(arms=self.arms, overlap=self.overlap, line=self.line)
-
-    def sample_keys(self) -> set[str]:
-        walked = [*self.arms.values(), *self.overlap.values(), *self.line.values()]
-        return {key for cells in walked for key, _, _ in cells}
-
-
-# The WALK's role, never the answer's `role` stamp: that names who FILED it, and a replay reads it.
-_ROW_SET_ROLES: dict[str, frozenset[MeasurementRole]] = {
-    "arms": SCOPE_ROLES[RoleScope.DECISION],
-    "overlap": frozenset({MeasurementRole.OVERLAP}),
-    "line": frozenset({MeasurementRole.OVERLAP}),
-}
-assert _ROW_SET_ROLES.keys() == RoundCells.model_fields.keys()
-
-
-def _round_walks[C: tuple[Any, ...]](
-    **by_individual: Mapping[ArmKey, Sequence[C]] | Mapping[str, Sequence[C]],
+def round_walks[C: tuple[Any, ...]](
+    arms: Mapping[ArmKey, Sequence[C]], panel: Mapping[str, Sequence[C]]
 ) -> list[IndividualWalk[C]]:
-    """An arm's cells are its individual's: a refused arm walked none, so its slot key holds none."""
+    """The WALK's role, never the answer's `role` stamp: that names who FILED it, and a replay reads
+    it. An arm's cells are its individual's: a refused arm walked none, so its slot key holds none."""
     return [
-        IndividualWalk(individual_id, _ROW_SET_ROLES[row_set], cells)
-        for row_set in _ROW_SET_ROLES
-        for individual_id, cells in by_individual[row_set].items()
+        *(
+            IndividualWalk(key, SCOPE_ROLES[RoleScope.DECISION], cells)
+            for key, cells in arms.items()
+        ),
+        *(IndividualWalk(key, _PANEL_ROLES, cells) for key, cells in panel.items()),
     ]
+
+
+_PANEL_ROLES = frozenset({MeasurementRole.OVERLAP})
 
 
 class Reelection(FrozenModel):
@@ -169,8 +157,8 @@ class RoundOutcome(FrozenModel):
     # Each arm's fold of the cells the round files for it; none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     election: Election | None
-    # Not `improved`, the selector's point estimate. `pending` until the overlap pass lands.
-    overlap: OverlapReading
+    # Not `improved`, the selector's point estimate. Its reading is `pending` until the line's pass lands.
+    origin_panel: OriginPanel
     # Graded against the rounds before it, so it is stamped, never re-derived from this one.
     health: DegradationHealth
     # Built once, at the round's close (`Cycle.close_state`); `None` from its election until then.
@@ -237,7 +225,7 @@ class RoundOutcome(FrozenModel):
         cuts = dict(zip(proposed, panel_cuts([counts[key] for key in proposed]), strict=True))
         # A reference reads the cells its readers asked, so no proposed arm's fuller walk cuts it.
         cuts |= {key: panel_cuts([counts[key]])[0] for key in self.arms if key not in cuts}
-        line = line_by_individual(self.overlap)
+        line = line_by_individual(self.origin_panel.reading)
         return [
             ArmReading.of(
                 arm_name(key, arm, self.round),
@@ -280,11 +268,8 @@ class RoundResult(RoundOutcome):
     at_offset: int | None = None
     # By arm: a reference re-read on the round's cells is an arm, so a held round's head is here.
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
-    # Keyed by the MEASURED individual, outside the arms: `raced` reads them beside the draw.
-    overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
-    # What the line's origin-panel reading bought after the election (`round.py::measure_overlap`),
-    # by individual: the race the election read never holds them, so `raced` does not.
-    line_results: dict[str, CellSheet] = Field(default_factory=dict)
+    # Every origin-panel row, by the MEASURED individual, outside the arms (`OriginPanel.raced`).
+    panel_rows: dict[str, CellSheet] = Field(default_factory=dict)
 
     @property
     def results(self) -> CellSheet:
@@ -296,12 +281,20 @@ class RoundResult(RoundOutcome):
 
     def raced(self, key: ArmKey) -> CellSheet:
         """The ONE row set the race and the election's θ read: the draw, then the origin-panel
-        cells it lacks."""
-        return self.rows(key).merged(self.overlap_results.get(key, NO_CELLS))
+        cells it lacks that the election pooled."""
+        pooled = key in self.origin_panel.raced
+        return self.rows(key).merged(self.panel_rows.get(key, NO_CELLS) if pooled else NO_CELLS)
+
+    def read_on_panel(self, reading: OverlapReading, bought: Mapping[str, CellSheet]) -> Self:
+        """This round holding the line's origin-panel *reading* and the cells it *bought*."""
+        panel = self.origin_panel.with_reading(reading)
+        return self.model_copy(
+            update={"origin_panel": panel, "panel_rows": {**self.panel_rows, **bought}}
+        )
 
     def closed_rows(self, key: ArmKey) -> CellSheet:
-        """Every row the round closed holding of *key*: its race, then what the line bought."""
-        return self.raced(key).merged(self.line_results.get(key, NO_CELLS))
+        """Every row the round closed holding of *key*: its draw, then its origin-panel cells."""
+        return self.rows(key).merged(self.panel_rows.get(key, NO_CELLS))
 
     def reference_rows(self, key: ArmKey) -> CellSheet:
         """The rows of the arm *key* was judged against, re-read on this round's cells."""
@@ -309,12 +302,9 @@ class RoundResult(RoundOutcome):
         against = None if fit is None or fit.vs_reference is None else fit.vs_reference.a
         return NO_CELLS if against is None else self.rows(ArmKey(against.address.individual_id))
 
-    def addresses(self) -> RoundCells:
-        return RoundCells(
-            arms={k: v.addresses() for k, v in self.cells.items()},
-            overlap={k: v.addresses() for k, v in self.overlap_results.items()},
-            line={k: v.addresses() for k, v in self.line_results.items()},
-        )
+    def addresses(self) -> dict[ArmKey, list[WalkedCell]]:
+        """Its arms' rows as archive addresses, in walk order."""
+        return {k: v.addresses() for k, v in self.cells.items()}
 
     @property
     def headline(self) -> ArmReading | None:
@@ -336,10 +326,9 @@ class InRunCells:
             if rr.round in kept and kept[rr.round][0] is rr
             else (
                 rr,
-                _round_walks(
-                    arms={k: _by_sample(v) for k, v in rr.cells.items()},
-                    overlap={k: _by_sample(v) for k, v in rr.overlap_results.items()},
-                    line={k: _by_sample(v) for k, v in rr.line_results.items()},
+                round_walks(
+                    {k: _by_sample(v) for k, v in rr.cells.items()},
+                    {k: _by_sample(v) for k, v in rr.panel_rows.items()},
                 ),
             )
             for rr in rounds
