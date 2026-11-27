@@ -48,7 +48,7 @@ declare module "chart.js" {
   interface PluginOptionsByType<TType extends ChartType> {
     barCaps?: { counts: (number | null)[]; standing: number | null; crown: string };
     divergenceLine?: { index: number | null };
-    inFlightPulse?: { index: number | null };
+    inFlightPulse?: { indices: readonly number[] };
     ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
     partialPanels?: { short: boolean[]; picked: number | null };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
@@ -268,40 +268,11 @@ function nextPulseFrame(chart: ChartJS): void {
   );
 }
 
-const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
+const inFlightPulsePlugin: Plugin<"bar", { indices: readonly number[] }> = {
   id: "inFlightPulse",
   afterDatasetsDraw(chart, _args, opts) {
-    const idx = opts.index;
-    if (idx == null || idx < 0) return;
-    const { ctx } = chart;
-    let left = Infinity;
-    let right = -Infinity;
-    let top = Infinity;
-    let base = -Infinity;
-    chart.data.datasets.forEach((ds, di) => {
-      if (isMark(ds.label)) return;
-      const p = (chart.getDatasetMeta(di).data[idx] as Placed)?.getProps?.(["x", "y", "base", "width"], true);
-      const x = p?.x;
-      const y = p?.y;
-      if (typeof x !== "number" || typeof y !== "number") return;
-      const b = typeof p?.base === "number" ? p.base : chart.chartArea.bottom;
-      const width = typeof p?.width === "number" ? p.width : POINT_PULSE_WIDTH;
-      left = Math.min(left, x - width / 2);
-      right = Math.max(right, x + width / 2);
-      top = Math.min(top, y);
-      base = Math.max(base, b);
-    });
-    if ([left, right, top, base].some((v) => !Number.isFinite(v))) return;
-    const t = 0.5 + 0.5 * Math.sin((Date.now() / PULSE_PERIOD_MS) * Math.PI * 2);
-    const glow = getCss("--color-success");
-    ctx.save();
-    ctx.strokeStyle = glow;
-    ctx.globalAlpha = 0.55 + 0.4 * t;
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = glow;
-    ctx.shadowBlur = 7 + 9 * t;
-    ctx.strokeRect(left - 1.5, top - 1.5, right - left + 3, base - top + 3);
-    ctx.restore();
+    if (opts.indices.length === 0) return;
+    for (const idx of opts.indices) pulseAt(chart, idx);
     nextPulseFrame(chart);
   },
   beforeDestroy(chart) {
@@ -310,6 +281,38 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
     pulseRaf.delete(chart);
   },
 };
+
+function pulseAt(chart: ChartJS<"bar">, idx: number) {
+  const { ctx } = chart;
+  let left = Infinity;
+  let right = -Infinity;
+  let top = Infinity;
+  let base = -Infinity;
+  chart.data.datasets.forEach((ds, di) => {
+    if (isMark(ds.label)) return;
+    const p = (chart.getDatasetMeta(di).data[idx] as Placed)?.getProps?.(["x", "y", "base", "width"], true);
+    const x = p?.x;
+    const y = p?.y;
+    if (typeof x !== "number" || typeof y !== "number") return;
+    const b = typeof p?.base === "number" ? p.base : chart.chartArea.bottom;
+    const width = typeof p?.width === "number" ? p.width : POINT_PULSE_WIDTH;
+    left = Math.min(left, x - width / 2);
+    right = Math.max(right, x + width / 2);
+    top = Math.min(top, y);
+    base = Math.max(base, b);
+  });
+  if ([left, right, top, base].some((v) => !Number.isFinite(v))) return;
+  const t = 0.5 + 0.5 * Math.sin((Date.now() / PULSE_PERIOD_MS) * Math.PI * 2);
+  const glow = getCss("--color-success");
+  ctx.save();
+  ctx.strokeStyle = glow;
+  ctx.globalAlpha = 0.55 + 0.4 * t;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = 7 + 9 * t;
+  ctx.strokeRect(left - 1.5, top - 1.5, right - left + 3, base - top + 3);
+  ctx.restore();
+}
 
 const MARK_R = 6;
 type MarkEl = { x: number; y: number; skip?: boolean };
@@ -381,7 +384,7 @@ interface Props {
   selectedKey: string | null;
   onSelect: (view: CandidateBar | null) => void;
   divergenceBoundary: number | null;
-  inFlightIndex: number | null;
+  inFlightIndices: readonly number[];
   onGeometry: (g: PlotGeometry) => void;
 }
 
@@ -390,7 +393,7 @@ export const FitnessChart = memo(function FitnessChart({
   selectedKey,
   onSelect,
   divergenceBoundary,
-  inFlightIndex,
+  inFlightIndices,
   onGeometry,
 }: Props) {
   const { views, metrics } = ctx;
@@ -591,13 +594,13 @@ export const FitnessChart = memo(function FitnessChart({
       legend: { display: false },
       barCaps: { counts: cutCounts, standing: standingIdx, crown },
       divergenceLine: { index: divergenceBoundary },
-      inFlightPulse: { index: inFlightIndex },
+      inFlightPulse: { indices: inFlightIndices },
       ciWhisker: { bands, shaded: asLines },
       partialPanels: { short: asLines ? shortPanels : [], picked: selectionBorder?.idx ?? null },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndices, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="chart-frame">

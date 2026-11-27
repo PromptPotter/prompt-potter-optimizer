@@ -27,6 +27,7 @@
 @import "./domains/onboarding.css";
 @import "./domains/node-surface-frame.css";
 @import "./domains/account.css";
+@import "./domains/bulletins.css";
 @import "./domains/login-auth.css";
 @import "./domains/onboarding-consent.css";
 @import "./domains/compare-evidence.css";

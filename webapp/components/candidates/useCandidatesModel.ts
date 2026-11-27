@@ -120,15 +120,11 @@ export function useCandidatesModel(dash: ServedDashboard) {
     return idx >= 0 ? idx : null;
   }, [divergentRound, views]);
 
-  const measuring = dash.measuring_arm;
-  const inFlightIndex = useMemo(() => {
-    if (!isLive || measuring === null) return null;
-    // `findLastIndex`: a fork's timeline also holds the parent's arm of that key, earlier on it.
-    const idx = views.findLastIndex(
-      (v) => v.reading?.arm.key === measuring.key && v.reading.arm.round === measuring.round,
-    );
-    return idx >= 0 ? idx : null;
-  }, [isLive, measuring, views]);
+  // Each arm with a cell out, as its own line row says: arms racing abreast pulse together.
+  const inFlightIndices = useMemo(
+    () => views.flatMap((v, i) => (v.reading && v.openCells.length > 0 ? [i] : [])),
+    [views],
+  );
 
   const lensActive = lens !== "" && !scoringMaskActive;
 
@@ -231,7 +227,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     scoringMaskActive,
     divergentRound,
     divergenceBoundary,
-    inFlightIndex,
+    inFlightIndices,
     overlap,
     hasOverlap,
     pickedSet,

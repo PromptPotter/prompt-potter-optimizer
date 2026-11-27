@@ -1940,11 +1940,22 @@ def test_a_forks_served_line_leads_with_its_parents_rounds_and_bills_their_chain
         if isinstance(rnd, HierarchyRound) and rnd.facts.round < 2
         for c in rnd.children
     ]
-    on_fork = cycles[Subject.of((fork,)).address].facts
-    assert below and on_fork.inherited == below, (
-        "the fork's bars do not lead with its parent's candidates below the cut"
-    )
+    fork_entry = cycles[Subject.of((fork,)).address]
+    own = {
+        c.address
+        for rnd in fork_entry.children
+        if isinstance(rnd, HierarchyRound)
+        for c in rnd.children
+    }
     assert isinstance(dash, ServedDashboard), "guard"
+    line = [a.address for a in dash.line]
+    assert below and sorted(line[: len(below)]) == sorted(below), (
+        "the fork's line does not lead with its parent's candidates below the cut"
+    )
+    assert own and set(line[len(below) :]) == own, (
+        "the fork's line past its cut is not the candidates its own cycle ran"
+    )
+    on_fork = fork_entry.facts
     # Tokens, exactly: the offline world bills no USD.
     prefix = sum(dash.spend_metered_by_round[str(r)].billed_tokens for r in (0, 1))
     assert prefix > 0, "guard: the prefix billed nothing, so no bill below tells the chain apart"

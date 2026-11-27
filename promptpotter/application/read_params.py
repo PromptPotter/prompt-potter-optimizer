@@ -20,6 +20,7 @@ from promptpotter.application.backend_listing import (
     backend_health,
     list_backends,
 )
+from promptpotter.application.bulletins import AccountBulletins, account_bulletins
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading, read_command
 from promptpotter.application.config_map import ConfigMapResponse
@@ -218,6 +219,13 @@ class MeParams(ReadParams, read=ReadKind.ME, route="/auth/me"):
     def answer(self, caller: Caller) -> account.MeResponse:
         stores = caller.stores
         return account.me(stores, account.account_read(stores), configured=caller.providers)
+
+
+class BulletinsParams(ReadParams, read=ReadKind.BULLETINS, route="/auth/bulletins"):
+    """What the host posted to every account, newest first, each marked if this account dismissed it."""
+
+    def answer(self, caller: Caller) -> AccountBulletins:
+        return account_bulletins(caller.stores)
 
 
 class UserSettingsParams(ReadParams, read=ReadKind.USER_SETTINGS, route="/auth/user-settings"):

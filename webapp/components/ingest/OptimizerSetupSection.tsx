@@ -67,7 +67,7 @@ export function OptimizerSetupSection({ onApply }: { onApply: (edit: DraftEdit) 
             reach: setup.reach,
             scope: "optimizer",
             nestsNode: setup.measurement_node,
-            activeNode: null,
+            active: null,
             isLive: false,
           }}
           tone="neutral"

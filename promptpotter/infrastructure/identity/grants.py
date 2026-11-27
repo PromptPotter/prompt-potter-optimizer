@@ -53,6 +53,10 @@ class IdentityPaths:
     def tokens(self) -> Path:
         return self.root / "tokens.json"
 
+    @property
+    def bulletins(self) -> Path:
+        return self.root / "bulletins.json"
+
 
 IDENTITY_DIR = "identity"
 

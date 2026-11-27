@@ -116,6 +116,24 @@
         "title": "AcceptTermsPayload",
         "type": "object"
       },
+      "AccountBulletins": {
+        "additionalProperties": false,
+        "properties": {
+          "bulletins": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ServedBulletin"
+            },
+            "title": "Bulletins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bulletins"
+        ],
+        "title": "AccountBulletins",
+        "type": "object"
+      },
       "AccountKey": {
         "additionalProperties": false,
         "properties": {
@@ -183,6 +201,30 @@
             "type": "boolean"
           }
         ]
+      },
+      "ActiveNode": {
+        "additionalProperties": false,
+        "description": "The node running now, in the layer whose ids name it: under pp-self both layers share ids.",
+        "properties": {
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "optimizer",
+              "target"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "node"
+        ],
+        "title": "ActiveNode",
+        "type": "object"
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
@@ -4271,6 +4313,8 @@
           "open-origin-draft",
           "set-user-settings",
           "accept-terms",
+          "post-bulletin",
+          "dismiss-bulletin",
           "set-api-key",
           "remove-api-key",
           "mint-api-token",
@@ -5187,17 +5231,6 @@
         "additionalProperties": false,
         "description": "The round in flight, rebuilt whole on every persist.",
         "properties": {
-          "active_node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Node"
-          },
           "candidates": {
             "items": {
               "$ref": "#/components/schemas/LiveCandidate"
@@ -5227,16 +5260,6 @@
             },
             "title": "Nodes",
             "type": "object"
-          },
-          "racing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RacingBlock"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "round": {
             "default": 0,
@@ -6110,6 +6133,23 @@
           "draft_id"
         ],
         "title": "DiscardDraftPayload",
+        "type": "object"
+      },
+      "DismissBulletinPayload": {
+        "additionalProperties": false,
+        "description": "Dismiss one bulletin for the caller's account: it pops up no more, and the list marks it.",
+        "properties": {
+          "bulletin_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Bulletin Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bulletin_id"
+        ],
+        "title": "DismissBulletinPayload",
         "type": "object"
       },
       "DisplayMetric": {
@@ -10030,6 +10070,34 @@
         "title": "LiftProfile",
         "type": "object"
       },
+      "LineArm": {
+        "additionalProperties": false,
+        "description": "One arm of a cycle's served line, a closed row and a live one in one shape.",
+        "properties": {
+          "address": {
+            "description": "The candidate's address on the cycle that ran it.",
+            "title": "Address",
+            "type": "string"
+          },
+          "open_cells": {
+            "description": "`LiveCandidate.open_cells`; empty on a closed round.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Open Cells",
+            "type": "array"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/ArmReading"
+          }
+        },
+        "required": [
+          "reading",
+          "address"
+        ],
+        "title": "LineArm",
+        "type": "object"
+      },
       "LineRate": {
         "additionalProperties": false,
         "description": "One member of the best-so-far line as an overlap reading holds it.",
@@ -10114,6 +10182,14 @@
                 "type": "null"
               }
             ]
+          },
+          "open_cells": {
+            "description": "The positions of this arm's cells out now, oldest first: arms walking abreast each carry their own; empty between its walks.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Open Cells",
+            "type": "array"
           },
           "pipeline_overlay": {
             "anyOf": [
@@ -14401,6 +14477,29 @@
         "title": "PoolSource",
         "type": "string"
       },
+      "PostBulletinPayload": {
+        "additionalProperties": false,
+        "description": "Post a bulletin to every account on this box; only its host may.",
+        "properties": {
+          "pops_up": {
+            "default": false,
+            "description": "Open it at sign-in and on each page load until the account dismisses it.",
+            "title": "Pops Up",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "PostBulletinPayload",
+        "type": "object"
+      },
       "PrefixReading": {
         "additionalProperties": false,
         "description": "A provider's prefix-cache discount as every surface reads it, served whole.",
@@ -14667,35 +14766,6 @@
           "max_campaigns_per_day"
         ],
         "title": "QuotaStatus",
-        "type": "object"
-      },
-      "RacingBlock": {
-        "additionalProperties": false,
-        "description": "The round's standing in its eliminator ``member``'s race.",
-        "properties": {
-          "member": {
-            "title": "Member",
-            "type": "string"
-          },
-          "n_samples": {
-            "title": "N Samples",
-            "type": "integer"
-          },
-          "top": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Top",
-            "type": "array"
-          }
-        },
-        "required": [
-          "member",
-          "n_samples",
-          "top"
-        ],
-        "title": "RacingBlock",
         "type": "object"
       },
       "RaisedCommand": {
@@ -16205,10 +16275,57 @@
         "title": "ServedBackpressure",
         "type": "object"
       },
+      "ServedBulletin": {
+        "additionalProperties": false,
+        "properties": {
+          "dismissed": {
+            "description": "This account dismissed it.",
+            "title": "Dismissed",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "pops_up": {
+            "description": "Opens on its own until the account dismisses it.",
+            "title": "Pops Up",
+            "type": "boolean"
+          },
+          "posted_at": {
+            "title": "Posted At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "posted_at",
+          "text",
+          "pops_up",
+          "dismissed"
+        ],
+        "title": "ServedBulletin",
+        "type": "object"
+      },
       "ServedDashboard": {
         "additionalProperties": false,
         "description": "A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the\nserving seam can say — the run phase and its producer, the controls armed now, the campaign's\nown meter, and every reading a surface would otherwise decide for itself. Nothing here reaches\ndisk, and every field is required: one builder (``_serve``) states them all, for the head and\nfor a replay alike. What the banked state holds as an INPUT to one of those readings\n(``LiveDashboardState``'s own fields) is not served beside it.",
         "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveNode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node running now: the newest open call's, else the newest open phase's; null unless the cycle is appending."
+          },
           "admission": {
             "$ref": "#/components/schemas/RunAdmission",
             "description": "The verb the run control offers now, its campaign's refusal joined (`admission.py::admitted`), or the sentence where it offers none."
@@ -16372,6 +16489,14 @@
             ],
             "description": "The call holding the walk and for how long (`held_call`); null until a call has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown."
           },
+          "line": {
+            "description": "The cycle's candidate line, read across its fork chain: every closed round's arms in round order, then the round in flight's while no round file holds it. The bars, the tree strip and the chart are views of it.",
+            "items": {
+              "$ref": "#/components/schemas/LineArm"
+            },
+            "title": "Line",
+            "type": "array"
+          },
           "lookahead": {
             "$ref": "#/components/schemas/SampleLookahead"
           },
@@ -16382,16 +16507,6 @@
             ],
             "title": "Measured Unit",
             "type": "string"
-          },
-          "measuring_arm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmName"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "metered_line": {
             "description": "This cycle's spend in the campaign's meter, capped or not, a replay included — `domain/spend.py::metered_line`, the CLI's stop line.",
@@ -16549,6 +16664,17 @@
               }
             ]
           },
+          "successor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fork a supersede moved this cycle's line to, its cycle id the `value`: what runs now runs there. Null where the line is its own."
+          },
           "total_backend_calls": {
             "default": 0,
             "title": "Total Backend Calls",
@@ -16602,6 +16728,9 @@
           "caps",
           "overshot",
           "fork_remainder",
+          "active",
+          "successor",
+          "line",
           "observed",
           "walk",
           "round_axis",
@@ -18340,14 +18469,6 @@
             "description": "The address of the candidate a fork hangs from: the arm its mint record names, on the cycle of its parent's line that ran it. Null on a root.",
             "title": "From Candidate"
           },
-          "inherited": {
-            "description": "The addresses of the candidates of each round its line holds from below its fork's cut, round then slot order, on the cycle that ran each: what its bars lead with. Empty on a root.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Inherited",
-            "type": "array"
-          },
           "lens_criterion": {
             "anyOf": [
               {
@@ -18456,8 +18577,7 @@
           "lens_criterion",
           "lens_shift",
           "origin",
-          "from_candidate",
-          "inherited"
+          "from_candidate"
         ],
         "title": "SubtreeCycleEntryFacts",
         "type": "object"
@@ -19756,6 +19876,38 @@
           }
         },
         "summary": "Activity",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
+    "/api/v1/auth/bulletins": {
+      "get": {
+        "description": "What the host posted to every account, newest first, each marked if this account dismissed it.",
+        "operationId": "bulletins_api_v1_auth_bulletins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBulletins"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Bulletins",
         "tags": [
           "Reads"
         ]
@@ -21627,6 +21779,79 @@
         ]
       }
     },
+    "/api/v1/commands/dismiss-bulletin": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "dismiss_bulletin_api_v1_commands_dismiss_bulletin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissBulletinPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Dismiss-Bulletin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -22407,6 +22632,79 @@
           }
         },
         "summary": "Pause",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/post-bulletin": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "post_bulletin_api_v1_commands_post_bulletin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostBulletinPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Post-Bulletin",
         "tags": [
           "Commands"
         ]

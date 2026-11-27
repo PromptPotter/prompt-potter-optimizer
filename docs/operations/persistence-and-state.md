@@ -64,7 +64,7 @@ projects/{tenant_id}/
         job.log                       # a detached launch's stderr
 ```
 
-**A reshape of run data's on-disk form wipes it at the landing, counted first** (`ls .promptpotter/projects/*/campaigns`); the archive and every survivor row stay untouched. An archived campaign stays in `campaigns/`, hidden by `lifecycle_status`.
+**A reshape of run data's on-disk form wipes it at the landing, counted first** (`ls .promptpotter/projects/*/campaigns`); the archive and every survivor row stay untouched, the host's bulletins among them, so a wipe's warning posted before the landing is still read after it. An archived campaign stays in `campaigns/`, hidden by `lifecycle_status`.
 
 ## File reference
 

@@ -18,6 +18,7 @@ import {
   type NodeConfigParam,
   type NodeReach,
   type PipelineView,
+  type AccountBulletins,
   type ActiveSessionResponse,
   type ArchiveDatasets,
   type ActivityResponse,
@@ -128,6 +129,11 @@ export function healthRead(): ReadDescriptor<HealthResponse> {
 
 export function meRead(): ReadDescriptor<MeResponse> {
   return { ...once<MeResponse>("me", readUrl("me", {})), subject: ACCOUNT };
+}
+
+// The host's word to every account; this account's dismissals move it.
+export function bulletinsRead(): ReadDescriptor<AccountBulletins> {
+  return { ...once<AccountBulletins>("bulletins", readUrl("bulletins", {})), auth: true, subject: ACCOUNT };
 }
 
 export function userSettingsRead(): ReadDescriptor<UserSettings> {

@@ -21,7 +21,7 @@ function bar(
     label: node.label,
     node,
     reading: node.facts.reading,
-    source: "history",
+    openCells: [],
     overlap: null,
     verify: null,
     bench: null,

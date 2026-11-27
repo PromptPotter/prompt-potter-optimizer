@@ -90,7 +90,7 @@ function cycleOf(index: LineageIndex, node: LineageNode): SubtreeCycle | null {
   return entry?.entry_kind === "cycle" ? entry : null;
 }
 
-function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
+export function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
   const entry = address ? index.byAddress.get(address) : undefined;
   return entry?.entry_kind === "candidate" ? entry : null;
 }
@@ -114,17 +114,6 @@ export function channelArms(index: LineageIndex, reading: SubjectReading | null,
 export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): HierarchyCandidate[] {
   const cycle = cycleAt(index, path);
   return cycle ? candidatesOf(cycle) : [];
-}
-
-// What a viewed entry's bars draw: a cycle's line, the rounds it holds from below its fork's cut
-// first (`facts.inherited`, on the cycle that ran each), then its own; a candidate's inner cycles.
-export function barNodes(index: LineageIndex, node: LineageNode): LineageNode[] {
-  if (node.entry_kind !== "cycle") return childNodes(node);
-  const below = node.facts.inherited.flatMap((address) => {
-    const c = candidateAt(index, address);
-    return c ? [c] : [];
-  });
-  return [...below, ...childNodes(node)];
 }
 
 // A cycle's candidates, round by round in slot order; not the inner campaigns it holds unplaced.

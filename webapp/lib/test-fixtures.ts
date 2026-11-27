@@ -460,7 +460,6 @@ export function subtreeCycle(
       lens_shift: null,
       origin: null,
       from_candidate: null,
-      inherited: [],
       ...facts,
     },
     climb: null,
@@ -500,12 +499,10 @@ export function subtreeCampaign(
 export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
-    active_node: null,
     measurement_node: "l1_score",
     inner: null,
     candidates: [],
     nodes: {},
-    racing: null,
     ...over,
   };
 }
@@ -516,6 +513,7 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
     prompts: null,
     resolved_params: null,
     pipeline_overlay: null,
+    open_cells: [],
     samples: [],
     validation_failures: [],
     evidence_grounding: null,
@@ -563,7 +561,9 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     run_phase: "running",
     stop_reason: null,
     round: 0,
-    measuring_arm: null,
+    active: null,
+    successor: null,
+    line: [],
     rounds: [],
     sample_coverage: { measuring_rounds: 0, samples: [] },
     overlap_line_round: null,
