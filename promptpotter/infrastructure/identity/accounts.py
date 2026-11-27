@@ -38,7 +38,6 @@ from promptpotter.shared.identity import (
     AccessState,
     Carrier,
     IdentityContext,
-    Issuer,
     TenantId,
     UserId,
     safe_name,
@@ -89,9 +88,10 @@ def is_declared_host(email: str | None) -> bool:
     return bool(declared) and (email or "").strip().lower() == declared
 
 
-def is_host_account(user: User) -> bool:
-    """The terminal's own account, or the one `HOST_ADMIN_EMAIL` names."""
-    return user.user_id == TERMINAL_IDENTITY_ID or is_declared_host(user.email)
+def is_host_account(user_id: str, email: str | None) -> bool:
+    """The terminal's own account, or the one `HOST_ADMIN_EMAIL` names: a live identity's `host`
+    stamp (`account_identity`) and an account's on a directory walk alike."""
+    return user_id == TERMINAL_IDENTITY_ID or is_declared_host(email)
 
 
 def host_user_id(projects_root: Path) -> str | None:
@@ -102,7 +102,7 @@ def host_user_id(projects_root: Path) -> str | None:
             for account in read_accounts(projects_root)
             if isinstance(account.user, User)
             and account.user.user_id != TERMINAL_IDENTITY_ID
-            and is_host_account(account.user)
+            and is_host_account(account.user.user_id, account.user.email)
         ),
         None,
     )
@@ -180,7 +180,7 @@ def account_identity(presented: IdentityContext, bundle: IdentityBundle) -> Iden
         presented,
         access_state=access_state,
         capabilities=_session_capabilities(access_state),
-        host=presented.user_id == TERMINAL_IDENTITY_ID or is_declared_host(presented.email),
+        host=is_host_account(presented.user_id, presented.email),
     )
 
 
@@ -189,7 +189,6 @@ def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityCo
         IdentityContext(
             user_id=UserId(data.user_id),
             tenant_id=TenantId(data.tenant_id),
-            issuer=Issuer(data.issuer) if data.issuer else None,
             email=data.email,
             provider=data.provider,
             claims={"subject": data.subject},

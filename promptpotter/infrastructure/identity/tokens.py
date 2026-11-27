@@ -132,5 +132,15 @@ def revoke_token(path: Path, *, user_id: str, token_id: str) -> bool:
     return True
 
 
+def drop_account(path: Path, user_id: str) -> int:
+    """How many rows of *user_id*'s went, live and revoked: a deleted account's bearer reads unknown."""
+    with write_lock(path):
+        tokens = _tokens(path)
+        kept = {digest: t for digest, t in tokens.items() if t.user_id != user_id}
+        if len(kept) != len(tokens):
+            _write(path, kept)
+    return len(tokens) - len(kept)
+
+
 def token_of(path: Path, plaintext: str) -> ApiToken | None:
     return _tokens(path).get(_digest(plaintext))

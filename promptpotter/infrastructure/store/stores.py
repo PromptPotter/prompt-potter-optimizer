@@ -19,6 +19,7 @@ from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import CycleSupersededRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.identity.grants import identity_paths
 from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -276,7 +277,7 @@ def build_stores(
         users=UserStore(tenant_dir),
         # The account's, never a sandbox's: an L4 inner run spends from the wallet of its owner.
         grant=GrantStore(account),
-        api_keys=TenantApiKeyStore(account),
+        api_keys=TenantApiKeyStore(account, box_key=identity_paths(shared).box_key),
         charges=ChargeBook(account),
         commands=CommandLog(account, paths.jobs_dir(shared)),
     )

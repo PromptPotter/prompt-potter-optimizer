@@ -4344,6 +4344,7 @@
           "grant-delegation",
           "revoke-delegation",
           "set-coupon",
+          "delete-account",
           "set-api-key",
           "remove-api-key",
           "mint-api-token",
@@ -5986,6 +5987,23 @@
           "treatment"
         ],
         "title": "DefaultsPin",
+        "type": "object"
+      },
+      "DeleteAccountPayload": {
+        "additionalProperties": false,
+        "description": "Delete an account: its tree, its tokens, grants, sign-ins and bulletin dismissals; refused while it runs anything. Only the host may.",
+        "properties": {
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "DeleteAccountPayload",
         "type": "object"
       },
       "DeleteAct": {
@@ -22015,6 +22033,79 @@
           }
         },
         "summary": "Compact-Archive",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/delete-account": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "delete_account_api_v1_commands_delete_account_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete-Account",
         "tags": [
           "Commands"
         ]

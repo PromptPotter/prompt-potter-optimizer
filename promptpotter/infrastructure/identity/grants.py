@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import field_serializer
 
-from promptpotter.config.paths import user_data_root
+from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
@@ -57,12 +57,21 @@ class IdentityPaths:
     def bulletins(self) -> Path:
         return self.root / "bulletins.json"
 
+    @property
+    def box_key(self) -> Path:
+        return self.root / "box.key"
+
 
 IDENTITY_DIR = "identity"
 
 
 def default_identity_paths() -> IdentityPaths:
-    return IdentityPaths(root=user_data_root() / IDENTITY_DIR)
+    return identity_paths(default_projects_root())
+
+
+def identity_paths(projects_root: Path) -> IdentityPaths:
+    """The identity zone of the install *projects_root* belongs to, beside it as its jobs dir is."""
+    return IdentityPaths(root=projects_root.parent / IDENTITY_DIR)
 
 
 logger = logging.getLogger(__name__)

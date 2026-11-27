@@ -14,6 +14,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field, SecretStr
 
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.command_kinds import CommandKind, Door, filable
@@ -21,15 +22,17 @@ from promptpotter.domain.records.run_records import AccountEvent, AccountEventRe
 from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity import accounts, tokens
+from promptpotter.infrastructure.identity import accounts, bulletin_board, tokens
 from promptpotter.infrastructure.identity import grants as grant_files
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
     default_identity_paths,
     grant_principal,
+    identity_paths,
     list_grants,
     revoke_principal,
 )
+from promptpotter.infrastructure.identity.oidc import OIDCSessionStore
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.account_trail import (
@@ -38,7 +41,7 @@ from promptpotter.infrastructure.store.account_trail import (
     workspace_lines,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import held_lock
+from promptpotter.infrastructure.store.io import held_lock, rmtree_robust
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.stores import Stores, build_stores, tenant_stores
 from promptpotter.infrastructure.store.user_store import (
@@ -505,6 +508,52 @@ def set_coupon(projects_root: Path, user_id: str, face: Budget, *, afresh: bool)
     if user is None:
         raise NotFoundError(f"No account {user_id!r} on this install.")
     return GrantStore(workspace).set(face, afresh=afresh, opened_at=user.created_at)
+
+
+class AccountDeleted(StrictModel):
+    user_id: str
+    tokens: int = Field(description="Its API token rows dropped, live and revoked.")
+    grants: list[str] = Field(description="The sub-principals whose grant went with it.")
+    sign_ins: int = Field(description="Its browser sessions ended.")
+
+
+def delete_account(projects_root: Path, user_id: str, *, actor: str) -> AccountDeleted:
+    """The host-admin deleter (decisions.md § 0004), the one writer that removes an account: every
+    survivor row it owns goes, its door first (its tokens, the grants it stands on either side of,
+    its sign-ins), then its bulletin dismissals, then its tree (its user, consent trail and held
+    keys, and its run data). Held under the accounts lock and the admission gate, so no sign-in
+    reopens it and no launch admits meanwhile; refused for the host's and while it runs anything."""
+    workspace = tenant_workspace(projects_root, user_id)
+    paths = identity_paths(projects_root)
+    registry = JobRegistry.attach(jobs_dir(projects_root))
+    with held_lock(projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT), registry.admission_gate():
+        user = UserStore(workspace).load()
+        if user is None:
+            raise NotFoundError(f"No account {user_id!r} on this install.")
+        if accounts.is_host_account(user.user_id, user.email):
+            raise ConflictError("The host's account is never deleted.", code="host_undeletable")
+        if live := [
+            *registry.list_holding_spend(user_id=user_id),
+            *registry.list_queued(user_id=user_id),
+        ]:
+            raise ConflictError(
+                f"{user_id!r} runs {len(live)} job(s): stop them, then delete it.",
+                code="account_running",
+                details={"jobs": [job.job_id for job in live]},
+            )
+        dropped = tokens.drop_account(paths.tokens, user_id)
+        granted = [
+            sub
+            for sub, held in list_grants(paths.grants).items()
+            if user_id in (sub, held.delegated_by)
+            and revoke_principal(
+                paths.grants, sub_principal_user_id=sub, actor=actor, audit_path=paths.grants_audit
+            )
+        ]
+        ended = OIDCSessionStore(paths.sessions_dir).end_account(user_id)
+        bulletin_board.rekey(paths.bulletins, old_id=user_id, new_id=None)
+        rmtree_robust(workspace)
+    return AccountDeleted(user_id=user_id, tokens=dropped, grants=granted, sign_ins=ended)
 
 
 # An account's own provider keys; who pays a send is `infrastructure/llm/wallet.py::paying_key`'s.

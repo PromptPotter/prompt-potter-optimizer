@@ -497,6 +497,15 @@ class OIDCSessionStore:
         if (path := self._path(session_id)) is not None:
             unlink_robust(path)
 
+    def end_account(self, user_id: str) -> int:
+        """Every sign-in of *user_id*'s ended, the lapsed swept on the way: how many went."""
+        ended = 0
+        for held in self._dir.glob("*.json") if self._dir.is_dir() else ():
+            if (data := _live(held)) is not None and data.user_id == user_id:
+                unlink_robust(held)
+                ended += 1
+        return ended
+
     def _path(self, session_id: str) -> Path | None:
         """``None`` for an id that names no file: the cookie is the caller's input."""
         try:

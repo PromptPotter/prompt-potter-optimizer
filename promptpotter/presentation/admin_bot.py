@@ -28,6 +28,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import (
     BlockEmailPayload,
     CommandPayload,
+    DeleteAccountPayload,
     Door,
     GrantDelegationPayload,
     PostBulletinPayload,
@@ -52,7 +53,7 @@ _WITHDRAW_USAGE = "/withdraw [bulletin_id]"
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
     "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
-    f"{_COUPON_USAGE}\n/spend\n/trail <email>\n{_BULLETIN_USAGE}\n{_WITHDRAW_USAGE}"
+    f"{_COUPON_USAGE}\n/delete <user_id>\n/spend\n/trail <email>\n{_BULLETIN_USAGE}\n{_WITHDRAW_USAGE}"
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
@@ -90,6 +91,11 @@ def handle_command(command: str, argument: str) -> str:
         return _handle_grant_command(command, argument)
     if command == "coupon":
         return _set_coupon(argument)
+    if command == "delete":
+        if not (user_id := argument.strip()):
+            return "Usage: /delete <user_id>"
+        _file(DeleteAccountPayload, {"user_id": user_id})
+        return f"Deleted the account {user_id}."
     if command == "spend":
         return _render_install_spend()
     if command == "trail":

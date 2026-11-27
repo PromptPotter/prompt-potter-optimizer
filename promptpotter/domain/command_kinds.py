@@ -446,6 +446,13 @@ class CommandKind(StrEnum):
         ACCOUNT_SELF_CAP,
         Press("set-coupon", host=False, no_browser=_HOST_ADMINISTERS),
     )
+    DELETE_ACCOUNT = (
+        "delete-account",
+        "operator_acts:delete_account",
+        ACCOUNT_SELF_CAP,
+        Press("delete-account", host=False, no_browser=_HOST_ADMINISTERS),
+        True,
+    )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
     SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", ACCOUNT_KEYS_CAP, BROWSER, True
@@ -1355,6 +1362,12 @@ class SetCouponPayload(CommandPayload, kind=CommandKind.SET_COUPON):
     user_id: str = Field(min_length=1, max_length=128)
     budget: Budget
     afresh: bool = False
+
+
+class DeleteAccountPayload(CommandPayload, kind=CommandKind.DELETE_ACCOUNT):
+    """Delete an account: its tree, its tokens, grants, sign-ins and bulletin dismissals; refused while it runs anything. Only the host may."""
+
+    user_id: str = Field(min_length=1, max_length=128)
 
 
 class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):

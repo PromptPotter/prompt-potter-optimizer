@@ -65,7 +65,7 @@ def _account_row(user: User, campaigns: CampaignStore) -> AccountUsage:
         spent=account_bill(ChargeBook(tenant_dir)),
         face=face_of(
             GrantStore(tenant_dir).load(),
-            host=is_host_account(user),
+            host=is_host_account(user.user_id, user.email),
         ),
         campaigns=len(campaigns.iter_campaign_dirs()),
         cycles=len(campaigns.iter_cycle_ledgers()),

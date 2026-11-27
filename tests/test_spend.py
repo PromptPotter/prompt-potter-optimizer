@@ -368,7 +368,6 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.identity import (
     SYSTEM_PRINCIPAL,
     IdentityContext,
-    Issuer,
     TenantId,
     UserId,
     default_identity,
@@ -825,11 +824,10 @@ def test_budget_equality_is_over_the_axes_each_names() -> None:
 def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     offline: Router,
 ) -> None:
-    # An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator.
+    # A spawned run is its launch's identity, never one rebuilt from the tenant alone: that is the host's.
     signup = IdentityContext(
         user_id=UserId("sub-9"),
         tenant_id=TenantId("sub-9"),
-        issuer=Issuer("https://accounts.google.com"),
         email="a@example.com",
         capabilities=frozenset({"campaign.run"}),
     )
@@ -1205,9 +1203,7 @@ def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def account(sub: str) -> Stores:
-        signed_in = IdentityContext(
-            user_id=UserId(sub), tenant_id=TenantId(sub), issuer=Issuer(_WEB)
-        )
+        signed_in = IdentityContext(user_id=UserId(sub), tenant_id=TenantId(sub))
         return workspace(signed_in)
 
     cell_entry = filed_under([("llm_only", {"model": "m"})])
@@ -1856,7 +1852,6 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
         IdentityContext(
             user_id=UserId("sub-d"),
             tenant_id=TenantId("sub-d"),
-            issuer=Issuer("https://accounts.google.com"),
             capabilities=frozenset({"campaign.create", "campaign.run"}),
         ),
     )
@@ -3310,7 +3305,6 @@ def _account_stores(
         IdentityContext(
             user_id=UserId(user.user_id),
             tenant_id=TenantId(user.tenant_id),
-            issuer=None if issuer is None else Issuer(issuer),
             email="",
             host=issuer is None,
         ),
@@ -3958,7 +3952,6 @@ def _web_account(sub: str) -> Stores:
         IdentityContext(
             user_id=UserId(sub),
             tenant_id=TenantId(sub),
-            issuer=Issuer(_WEB),
             claims={},
             capabilities=frozenset({"campaign.create"}),
         ),

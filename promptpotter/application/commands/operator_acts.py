@@ -6,6 +6,7 @@ from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.command_kinds import (
     BlockEmailPayload,
     CommandPayload,
+    DeleteAccountPayload,
     GrantDelegationPayload,
     RevokeDelegationPayload,
     SetCouponPayload,
@@ -53,6 +54,13 @@ async def grant_delegation(dispatched: Dispatched[GrantDelegationPayload]) -> Ap
 async def revoke_delegation(dispatched: Dispatched[RevokeDelegationPayload]) -> Applier[object]:
     actor, user_id = _host_acts(dispatched), dispatched.payload.user_id
     return Applier.blocking(lambda: account.revoke_grant(user_id, actor=actor))
+
+
+async def delete_account(dispatched: Dispatched[DeleteAccountPayload]) -> Applier[object]:
+    actor, user_id = _host_acts(dispatched), dispatched.payload.user_id
+    return Applier.blocking(
+        lambda: account.delete_account(default_projects_root(), user_id, actor=actor)
+    )
 
 
 async def set_coupon(dispatched: Dispatched[SetCouponPayload]) -> Applier[object]:

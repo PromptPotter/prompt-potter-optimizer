@@ -49,13 +49,16 @@ def withdraw(path: Path, *, bulletin_id: str) -> bool:
     return True
 
 
-def rekey(path: Path, *, old_id: str, new_id: str) -> None:
-    """An account's dismissals follow its id (`accounts.py::claim_default`)."""
+def rekey(path: Path, *, old_id: str, new_id: str | None) -> None:
+    """An account's dismissals follow its id (`accounts.py::claim_default`), or go with the
+    account (``None``, `account.py::delete_account`)."""
     with write_lock(path):
         board = read_board(path)
         if old_id in board.dismissed:
             dismissed = dict(board.dismissed)
-            dismissed[new_id] = dismissed.pop(old_id)
+            held = dismissed.pop(old_id)
+            if new_id is not None:
+                dismissed[new_id] = held
             _write(path, BulletinBoard(bulletins=board.bulletins, dismissed=dismissed))
 
 

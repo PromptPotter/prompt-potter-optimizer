@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 TenantId = NewType("TenantId", str)
 UserId = NewType("UserId", str)
-Issuer = NewType("Issuer", str)
 SafeName = NewType("SafeName", str)
 
 _SAFE_NAME_RE = re.compile(r"[a-zA-Z0-9_\-]+")
@@ -108,7 +107,6 @@ class Carrier(NamedTuple):
 class IdentityContext:
     user_id: UserId
     tenant_id: TenantId
-    issuer: Issuer | None = None
     email: str | None = None
     provider: str | None = None
     access_state: AccessState = "active"
@@ -128,8 +126,6 @@ def default_identity(tenant_id: str = TERMINAL_IDENTITY_ID) -> IdentityContext:
     return IdentityContext(
         user_id=UserId(safe_name(tenant_id)),
         tenant_id=TenantId(safe_name(tenant_id)),
-        issuer=None,
-        claims={},
         capabilities=OWNER_COMMAND_CAPABILITIES,
         # The terminal is the box's own.
         host=True,

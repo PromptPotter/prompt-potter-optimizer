@@ -17,6 +17,7 @@ from promptpotter.config.paths import short_form
 from promptpotter.domain.records.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.identity import sealing
 from promptpotter.infrastructure.store.io import append_line, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
@@ -70,19 +71,36 @@ class HeldKey(FrozenModel):
         return self.secret.get_secret_value()[-4:]
 
 
-HELD_KEYS: TypeAdapter[dict[str, HeldKey]] = TypeAdapter(dict[str, HeldKey])
+class SealedKey(FrozenModel):
+    """A held key as it rests: its secret sealed under the box key (`identity/sealing.py`)."""
+
+    sealed: str
+    added_at: str
+
+
+SEALED_KEYS: TypeAdapter[dict[str, SealedKey]] = TypeAdapter(dict[str, SealedKey])
 
 
 class TenantApiKeyStore:
     """One key per provider; read on every send's resolution, so a removal binds the next send."""
 
-    def __init__(self, account_dir: Path) -> None:
+    def __init__(self, account_dir: Path, *, box_key: Path) -> None:
         self.path = account_dir / API_KEYS_FILE
+        self.box_key = box_key
 
     def load(self) -> dict[str, HeldKey]:
-        # Optional, not tolerant: a corrupt file read as "no keys" would bill the host's.
-        held = read_file(self.path, HELD_KEYS.validate_json, FileKind.STORED_CONFIG)
-        return {} if held is None else held
+        # Optional, not tolerant: a corrupt file, or one its box key does not open, read as "no
+        # keys" would bill the host's.
+        return read_file(self.path, self._opened, FileKind.STORED_CONFIG) or {}
+
+    def _opened(self, raw: bytes) -> dict[str, HeldKey]:
+        key = sealing.opened_key(self.box_key)
+        return {
+            p: HeldKey(
+                secret=SecretStr(sealing.unseal(key, k.sealed, bound=p)), added_at=k.added_at
+            )
+            for p, k in SEALED_KEYS.validate_json(raw).items()
+        }
 
     def put(self, provider: str, secret: SecretStr) -> HeldKey:
         held = HeldKey(secret=secret)
@@ -104,11 +122,16 @@ class TenantApiKeyStore:
         """Read and replaced under its write lock."""
         with write_lock(self.path):
             keys = change(self.load())
+            # The box key is made by the first key an install seals, never by an emptied file.
+            box = sealing.box_key(self.box_key) if keys else b""
             held = {
-                p: {"secret": k.secret.get_secret_value(), "added_at": k.added_at}
+                p: SealedKey(
+                    sealed=sealing.seal(box, k.secret.get_secret_value(), bound=p),
+                    added_at=k.added_at,
+                )
                 for p, k in keys.items()
             }
-            write_json(self.path, held)
+            write_json(self.path, SEALED_KEYS.dump_python(held, mode="json"))
 
 
 class ChargeBook:

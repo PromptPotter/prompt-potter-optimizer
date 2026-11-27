@@ -66,7 +66,7 @@ from promptpotter.application import (
     health,
     notices,
 )
-from promptpotter.application.account import blocked_emails
+from promptpotter.application.account import account_of, blocked_emails, put_account_key
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
 from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
@@ -182,6 +182,7 @@ from promptpotter.domain.command_kinds import (
     CleanupEmptyCyclesPayload,
     CommandKind,
     CommandPayload,
+    DeleteAccountPayload,
     DeleteCampaignPayload,
     DeleteCyclePayload,
     DiscardDraftPayload,
@@ -298,6 +299,7 @@ from promptpotter.infrastructure.identity.oidc import (
     load_provider_config,
 )
 from promptpotter.infrastructure.identity.tokens import MAX_LIVE_TOKENS, ApiToken, mint_token
+from promptpotter.infrastructure.identity.tokens import account_tokens as account_tokens_of
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.run_state import derive_run_state
@@ -394,9 +396,9 @@ from promptpotter.shared.identity import (
     CAMPAIGN_STEP_CAP,
     OWNER_COMMAND_CAPABILITIES,
     SYSTEM_PRINCIPAL,
+    TERMINAL_IDENTITY_ID,
     Carrier,
     IdentityContext,
-    Issuer,
     TenantId,
     UserId,
     acting_principal,
@@ -406,6 +408,30 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 _REPO = Path(__file__).resolve().parents[1]
 # 1. Leaks and the perimeter
+
+
+def test_an_accounts_held_key_rests_sealed_and_a_lost_box_key_never_reads_as_none() -> None:
+    # Read as "no keys", a key the box cannot open would bill the host's for the account's sends.
+    stores, secret = workspace(), "sk-held-0123456789abcdef"
+    put_account_key(stores, "openai", SecretStr(secret))
+    assert secret.encode() not in stores.api_keys.path.read_bytes(), "a held key rests in clear"
+    assert stores.api_keys.load()["openai"].secret.get_secret_value() == secret
+    stores.api_keys.box_key.unlink()
+    with pytest.raises(FileUnreadableError):
+        stores.api_keys.load()
+        pytest.fail("a key no box key opens read as none held")
+
+
+def test_a_key_v0_8_21_held_in_clear_is_sealed_by_the_landing_and_still_opens() -> None:
+    stores, secret = workspace(), "sk-clear-0123456789abcdef"
+    was = {"groq": {"secret": secret, "added_at": "2026-11-20T00:00:00Z"}}
+    write_json(stores.api_keys.path, was)
+    staged = {one.path: one.data for one in MIGRATIONS["sealed api keys"](stores.projects_root, {})}
+    assert secret.encode() not in staged[stores.api_keys.path], "the landing kept a key in clear"
+    for path, data in staged.items():
+        write_bytes(path, data)
+    held = stores.api_keys.load()["groq"]
+    assert (held.secret.get_secret_value(), held.added_at) == (secret, was["groq"]["added_at"])
 
 
 def test_a_segment_that_could_leave_its_directory_names_no_path_at_any_door(tmp_path: Path) -> None:
@@ -662,7 +688,6 @@ def _who(user_id: str) -> IdentityContext:
     return IdentityContext(
         user_id=UserId(user_id),
         tenant_id=TenantId(user_id),
-        issuer=Issuer("https://accounts.example"),
     )
 
 
@@ -1081,9 +1106,7 @@ async def test_two_first_arrivals_racing_for_the_last_place_open_one_and_refuse_
     start = threading.Barrier(2)
 
     def arrive(user: str) -> bool:
-        stranger = IdentityContext(
-            user_id=UserId(user), tenant_id=TenantId(user), issuer=Issuer("https://x")
-        )
+        stranger = IdentityContext(user_id=UserId(user), tenant_id=TenantId(user))
         start.wait()
         try:
             return account.arrive(build_stores_from_identity(stranger), device=None).opened
@@ -5056,6 +5079,54 @@ async def test_the_hosts_administration_is_filed_at_its_terminal_alone_never_at_
     assert blocked_emails() == ["eve@x.com"]
     await _filed(host, UnblockEmailPayload(email="eve@x.com"), Door.TERMINAL)
     assert blocked_emails() == []
+
+
+async def test_an_accounts_deletion_drops_every_survivor_row_it_owns_its_dismissals_with_them() -> (
+    None
+):
+    # A row left behind keeps a deleted account's door open (a bearer, a sign-in, a delegate) or
+    # carries what it owned into whoever next signs in under its id.
+    host, ada, paths = workspace(), _uploader("ada"), default_identity_paths()
+    for opened in (host, ada):
+        await asyncio.to_thread(account_of, opened)
+    put_account_key(ada, "openai", SecretStr("sk-ada-0123456789"))
+    mint_token(paths.tokens, user_id="ada", name="t", scopes=frozenset({CAMPAIGN_STEP_CAP}))
+    grant_principal(
+        paths.grants, sub_principal_user_id="ada-bot", delegated_by_user_id="ada",
+        capabilities=frozenset({CAMPAIGN_STEP_CAP}), note="", actor="host",
+        audit_path=paths.grants_audit,
+    )  # fmt: skip
+    OIDCSessionStore(paths.sessions_dir).create(
+        user_id="ada", tenant_id="ada", issuer="i", subject="s", email=None, provider="google"
+    )
+    await _filed(host, PostBulletinPayload(text="a wipe at noon"), Door.TERMINAL)
+    (posted,) = bulletins.account_bulletins(ada).bulletins
+    await _filed(ada, DismissBulletinPayload(bulletin_id=posted.id))
+    deleted = DeleteAccountPayload(user_id="ada")
+    for stores, door in ((ada, Door.TERMINAL), (host, Door.API)):
+        with pytest.raises(PayloadInvalidError):
+            await _filed(stores, deleted, door)
+    with pytest.raises(ConflictError) as refused:
+        await _filed(host, DeleteAccountPayload(user_id=TERMINAL_IDENTITY_ID), Door.TERMINAL)
+    assert refused.value.code == "host_undeletable"
+    registry = JobRegistry.attach(jobs_dir(default_projects_root()))
+    asked = await asyncio.to_thread(
+        registry.create, user_id="ada", principal_id="ada", workspace=WorkspaceDir(ada.base_dir),
+        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    with pytest.raises(ConflictError) as running:
+        await _filed(host, deleted, Door.TERMINAL)
+    assert running.value.code == "account_running" and ada.base_dir.is_dir()
+    await asyncio.to_thread(registry.release, asked.job_id)
+    await _filed(host, deleted, Door.TERMINAL)
+    left = {
+        "tree": ada.base_dir.exists(),
+        "tokens": bool(account_tokens_of(paths.tokens, "ada")),
+        "grants": bool(list_grants(paths.grants)),
+        "sign-ins": any(paths.sessions_dir.glob("*.json")),
+        "dismissals": bool(read_board(paths.bulletins).dismissed),
+    }
+    assert not any(left.values()), f"a deleted account left {left}"
 
 
 @pytest.mark.usefixtures("offline")

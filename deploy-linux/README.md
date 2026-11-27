@@ -336,6 +336,7 @@ signed out, and the public site flags its visits `self`, so the morning briefing
 | `/block <email>` · `/unblock <email>` · `/blocked` | Withdraw access (every command refused from the next request), give it back, list. |
 | `/grant <sub_user_id> step,create` · `/revoke <sub_user_id>` · `/grants` | Delegate an attenuated sub-principal into your workspace, remove it, list. The id is the delegate's own account modal's (`/auth/me`). |
 | `/coupon <user_id> <usd\|-> <tokens\|-> [afresh]` | Set that account's coupon (`-` leaves a unit unbounded); `afresh` starts its draw now, so nothing charged before counts. The bill is never moved. |
+| `/delete <user_id>` | Delete that account: its tree (campaigns, keys, bill), tokens, grants, sign-ins and bulletin dismissals. Refused for the host's and while it runs anything; the terminal's `delete-account` files the same command. |
 | `/trail <email>` | What that account did, oldest first, across every workspace it owns or acts in; the terminal's `trail <email>` reads the same. |
 | `/spend` | Every account's spend and output. |
 | `/bulletin [popup] <text>` | Post a bulletin to every account; `popup` opens it on every page load until each account dismisses it. The terminal's `post-bulletin` files the same command. |

@@ -367,7 +367,11 @@ BASELINE = {
     # `BackendClient.cells_paid_by` by every in-run planner), where `Connector.cell_payer` declared it.
     # w9-pass (+3): a raced round announces its parent's arm before the walks, so its catch-up is
     # that arm's pass. Set to the measured count at the w9 landing.
-    "package_lines": 114161,
+    # w10-identity (+159): an account's held keys rest sealed under the box key
+    # (`identity/sealing.py`, stdlib, as core reads them), with the survivor's one-shot migration.
+    # (+98): the account deleter (`account.py::delete_account`), the host's `delete-account`.
+    # (−5): `IdentityContext.issuer`, which nothing read, and the host predicate's second spelling.
+    "package_lines": 114413,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
