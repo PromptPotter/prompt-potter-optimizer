@@ -115,6 +115,7 @@ from promptpotter.application.jobs.quota import (
     admit_launch,
     coupon_status,
     declare_run_budget,
+    sends_on,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep
 from promptpotter.application.jobs.registry import JobRegistry
@@ -159,7 +160,7 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.config.paths import default_projects_root, jobs_dir
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
 from promptpotter.domain.bench import PassRefusal
@@ -297,6 +298,7 @@ from promptpotter.infrastructure.llm.wallet import (
     keyed_client,
     paying_key,
     provider_send,
+    sends_draw_coupon,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
@@ -2987,7 +2989,9 @@ def dspy_billed(net: Router, out: Path) -> dict[str, Any]:
             jobs_dir=jobs,
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
-        pairs = {dspy_module.PROGRAM_NODE: client.priced_as(NodeCall.model_validate(config))}
+        pairs = {
+            dspy_module.PROGRAM_NODE: client.connector.priced_as(NodeCall.model_validate(config))
+        }
 
         async def one_cell() -> Any:
             async with CellEnvelope(600.0, attempts=client.connector.cell_attempts, label="q"):
@@ -3283,7 +3287,7 @@ def test_an_agent_whose_sends_died_on_a_5xx_never_measured_the_prompt(offline: R
 
 _WEB = "https://accounts.google.com"
 _FACE = Budget.amount(settings.HOST_COUPON.usd or 0.0, settings.HOST_COUPON.tokens or 0)
-# A backend's cells, which go out on the box's keys whatever the account holds.
+# A remote backend's cells, which go out on the box's keys.
 _CELLS = (BackendCells("termnorm", "host", priced=True),)
 # Cells no rate bounds: a dollar ceiling on them is refused at the mint.
 _UNPRICED_CELLS = (BackendCells("n8n", "host", priced=False),)
@@ -3614,6 +3618,30 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
         patched.setattr(settings, "GROQ_API_KEY", SecretStr(""))
         assert provider_send(fresh.api_keys.load(), "groq").payer is None, (
             "a provider no key holds read as paid"
+        )
+
+
+def test_a_cell_keying_its_own_sends_is_paid_as_its_providers_keys_pay() -> None:
+    # A spent coupon and an own openrouter key: a library's cells on it reserve no coupon.
+    user = User(user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01")
+    stores = _account_stores(issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter")
+    remote = connectors.CONNECTORS.get("termnorm")
+    library = dataclasses.replace(remote, holds_own_sends=True, model_names_provider=True)
+    table: list[tuple[Connector, list[str | None], str]] = [
+        (library, ["openrouter/x"], "user"),
+        (library, ["openrouter/x", "openai/y"], "host"),
+        (library, [None], "host"),
+        (library, [], "host"),
+        (remote, ["openrouter/x"], "host"),
+    ]
+    for connector, models, payer in table:
+        config = defaulted_config(
+            {"pipeline_overlay": {f"n{i}": {"model": m} for i, m in enumerate(models)}}
+        )
+        cells, *_ = sends_on(stores, config, connector)
+        assert (cells.payer, sends_draw_coupon((cells,))) == (payer, payer == "host"), (
+            f"{models} on a {'library' if connector.holds_own_sends else 'remote'} backend "
+            f"was planned as paid by {cells.payer}"
         )
 
 

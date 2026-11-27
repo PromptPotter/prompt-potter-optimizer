@@ -260,7 +260,7 @@ def _node_spends(
 
 
 async def attempt_bounds(session: Session, calls: Mapping[str, NodeCall]) -> dict[str, SendBound]:
-    priced_as = session.backend_client.priced_as
+    priced_as = session.backend_client.connector.priced_as
     return {
         node.name: await _attempt_bound(spend, cfg, priced_as(cfg))
         for node, cfg, spend in _node_spends(session, calls)
@@ -317,7 +317,7 @@ async def _calls_bound(session: Session, calls: Mapping[str, NodeCall]) -> SendB
         if isinstance(spend, WebSpendBound):
             usd += spend.queries * spend.usd_per_query
             continue
-        each = await _attempt_bound(spend, cfg, client.priced_as(cfg))
+        each = await _attempt_bound(spend, cfg, client.connector.priced_as(cfg))
         input_tokens += spend.attempts * each.input_tokens
         output_tokens += spend.attempts * (each.output_tokens or 0)
         if each.usd is None:
@@ -481,7 +481,9 @@ async def measure_sample(
     try:
         wire_params = interpolate_pipeline_params(pipeline_params, sample.model_dump())
         calls = wire_params.nodes
-        pairs = {name: session.backend_client.priced_as(cfg) for name, cfg in calls.items()}
+        pairs = {
+            name: session.backend_client.connector.priced_as(cfg) for name, cfg in calls.items()
+        }
         data, spent, envelope = await _send_cell(sample, session, wire_params, calls, pairs)
 
         ranked = terminal_ranking(data, pipeline_schema)

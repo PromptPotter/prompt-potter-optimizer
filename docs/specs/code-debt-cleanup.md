@@ -32,14 +32,6 @@ row it closes.
   in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
   verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
 
-### batch/26 · money
-
-- **A connector's name is looked up again where its `Connector` is held** (served-1's report; w8-launch4
-  closed every holder but this): `jobs/quota.py::sends_on` takes a `str` and looks it up again, so
-  `mint_and_start.py`'s `sends` pass `.name`. Action: it takes the `Connector`. **Rides with:** the
-  chain owning `quota.py`. **Re-test:** `git grep -n "connector(stores)\.name" --
-  promptpotter/application/jobs` → 0.
-
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
 - **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
@@ -717,16 +709,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   after its stop is declared (`runner/entry.py::_run_single_cycle`), and `runner/entry.py::open_line`'s
   divergence stop passes no detail. Door: the cut precedes the stop, whose detail names the child
   cycle. **Rides with:** the next `runner/entry.py` chain (w8-fork landed without it).
-- **A library connector's cells are planned as the box's whatever keys the account holds** (w8-box2,
-  w8-wallet): `connectors/dspy_module.py` and `connectors/harbor.py` declare `Connector.cell_payer=
-  "host"`, but since w8-box2 their cells send on `wallet.py::sending_key`'s key, the account's own
-  first. Every reader of `cell_payer` still plans and holds such a cell as the box's:
-  `jobs/quota.py::sends_on` (the launch's reservation, the tier cap), the in-run planners, and
-  `wallet.py::AccountWallet.refused` ("whatever keys this account holds"). Root: the payer is
-  resolved per cell by `sending_key`'s rule at every reader, so `cell_payer` goes. Fixing the launch
-  alone reserves nothing for an own-keyed run that the planners still hold as host-paid, so the run
-  halts at its first cell. **Rides with:** money. **Re-test:** an account holding its own
-  openrouter key launches a DSPy cell with no coupon reserved.
 
 ### wave-7 · what the w7 chains filed (2026-11-27)
 
@@ -791,3 +773,19 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **Held:** unreproduced at `2c7dff34e` (w7-small: `/campaigns/gone/pipeline` answers 404 with and
   without `at=`, over every hop shape); if the 400 recurs, capture the exact `at` the stale tab sent.
   **Re-test:** each campaign read of a deleted campaign answers 404.
+
+### wave-9 · what the w9 chains filed (2026-11-27)
+- **dbllmbench's cells send on the box's key read off `settings`, not `sending_key`** (w9-payer):
+  `connectors/dbllmbench.py:182,205` hand the container `settings.<KEY>`, so an account's own key never
+  pays a dbllmbench cell, and `holds_own_sends=False` is what holds its payer at the box. Root: the
+  wallet's payer rule. Door: the container takes `sending_key(provider)`'s secret, it keys its own
+  sends, and `cells_paid_by` reads it as a library's. Symptom under it:
+  `infrastructure/backend.py::BackendClient.cells_paid_by` asks for the bound account even for a remote backend,
+  which never reads the keys. **Re-test:** `git grep -n "api_key_attr).get_secret_value\|ANTHROPIC_API_KEY.get_secret_value" -- promptpotter/connectors`
+  is empty.
+- **A campaign names its connector, and five readers look it up again** (w9-payer):
+  `Campaign.connector` / `Environment.connector` are `str`, so `wiring.py:258`,
+  `admission.py::campaign_sends`, `mint_and_start.py:123`, `mask/load.py:206` and
+  `pipeline_resolve.py:1043` each call `CONNECTORS.get`. Root: the campaign domain
+  (`domain/campaign.py`) holds the `Connector`. **Re-test:**
+  `git grep -c "CONNECTORS.get(.*campaign.connector)" -- promptpotter` is 1.

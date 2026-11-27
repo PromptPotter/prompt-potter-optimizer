@@ -439,7 +439,6 @@ def fake_connector(name: str = "fake", **declared: Any) -> Connector:
         **{
             "endpoint": Endpoint("FAKE_ENDPOINTS", lambda: {"fake": f"http://{FakeBackend.AT}"}),
             "cell_envelope_s": cell_envelope_of(600.0),
-            "cell_payer": "host",
             "sent_spend_bound": None,
             "cells_priced": True,
             **declared,

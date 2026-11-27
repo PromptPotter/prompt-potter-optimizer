@@ -19,7 +19,7 @@ from promptpotter.domain.pipeline_schema import KnobLayer, PipelineNode, Pipelin
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.llm.registry import providers
-from promptpotter.infrastructure.llm.wallet import paying_key
+from promptpotter.infrastructure.llm.wallet import cells_paid_by, paying_key
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
@@ -70,7 +70,8 @@ def free_fence(stores: Stores, connector: Connector) -> FreeFence | None:
         return None
     keys = stores.api_keys.load()
     return FreeFence(
-        task=draws_coupon(connector.cell_payer),
+        # Read before any node is laid, so a task that keys its own sends may send on any of them.
+        task=draws_coupon(cells_paid_by(stores, connector, providers())),
         providers=frozenset(
             provider
             for provider in providers()

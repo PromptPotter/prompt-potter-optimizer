@@ -134,7 +134,10 @@ async def open_launch(
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
         book.refuse_unpriced(
-            cell, filed(CELL).kind, NEXT_CELL, session.backend_client.connector.cell_payer
+            cell,
+            filed(CELL).kind,
+            NEXT_CELL,
+            session.backend_client.cells_paid_by(session.pipeline_params),
         )
     # The launch's one session open, before round 0's door sends a cell.
     await session.backend_client.init_session(session.bank.samples, session.answer_terms)

@@ -472,7 +472,6 @@ CONNECTOR = Connector(
     execution="in_process",
     wire_adapter=dbllmbench_wire_adapter,
     cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
-    cell_payer="host",
     sent_spend_bound=_sent_spend_bound,
     cells_priced=True,
     extract_experiment=_extract_experiment,

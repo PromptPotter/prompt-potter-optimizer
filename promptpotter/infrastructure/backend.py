@@ -19,9 +19,9 @@ from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
 from promptpotter.domain.records.run_records import BackendWarningRecord
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
-from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     HELD_POLL_S,
@@ -39,10 +39,12 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     SendOutcome,
     admitted,
+    bound_account,
     replied,
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import append_record
+from promptpotter.infrastructure.llm.wallet import cells_paid_by
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
@@ -222,12 +224,15 @@ class BackendClient:
 
     def node_spend_bound(self, node: PipelineNode, cfg: NodeCall) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
-            return sent(node.name, cfg, self.priced_as(cfg), self.workload)
+            return sent(node.name, cfg, self._connector.priced_as(cfg), self.workload)
         return node.spend_bound
 
-    def priced_as(self, cfg: NodeCall) -> PricedPair:
-        return priced_pair(
-            cfg.model, cfg.provider, names_provider=self._connector.model_names_provider
+    def cells_paid_by(self, *params: PipelineParams) -> KeySource:
+        """Who pays the cells *params* send under the bound account (`wallet.py::cells_paid_by`)."""
+        return cells_paid_by(
+            bound_account("a backend's cells"),
+            self._connector,
+            (self._connector.priced_as(cfg)[1] for p in params for cfg in p.nodes.values()),
         )
 
     async def aclose(self) -> None:
@@ -283,15 +288,16 @@ class BackendClient:
         """Never resends a request the backend may still be working: a read timeout is terminal."""
         query = sample.query
         payload = self._connector.wire_adapter(sample, pipeline_params)
+        paid_by = self.cells_paid_by(pipeline_params)
 
         if self._connector.execution != "remote_http":
             return await self._in_process_until_admitted(
-                sample, payload, bound=bound, pairs=pairs, billed=billed
+                sample, payload, bound=bound, pairs=pairs, billed=billed, paid_by=paid_by
             )
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
         outcome, data, spent = await self._post_until_answered(
-            query, payload, bound=bound, billed=billed
+            query, payload, bound=bound, billed=billed, paid_by=paid_by
         )
         if outcome.failure is not None:
             raise FailedSendError(outcome)
@@ -307,6 +313,7 @@ class BackendClient:
         bound: SendBound | None,
         pairs: Mapping[str, PricedPair],
         billed: CellBilling[S],
+        paid_by: KeySource,
     ) -> tuple[dict[str, Any], S]:
         run = self._connector.in_process_run
         if run is None:
@@ -323,7 +330,13 @@ class BackendClient:
             async with self.backpressure.send() as ticket, machine:
                 try:
                     result = await self._in_process_cell(
-                        run, sample, payload, bound=bound, pairs=pairs, billed=billed
+                        run,
+                        sample,
+                        payload,
+                        bound=bound,
+                        pairs=pairs,
+                        billed=billed,
+                        paid_by=paid_by,
                     )
                 except CellThrottledError as exc:
                     self.backpressure.throttled(ticket, headers=None, body=str(exc))
@@ -338,6 +351,7 @@ class BackendClient:
         *,
         bound: SendBound,
         billed: CellBilling[S],
+        paid_by: KeySource,
     ) -> tuple[SendOutcome, dict[str, Any] | None, S]:
         client = self.http
         sends = _CellSends(query, drawn_budget())
@@ -345,9 +359,7 @@ class BackendClient:
             wait: float | None = None
             unreachable: tuple[httpx.TransportError, SendOutcome] | None = None
             async with self.backpressure.send() as ticket:
-                with admitted(
-                    CELL, bound, model=None, provider=None, paid_by=self._connector.cell_payer
-                ) as admission:
+                with admitted(CELL, bound, model=None, provider=None, paid_by=paid_by) as admission:
                     started = time.monotonic()
                     try:
                         # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
@@ -456,16 +468,15 @@ class BackendClient:
         bound: SendBound | None,
         pairs: Mapping[str, PricedPair],
         billed: CellBilling[S],
+        paid_by: KeySource,
     ) -> tuple[dict[str, Any], S]:
         with contextlib.ExitStack() as hold:
             admission: Admission | None = None
             if bound is not None and self._connector.holds_own_sends:
-                hold.enter_context(reserved(CELL, bound, paid_by=self._connector.cell_payer))
+                hold.enter_context(reserved(CELL, bound, paid_by=paid_by))
             elif bound is not None:
                 admission = hold.enter_context(
-                    admitted(
-                        CELL, bound, model=None, provider=None, paid_by=self._connector.cell_payer
-                    )
+                    admitted(CELL, bound, model=None, provider=None, paid_by=paid_by)
                 )
             started = time.monotonic()
             try:

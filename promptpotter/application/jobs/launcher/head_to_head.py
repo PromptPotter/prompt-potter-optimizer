@@ -220,10 +220,12 @@ async def admit_head_to_head(
             session.bank.samples,
             origin_override=None if opened is None else opened.origin_override,
         )
-        configs = [(effective_config(plan.spec), plan.spec.environment.connector) for plan in plans]
+        # The arms share the session's dataset, so its connector.
+        connector = session.backend_client.connector
+        configs = [effective_config(plan.spec) for plan in plans]
         asks = [
             (config.optimization.budget, sends_on(session.store, config, connector))
-            for config, connector in configs
+            for config in configs
         ]
         # Off the loop, once: the sweep and the admission wait on the gate and scan every ledger.
         admitted = await asyncio.to_thread(_admit, asks, session.store, job_registry, holder)

@@ -172,7 +172,7 @@ class FreshMint(LaunchRequest):
         return self.campaign_config(stores).optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self.campaign_config(stores), self.connector(stores).name)
+        return sends_on(stores, self.campaign_config(stores), self.connector(stores))
 
     @asynccontextmanager
     async def open(self, opening: Opening) -> AsyncIterator[OpenedCycle]:
@@ -253,7 +253,7 @@ class ForkLaunch(LaunchRequest):
         return self._config(stores).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self._config(stores).config, self.connector(stores).name)
+        return sends_on(stores, self._config(stores).config, self.connector(stores))
 
     def stand(self, opening: Opening, held: HeldBudget) -> ExistingCycle:
         """Cut under its admission's gate, its share landed on the child: no sibling admitted after

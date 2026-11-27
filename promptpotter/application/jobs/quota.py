@@ -8,13 +8,13 @@ from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
-from promptpotter import connectors
 from promptpotter.application.account import AccountKey, account_of, account_or_opening
 from promptpotter.application.free_tier import model_calls, tier_ceiling
 from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
@@ -52,6 +52,7 @@ from promptpotter.infrastructure.llm.wallet import (
     BackendCells,
     ProviderSend,
     Send,
+    cells_paid_by,
     paying_key,
     provider_send,
     read_coupon,
@@ -341,14 +342,16 @@ def account_wallet(stores: Stores) -> AccountWallet:
     )
 
 
-def sends_on(stores: Stores, config: CampaignConfig, connector: str) -> tuple[Send, ...]:
-    """What a run declaring *config* on *connector* sends, and who pays each: the connector's
-    cells as it declares them, then each provider its `model_calls` name, per `paying_key`."""
+def sends_on(stores: Stores, config: CampaignConfig, connector: Connector) -> tuple[Send, ...]:
+    """What a run declaring *config* on *connector* sends, and who pays each: its cells on the
+    providers its overlay lays (`cells_paid_by`), then each provider its `model_calls` name."""
     keys = stores.api_keys.load()
     calls = model_calls(select_optimizer(config.optimization), config)
-    declared = connectors.CONNECTORS.get(connector)
+    cells = (connector.priced_as(cfg)[1] for cfg in config.pipeline_overlay.values())
     return (
-        BackendCells(connector, declared.cell_payer, declared.cells_priced),
+        BackendCells(
+            connector.name, cells_paid_by(stores, connector, cells), connector.cells_priced
+        ),
         *(provider_send(keys, provider) for provider in dict.fromkeys(c.provider for c in calls)),
     )
 

@@ -25,8 +25,8 @@ from promptpotter.domain.layer_fold import Rule, rules_of
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
+from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
 
@@ -72,7 +72,7 @@ class NoopSession:
 
 
 PricedPair = tuple[str | None, str | None]
-"""The ``(model, provider)`` one node's sends are priced as (``BackendClient.priced_as``)."""
+"""The ``(model, provider)`` one node's sends are priced as (``Connector.priced_as``)."""
 
 # `(workload, sample, payload, the cell's pairs by node) -> {"data": {…}}`, a `/matches` body.
 InProcessRun = Callable[
@@ -147,10 +147,6 @@ class Connector:
     cell_envelope_s: CellEnvelopeSeconds
     """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
 
-    cell_payer: KeySource
-    """Whose wallet a cell's sends draw, whatever keys the account holds: ``"host"`` draws the
-    host's coupon."""
-
     sent_spend_bound: SentSpendBound | None
     """The bound THIS process sends the backend; ``None`` reads the served node's ``spend_bound``."""
 
@@ -211,7 +207,8 @@ class Connector:
     """Run init refuses a dataset declaring any other scope, so the empty default refuses the key."""
 
     holds_own_sends: bool = False
-    """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
+    """Each paid send is admitted, billed and keyed where it is made; ``False``: the cell is ONE
+    send, on the box's keys (`wallet.py::cells_paid_by`)."""
 
     model_names_provider: bool = False
     """Model strings are litellm's ``provider/model``, priced as ``pricing.py::priced_pair`` splits."""
@@ -303,6 +300,9 @@ class Connector:
         """A panel a cycle pinned, read back."""
         assert self.experiment_model is not None, "a panel is read only where one is owned"
         return self.experiment_model.model_validate(doc)
+
+    def priced_as(self, cfg: NodeCall) -> PricedPair:
+        return priced_pair(cfg.model, cfg.provider, names_provider=self.model_names_provider)
 
     @property
     def serves_pipeline(self) -> bool:

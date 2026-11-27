@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, contextma
 from functools import cmp_to_key
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
+from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.jobs.launcher.opening import (
     Opening,
@@ -707,4 +708,6 @@ def _open_pass(
 
 def campaign_sends(stores: Stores, at: CampaignCycle) -> tuple[Send, ...]:
     """What a run or pass on *at* sends, under its resolved config and connector."""
-    return sends_on(stores, cycle_config(stores, at).config, at.campaign.connector)
+    return sends_on(
+        stores, cycle_config(stores, at).config, connectors.CONNECTORS.get(at.campaign.connector)
+    )

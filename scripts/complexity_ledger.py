@@ -363,7 +363,9 @@ BASELINE = {
     # under it (`Narration`, the live board's pass), so no row stamps a running fold. (+39): a
     # `PairedReading` is a `ReadPair` or an `UnreadPair`, each arm's fields declared on it. (−8):
     # three fields nobody read go. (−3): round's and spine4's overlap, merged.
-    "package_lines": 114198,
+    # w9-payer (+36): a cell's payer is resolved per cell (`wallet.py::cells_paid_by`, read through
+    # `BackendClient.cells_paid_by` by every in-run planner), where `Connector.cell_payer` declared it.
+    "package_lines": 114234,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

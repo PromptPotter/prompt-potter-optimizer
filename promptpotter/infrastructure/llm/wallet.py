@@ -10,9 +10,9 @@ it down.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.said import Tone
@@ -40,6 +40,9 @@ from promptpotter.shared.errors import (
     LaunchRefusalReason,
     NoApiKeyError,
 )
+
+if TYPE_CHECKING:
+    from promptpotter.connectors.protocol import Connector
 
 
 def face_of(grant: CouponGrant | None, *, host: bool) -> Budget:
@@ -93,7 +96,7 @@ class ProviderSend(NamedTuple):
 
 
 class BackendCells(NamedTuple):
-    """A backend's cells, paid and priced as its connector declares whatever keys the account holds."""
+    """A backend's cells, paid per `cells_paid_by` and priced as its connector declares."""
 
     backend: str
     payer: KeySource
@@ -120,6 +123,19 @@ def paying_key(keys: Mapping[str, HeldKey], provider: str) -> ProviderKey | None
 def provider_send(keys: Mapping[str, HeldKey], provider: str) -> ProviderSend:
     key = paying_key(keys, provider)
     return ProviderSend(provider, None if key is None else key.paid_by)
+
+
+def cells_paid_by(
+    stores: Stores, connector: Connector, providers: Iterable[str | None]
+) -> KeySource:
+    """THE payer of *connector*'s cells sending on *providers*, by `sending_key`'s rule: a cell that
+    is one send goes out on the box's keys; one keying its own sends pays each per `paying_key`,
+    so the account pays it only where its own key pays each provider it names, and it names one."""
+    if not connector.holds_own_sends:
+        return "host"
+    keys = stores.api_keys.load()
+    paid = {None if p is None else provider_send(keys, p).payer for p in providers}
+    return "user" if paid == {"user"} else "host"
 
 
 def unpaid(provider: str) -> NoApiKeyError:
@@ -243,10 +259,7 @@ class AccountWallet(NamedTuple):
             case ProviderSend(provider=provider):
                 sends, named = f"{what}'s sends on {provider}", provider
             case BackendCells(backend=backend):
-                sends = (
-                    f"{what}'s {backend} cells, which go out on the box's keys whatever keys "
-                    "this account holds"
-                )
+                sends = f"{what}'s {backend} cells, which go out on the box's keys"
         asks = (
             f"nothing is left for {sends}"
             if declares is None

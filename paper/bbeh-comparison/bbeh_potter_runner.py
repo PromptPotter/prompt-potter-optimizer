@@ -160,7 +160,7 @@ async def run_bbeh_campaign(
             await attempt_bounds(verifying, calls),
         )
         client = verifying.backend_client
-        sends = sends_on(verifying.store, campaign_config, client.connector.name)
+        sends = sends_on(verifying.store, campaign_config, client.connector)
         async with paid_pass(
             stores=verifying.store,
             pass_kind=MeasurementRole.VERIFY,

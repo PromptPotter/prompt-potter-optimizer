@@ -622,7 +622,7 @@ def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each."""
-    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0].name)
+    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0])
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:

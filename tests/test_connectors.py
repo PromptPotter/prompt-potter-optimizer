@@ -89,7 +89,7 @@ def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -
         "max_calls": max_calls,
         "max_tokens": 50,
     }
-    pairs = {dspy_module.PROGRAM_NODE: client.priced_as(NodeCall.model_validate(config))}
+    pairs = {dspy_module.PROGRAM_NODE: client.connector.priced_as(NodeCall.model_validate(config))}
 
     async def one_cell() -> Any:
         async with CellEnvelope(600.0, attempts=client.connector.cell_attempts, label="q"):

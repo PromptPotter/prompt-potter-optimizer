@@ -736,7 +736,9 @@ class _ScoringPhase[K: Hashable]:
         self.gauge = self.session.state.flight
         self.client = self.session.backend_client
         self.cancels = self.client.connector.cancel_stops_billing
-        self.payer = self.client.connector.cell_payer
+        self.payer = self.client.cells_paid_by(
+            *(w.ctx.search_point.pipeline_params for w in self.walks if w)
+        )
         self.ceiling = self.client.connector.max_cells_in_flight
         self.book = run_scope().book
         self.label = filed(CELL)

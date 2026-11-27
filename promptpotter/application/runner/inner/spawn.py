@@ -475,7 +475,6 @@ CONNECTOR = Connector(
     cancel_stops_billing=True,
     # Without it a throttle storm stretches one cell, a whole campaign, across the round measuring it.
     cell_envelope_s=_cell_envelope_s,
-    cell_payer="host",
     # Every inner send is admitted and billed under the enclosing run's book.
     sent_spend_bound=None,
     cells_priced=True,

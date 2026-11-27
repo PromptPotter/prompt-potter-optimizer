@@ -667,7 +667,8 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     usd = passes * (len(session.state.scoring.partition.bench) * fmean(costs) + max(costs))
     if usd > aside.usd_amount:
         tokens = round(aside.token_amount * usd / aside.usd_amount)
-        book.set_aside(usd, tokens, paid_by=session.backend_client.connector.cell_payer)
+        paid_by = session.backend_client.cells_paid_by(session.pipeline_params)
+        book.set_aside(usd, tokens, paid_by=paid_by)
 
 
 async def bench_selection(
