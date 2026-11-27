@@ -17,14 +17,14 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import RunStart, refuse_campaign
+from promptpotter.application.jobs.launcher.admission import refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
-from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
-from promptpotter.application.run_observers import build_run_observers
+from promptpotter.application.jobs.launcher.opening import Opening
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.runner.entry import run_optimization
+from promptpotter.application.runner.run_init import enter_cycle
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
-from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
@@ -81,21 +81,19 @@ async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
     """Returns only once the run's process holds the job (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
-    start, stores, hop = held.start, held.session.store, held.session.hop
+    stores, hop = held.session.store, held.session.hop
     log_path = CycleLayout(stores.campaigns.cycle_dir(hop)).job_log
     loop = asyncio.get_running_loop()
-    try:
-        spec = held.job_spec()
-        child = _start(spec, log_path)
-        if not await _adoption(loop, child, spec.job_id):
-            raise RuntimeError(
-                f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
-            )
-    except BaseException as exc:
-        # No process took the job (its spec unbuilt among them), so nothing else will ever hand its
-        # slot back or stamp its cycle.
-        await asyncio.to_thread(start.release, exc, stamps=hop)
-        raise
+    # Until a process takes the job (its spec unbuilt among them), nothing else will ever hand its
+    # slot back or stamp its cycle: the opening's exit does, on a raise.
+    held.opening.owns(hop)
+    spec = held.job_spec()
+    child = _start(spec, log_path)
+    if not await _adoption(loop, child, spec.job_id):
+        raise RuntimeError(
+            f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
+        )
+    held.opening.hand_off()
 
     exited = asyncio.Event()
 
@@ -170,10 +168,10 @@ class HeldRun:
     """A launch past everything that can refuse it: its machine slot held and its ceiling admitted
     (``launcher.admission``), its cycle on disk, a session bound to that cycle. A launch arrives
     here by ``launch.py::hold`` and an arm by its head-to-head's mint, and what is left is the
-    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`, each
-    closing what opened its session (*closing*) once the run is handed off or ended."""
+    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run`, each closing
+    what opened its session and its opening's exit (*closing*) once the run is handed off or ended."""
 
-    start: RunStart
+    opening: Opening
     session: Session
     cycle: CycleConfig
     budget: HeldBudget
@@ -184,7 +182,7 @@ class HeldRun:
     @classmethod
     def of(
         cls,
-        start: RunStart,
+        opening: Opening,
         opened: OpenedCycle,
         budget: HeldBudget,
         closing: AsyncExitStack,
@@ -193,7 +191,7 @@ class HeldRun:
         """The opened cycle is what it reads back as, which a detached run rebuilds: a mint lays
         the one span it writes, a resume reads its line."""
         return cls(
-            start=start,
+            opening=opening,
             session=opened.session,
             cycle=opened.cycle,
             budget=budget,
@@ -205,12 +203,12 @@ class HeldRun:
     def job_spec(self) -> JobSpec:
         stores = self.session.store
         return JobSpec(
-            job_id=self.start.job_id,
+            job_id=self.opening.job_id,
             hop=self.session.hop,
             mode=self.mode,
             identity=stores.identity,
             budget=self.budget,
-            jobs_dir=self.start.job_registry.jobs_dir,
+            jobs_dir=self.opening.job_registry.jobs_dir,
             projects_root=stores.projects_root,
             shared_root=stores.shared_root,
             install_datasets_root=stores.install_datasets_root,
@@ -224,14 +222,20 @@ class HeldRun:
     async def run_inline(
         self, *, readout_sink: Callable[[str], None] | None
     ) -> tuple[Session, CycleResult]:
+        """A person's run: the readout pointer names its cycle first."""
         session = self.session
         readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
         # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
         with contextlib.suppress(OSError):
             write_text(user_data_root() / READOUT_POINTER, f"{readout}\n")
+        return await self.run(readout_sink=readout_sink)
+
+    async def run(
+        self, *, readout_sink: Callable[[str], None] | None
+    ) -> tuple[Session, CycleResult]:
         async with self.closing:
             return await run_held_job(
-                self.start,
+                self.opening,
                 self.session,
                 self.cycle,
                 mode=self.mode,
@@ -254,39 +258,33 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     # declares itself leaves the cycle free.
     if (adopted := await asyncio.to_thread(job_registry.adopt, spec.job_id)) is None:
         return None
-    start = RunStart(stores, job_registry, adopted)
+    opening = Opening.of(stores, job_registry, adopted)
     _tell_spawner()
     try:
-        # Asked again here, under the claim: the admitting process's answer is a handoff old.
-        refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
-    except CampaignRefusedError as refused:
-        # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
-        await asyncio.to_thread(start.release, refused)
-        return StopOutcome.FAILED
-    async with AsyncExitStack() as closing:
-        try:
+        async with AsyncExitStack() as closing:
+            closing.push_async_exit(opening)
+            # Asked again here, under the claim: the admitting process's answer is a handoff old.
+            # A refusal is the job's, never the cycle's stop: the cycle keeps the one it had.
+            refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
+            opening.owns(spec.hop)
             opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(stores))
-        except BaseException as exc:  # noqa: BLE001
-            await asyncio.to_thread(start.release, exc, stamps=spec.hop)
-            return StopOutcome.FAILED
-        try:
             _, result = await run_held_job(
-                start,
+                opening,
                 opened.session,
                 opened.cycle,
                 mode=spec.mode,
                 budget=spec.budget,
                 optimizer=opened.optimizer,
             )
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            return StopOutcome.PAUSED
-        except Exception:  # noqa: BLE001 -- `run_held_job` released the job with it
-            return StopOutcome.FAILED
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return StopOutcome.PAUSED
+    except Exception:  # noqa: BLE001 -- the opening's exit released the job with it
+        return StopOutcome.FAILED
     return stop_reason_outcome(result.stop_reason)
 
 
 async def run_held_job(
-    start: RunStart,
+    opening: Opening,
     session: Session,
     cycle: CycleConfig,
     *,
@@ -295,38 +293,28 @@ async def run_held_job(
     optimizer: SelectedOptimizer,
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[Session, CycleResult]:
-    """THE run of a held launch at every door, an inner seat's too: START, the run, its END.
-    Answers the session the run ENDED on (`run_optimization`). Its START, its hold and its END
-    wait on gates, off the loop."""
-    await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
+    """THE run of a held launch at every door, an inner seat's too: START, the run, its END, the
+    END being *opening*'s exit, which its door's stack holds. Answers the session the run ENDED on
+    (`run_optimization`). Its START and its hold wait on gates, off the loop."""
     # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
     # own producer may still be running it.
-    stamps: CycleHop | None = None
-    try:
-        observers = await asyncio.to_thread(
-            build_run_observers,
-            session=session,
-            campaign_config=cycle.config,
-            readout_sink=readout_sink,
-        )
-        stamps = session.hop
-        ended, result = await run_optimization(
-            list(session.bank.samples),
-            cycle,
-            session=session,
-            observers=observers,
-            mode=mode,
-            budget=budget,
-            optimizer=optimizer,
-        )
-    except BaseException as exc:
-        # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
-        # fired OUTSIDE the runner's try, so this stamps it.
-        await asyncio.to_thread(
-            start.release, exc, stamps=None if launch_interrupted(exc) else stamps
-        )
-        raise
-    await asyncio.to_thread(start.release, result)
+    opening.owns(None)
+    await asyncio.to_thread(opening.job_registry.move, opening.job_id, LaunchMove.START)
+    observers = await asyncio.to_thread(
+        enter_cycle, session, cycle.config, readout_sink=readout_sink
+    )
+    # Anything raised from here fired OUTSIDE the runner's try, an interrupt aside: it stamps.
+    opening.running_on(session.hop)
+    ended, result = await run_optimization(
+        list(session.bank.samples),
+        cycle,
+        session=session,
+        observers=observers,
+        mode=mode,
+        budget=budget,
+        optimizer=optimizer,
+    )
+    opening.ended = result
     return ended, result
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from typing import Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -217,12 +218,10 @@ async def _held_at_depth(
     pressed = SetSampleLookaheadPayload.model_validate(
         {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, **press.model_dump()}
     )
-    try:
+    async with AsyncExitStack() as pressing:
+        pressing.push_async_exit(held.closing)
         await dispatcher.dispatch(CommandCall(pressed, door=door))
-    except BaseException as exc:
-        await asyncio.to_thread(held.start.release, exc)
-        await held.closing.aclose()
-        raise
+        pressing.pop_all()
     return held
 
 
@@ -352,35 +351,27 @@ async def _launch_fork(
         await asyncio.to_thread(cut.withdraw, stores, job_registry)
         raise
 
+    async def _unfork(_type: object, exc: BaseException | None, _tb: object) -> None:
+        if exc is not None:
+            await asyncio.to_thread(cut.withdraw, stores, job_registry)
+
     async def _held_fork() -> HeldRun:
-        held: HeldRun | None = None
-        try:
+        async with AsyncExitStack() as unfork:
+            unfork.push_async_exit(_unfork)
             held = await admitted.held()
+            # The held run's own exit first: its job released before the cut is withdrawn.
+            unfork.push_async_exit(held.closing)
             # It spends the arm's ceiling and moves its parent, so the campaign leaves.
             stores.campaigns.act(cut.parent, ArmAct.FORK)
             await _leave_parent(dispatcher, cut, dispatched.door)
             await asyncio.to_thread(cut.take, stores)
-        except BaseException as exc:
-            await asyncio.to_thread(_unfork, held, cut, stores, job_registry, exc)
-            raise
+            unfork.pop_all()
         return held
 
     press = dispatched.payload.lookahead
     return await admitted.hand_over(
         _held_at_depth(dispatcher, dispatched.door, press, _held_fork())
     )
-
-
-def _unfork(
-    held: HeldRun | None,
-    cut: ForkCut,
-    stores: Stores,
-    job_registry: JobRegistry,
-    exc: BaseException,
-) -> None:
-    if held is not None:
-        held.start.release(exc)
-    cut.withdraw(stores, job_registry)
 
 
 async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut, door: Door) -> None:

@@ -16,18 +16,10 @@ row it closes.
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
 - **A fork is not opened under a carried admission**: `jobs/launcher/launch.py::hold` opens every held
-  launch's cycle, and the slotless doors (`embedded_run.py::run_campaign`,
-  `runner/inner/spawn.py::_open_seat`) admit through `admission.py::admit_slotless` before they mint
-  and run through `run_job.py::run_held_job`, but mint or resume beside it. Action: a fork is opened
-  under a carried admission, and the slotless doors open through the request kind's one `open`.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "mint(" -- promptpotter/application/runner/inner/spawn.py promptpotter/application/embedded_run.py` is empty.
-- **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the
-  one release, but 8 `except BaseException: … release(exc)` blocks across `jobs/launcher/` and
-  `commands/launching.py`, and `embedded_run.py`'s `to_thread(start.release, exc`, call it by hand, and `jobs/launcher/head_to_head.py::AdmittedHeadToHead.launched`
-  and `embedded_run.py::run_head_to_head` each release the arms not yet run after a failure (no arm set
-  owns its starts). Action: the one `open_cycle` lifecycle owns the start's release; a context manager is
-  the patch, not the root. **Rides with:** admit-2. **Re-test:** `git grep -c "release(exc" -- promptpotter/application`
-  falls from 8.
+  launch's cycle, the slotless kinds' (`mint_and_start.py::EmbeddedMint`, `EmbeddedResume`,
+  `InnerSeat`) included, but a fork's cut is opened beside it (`commands/launching.py::fork_cycle`).
+  Action: a fork is opened under a carried admission. **Rides with:** admit-2. **Re-test:**
+  `git grep -n "cut_operator_fork(" -- promptpotter/application/commands/launching.py` names it inside a request's `open`.
 - **A fork's cut lands before its admission**: `commands/launching.py` cuts the child
   (`cut_operator_fork`) before `_launch_fork` admits on the request's own hop, so a refusal leaves the
   parent's inert `FORK_CUT` line, because `jobs/quota.py::_new_campaign` counts an unresolved hop as a
@@ -36,7 +28,7 @@ row it closes.
   `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py` lists the
   admission before the cut. Measured at +60 in `promptpotter` as its own door (`wip/valid-2` d75eb7e is
   the reference build), so it rides admit-2's one admission door.
-- **A mint takes no claim until `admission.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
+- **A mint takes no claim until `opening.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
   embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
   registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of
   the mint's whole workspace: any live job there keeps every torn mint in it). Action: the mint claims
@@ -45,8 +37,8 @@ row it closes.
   read `destroying` would otherwise raise `CycleBusyError` on). **Rides with:** admit-2. **Re-test:**
   `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
 - **The embedded launch is not a command**: `embedded_run.py::run_campaign` and `::run_head_to_head`
-  open their own session but file no `CommandRecord`; `run_campaign` admits through
-  `admission.py::admit_slotless` and mints itself, because a DSPy `program` is an in-memory object no
+  open their own session but file no `CommandRecord`; `run_campaign` admits an
+  `EmbeddedMint` through `jobs/launcher/launch.py::admit` with no command, because a DSPy `program` is an in-memory object no
   payload carries. Action: `run_campaign` files `mint-campaign` or `start-run` with an `EmbeddedRun`
   holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:** an embedded
   `run_campaign` leaves a `CommandRecord` in the commands log (today `commands/dispatcher.py` builds the
@@ -235,7 +227,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 ### valid (after rk-dec, before the behaviour keys)
 
 - **A fork's share lands at its landing**: a running cycle's job moves onto its fork through
-  `jobs/launcher/admission.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
+  `jobs/launcher/opening.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
   `set-limits` filed between the cut and the landing re-shares the campaign without the fork. Action:
   the share is taken against the campaign with the cut. **Rides with:** admit-2.
 - **`ab` under an edited scorer refits what the archive still holds**: `difficulty.py::regraded_ruler`
@@ -520,7 +512,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   have moved). Action: time `probe_backend`,
   `served_pipeline`, `ensure_model_capabilities` and the term push on the box for one paused cycle, then
   drop whichever one a resume re-does. **Rides with:** box (it needs the box measured), whose Owns gain
-  `runner/mint.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
+  `runner/run_init.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
   ack on a paused cycle.
 
 ### batch/32 · tests-w (a tests chain named at batch/25's fold; it owns `scripts/offline_world.py`)
@@ -745,7 +737,7 @@ Each row names the chain it rides with.
 
 Order. A landing may wipe run data, so none is ordered by a wipe; each root names its reshape.
 1. Land what is in flight: l4-key-b → l4-key-c; spend-tomb; ml-6 → ml-7; web-tail → web-land.
-2. A, the run opening, after l4-key-b, spend-tomb and admit-3. Its rows `runner/mint.py` and `jobs/quota.py` ride it.
+2. A, the run opening, after l4-key-b, spend-tomb and admit-3. Its rows rode it.
 3. B, the resolved run: its core is free now and parallel with A; the check-in link goes after A. Decide G first.
 4. D, versions, after spend-tomb; parallel with A and B.
 5. C1 → C2 → the nested send, one chain over `domain/records/run_records.py`, after l4-key-b, spend-tomb and the measuring loop; C1 after ml-7; the scanner fold after the loop.
@@ -760,14 +752,14 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `jobs/launcher/launch.py:30` `LaunchRequest = FreshMint | ExistingCycle | CheckinStart` repeats eight
   members (`at`, `step_rounds`, `holder`, `connector`, `endpoint`, `declared_budget`, `sends`, `open`)
   in three classes (`mint_and_start.py:58,117`, `checkin.py:52`) with no declared protocol, and the
-  embedded and inner doors stand outside it. The opening is spelled across `admission.py::RunStart`,
-  `jobs/launcher/launch.py::hold`, `runner/mint.py::open_launch` and `open_cycle`, `run_observers.py::build_run_observers`,
+  embedded and inner doors stand outside it. The opening is spelled across `opening.py::Opening`,
+  `jobs/launcher/launch.py::hold`, `runner/run_init.py::open_launch` and `open_cycle`, `run_observers.py::build_run_observers`,
   `runner/entry.py::launch_scope`, `embedded_run.py::enter` and `runner/inner/spawn.py::_open_seat`;
   `release(exc` stands 8/3; `run_observers.py:154` appends `RunPhaseRecord(Running)`, voids the inbox,
   saves the active pointer and closes a dead bench, so the run boundary sits in an observer builder.
   Root: a request kind states only its data; embedded, inner and fork are request kinds, not side doors.
-  **Closes:** **A start's release is still hand-rolled at each start site**, **A fork's cut lands before its admission**,
-  **A mint takes no claim until `admission.py::claim_cycle`**, **The embedded launch is not a command**,
+  **Closes:** **A fork's cut lands before its admission**,
+  **A mint takes no claim until `opening.py::claim_cycle`**, **The embedded launch is not a command**,
   **Three launch faults from a code review**, **A fork's share lands at its landing**, **A fork is not opened under a carried admission**;
   adjacent: **A queued launch dies with the asking process**, **A job is a survivor that carries how its run ended**.
   **Run data:** none. **Size:** large, about 10 files, a chain of 5–6 links. **Rides with:** admit-3.
@@ -843,15 +835,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   values compose. Sits under **The cycle index reads its chain beside the store's**, the launch-steer row
   and the sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:**
   `git grep -c "for span in spans" -- promptpotter` falls from 16.
-- **`jobs/quota.py` holds counts and rates, and the money shares sit beside the spend book**: `quota.py`
-  is 1,015 lines; `:608` onward holds `share_campaign_ceiling`, `cycle_share`, `move_campaign_money`,
-  `change_budget`, `hold_run` and `release_run`; 16 files import it, `pipeline_resolve.py` among them,
-  the cycle **`runner/termination.py` is a phase module that `jobs/` reads** names. Root: shares and holds
-  move to the spend book's side, and `quota` keeps counts and rates. **Rides with:** root A.
-  **Re-test:** `git grep -c "^def " -- promptpotter/application/jobs/quota.py` falls by the six.
-- **`runner/mint.py` opens a run and mints nothing**: it holds `open_launch`, `open_cycle`, `close_init`
-  and `onto_fork`; the mint is `jobs/mint.py`. Root: the opening of root A takes the four. **Rides with:** root A.
-  **Re-test:** `git ls-files promptpotter/application/runner/mint.py` is empty.
 - **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
   `_Money`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
   its own beside the spend book. **Rides with:** root C2's chain. **Re-test:**
@@ -1151,6 +1134,14 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `application.account` directly (decisions § 0004); `/bulletin` is the first to dispatch a
   `CommandKind`. Door: each bot verb is a command kind. **Re-test:** the bot imports no
   `application.account` writer.
+- **A fork's cut is opened beside its admission** (w7-open): `commands/launching.py::fork_cycle` cuts
+  the fork outside a request's `open`, so the fork half of **A fork is not opened under a carried
+  admission** stays. Door: the fork is a request kind whose `open` cuts it. **Re-test:** `fork_cycle`
+  cuts nothing itself.
+- **The embedded fresh door probes its backend after its session opens** (w7-open): the probe moved
+  into admission but runs once the session is open, so a dead backend opens a session first. Door:
+  the probe runs before the opening. **Re-test:** a fresh embedded launch on a dead backend opens no
+  session.
 - **The gate rewrites `maintenance/built_key.py` on every code change** (w7-small; the wave-7 landing
   hit it at each squash): a committed key of the code tree is stale after any edit, so every commit
   regenerates it first. Root: the key is computed where it is read, or the gate's write is the

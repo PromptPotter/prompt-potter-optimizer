@@ -1863,8 +1863,9 @@ def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
         launched = dispatched.result
         assert isinstance(launched, Launched) and launched.held is not None
         # The journey asks what the held fork does to its parent, not what its run does next.
-        async with (await launched.held).closing:
-            pass
+        with contextlib.suppress(RuntimeError):
+            async with (await launched.held).closing:
+                raise RuntimeError("the fork's run is not this journey's")
 
     asyncio.run(forked())
     withdrawn = queue.get(parents_launch.job_id)

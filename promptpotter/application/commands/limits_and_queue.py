@@ -10,7 +10,7 @@ from promptpotter.application.commands.dispatcher import (
     Replaying,
     replays,
 )
-from promptpotter.application.jobs import quota
+from promptpotter.application.jobs import quota, shares
 from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.served_dashboard import current_caps
 from promptpotter.domain.campaign import CampaignCycle
@@ -54,7 +54,7 @@ def _change_budget(
     dispatcher: CommandDispatcher, at: CampaignCycle, change: ChangeRunLimitsPayload
 ) -> bool:
     stores = dispatcher.stores
-    return quota.change_budget(
+    return shares.change_budget(
         change.budget,
         overshoot=change.overshoot,
         stores=stores,

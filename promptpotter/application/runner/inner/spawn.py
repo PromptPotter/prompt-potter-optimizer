@@ -7,27 +7,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, NamedTuple
 
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
-    admit_slotless,
-    campaign_refusal,
-)
-from promptpotter.application.jobs.launcher.run_job import run_held_job
+from promptpotter.application.jobs.launcher.admission import campaign_refusal
+from promptpotter.application.jobs.launcher.launch import admit
+from promptpotter.application.jobs.launcher.mint_and_start import InnerSeat
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
-    mint,
     resolve_cycle_plan,
     resolve_resume,
 )
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
-    SelectedOptimizer,
     resolved_overrides,
 )
 from promptpotter.application.pipeline_resolve import laid_session
@@ -43,11 +40,10 @@ from promptpotter.application.runner.inner.tasks import (
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.cells import InnerCells, cell_key
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
@@ -71,7 +67,6 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
-from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.run_scope import (
     InnerSpawnContext,
@@ -218,16 +213,6 @@ def _cells(ctx: InnerSpawnContext) -> InnerCells:
     return ctx.cells
 
 
-class _Opened(NamedTuple):
-    """A seat admitted, then minted or resumed: its cycle, under the hold its run releases."""
-
-    session: Session
-    cycle: CycleConfig
-    optimizer: SelectedOptimizer
-    start: RunStart
-    held: HeldBudget
-
-
 def arm_layer(overrides: Overrides) -> Layer[str]:
     """An arm's edit, each node's on that node alone, laid last over the cell's own overlay: the
     selection refuses what no render can apply."""
@@ -278,7 +263,7 @@ async def panel_rows(stores: Stores, panel: ResolvedInnerPanel) -> list[dict[str
 
 
 @asynccontextmanager
-async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
+async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[HeldRun]:
     ctx = cell.ctx
     # The campaign that exists decides, never an id its origin content derives: a drifted origin
     # reaches the drift refusal rather than a fresh root.
@@ -304,31 +289,19 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
                 raise
             # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
             raise CellUnscoreableError(str(refused), spent={}) from refused
-        # Admitted BEFORE the mint, as every slotless door is: a refusal mints no seat. Each send is
-        # admitted by its own book AND the ROOT's; its share bounds every checkpoint.
-        start, held = await asyncio.to_thread(
-            admit_slotless,
-            plan.cycle.config,
-            stores=store,
-            holder=InnerRun(cell.dataset),
-            at=None if campaign is None else plan.session.at,
-            requested=Budget(),
-            step_rounds=None,
-            sends=(),
+        # Admitted BEFORE the mint, as every slotless door is: a refusal mints no seat.
+        seat = InnerSeat(
+            plan, cell.campaign_id, cell.dataset, None if campaign is None else plan.session.at
         )
-        stamps: CycleHop | None = None
-        try:
-            if campaign is None:
-                minted = mint(plan, campaign_id=cell.campaign_id, adopting=None)
-                stamps = minted.hop
-                await asyncio.to_thread(start.land, minted.hop, held)
-                session = minted.session
-            else:
-                session = plan.session
-        except BaseException as exc:
-            await asyncio.to_thread(start.release, exc, stamps=stamps)
-            raise
-        yield _Opened(session, plan.cycle, plan.optimizer, start, held)
+        admitted = await asyncio.to_thread(
+            admit,
+            seat,
+            RunMode(),
+            stores=store,
+            job_registry=JobRegistry.attach(store.jobs_dir),
+            inline=None,
+        )
+        yield await admitted.held()
 
 
 async def _run_inner_campaign(
@@ -342,20 +315,16 @@ async def _run_inner_campaign(
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
-        async with _open_seat(cell, store) as opened:
-            session = opened.session
+        async with _open_seat(cell, store) as held, AsyncExitStack() as unrun:
+            # The seat's run ends inside: its opening's exit is its END.
+            unrun.push_async_exit(held.closing)
+            session = held.session
             session.store.campaigns.append(
                 session.hop, SpawnedRecord(spawned_by=SpawnedBy.model_validate(spawned_by))
             )
             minted.append(session.hop)
-            ended, result = await run_held_job(
-                opened.start,
-                session,
-                opened.cycle,
-                mode=RunMode(),
-                budget=opened.held,
-                optimizer=opened.optimizer,
-            )
+            unrun.pop_all()
+            ended, result = await held.run(readout_sink=None)
             spans = line_spans(ended.store, ended.state.scoring.scorer, ended.hop)
             declared = ended.store.campaigns.last(ended.hop, RunPhaseRecord)
     assert declared is not None and declared.stop_reading is not None, "an inner run ends declared"

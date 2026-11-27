@@ -283,7 +283,9 @@ BASELINE = {
     # dismiss commands, the account's read at the API and the terminal, and the admin bot's `/bulletin`.
     # w7-line (+19): the dashboard serves `active`, `successor` and `line`, and each line arm its
     # open cells; `measuring_arm`, the race fold and the subtree's `inherited` go.
-    "package_lines": 113161,
+    # w7-open (+59): one `opening.py::Opening` per run, the `LaunchRequest` shape its five kinds
+    # share (the embedded and inner doors among them), and `jobs/shares.py` beside quota.
+    "package_lines": 113220,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

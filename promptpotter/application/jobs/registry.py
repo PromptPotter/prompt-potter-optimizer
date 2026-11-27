@@ -300,7 +300,7 @@ class JobRegistry:
         self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
     ) -> Job | None:
         """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
-        (`admission.py::RunStart.release`): the `StopReason` its run returned (*stepped* where it
+        (`opening.py::Opening`'s exit): the `StopReason` its run returned (*stepped* where it
         paused at its round allowance); any raise in the queue withdrew it, one before its admission
         or a campaign's refusal at any point refused it, and an interrupt or a raise after it is the
         stop it reads as (`run_stop_reason`); nothing at all is a scoring pass that returned."""
@@ -450,7 +450,7 @@ class JobRegistry:
         return starts
 
     def reap_orphans(self) -> list[Job]:
-        """`quota.reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
+        """`shares.py::reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
         ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood. Its scans
         are off the gate, which takes each orphan alone, asked again: an adoption made it live."""

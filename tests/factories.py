@@ -29,12 +29,10 @@ from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.jobs.launcher.admission import (
-    admit_slotless,
-    claim_cycle,
-)
-from promptpotter.application.jobs.mint import mint_framed_cycle, run_spec
-from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.launcher.launch import admit
+from promptpotter.application.jobs.launcher.mint_and_start import EmbeddedMint
+from promptpotter.application.jobs.launcher.opening import claim_cycle
+from promptpotter.application.jobs.mint import run_spec
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -49,14 +47,13 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
 )
 from promptpotter.application.pipeline_resolve import laid_session
-from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.entry import launch_scope, open_line
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
-from promptpotter.application.runner.mint import open_launch
+from promptpotter.application.runner.run_init import enter_cycle, open_launch
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
 from promptpotter.application.scoring.search_point_scorer import filed_entry
@@ -103,7 +100,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
-from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, LaunchMove
+from promptpotter.domain.job import CampaignLaunch, LaunchMove
 from promptpotter.domain.l4.cells import InnerCell, InnerCells
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
@@ -196,7 +193,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     campaign_defaults,
     install_dataset,
     resolve_dataset,
-    runnable_definition,
 )
 from promptpotter.infrastructure.store.io import write_json, write_yaml
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
@@ -743,39 +739,19 @@ async def run_init_round(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
-
-        async def run(held: HeldBudget) -> tuple[RoundContext, CycleResult]:
-            minted = await mint_framed_cycle(
-                session,
-                config,
-                session.bank.samples,
-                task_text=None,
-            )
-            await asyncio.to_thread(start.land, minted.session.hop, held)
-            return await launched_round(
-                minted.session, minted.cycle, minted.optimizer, held, round_num=round_num
-            )
-
-        start, held = await asyncio.to_thread(
-            admit_slotless,
-            config,
+        admitted = await asyncio.to_thread(
+            admit,
+            EmbeddedMint(session, config, Budget()),
+            RunMode(),
             stores=stores,
-            holder=EmbeddedRun(session.measured_dataset),
-            at=None,
-            requested=Budget(),
-            step_rounds=None,
-            sends=sends_on(
-                stores,
-                config,
-                runnable_definition(resolve_dataset(stores, LAUNCHED_DATASET)).connector,
-            ),
+            job_registry=JobRegistry.attach(stores.jobs_dir),
+            inline=None,
         )
-        try:
-            ctx, ended = await run(held)
-        except BaseException as exc:
-            await asyncio.to_thread(start.release, exc)
-            raise
-        await asyncio.to_thread(start.release, ended)
+        held = await admitted.held()
+        async with held.closing:
+            ctx, held.opening.ended = await launched_round(
+                held.session, held.cycle, held.optimizer, held.budget, round_num=round_num
+            )
         return ctx
 
 
@@ -788,9 +764,7 @@ async def launched_round(
     round_num: int,
 ) -> tuple[RoundContext, CycleResult]:
     """Run init on a minted cycle as its door opens it, through round 0's walk."""
-    observers = await asyncio.to_thread(
-        build_run_observers, session=running, campaign_config=cycle_config.config
-    )
+    observers = await asyncio.to_thread(enter_cycle, running, cycle_config.config)
     try:
         with launch_scope(running, observers, cycle_config.config):
             prep = await open_launch(
@@ -1073,11 +1047,10 @@ async def inner_seat(
     # Under the outer run's book, as a cell's spawn reads it.
     with scoped(account=stores), scoped(spawn=spawning, book=spend_book(1000.0)), scoped(round=0):
         cell = spawn._resolve_inner_cell(asked, {"optimizer_prompt_overrides": overrides})
-        async with spawn._open_seat(cell, spawn.claim_sandbox(spawning)) as opened:
-            ctx, ended = await launched_round(
-                opened.session, opened.cycle, opened.optimizer, opened.held, round_num=round_num
+        async with spawn._open_seat(cell, spawn.claim_sandbox(spawning)) as held, held.closing:
+            ctx, held.opening.ended = await launched_round(
+                held.session, held.cycle, held.optimizer, held.budget, round_num=round_num
             )
-            await asyncio.to_thread(opened.start.release, ended)
             return ctx
 
 

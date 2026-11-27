@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -14,7 +14,7 @@ from promptpotter.application.bench.task_context import (
     committed_task_context,
     draft_ledger,
 )
-from promptpotter.application.config_map import bench_defaults_pin
+from promptpotter.application.config_map import bench_defaults_pin, measured_address
 from promptpotter.application.datasets.authored import declare_run, effective_config
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import (
@@ -44,10 +44,6 @@ from promptpotter.application.preflight import (
     unpriced_routes,
 )
 from promptpotter.application.run_observers import declare_run_wiring
-from promptpotter.application.runner.mint import (
-    origin_content_hash,
-    root_cycle_id_of,
-)
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
@@ -98,10 +94,29 @@ from promptpotter.infrastructure.store.io import make_dirs, validate_path_compon
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PayloadInvalidError
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
+
+
+def origin_content_hash(
+    origin: OptSearchPoint,
+    points: PointContext,
+    dataset: list[Sample],
+    *,
+    answer_terms: Collection[str],
+) -> str:
+    """What the origin SENDS over its rows: a cell's identity is not in it, and is checked beside it
+    off the cycle's drawn record (`CampaignSurvey.drawn`)."""
+    return points.job(origin).content_hash(dataset, answer_terms=answer_terms)[:12]
+
+
+def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
+    """Each arm of a head-to-head is its own run; declarations differing only in spend or display are
+    one, so two ``new`` calls on one share it and ``measurements/`` pools their origin scores."""
+    return f"cycle_{stable_hash([origin_hash, measured_address(declaration)], length=12)}"
 
 
 def refuse_unrunnable(

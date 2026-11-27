@@ -1078,12 +1078,12 @@ _PATCHED = frozenset({"pause_at_round", "overshoot"})
 
 class CampaignCeilingRecord(CycleRecord):
     """The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's
-    ledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`."""
+    ledger, so every cycle of it reads one; every move lands through `jobs/shares.py::move_campaign_money`."""
 
     record_type: Literal["campaign_ceiling"] = "campaign_ceiling"
     budget: Budget
     # What the operator asked of each axis `budget` names; lower there only where the account's
-    # allowance clamped it (`quota.py::_clamped`).
+    # allowance clamped it (`quota.py::clamped_change`).
     asked: Budget
     timestamp: str = Field(default_factory=utcnow_iso)
 
