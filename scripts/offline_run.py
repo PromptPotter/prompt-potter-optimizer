@@ -1239,8 +1239,8 @@ def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None
 
 async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
     """The line's warm ruler separates arms, so each door reads the noise walk and the hold off
-    one served round: the readouts of *line* name μ0 and τ, *hop*'s `log.md` every hold the
-    last close's series reads (a close's readout reads its own), the embedded and MCP reads of
+    one served round: the readouts of *line* name μ0 and τ, *hop*'s stop every hold the last
+    close's series reads (a close's round block reads its own), the embedded and MCP reads of
     *hop* serve both."""
     embedded = await answer_read(
         CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id), stores
@@ -1255,13 +1255,12 @@ async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) 
     if served != [{k: r[k] for k in walk} for r in hosted]:
         raise SystemExit("offline run: the MCP and embedded doors read two noise walks")
     held = [r.hold_up for r in embedded.rounds if r.hold_up is not None]
-    log = stores.campaigns.layout(hop).log_md.read_text("utf-8")
     said = {
         "lift_prior": any(r["lift_prior"] for r in served),
         "hold_up": bool(held),
         "μ0": "noise walk: μ0 " in readout,
         "τ": ", τ " in readout,
-        "held up": all(f"held up: the promotion holds {h.text} " in log for h in held),
+        "held up": all(f"held up: the promotion holds {h.text} " in readout for h in held),
     }
     if missing := [name for name, read in said.items() if not read]:
         raise SystemExit(f"offline run: the separating round's doors read no {missing}")

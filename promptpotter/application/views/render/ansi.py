@@ -54,7 +54,13 @@ from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRe
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat
-from promptpotter.domain.spend import RATE_PRICED_LABEL, StopSpend, usd_text
+from promptpotter.domain.spend import (
+    RATE_PRICED_LABEL,
+    SpendBucket,
+    SpendRollup,
+    StopSpend,
+    usd_text,
+)
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts, collapse_reason
 from promptpotter.shared.answer_text import truncate
@@ -370,6 +376,34 @@ def render_run_spend(v: StopSpend) -> str:
     ]
     bits.extend(v.meter_lines())
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
+
+
+def render_spend_breakdown(spend: SpendRollup) -> list[str]:
+    """The cycle chain's spend per kind, per scoring pass, and per node with its prefix cache: the
+    one text a host pin's verdict reads (realized cache share and $/M beside running uncached)."""
+
+    def row(name: str, bucket: SpendBucket) -> str:
+        return (
+            f"    {name}: billed {usd_text(bucket.used_usd)} · {RATE_PRICED_LABEL} "
+            f"{usd_text(bucket.rate_priced_usd)} · incurred {usd_text(bucket.incurred_usd)}"
+        )
+
+    lines = ["  spend by kind:", *(row(kind, b) for kind, b in spend.by_kind.items())]
+    if spend.by_role:
+        by_pass = sorted(spend.by_role.items(), key=lambda kv: -kv[1].incurred_usd)
+        lines.append("  spend by scoring pass:")
+        lines += [row("outside every pass" if r is None else r, b) for r, b in by_pass]
+    for header, by_node in (("node", spend.by_node), ("nested run's node", spend.by_nested_node)):
+        sent = sorted(
+            ((n, b) for n, b in by_node.items() if b.input_tokens), key=lambda kv: -kv[1].sent_usd
+        )
+        if sent:
+            lines.append(f"  spend by {header}:")
+            lines += [
+                f"{row(n, b)} · {b.input_tokens} input tokens · prefix cache {b.prefix.badge}"
+                for n, b in sent
+            ]
+    return lines
 
 
 def _render_pass_enter(v: PassOpened) -> str:

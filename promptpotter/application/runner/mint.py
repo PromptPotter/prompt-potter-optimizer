@@ -394,7 +394,7 @@ def close_init(cycle: Cycle) -> None:
         sample_ids=session.state.scoring.partition.admitted_ids,
     )
     partition = session.state.scoring.partition
-    # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
+    # A RUNNING cycle's readout reads its formula off this bracket (`scorer_cell_formula`).
     append_record(
         PhaseRecord(
             phase=CampaignPhase.INIT,

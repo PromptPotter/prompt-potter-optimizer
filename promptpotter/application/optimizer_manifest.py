@@ -517,7 +517,7 @@ class SelectedOptimizer:
         *,
         context_object: list[str],
     ) -> ReviewReading | None:
-        """``None`` where no member keeps a reading of its own; ``review.md`` then says N/A."""
+        """``None`` where no member keeps a reading of its own; the readout's review then says N/A."""
         reviewer = next((m for m in self.members if isinstance(m, Reviewer)), None)
         if reviewer is None:
             return None
@@ -1015,7 +1015,7 @@ def _open_edges(selected: SelectedOptimizer) -> list[str]:
         if editors := [p.name for p in walk if p.proposes == "edits" and p.arms(selected)]:
             open_.append(f"{editors} edit the arms they are handed and count arms of their own")
     if len(reviewers := sorted(n for n, m in members.items() if isinstance(m, Reviewer))) > 1:
-        open_.append(f"{reviewers} each answer review.md's reading, which one member answers")
+        open_.append(f"{reviewers} each answer the readout's review, which one member answers")
     return open_
 
 

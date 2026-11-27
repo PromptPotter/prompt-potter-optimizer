@@ -307,10 +307,6 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   and row choice) and L4's level series; the round carries its pairings alone. It reshapes run data,
   so it lands before L4 spends; [`../architecture.md`](../architecture.md) §0.5's case for the δ
   ruler is restated first.
-- **Then: one text digest of a round.** `review.md`, `log.md` (`views/view_models.py::RoundDigestView`)
-  and the readout each re-derive a round off `RoundResult`, where `ServedRound` already serves it:
-  one round block rendered from it, `review.md` keeping its checks, variants and critique. The
-  folder's text only, so no re-key.
 
 The re-keys end at the behaviour-key switch.
 

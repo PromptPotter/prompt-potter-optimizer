@@ -128,7 +128,7 @@ class HardSamples(StrictModel):
     theta: dict[str, float]
     positions: dict[str, int]
     # The samples this scope measured: δ descending, then the ones off the ruler; ties by row.
-    sample_order: list[str]
+    ranked_keys: list[str]
     samples: dict[str, SampleDifficulty]
     cells: list[HardSampleCell]
 

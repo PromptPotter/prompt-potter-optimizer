@@ -426,7 +426,7 @@ class _LeaderboardPage:
 def _selected(
     view: HardSamples, members: Collection[int], max_unmeasured: int | None, limit: int
 ) -> list[int]:
-    in_view = [view.positions[k] for k in view.sample_order if view.positions[k] in members]
+    in_view = [view.positions[k] for k in view.ranked_keys if view.positions[k] in members]
     selection = in_view + sorted(set(members).difference(in_view))
     return _trim_unmeasured(selection, set(in_view), max_unmeasured)[:limit]
 

@@ -52,10 +52,10 @@ projects/{tenant_id}/
     commands.jsonl                    # the account's command log
   drafts/{draft_id}/                  # an open check-in, until Start or Discard
   campaigns/{campaign_id}/
-    campaign.json  log.md
+    campaign.json
     cycles/{cycle_id}/                # root + forks, ALL FLAT
       dashboard.json  index.json  export.json  optimized.md
-      log.md  review.md  readout.log
+      readout.log
       rounds/round_NNNN.json
       .runtime/
         ledger.jsonl                  # append-only spine
@@ -76,7 +76,7 @@ Each file's contract is its model; this says only what the type cannot.
 | `dashboard.json` | A fold of the ledger; a read serves the fold, never the file. |
 | `index.json` | One writer, no reader — readers fold the ledger. |
 | `rounds/round_NNNN.json` | The round's last statement, for the operator; a round resumes from its close on the ledger, never from its file. |
-| `log.md`, `review.md` | A projection of the ledger nothing reads back, rendered at each round close and once more at its drainer's close, so they name the stop. The per-node I/O is served at `GET …/rounds/{n}/audit`; no file holds it. |
+| `readout.log` | The run folder's text, for a reader with no browser: each round's block at its close (`render/phase.py::render_round_block`, off the served round, its behaviour checks beside it), and at each stop the spend per kind, pass and node, each hold on the last scale, the optimizer's review and the hard samples. Appended, never rewritten. The per-node I/O is served at `GET …/rounds/{n}/audit`; no file holds it. |
 | `.runtime/ledger.jsonl` | The only surface saying which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole lineage. |
 
 **The cycle runs on ledger records read over the fork chain**: the bank partition is appended at mint and a fork reads its parent's; `resolved_run`'s `read` (the search SPACE, `PipelineRead.declaration`) last wins, its `experiment` (the CELLS) first wins; a backend revision drift is served, never refused.

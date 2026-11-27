@@ -68,7 +68,7 @@ never replayed each other's cells: count them before trusting a cross-campaign n
   an `l1_generate` problem.
 - Validate a cheap proxy at the ARM level, never per cell. Widen candidates semantically to raise arm SD.
 - A cell whose constant-answer floor exceeds its origin is disqualified (`rewards_collapse`). An unchanged
-  prompt can take a step (the proxy reads the promoted parent): open the cell's `review.md` before crediting an arm.
+  prompt can take a step (the proxy reads the promoted parent): open the arm's `individual.lineage` in the cell's `rounds/round_NNNN.json` before crediting an arm.
 - Compare arms on cells BOTH met; a win is a few rows. Price every panel in wall clock *and* dollars.
 
 **The cost ladder.** A decision point is one frozen inner round (less round 0) carrying a parsed
