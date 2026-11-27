@@ -34,9 +34,9 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.spend import MONEY_AXES, Budget, StopSpend
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import append_record, billing_ledger, current_round
-from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
+from promptpotter.infrastructure.store.campaign_store.store import CycleIndexProjection
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -226,7 +226,7 @@ def _bind_observers(
     # Each joins at the line the index stands at, past what the checkout folded.
     dashboard = projecting.add(dashboard)
     readout = projecting.add(readout)
-    projecting.add(CycleIndexProjection(cycle_dir))
+    projecting.add(CycleIndexProjection(session.store.campaigns, session.hop))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
     projecting.add(ExportProjection(session.store, session.at, session.dataset))
     return RunObservers(

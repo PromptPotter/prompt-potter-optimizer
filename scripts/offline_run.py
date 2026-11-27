@@ -137,7 +137,8 @@ from promptpotter.domain.command_kinds import (
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
 )
-from promptpotter.domain.cycle_paths import CycleHop, Subject
+from promptpotter.domain.cycle_index import CycleIndex
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.origin_panel import RoundEnding
@@ -151,9 +152,9 @@ from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
-from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -165,6 +166,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_answers,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.campaign_store.store import fold_cycle_index
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
@@ -292,9 +294,7 @@ RESUME_APPENDS = ("phases", "run_phases", "arms", "rounds_entered", "standings")
 # Which of a round's cells a launch paid and which it replayed, by where each count sits: a
 # reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
 # that name elsewhere, such as the fitness term `evaluators.tokens`.
-READING_SIDES, SIDE_SPLIT = ("a", "b"), ("bought",)
-CELL_ROWS, ROW_SPLIT = ("cells", "overlap_results", "line_results"), ("cached",)
-FOLDS, FOLD_SPLIT = "folds", ("cached", "tokens")
+CELL_ROWS, ROW_SPLIT = ("cells", "overlap_cells", "line_cells"), ("cached",)
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 
 BENCH: dict[str, Any] = {
@@ -438,18 +438,16 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
 
 
 def _asker() -> str:
-    """Empty for the run's own call; an L4 cell's inner campaign by its seat's seed and the arm
-    laid into its overlay, never by its id, which hashes the code."""
+    """Empty for the run's own call; an L4 cell's inner campaign by its seat's `run_seed` and the
+    arm laid into its overlay, so two seats of one arm never share a turn, never by its id, which hashes the code."""
     if not run_scope().depth:
         return ""
     scope = run_scope()
     spawn, stores = scope.spawn, scope.account
     assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
-    assert scope.determinism is not None, "an inner run binds its clamp"
-    at = stores.campaigns.campaign_cycle(spawn.inside[-1])
-    laid = cycle_config(stores, at).config.optimization.nodes
-    overlay = {node: dict(o.config) for node, o in sorted(laid.items())}
-    held = json.dumps([scope.determinism.seed, overlay], sort_keys=True, default=str)
+    config = cycle_config(stores, stores.campaigns.campaign_cycle(spawn.inside[-1])).config
+    overlay = {node: dict(o.config) for node, o in sorted(config.optimization.nodes.items())}
+    held = json.dumps([config.run_seed, overlay], sort_keys=True, default=str)
     return hashlib.sha256(held.encode()).hexdigest()[:8]
 
 
@@ -1194,7 +1192,7 @@ class BehaviourTrace:
 
     @classmethod
     def read(cls, workspace: Path) -> BehaviourTrace:
-        return cls(**_kept(json.loads((workspace / TRACE).read_text(encoding="utf-8"))))
+        return cls(**json.loads((workspace / TRACE).read_text(encoding="utf-8")))
 
     def write(self, out: Path) -> None:
         out.mkdir(parents=True, exist_ok=True)
@@ -1297,7 +1295,7 @@ def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None
         for at in elections:
             past = lines[:at]
             if not any(
-                r.get("record_type") == "election" and r["round"] and r["ending"] == "crowned"
+                r.get("record_type") == "election" and r["ending"] == RoundEnding.CROWNED
                 for r in past
             ):
                 continue
@@ -1679,35 +1677,10 @@ async def run_controlled(
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:
-    return bench is not None and bench["status"]["state"] == "read"
+    return bench is not None and bench["state"] == "read"
 
 
-# A ledger is read as dicts with `.get`: a dump taken before a reshape must load after it.
 FLOAT_DP = 6
-DROP_KEYS = {
-    "timestamp", "created_at", "updated_at", "started_at", "finished_at", "at_offset", "offset",
-    "wall_clock", "duration_s", "elapsed_s", "call_id", "answer", "answers", "sp_hash", "content_hash",
-    "prompt_fields_id", "ruler_id", "anchor_id", "prompt_hashes",
-    "optimizer_prompt_hashes", "version", "sample_key",
-    "backend_url", "latency", "latency_ms", "total_time", "step_timings",
-    # A fact about the holdout, which a campaign beside this one moves and no decision reads.
-    "reads_before",
-}  # fmt: skip
-# A digest of keys dropped above, by the key that holds it: a re-key moves it, behaviour never does.
-DROP_UNDER: dict[str, frozenset[str]] = {"cell_set": frozenset({"id"})}
-
-
-def _dropped(key: str, under: str) -> bool:
-    return key in DROP_KEYS or key in DROP_UNDER.get(under, frozenset())
-
-
-def _kept(o: Any, under: str = "") -> Any:
-    """*o* less every key a trace never compares, so a base written before a rule compares under it."""
-    if isinstance(o, dict):
-        return {k: _kept(v, k) for k, v in o.items() if not _dropped(k, under)}
-    if isinstance(o, list):
-        return [_kept(v, under) for v in o]
-    return o
 
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -1755,13 +1728,11 @@ class Canon:
         v = _SESSION_ID.sub("<session>", v)
         return _WIN_PATH.sub("<path>", v)
 
-    def __call__(self, o: Any, under: str = "") -> Any:
+    def __call__(self, o: Any) -> Any:
         if isinstance(o, dict):
-            return {
-                self.s(str(k)): self(v, str(k)) for k, v in o.items() if not _dropped(str(k), under)
-            }
+            return {self.s(str(k)): self(v) for k, v in o.items()}
         if isinstance(o, list | tuple):
-            return [self(v, under) for v in o]
+            return [self(v) for v in o]
         if isinstance(o, bool) or o is None or isinstance(o, int):
             return o
         if isinstance(o, float):
@@ -1797,12 +1768,18 @@ def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[
     return ids
 
 
+def _cycle_index(cycle: Path) -> CycleIndex:
+    """A cycle the world left as a bare tree, folded off its chain as the store folds a hop's."""
+    index = fold_cycle_index(ledger_chain(CycleDir(cycle), moment=None))
+    assert index is not None, f"{cycle.name} ran without minting its cycle"
+    return index
+
+
 def _fork_labels(cycle: Path) -> dict[str, str]:
     """Each fork of *cycle*'s campaign by the rounds its line was cut at: its id hashes the clock."""
     parents: dict[str, tuple[str | None, int | None]] = {}
     for minted in cycle.parent.iterdir():
-        index = read_cycle_index(minted, moment=None)
-        assert index is not None, f"{minted.name} ran without minting its cycle"
+        index = _cycle_index(minted)
         parents[minted.name] = (index.parent_cycle_id, index.cut_round)
 
     def label(cycle_id: str) -> str:
@@ -1815,63 +1792,149 @@ def _fork_labels(cycle: Path) -> dict[str, str]:
     return labels
 
 
-def _cells(rows: Any) -> list[dict[str, Any]]:
-    keys = ("position", "predicted", "ground_truth", "fitness", "objective", "cached")
-    out = [{k: r.get(k) for k in (*keys, "error_category")} for r in rows or []]
-    return sorted(out, key=lambda c: str(c["position"]))
+@dataclass(frozen=True)
+class One:
+    """The sub-document at *path* (``""``: the document itself), read by *pick*."""
+
+    path: str
+    pick: Pick
 
 
-ARM_KEYS = (
-    "state", "role", "reason", "locked_in", "position", "overlay", "resolved_params",
-    "expected_samples", "validation_failures",
-)  # fmt: skip
-ROUND_KEYS = ("round", "overlap", "overlap_results", "line_results", "optimizer_state")
-ELECTION_KEYS = (
-    "leading", "ending", "parent", "electable", "fit", "elects_on", "deciding_pair",
-    "verdict_reason",
-)  # fmt: skip
+@dataclass(frozen=True)
+class Each:
+    """Each item of the map (by its data key) or the list at *path*, read by *pick*, a list's
+    sorted *by* one of its picks where it lands in arrival order."""
+
+    path: str
+    pick: Pick
+    by: str | None = None
 
 
-def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
-    out: dict[str, Any] = {k: d.get(k) for k in ROUND_KEYS}
-    election = d.get("election") or {}
-    out["election"] = {k: election.get(k) for k in ELECTION_KEYS}
-    health = d.get("health") or {}
-    out["health"] = {k: health.get(k) for k in ("grade", "cause")}
-    readings = [row.reading for row in _ranked(d)]
-    out["arms"] = {
-        ids.get(key, key): {
-            **{k: arm.get(k) for k in ARM_KEYS},
-            "prompts": (arm.get("individual") or {}).get("prompts"),
-        }
-        for key, arm in (d.get("arms") or {}).items()
-    }
-    out["folds"] = {ids.get(k, k): v for k, v in (d.get("folds") or {}).items()}
-    out["scoreboard_order"] = [ids.get(r.arm.key, r.arm.label) for r in readings]
-    out["cells"] = {ids.get(k, k): _cells(v) for k, v in (d.get("cells") or {}).items()}
-    return out
+# A decision the trace reads: a leaf by its model path, or a map of the trace's own names. A model
+# rename moves only its path here, never a name the trace hashes (`behaviour_keys`).
+type Pick = str | One | Each | Mapping[str, Pick]
 
 
-LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "decision": ("decisions", ("round", "kind", "outcome", "inputs")),
-    "election": ("elections", ("round", "leading", "ending", "parent", "fit")),
-    "arm": ("arms", ("round", "arm", "state")),
-    "phase": ("phases", ("round", "phase", "step")),
-    "round_entered": ("rounds_entered", ("round",)),
-    "round_closed": ("rounds_closed", ("round", "election")),
-    "run_phase": ("run_phases", ("run_phase", "stop_reason")),
-    "llm_call": ("optimizer_calls", ("round", "node", "candidate_idx")),
-    "round_warning": ("round_warnings", ("round", "kind", "severity", "detail")),
-    # The origin's reserve is the selection pass's set-aside: what the run holds back is decided.
-    "pass_graded": (
-        "passes_graded",
-        ("subject", "tolerance", "reserve_usd", "reserve_tokens", "state"),
-    ),
-    "race_standing": (
-        "standings",
-        ("round", "member", "current", "n_samples", "p_best", "paired_breakdown"),
-    ),
+def _at(doc: Any, path: str) -> Any:
+    for step in path.split(".") if path else ():
+        doc = doc.get(step) if isinstance(doc, dict) else None
+    return doc
+
+
+def picked(doc: Any, pick: Pick) -> Any:
+    """What *pick* names in *doc*: absent where *doc* is."""
+    if isinstance(pick, str):
+        return _at(doc, pick)
+    if doc is None:
+        return None
+    if isinstance(pick, One):
+        return picked(_at(doc, pick.path), pick.pick)
+    if isinstance(pick, Each):
+        items = _at(doc, pick.path)
+        if isinstance(items, dict):
+            return {k: picked(v, pick.pick) for k, v in items.items()}
+        if items is None:
+            return None
+        out = [picked(v, pick.pick) for v in items]
+        return out if pick.by is None else sorted(out, key=lambda c: str(c[pick.by]))
+    return {name: picked(doc, p) for name, p in pick.items()}
+
+
+ESTIMATE: Pick = {"value": "value", "lo": "ci_lo", "hi": "ci_hi", "n": "n"}
+PAIR: Pick = {
+    "a": "a.address.arm.label", "b": "b.address.arm.label", "read": "state",
+    "cells": "cell_set.name", "scored": "coverage.scored", "coverage": "coverage.state",
+    "lift": One("headline.estimate", ESTIMATE), "side": "headline.side", "p": "headline.p_value",
+}  # fmt: skip
+ELECTION: Pick = {
+    "leading": "leading", "ending": "ending", "parent": "parent.arm", "electable": "electable",
+    "elects_on": "elects_on", "reason": "verdict_reason", "deciding": One("deciding_pair", PAIR),
+    "fit": Each("fit", {
+        "theta": "theta", "se": "theta_se", "caveat": "theta_caveat",
+        "lift": One("lift", ESTIMATE), "vs_parent": One("vs_reference", PAIR),
+    }),
+}  # fmt: skip
+# A cell row's `cached` is which of a round's cells a launch paid and which it replayed (`ROW_SPLIT`).
+ROW: Pick = {
+    "position": "position", "predicted": "predicted", "ground_truth": "ground_truth",
+    "fitness": "fitness", "objective": "objective", "cached": "cached", "error": "error_category",
+}  # fmt: skip
+ROUND: Pick = {
+    "round": "round",
+    "election": One("election", ELECTION),
+    "health": {"grade": "health.grade", "cause": "health.cause"},
+    "overlap": One("overlap", {
+        "advance": "advance", "stall": "stall", "positions": "positions",
+        "lead": One("lead", PAIR), "vs_previous_pick": One("vs_previous_pick", PAIR),
+        "earlier": Each("earlier", PAIR),
+        "triggered": Each("triggered", {"trigger": "trigger", "reading": One("reading", PAIR)}),
+    }),
+    "arms": Each("arms", {
+        "state": "state", "role": "role", "reason": "reason.kind",
+        "eliminated": "reason.elimination.reason", "eliminated_at": "reason.elimination.context.gate",
+        "locked_at": "locked_in.context.gate", "position": "position.idx",
+        "expected_samples": "expected_samples", "overlay": "overlay", "params": "resolved_params",
+        "failures": Each("validation_failures", "reason"), "prompts": "individual.prompts",
+    }),
+    "folds": Each("folds", {
+        "fitness": "fitness", "composite": "composite_fitness", "band": One("fitness_band", ESTIMATE),
+        "total": "total", "walked": "walked", "degraded": "degraded", "deprecated": "deprecated",
+    }),
+    "cells": Each("cells", Each("", ROW, by="position")),
+    "overlap_cells": Each("overlap_results", Each("", ROW)),
+    "line_cells": Each("line_results", Each("", ROW)),
+    "population": Each("optimizer_state.population", {
+        "parents": "lineage.parent_ids", "changes": "lineage.changes_description",
+    }),
+    "l1_parse_failure": "optimizer_state.outputs.l1_readout.l1_parse_failure",
+}  # fmt: skip
+INDEX: Pick = {
+    "stop_reason": "stop_reason",
+    "rounds_to_separable": "final.rounds_to_separable",
+    "rounds_to_improved": "final.rounds_to_improved",
+    "rounds_to_ceiling": "final.rounds_to_ceiling",
+    "mode": "final.mode",
+    "prompt_fields": "final.result_prompt_fields",
+    "pipeline_params": "final.result_pipeline_params",
+    "rounds": Each("rounds", {"round": "round", "fitness": "fitness", "health": "health.grade"}),
 }
+# What the held-out passes read and how far each got, never the served answer around them
+# (can-run, the control, cost).
+LEVEL: Pick = {
+    "round": "round", "n": "n", "headline": "headline", "level": One("level", ESTIMATE),
+    "fitness": One("fitness", ESTIMATE), "composite": One("composite", ESTIMATE),
+}  # fmt: skip
+HELD_OUT: Pick = {
+    "state": "status.state", "stop": "status.stop", "scored": "status.scored",
+    "expected": "status.expected", "origin": One("origin", LEVEL),
+    "selected": One("selected", LEVEL), "vs_origin": One("vs_origin", PAIR),
+}  # fmt: skip
+LEDGER: dict[str, tuple[str, Pick]] = {
+    "decision": ("decisions", {"round": "round", "kind": "kind", "outcome": "outcome", "inputs": "inputs"}),
+    "election": ("elections", {"round": "round", "leading": "leading", "ending": "ending", "parent": "parent.arm"}),
+    "arm": ("arms", {"round": "round", "arm": "arm", "state": "state.state", "position": "state.position.idx"}),
+    "phase": ("phases", {"round": "round", "phase": "phase", "step": "step"}),
+    "round_entered": ("rounds_entered", {"round": "round"}),
+    "round_closed": ("rounds_closed", {
+        "round": "round", "ending": "election.ending", "ruler_excluded": "election.ruler.excluded",
+        "levels": Each("level_series.levels", {"theta": "theta", "se": "se", "cells": "cells", "caveat": "caveat"}),
+    }),
+    "run_phase": ("run_phases", {"run_phase": "state.run_phase", "stop_reason": "state.stop_reason"}),
+    "llm_call": ("optimizer_calls", {
+        "round": "round", "node": "node", "candidate_idx": "candidate_idx",
+        "repairs": "payload.schema_repair_errors",
+    }),
+    "round_warning": ("round_warnings", {"round": "round", "kind": "kind", "severity": "severity", "detail": "detail"}),
+    # The origin's reserve is the selection pass's set-aside: what the run holds back is decided.
+    "pass_graded": ("passes_graded", {
+        "subject": "subject", "tolerance": "tolerance", "reserve_usd": "reserve_usd",
+        "reserve_tokens": "reserve_tokens", "state": "state",
+    }),
+    "race_standing": ("standings", {
+        "round": "round", "member": "member", "current": "current", "n_samples": "n_samples",
+        "p_best": "p_best", "paired_breakdown": "paired_breakdown",
+    }),
+}  # fmt: skip
 
 
 def _as_sets(o: Any) -> Any:
@@ -1884,39 +1947,15 @@ def _as_sets(o: Any) -> Any:
 
 
 def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
-    out: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in LEDGER_KEYS.values()}
-    out["level_series"] = []
+    out: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in LEDGER.values()}
     for r in ledger:
-        if (kind := r.get("record_type")) not in LEDGER_KEYS:
-            continue
-        name, keys = LEDGER_KEYS[kind]
-        entry = {k: r.get(k) for k in keys}
-        if kind == "arm":
-            state = r["state"]
-            entry["state"] = {"state": state["state"], "position": state.get("position")}
-        if kind == "round_closed":
-            series = r["level_series"]
-            levels = {
-                rnd: None if lv is None else {k: lv[k] for k in ("theta", "se", "cells", "caveat")}
-                for rnd, lv in series["levels"].items()
-            }
-            out["level_series"].append(
-                canon(
-                    {
-                        "round": r["round"],
-                        "level_series": {"levels": levels},
-                    }
-                )
-            )
-        if kind == "run_phase":
-            entry = {k: r["state"].get(k) for k in keys}
-        if kind == "llm_call":
-            entry["repairs"] = len((r.get("payload") or {}).get("schema_repair_errors") or [])
-        out[name].append(_as_sets(canon(entry)) if kind == "decision" else canon(entry))
+        if (kind := r.get("record_type")) in LEDGER:
+            name, pick = LEDGER[kind]
+            entry = canon(picked(r, pick))
+            out[name].append(_as_sets(entry) if kind == "decision" else entry)
     # Concurrent arms append in arrival order; the SET per round is what a comparison reads.
-    for name in ("decisions", "round_warnings", "optimizer_calls", "standings"):
+    for name in ("decisions", "round_warnings", "optimizer_calls", "standings", "arms"):
         out[name].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
-    out["arms"].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
     # Each launch grades the line's held passes again: one reading of a pass is one decision.
     graded = {json.dumps(x, sort_keys=True): x for x in out["passes_graded"]}
     out["passes_graded"] = [graded[k] for k in sorted(graded)]
@@ -1933,48 +1972,28 @@ def _ranked(d: dict[str, Any]) -> list[ScoreboardRow]:
 
 
 def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
+    """The decisions *cycle* took, each by the trace's own name (`Pick`), canonical."""
     rounds = [
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
     ]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
-    folded = read_cycle_index(cycle, moment=None)
-    assert folded is not None, f"{cycle.name} ran without minting its cycle"
-    index = folded.model_dump(mode="json")
     ids = _id_map(ledger, rounds)
     canon = Canon(ids, _fork_labels(cycle))
-    final = index["final"] or {}
-    run = {
-        "stop_reason": index["stop_reason"],
-        "n_rounds": len(index["rounds"]),
-        **{
-            k: final.get(k)
-            for k in (
-                "rounds_to_separable", "rounds_to_improved", "rounds_to_ceiling",
-                "mode", "result_prompt_fields",
-                "result_pipeline_params",
-            )
-        },
-        # The origin round's one fold, on the origin's own samples.
-        "origin_composite_fitness": next(
-            (f["composite_fitness"] for r in rounds[:1] if r["round"] == 0 for f in r["folds"].values()),
-            None,
-        ),
-        # What the held-out passes read and how far each got, never the served answer around
-        # them (can-run, the control, cost).
-        "bench": None if bench is None else bench.model_dump(
-            mode="json",
-            include={
-                "status": {"state", "stop", "scored", "expected"},
-                "origin": True,
-                "selected": True,
-                "vs_origin": True,
-            },
-        ),
-        "round_index": index["rounds"],
-    }  # fmt: skip
+    run = picked(_cycle_index(cycle).model_dump(mode="json"), INDEX)
+    run["bench"] = None if bench is None else picked(bench.model_dump(mode="json"), HELD_OUT)
     return {
         "run": canon(run),
-        "rounds": [canon(_round(d, ids)) for d in rounds],
+        "rounds": [
+            canon(
+                {
+                    **picked(d, ROUND),
+                    "scoreboard_order": [
+                        ids.get(r.reading.arm.key, r.reading.arm.label) for r in _ranked(d)
+                    ],
+                }
+            )
+            for d in rounds
+        ],
         "ledger": _ledger(ledger, canon),
     }
 
@@ -2238,7 +2257,7 @@ def child_env(root: Path) -> dict[str, str]:
 
 def decided(workspace: Path, *, after: int) -> dict[str, Any]:
     """Less what a resume legitimately moves: its init records, the checkouts it deleted, the round
-    it re-enters, and which of a round's cells it paid and which it replayed, by path (`READING_SIDES`, `CELL_ROWS`, `FOLDS`): a
+    it re-enters, and which of a round's cells it paid and which it replayed, by path (`CELL_ROWS`): a
     cell answered before a pause inside a round replays on the resume. The harness's call counts
     stay, so a resume that re-walked a banked round reads MOVED."""
     doc = BehaviourTrace.read(workspace).decisions
@@ -2254,10 +2273,7 @@ def decided(workspace: Path, *, after: int) -> dict[str, Any]:
             return node
         if key in CELL_ROWS:
             return {arm: [less(row, ROW_SPLIT) for row in rows] for arm, rows in node.items()}
-        if key == FOLDS:
-            return {arm: less(fold, FOLD_SPLIT) for arm, fold in node.items()}
-        held = less(node, SIDE_SPLIT) if key in READING_SIDES else node
-        return {k: unsplit(v, k) for k, v in held.items()}
+        return {k: unsplit(v, k) for k, v in node.items()}
 
     rounds = [r for r in doc["rounds"] if r["round"] > after]
     out: dict[str, Any] = unsplit({**doc, "ledger": kept, "rounds": rounds})
@@ -2330,7 +2346,7 @@ def less_heals(workspace: Path) -> dict[str, Any]:
     """Less what a heal adds to a call: its sends, and the failed attempts the call records."""
     doc = BehaviourTrace.read(workspace).decisions
     calls = sorted(
-        ({**c, "repairs": 0} for c in doc["ledger"]["optimizer_calls"]),
+        ({**c, "repairs": None} for c in doc["ledger"]["optimizer_calls"]),
         key=lambda c: json.dumps(c, sort_keys=True),
     )
     harness = {k: v for k, v in doc["harness"].items() if k != "llm_calls"}
@@ -2346,7 +2362,7 @@ def healed_leg(potter: Path, leg: Future[int]) -> bool:
     calls = BehaviourTrace.read(healed).decisions["ledger"]["optimizer_calls"]
     moved = _moved(less_heals(healed), less_heals(potter), "decisions", 2)
     print(
-        f"potter: {len(HEALS)} calls answered invalid healed, {sum(c['repairs'] for c in calls)} "
+        f"potter: {len(HEALS)} calls answered invalid healed, {sum(len(c['repairs'] or ()) for c in calls)} "
         f"failed attempts recorded; decisions {'MOVED ' + ', '.join(moved) if moved else 'UNMOVED'}"
     )
     return not moved
@@ -2357,10 +2373,10 @@ def wound_marks(workspace: Path) -> Counter[str]:
     doc = BehaviourTrace.read(workspace).decisions
     marks = Counter(w["kind"] for w in doc["ledger"]["round_warnings"])
     for r in doc["rounds"]:
-        if (readout := r["optimizer_state"]["outputs"].get("l1_readout")) is not None:
-            marks[readout["l1_parse_failure"]] += 1
+        if r["l1_parse_failure"] is not None:
+            marks[r["l1_parse_failure"]] += 1
         for arm in r["arms"].values():
-            marks.update(f["reason"] for f in arm["validation_failures"] or [])
+            marks.update(arm["failures"] or [])
     parse_failures = (PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING, "layer_parse_failure")
     return Counter({mark: n for mark, n in marks.items() if mark in parse_failures})
 
@@ -2401,13 +2417,13 @@ def read_straight(name: str, workspace: Path) -> int:
     ran = BehaviourTrace.read(workspace).decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
     bench = ran["bench"]
-    lift = None if bench is None else bench["vs_origin"].get("headline")
+    lift = None if bench is None else bench["vs_origin"]["lift"]
     headline = (
-        f"{lift['estimate']['value']:+.3f}"
+        f"{lift['value']:+.3f}"
         if lift is not None
         else "NO BENCH HEADLINE"
         if bench is None
-        else f"none ({bench['vs_origin']['state']})"
+        else f"none ({bench['vs_origin']['read']})"
     )
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
     return int(not _graded(bench))
@@ -2649,14 +2665,6 @@ def replicated_leg(name: str, workspace: Path, leg: Future[int] | None) -> bool:
     return held
 
 
-def _unlabelled(node: Any) -> Any:
-    if isinstance(node, dict):
-        return {k: _unlabelled(v) for k, v in node.items() if k != "individual_id"}
-    if isinstance(node, list):
-        return [_unlabelled(v) for v in node]
-    return node
-
-
 def bench_paused_leg(home: Path, leg: Future[int]) -> bool:
     """Potter's warm run paused inside its end pass and resumed: the pass banks pending, stopped
     by the pause on the cells it walked, and the resumed pass replays each of them and reads the
@@ -2682,11 +2690,8 @@ def bench_paused_leg(home: Path, leg: Future[int]) -> bool:
         and banked <= {c[0] for c in v["cells"] if c[2]}
         for state, v in passes
     )
-    # Its labels name ids by first appearance on the ledger, which a resume's init records move.
-    bench = [
-        _unlabelled(decided(at, after=0)["run"]["bench"])
-        for at in (workspace, home / "potter" / WARM)
-    ]
+    # It names an arm by its label, never by the id first appearance on the ledger names.
+    bench = [decided(at, after=0)["run"]["bench"] for at in (workspace, home / "potter" / WARM)]
     same = bench[0] == bench[1]
     print(
         f"potter: a pause inside a bench pass banked "

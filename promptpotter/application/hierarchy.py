@@ -74,7 +74,6 @@ from promptpotter.domain.spend import (
     rate_priced_text,
     usd_text,
 )
-from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.run_state import producer_stamps
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
@@ -426,11 +425,7 @@ def campaign_cycle_reads(
             (
                 (hop, index, now)
                 for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
-                if (
-                    index := now
-                    if moment is None
-                    else read_cycle_index(stores.campaigns.cycle_dir(hop), moment=moment)
-                )
+                if (index := now if moment is None else stores.campaigns.load(hop, moment=moment))
                 is not None
             ),
             key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),

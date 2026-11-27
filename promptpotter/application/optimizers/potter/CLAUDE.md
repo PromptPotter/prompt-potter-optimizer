@@ -40,7 +40,7 @@
 
 ## Editing a renderer's PROSE is a measurement change
 
-`optimizer_manifest.py::behaviour_key` hashes potter's fingerprint on the offline world, so a rewording that moves a request or a decision re-keys potter and voids banked origins, as does any edit to a line its straight run never ran, and a rename on a run line re-keys nothing; the offline run regenerates the fingerprint, and the gate is red until it is committed. A prompt-shaping constant lives in `bundle.py`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into the readout's review), never both.
+`optimizer_manifest.py::behaviour_key` hashes potter's fingerprint on the offline world, so a rewording that moves a request or a decision re-keys potter and voids banked origins, as does any edit to a line its straight run never ran, a rename among them (an unrun line keys by its AST, the names it calls included: `offline_run.py::_unvouched`), while a rename only run lines spell re-keys nothing; the offline run regenerates the fingerprint, and the gate is red until it is committed. A prompt-shaping constant lives in `bundle.py`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into the readout's review), never both.
 
 ## Add no 4th layer — L4 is a recursion
 

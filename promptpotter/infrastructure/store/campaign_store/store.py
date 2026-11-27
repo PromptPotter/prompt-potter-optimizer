@@ -19,9 +19,9 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
 )
 from promptpotter.domain.campaign_config import LaidSpan
-from promptpotter.domain.cycle_index import CycleIndex
+from promptpotter.domain.cycle_index import CycleIndex, IndexRound
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop, Subject, WorkspaceDir
-from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
@@ -42,10 +42,7 @@ from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.holders import CycleHolder, holder_of
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
-from promptpotter.infrastructure.projections.cycle_index import (
-    CycleIndexProjection,
-    read_cycle_index,
-)
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     run_limits_at,
@@ -56,8 +53,10 @@ from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
+    moves_index,
     scan_arm_acts,
     scan_campaign_ceiling,
+    scan_cell_formula,
     scan_cycle_facts,
     scan_each_last,
     scan_ledger_metered,
@@ -143,6 +142,63 @@ def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:
     return total
 
 
+def fold_cycle_index(chain: Sequence[LedgerSpan]) -> CycleIndex | None:
+    """A cycle's index off its hop's chain (`CampaignStore.chain`): its own facts are its own
+    ledger's, the chain's last span; its rounds stand over the whole chain."""
+    own = chain[-1]
+    facts = scan_cycle_facts(own.path, own.until)
+    minted = facts.minted
+    if minted is None:
+        return None
+    standing = scan_standing_rounds(chain)
+    ended, final = facts.ended, facts.final
+    return CycleIndex(
+        cycle_id=CycleLayout.of_ledger(own.path).cycle_dir.name,
+        created_at=minted.timestamp,
+        updated_at=facts.updated_at,
+        parent=minted.parent,
+        forked_at_offset=minted.forked_at_offset,
+        cut_round=minted.cut_round,
+        fork=facts.fork,
+        spawned_by=facts.spawned_by,
+        scorer_cell_formula=scan_cell_formula(chain),
+        interventions=list(facts.interventions),
+        stop_reason=None if ended is None else ended.stop_reason,
+        finished_at=facts.ended_at,
+        interrupted_round=None if final is None else final.interrupted_round,
+        error=facts.error,
+        final=None if final is None else final.final,
+        superseded_by=facts.superseded_by,
+        rounds=[
+            IndexRound(
+                round=n,
+                fitness=None if (fold := held.close.fold) is None else fold.fitness,
+                health=RoundHealth.of(n, held.close.health),
+            )
+            for n, held in standing.rounds.items()
+        ],
+        elects_on=standing.elections[max(standing.elections)].elects_on
+        if standing.elections
+        else None,
+        standing=standing.standing,
+    )
+
+
+class CycleIndexProjection(Projection):
+    """`index.json`'s one writer: *hop*'s index (`CampaignStore.load`), rewritten at each record
+    that moves it, its chain read at each, since a fork's mint is what lays its prefix."""
+
+    derives = "index.json"
+
+    def __init__(self, store: CampaignStore, hop: CycleHop) -> None:
+        self._store, self._hop = store, hop
+
+    def feed(self, record: CycleRecord) -> None:
+        index = self._store.load(self._hop, moment=None) if moves_index(record) else None
+        if index is not None:
+            write_json(self._store.layout(self._hop).manifest, index.model_dump(mode="json"))
+
+
 class CampaignStore:
     def __init__(self, base_dir: WorkspaceDir, jobs_dir: Path):
         self._base_dir = base_dir
@@ -206,7 +262,7 @@ class CampaignStore:
             else CycleEventLog.open(cycle_dir)
         )
         with LedgerIndex.of(ledger.path).projecting() as projecting:
-            projecting.add(CycleIndexProjection(cycle_dir))
+            projecting.add(CycleIndexProjection(self, hop))
             if any(isinstance(record, RunPhaseRecord) for record in records):
                 projecting.add(DashboardCheckout(cycle_dir))
             return ledger.append(*records)
@@ -483,7 +539,7 @@ class CampaignStore:
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
-        return read_cycle_index(self.cycle_dir(hop), moment=moment)
+        return fold_cycle_index(self.chain(hop, moment=moment))
 
     def mint_cycle(self, hop: CycleHop, minted: CycleMintedRecord | None = None) -> None:
         """THE mint, idempotent by content: a re-mint of what stands is a no-op, another refuses.
@@ -589,11 +645,7 @@ class CampaignStore:
         return self._indexed(self.campaign_cycle_hops(campaign_id))
 
     def _indexed(self, hops: list[CycleHop]) -> list[tuple[CycleHop, CycleIndex]]:
-        return [
-            (hop, index)
-            for hop in hops
-            if (index := read_cycle_index(self.cycle_dir(hop), moment=None)) is not None
-        ]
+        return [(hop, index) for hop in hops if (index := self.load(hop, moment=None)) is not None]
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
         """What makes *hop* no stub; whether a run or a pass holds it is asked of each delete under

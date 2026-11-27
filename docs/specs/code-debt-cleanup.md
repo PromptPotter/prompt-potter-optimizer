@@ -122,17 +122,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   nothing. Action: decide what scale an edited formula replays on (the filed rows' share it
   re-graded, served beside the verdict; or refuse below a coverage). **Rides with:** a design call.
 
-### hubs (after valid, before layers)
-
-- **The cycle index reads its chain beside the store's**: `projections/cycle_index.py::read_cycle_index`
-  takes a bare cycle dir and spells `ledger_chain(CycleDir(...))` itself, since the store imports it
-  (`CampaignStore.load`) and so it cannot read `CampaignStore.chain`. Action: the index fold is
-  handed its hop's chain, `CycleIndexProjection` keyed by hop. Built and reverted by store-5a:
-  `fold_cycle_index(hop, chain)` with `CampaignStore.load` = it over `self.chain(hop, moment=…)`,
-  blocked only by `scripts/offline_run.py`'s two `read_cycle_index(<dir>)` calls. **Rides with:**
-  the next chain owning `scripts/offline_run.py`.
-  **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.
-
 ### layers (alone, after valid, before the behaviour keys)
 
 - **The layering is fictional at runtime**: the package holds no function-local import and its
@@ -153,16 +142,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   layers. **Re-test:** the `type_cycles` row of `BASELINE` falls to 0.
 
 ### bkeys-2 (what bkeys left at its landing)
-
-- **The trace hashes a field's spelling** (rec's landing, reported; bkeys-3 took `Estimate`'s words;
-  `MemberAddress.pass_role` is no display field: `paired.py::read_pair`'s address equality reads it,
-  and capo-pobb's `same_individual` moved without it): `offline_run.py::behaviour_keys` hashes the
-  trace with its keys, and the trace keeps whole
-  sub-documents (`ELECTION_KEYS`' `fit`, `LEDGER_KEYS`' `election.fit`, `run.bench`, `round_index`),
-  so ren's renames re-keyed `behaviour_keys.json` by field names alone (decisions identical once
-  normalized). Root: the trace names each decision it reads, so a model rename moves only its pick.
-  **Rides with:** bkeys-2. **Re-test:** renaming a field the trace reads leaves `behaviour_keys.json`
-  unchanged.
 
 - **The paid L4 browser walk's stop was sized for one inner round** (reported):
   `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
@@ -538,8 +517,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   holds 21 `scan_` functions; `for span in spans` is spelled 16/6; `scan_cell_formula` (`:827`) hand-merges the
   fold `scan_cycle_facts` (`:823`) reads on one ledger. Which ledgers answer for a hop (its cycle, its line,
   its campaign) is decided at each reader. Root: one read `(hop, scope, fold)`, the fold stating how its
-  values compose. Sits under **The cycle index reads its chain beside the store's**, the launch-steer row
-  and the sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:**
+  values compose. Sits under the launch-steer row and the sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:**
   `git grep -c "for span in spans" -- promptpotter` falls from 16.
 - **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
   `_Money`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
@@ -591,14 +569,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
 ### wave-6 · what the test rework's world could not seat (tw-x, tw-j at their landing)
 
-- **A pressed L4 outer run does not repeat** (tw-j): two pressed runs of the e2e L4 fixture differ in the
-  outer `L1Critique/Generate_0,_1` requests and the inner decisions, while unpressed runs repeat, so the
-  outer's record hangs on which concurrent inner campaign files first. Root (w8-l4 reproduced it: the
-  outer is deterministic; the world is not): `scripts/offline_run.py::_asker` names an inner campaign by
-  `determinism.seed` plus overlay, not the seat's `run_seed`, so seats on one arm share a turn counter
-  and, under a press, call numbering follows arrival. Keying by `run_seed` moves `estimator` (named
-  old→new). **Re-test:** two pressed runs of a ≥2-search-seat L4 leg read the same inner requests.
-  **Re-test:** two pressed runs of `offline_run.py --l4` read the same outer requests.
 - **No L4 fixture buys an outer cell ahead, so an L4 outer ending is unread** (tw-j link 1):
   `query_loop.py`'s endings skip `land()` when `phase.cancels`, the connector's `cancel_stops_billing`,
   which only the inner connector sets (`runner/inner/spawn.py::CONNECTOR`). So an inner cell that
@@ -611,11 +581,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   between a command's own steps, where tw-r2 and tw-r3 found their bugs. Root: the world steps the
   command and picks the cell that lands between two steps, by an event, never the clock. **Rides
   with:** wave 6. **Re-test:** a leg lands a cell between a pause's two steps, on every run.
-- **A rename on a run line re-keys potter** (tw-j): renaming `application/optimizers/potter/dispatch/injections/wounds.py::_guard_evidence` re-keyed potter
-  and capo-pobb, while `optimizers/potter/CLAUDE.md` says a rename on a run line re-keys nothing. The
-  fingerprint carries a name it should not (`optimizer_manifest.py::behaviour_key`), or the doc is
-  stale. Root: whichever side is wrong. **Rides with:** wave 6. **Re-test:** rename `_guard_evidence`
-  and read `offline_run.py --digests`.
 - **No door yields a recorded capability menu or a dataset with a panel** (tw-x row 7): two
   `write_resolved_run` seats stay in test_identity. Door: the offline world's OpenRouter catalogue
   (`offline_world.py`, `openrouter.ai/api/v1/models`) moved between a world campaign and its resume,

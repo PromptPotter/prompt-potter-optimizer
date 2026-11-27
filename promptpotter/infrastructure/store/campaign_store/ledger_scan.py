@@ -555,7 +555,7 @@ assert set(_MOVES_ROUNDS) <= set(_StandingFold.records)
 
 
 def moves_index(record: CycleRecord) -> bool:
-    """Whether *record* moves a cycle's index (`projections/cycle_index.py`): a fact its fold takes, or a round that stands."""
+    """Whether *record* moves a cycle's index (`store.py::fold_cycle_index`): a fact its fold takes, or a round that stands."""
     if isinstance(record, PhaseRecord):
         return _init_formula(record) is not None
     return isinstance(record, (*_CycleFactsFold.records, *_MOVES_ROUNDS))

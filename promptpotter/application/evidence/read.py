@@ -108,7 +108,6 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingArm,
     StandingRounds,
@@ -621,7 +620,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
         if cycle is None or origin is None:
             return None
         c0 = _masked(origin, cycle.mask(spec.samples))
-        c0_index = read_cycle_index(cycle_dir, moment=None)
+        c0_index = stores.campaigns.load(cycle.hop, moment=None)
         return _Head(
             cycle_dir=cycle_dir,
             label=campaign_short_label(at.campaign),
@@ -635,7 +634,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
     cycle = _graded_cycle(stores, spec.campaign_id, cycle_dir)
     if cycle is None:
         return None
-    index = read_cycle_index(cycle_dir, moment=None)
+    index = stores.campaigns.load(cycle.hop, moment=None)
     scenario, chain = (None, None)
     if spec.lens:
         resolved = _scenario(stores, spec, cycle)
