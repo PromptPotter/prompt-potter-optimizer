@@ -9,11 +9,12 @@ from typing import Any, assert_never
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
     refuse_as_busy,
+    refuse_campaign,
     request_jobs,
     slotless_opening,
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
-from promptpotter.application.jobs.launcher.mint_and_start import LaunchRequest
+from promptpotter.application.jobs.launcher.mint_and_start import Hosted, LaunchRequest
 from promptpotter.application.jobs.launcher.opening import Opening
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.reaper import sweep
@@ -27,7 +28,11 @@ from promptpotter.infrastructure.store.stores import Stores
 
 @dataclass(frozen=True, slots=True)
 class Inline:
+    """A launch answered held in the process that filed it: a person's terminal, or a host's run
+    (*hosted*), which the launch kinds open slotless."""
+
     no_wait: bool = False
+    hosted: Hosted | None = None
 
 
 class LaunchOutcome:
@@ -132,7 +137,11 @@ def admit(
             if inline is not None and job.queued and inline.no_wait:
                 refuse_as_busy(job_registry, job)
             opening = Opening.of(stores, job_registry, job)
-        case EmbeddedRun() | InnerRun():
+        case EmbeddedRun():
+            if (campaign := request.campaign) is not None:
+                refuse_campaign(stores, campaign)
+            opening = slotless_opening(stores, job_registry, holder, hop)
+        case InnerRun():
             opening = slotless_opening(stores, job_registry, holder, hop)
         case _:
             assert_never(holder)

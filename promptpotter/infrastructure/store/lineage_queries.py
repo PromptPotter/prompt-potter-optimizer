@@ -184,7 +184,7 @@ def read_cycle(
     # A round's panel is its proposals': a re-read parent is no arm of it.
     proposals: dict[int, list[tuple[int, ArmKey]]] = {}
     for at, held in standing.arms.items():
-        if held.state.role != MeasurementRole.PARENT:
+        if held.state.role.is_proposal:
             proposals.setdefault(at[0], []).append(at)
     cut = {
         at: flag

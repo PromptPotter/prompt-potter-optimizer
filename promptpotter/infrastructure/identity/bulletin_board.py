@@ -20,7 +20,7 @@ def read_board(path: Path) -> BulletinBoard:
 
 
 def _write(path: Path, board: BulletinBoard) -> None:
-    write_json(path, board.model_dump(mode="json"), durable=True)
+    write_json(path, board.model_dump(mode="json"))
 
 
 def post(path: Path, *, text: str, pops_up: bool) -> Bulletin:

@@ -39,6 +39,7 @@ from factories import (
     cycle_result,
     declaration_of,
     defaulted_config,
+    fake_connector,
     filed,
     filed_under,
     inner_cells,
@@ -47,7 +48,6 @@ from factories import (
     laid_ledger,
     launched_bank,
     ledger_records,
-    loop_session,
     measurement,
     on_jumping_clock,
     pipeline_schema,
@@ -55,7 +55,6 @@ from factories import (
     run_wiring,
     samples,
     score_summary,
-    scorer_of,
     spend_book,
     workspace,
 )
@@ -86,7 +85,6 @@ from promptpotter.application.commands.dispatcher import (
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.datasets.draft_campaign import new_draft
-from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.head_to_head_price import (
     optimizer_round_price,
@@ -95,11 +93,13 @@ from promptpotter.application.head_to_head_price import (
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs import interlock, mint, quota
+from promptpotter.application.jobs import registry as registry_mod
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
     admit_and_share,
+    admit_arms,
     paid_call,
     paid_pass,
     request_jobs,
@@ -221,9 +221,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
-    PipelineNode,
     PipelineSchema,
-    WebSpendBound,
 )
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -255,7 +253,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import MeasuredCell, PipelineData, Scorer
+from promptpotter.domain.scoring import MeasuredCell, PipelineData
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
     CYCLE_AXES,
@@ -351,7 +349,6 @@ from promptpotter.infrastructure.store.layout import (
     draft_dirs,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
-from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
@@ -765,7 +762,7 @@ async def test_a_truncated_attempt_keeps_its_token_split_past_the_reask_that_hea
 
 @pytest.mark.usefixtures("run_bound")
 async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows_price(
-    tmp_path: Path,
+    tmp_path: Path, world: World
 ) -> None:
     async def ran_ungraded(*_args: Any) -> dict[str, Any]:
         spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
@@ -773,22 +770,22 @@ async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows
 
     cells = CycleEventLog(tmp_path / "cells.jsonl")
     unbounded = spend_book()
-    session = loop_session(
-        workspace(),
-        pipeline_schema([]),
-        [],
-        client=backend_client(
-            tmp_path / "jobs", execution="in_process", in_process_run=ran_ungraded
-        ),
-        scorer=scorer_of("max(0.0, min(1.0, env_reward))", verifier_graded=True),
+    in_process = fake_connector(
+        "ungraded",
+        execution="in_process",
+        in_process_run=ran_ungraded,
+        endpoint=None,
+        pipeline_declaration=world.net.backend.declared,
     )
-    with scoped(ledger=cells):
-        with scoped(book=unbounded):
+    async with world.opened(connector=in_process) as session:
+        with scoped(ledger=cells), scoped(book=unbounded):
             row_ = await measure_sample(
                 Sample(id=0, query="10452", ground_truth=None), session, PipelineParams()
             )
-        banked = {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}
-        emit_replayed_step_tokens(banked, {})
+        with scoped(ledger=cells):
+            emit_replayed_step_tokens(
+                {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}, {}
+            )
     *ran, replayed = [r for r in ledger_records(cells) if isinstance(r, TokenUsageRecord)]
     assert row_.error_category == ErrorCategory.UNSCOREABLE, "an ungraded cell read as graded"
     assert [(r.price.cost_usd, r.input_tokens, r.bill is None) for r in ran] == [
@@ -843,36 +840,6 @@ class _OrderedFakeBackend:
         )
 
 
-_HIT = Scorer(
-    id="hit",
-    per_cell=None,
-    matcher=None,
-    span=None,
-    ranking=None,
-    fields=None,
-    fitness_unit="score",
-    two_valued=frozenset({"hit"}),
-    terms=frozenset(),
-    fitness=lambda _row, _grade: 1.0,
-    objective=None,
-)
-
-
-def _searching(usd_per_query: float) -> Any:
-    bound = WebSpendBound(kind="web", queries=1, usd_per_query=usd_per_query)
-    return pipeline_schema([PipelineNode(name="search", tunes_llm=False, spend_bound=bound)])
-
-
-def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
-    entry = archive_entry(
-        sp,
-        dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.bound_resolution.chain,
-        cell_identity=session.cell_identity,
-    )
-    return ReplayFeed(stores.archive, entry.node_configs)
-
-
 def _control_pausing(pressed: Callable[[], bool], *, lookahead: LookaheadPress) -> RunControl:
     class _Pressed(RunControl):
         def pause_requested(self) -> bool:
@@ -902,23 +869,18 @@ async def _stopped_by_operator(phase: Any) -> str | None:
 
 
 async def _walk(
-    stores: Stores,
-    dataset: list[Sample],
-    *,
-    resumes: JobSearchPoint | None = None,
-    skip_at: int | None = None,
-    cap_usd: float | None = None,
+    world: World, dataset: list[Sample], *, resumes: JobSearchPoint | None = None, skip_at: int
 ) -> dict[str, Any]:
     """One walk pressed 4 cells deep on a backend that holds 4, each cell bound and billed $1."""
     backend = _OrderedFakeBackend(len(dataset))
     # The walk's own campaign, which priced nothing yet.
-    campaign = stores.projects_root / "walks" / uuid.uuid4().hex
+    campaign = world.stores.projects_root / "walks" / uuid.uuid4().hex
     rescope(priced=campaign)
     # An individual of its own, so a walk replays only the cells of the one it resumes.
     sp = resumes or JobSearchPoint(
-        pipeline_params=PipelineParams().with_nodes({"search": {"walk": uuid.uuid4().hex}})
+        pipeline_params=PipelineParams().with_nodes({"llm_only": {"walk": uuid.uuid4().hex}})
     )
-    book = spend_book(cap_usd)
+    book = spend_book()
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
     async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
@@ -930,32 +892,25 @@ async def _walk(
         return row
 
     started = laid_ledger(campaign_cycles_dir(campaign) / "walk")
-    with (
-        scoped(ledger=started),
-        mock.patch.object(query_loop, "measure_sample", _measure),
-        scoped(book=book),
-    ):
-        session = loop_session(
-            stores,
-            # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
-            _searching(1.0),
-            dataset,
-            scorer=_HIT,
-            control=_control_pausing(lambda: False, lookahead=LookaheadPress(cells=4)),
-            client=backend_client(stores.jobs_dir, max_cells_in_flight=4),
-        )
-        walk = open_walk(
-            sp, dataset, session, kind=MeasurementRole.PANEL, measured="arm", skip_at=skip_at
-        )
-        stopped = await _stopped_by_operator(
-            query_loop.run_walks({"arm": walk}, session, keep_cut=False)
-        )
+    holding = fake_connector("holding", max_cells_in_flight=4)
+    async with world.opened(connector=holding) as session:
+        session.state.control = _control_pausing(lambda: False, lookahead=LookaheadPress(cells=4))
+        with (
+            scoped(ledger=started),
+            mock.patch.object(query_loop, "measure_sample", _measure),
+            scoped(book=book),
+        ):
+            walk = open_walk(
+                sp, dataset, session, kind=MeasurementRole.PANEL, measured="arm", skip_at=skip_at
+            )
+            stopped = await _stopped_by_operator(
+                query_loop.run_walks({"arm": walk}, session, keep_cut=False)
+            )
     return {
         "sp": sp,
         "rows": walk.results,
         "stop_reason": stopped or _ended_on(walk),
         "calls": list(backend.calls),
-        "billed": book.spent.sent_usd,
         "ledger": started.path,
     }
 
@@ -1119,14 +1074,14 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
 @pytest.mark.usefixtures("run_bound")
 @on_jumping_clock
 async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
-    built_stores: Stores,
+    world: World,
 ) -> None:
     dataset = _dataset()
-    replayed = await _walk(built_stores, dataset, skip_at=3)
+    replayed = await _walk(world, dataset, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
     # A second resume replays the skipped walk: its depth is what the replay records, never zero.
-    again = await _walk(built_stores, dataset, skip_at=3, resumes=replayed["sp"])
+    again = await _walk(world, dataset, skip_at=3, resumes=replayed["sp"])
     depth = [
         r.running.walked
         for r in ledger_records(again["ledger"])
@@ -2042,7 +1997,7 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
             user_id=UserId("sub-d"),
             tenant_id=TenantId("sub-d"),
             issuer=Issuer("https://accounts.google.com"),
-            capabilities=frozenset({"campaign.run"}),
+            capabilities=frozenset({"campaign.create", "campaign.run"}),
         ),
     )
     spender, claimed = _line(World(delegate, offline, tmp_path / "delegate"), 1)
@@ -4095,7 +4050,7 @@ def _web_account(sub: str) -> Stores:
             tenant_id=TenantId(sub),
             issuer=Issuer(_WEB),
             claims={},
-            capabilities=frozenset(),
+            capabilities=frozenset({"campaign.create"}),
         ),
     )
 
@@ -4208,6 +4163,26 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(offline: Router)
     )
     assert _reserve_of(metered, job.job_id).usd is not None, (
         "an uncap left the account nothing held back for the run"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_arms_asked_in_one_tick_are_admitted_whatever_order_their_ids_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One tick ranks its jobs by their random ids; an arm admitted before an earlier-ranked
+    # sibling still asked reads it contending, and refuses the whole act.
+    host = _web_account("sub-arms")
+    host.grant.set(Budget(usd=10.0), afresh=False, opened_at=_OPENED)
+    monkeypatch.setattr(registry_mod, "utcnow_iso", lambda: _OPENED)
+    admitted = admit_arms(
+        [(Budget(usd=0.1), _CELLS)] * 6,
+        stores=host,
+        job_registry=JobRegistry.attach(host.jobs_dir),
+        holder=EmbeddedRun("ds1"),
+    )
+    assert all(held.admitted.usd == pytest.approx(0.1) for _, held in admitted), (
+        "an arm was admitted at another arm's budget"
     )
 
 

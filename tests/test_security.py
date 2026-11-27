@@ -35,22 +35,16 @@ from typing import Any, Literal, NamedTuple, cast, override
 import httpx
 import pytest
 from factories import (
-    PROMPT_INFO,
     archive_row,
     billed_call,
     cycle_result,
     declaration_of,
-    defaulted_config,
     filed,
     inner_sandbox,
     laid_ledger,
-    loop_session,
-    minted_campaign,
     minted_dataset,
     on_jumping_clock,
     run_wiring,
-    samples,
-    stored_campaign,
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request, Response
@@ -99,6 +93,7 @@ from promptpotter.application.host_surface import (
     TaskResultOf,
     TaskStatusOf,
 )
+from promptpotter.application.jobs import mint as mint_module
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
@@ -241,7 +236,6 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -309,7 +303,7 @@ from promptpotter.infrastructure.store.account_trail import RUN_STOPPED, TrailLi
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
-from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     rmtree_robust,
@@ -372,7 +366,6 @@ from promptpotter.presentation.cli.commands.reads import cmd_read
 from promptpotter.presentation.cli.commands.writes import cmd_command
 from promptpotter.presentation.cli.main import said_text
 from promptpotter.presentation.mcp.server import _refused
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -747,8 +740,8 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
     assert registry.claim_next(waiting.job_id), "code on the target refused its own launches"
 
 
+@pytest.mark.usefixtures("offline")
 def test_an_edit_banked_in_one_accounts_block_pack_is_no_snippet_of_anothers() -> None:
-    ada_hop = CycleHop(campaign_id="camp-ada", cycle_id="cycle_ada")
     installed = block_packs_root() / "shared" / "pack.json"
     installed.parent.mkdir(parents=True)
     seed = Snippet(
@@ -770,10 +763,12 @@ def test_an_edit_banked_in_one_accounts_block_pack_is_no_snippet_of_anothers() -
         workspace(dataclasses.replace(_who(u), capabilities=OWNER_COMMAND_CAPABILITIES))
         for u in ("ada-id", "eve-id")
     )
-    ada.campaigns.create_campaign(minted_campaign(ada_hop))
+    # Written in a check-in draft of ada's: a family dataset's campaign id holds a dot the payload
+    # refuses.
+    drafted = asyncio.run(ingest_draft(stores=ada, blob=b"q,a\nx,y\n", filename="t.csv"))
     edit = "Think it through, one step at a time."
     banked = BankSnippetPayload(
-        supersedes=snippet_id(seed.text), text=edit, experiment=ada_hop.campaign_id
+        supersedes=snippet_id(seed.text), text=edit, experiment=drafted.draft_id
     )
     asyncio.run(CommandDispatcher(ada).dispatch(CommandCall(banked, door=Door.HOST)))
     by_ada = {s.text: s for s in library(ada.block_packs).snippets}
@@ -3217,9 +3212,12 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     release_cycle(campaigns.cycle_dir(kept_hop))
     spent = campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
-    late_hop = CycleHop(campaign_id="c__cccccc", cycle_id="y")
-    campaigns.mint_cycle(late_hop)
+    # A real mint torn before its manifest, whose manifest then lands as the mint writes it.
+    late_hop = asyncio.run(_mint(built_stores, offline, tmp_path))
     late_dir = campaigns.campaign_root_dir(late_hop.campaign_id)
+    manifest = late_dir / "campaign.json"
+    late = manifest.read_bytes()
+    manifest.unlink()
     cleared = plan_landing(built_stores.projects_root, reset=False)
     assert [one.path for one in cleared.torn] == [torn_dir, late_dir], "a torn mint was unlisted"
     # No run or pass takes a torn mint: every door reads its campaign first.
@@ -3232,7 +3230,7 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
         )
     # A mint that wrote its manifest past the plan's scan is no torn one, whoever holds it now:
     # the act asks again, keeps it, says so, and the next entry lands again.
-    stored_campaign(built_stores, minted_campaign(late_hop))
+    manifest.write_bytes(late)
     applied = apply_landing(built_stores.projects_root, cleared)
     unlanded = last_landing(built_stores.projects_root)
     assert late_dir.is_dir() and [one.path for one in applied.kept] == [late_dir], (
@@ -3569,26 +3567,14 @@ async def _drafted(
 
 # The Start's retry and its draft's edit are read after the mint and close that consumed both.
 async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retry_answers_it(
-    monkeypatch: pytest.MonkeyPatch, command_log: _Log
+    monkeypatch: pytest.MonkeyPatch, command_log: _Log, world: World
 ) -> None:
     # A Start's mint of a real plan, its draft's ledger billed in.
     log, stores = command_log, command_log.stores
-    unframed = {"optimization": {"degradation_threshold": 0.4}}
-    write_yaml(
-        stores.tenant_datasets.dataset_dir("acts") / DEFINITION_FILE,
-        {"pipeline": {"connector": "termnorm"}, "campaign": unframed},
-    )
-    rows = samples(30)
-    declaration = {"nodes": {"solve": {"prompt_info": PROMPT_INFO.model_dump(mode="json")}}}
-    starting = loop_session(
-        stores,
-        parse_pipeline_response(declaration),
-        rows,
-        dataset=resolve_dataset(stores, "acts"),
-        declaration=declaration,
-    )
-    declared = declaration_of(starting, defaulted_config(unframed), Optimize())
-    plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)
+    async with world.opened(30) as starting:
+        rows = list(starting.bank.samples)
+        declared = declaration_of(starting, starting.bound_resolution.config, Optimize())
+        plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)
     moved, edit = await _drafted(monkeypatch, log, "moved")
 
     async def started(_: object) -> Applier[Launched]:
@@ -3622,16 +3608,14 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
 
 
 async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addressing_it(
-    command_log: _Log,
+    command_log: _Log, world: World
 ) -> None:
     # Its own loop's run refuses a pause sent into it.
     log, stores = command_log, command_log.stores
-    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
     sandbox = inner_sandbox(stores, log.hop.campaign_id, log.hop.cycle_id)
     (sandbox / stores.tenant_id).mkdir(exist_ok=True)
     inner = descend_store(stores, (log.hop,))
-    inner.campaigns.create_campaign(minted_campaign(leaf))
-    inner.campaigns.mint_cycle(leaf)
+    leaf = await World(inner, world.net, world.scratch / "inner").minted()
     leaf_dir = inner.campaigns.cycle_dir(leaf)
     into_leaf = Subject.of((log.hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
@@ -4159,15 +4143,14 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
 
 
 def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_older_one(
-    host_tenant: _HostTenant, launches: _Launches
+    host_tenant: _HostTenant, launches: _Launches, offline: Router, tmp_path: Path
 ) -> None:
     stores, registry = host_tenant.caller.stores, launches.registry
     user_id = str(stores.identity.user_id)
-    older = CycleHop(campaign_id="camp-old", cycle_id="cycle_old0")
-    fresh = CycleHop(campaign_id="camp-new", cycle_id="cycle_new0")
-    for hop, created_at in ((older, "2026-01-01T00:00:00Z"), (fresh, utcnow_iso())):
-        stores.campaigns.create_campaign(minted_campaign(hop, created_at=created_at))
-        stores.campaigns.mint_cycle(hop)
+    with pytest.MonkeyPatch.context() as then:
+        then.setattr(mint_module, "utcnow_iso", lambda: "2026-01-01T00:00:00Z")
+        older = asyncio.run(_mint(stores, offline, tmp_path))
+    fresh = asyncio.run(_mint(stores, offline, tmp_path))
     # A resume of the older campaign, then the fresh one's mint and its resume.
     for hop in (older, fresh, fresh):
         job = registry.create(
@@ -4184,15 +4167,11 @@ def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_
 
 
 async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_jobs_own_ending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant, offline: Router
 ) -> None:
     # A queued launch records the cycle its job already knows; its retry is never a relaunch.
     caller = host_tenant.caller
-    step_hop = CycleHop(campaign_id="camp-step", cycle_id="cycle_step0000000")
-    step_campaign = minted_campaign(step_hop)
-    stored_campaign(caller.stores, step_campaign)
-    minted_dataset(caller.stores, step_campaign)
-    caller.stores.campaigns.mint_cycle(step_hop)
+    step_hop = await _mint(caller.stores, offline, tmp_path)
     queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     stepping = HostSession(Caller(caller.stores, queuing))
     step = StartRunPayload(
@@ -4241,16 +4220,12 @@ class _HeldTask(NamedTuple):
 
 
 async def _held_at_arms_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stores: Stores
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stores: Stores, offline: Router
 ) -> _HeldTask:
     """A host's start-run task whose run holds at its arms gate, asking for its input."""
     from promptpotter.application import host_surface
 
-    hop = CycleHop(campaign_id="camp-held", cycle_id="cycle_held0000000")
-    campaign = minted_campaign(hop)
-    stored_campaign(stores, campaign)
-    minted_dataset(stores, campaign)
-    stores.campaigns.mint_cycle(hop)
+    hop = await _mint(stores, offline, tmp_path)
     queuing = JobRegistry(tmp_path / "queue" / "jobs", capacity=lambda _live: 0)
     session = HostSession(Caller(stores, queuing))
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
@@ -4277,7 +4252,7 @@ _ARM = {"prompt_fields": {"solve": {"instruction": "Held."}}, "changes_descripti
 # One journey: the hold's elicitation is answered, that answer filed, and the task's result
 # then reads the run that went on past it.
 async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant, offline: Router
 ) -> None:
     import mcp.types as mcp_types
     from mcp import Client
@@ -4287,7 +4262,7 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
 
     stores = host_tenant.caller.stores
     session, task, ledger, cycle_dir, job, queuing = await _held_at_arms_gate(
-        tmp_path, monkeypatch, stores
+        tmp_path, monkeypatch, stores, offline
     )
     arm = _ARM
     asked: list[mcp_types.ElicitRequestParams] = []
@@ -4336,7 +4311,7 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
 
 
 async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answer_by_update(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant, offline: Router
 ) -> None:
     import mcp.types as mcp_types
     from mcp import Client
@@ -4351,7 +4326,7 @@ async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answe
         input_requests: dict[str, dict[str, Any]]
 
     stores = host_tenant.caller.stores
-    held = await _held_at_arms_gate(tmp_path, monkeypatch, stores)
+    held = await _held_at_arms_gate(tmp_path, monkeypatch, stores, offline)
     task_id = held.task.task_id
     status_of = mcp_types.GetTaskRequest(params=mcp_types.GetTaskRequestParams(task_id=task_id))
     async with Client(host_server(held.session)) as host:

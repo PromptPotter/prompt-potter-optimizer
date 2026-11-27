@@ -12,6 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 from promptpotter.application.cycle_addressing import resolve_cycle, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.launcher.launch import Inline, LaunchOutcome
+from promptpotter.application.jobs.launcher.mint_and_start import Hosted
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.campaign import CampaignCycle
@@ -366,6 +367,11 @@ class CommandDispatcher:
         self.stores = stores
         self.inline = inline
         self._attached = job_registry
+
+    @property
+    def hosted(self) -> Hosted | None:
+        """The host program this process files its launches for, which they run slotless."""
+        return None if self.inline is None else self.inline.hosted
 
     @property
     def job_registry(self) -> JobRegistry:

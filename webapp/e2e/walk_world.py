@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from promptpotter.application.account import accept_terms, local_stores
+from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.config.paths import PROJECTS_DIR
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.infrastructure.store.io import rmtree_robust
@@ -53,6 +54,8 @@ def main(argv: list[str]) -> int:
     # An L4 cell's inner run sits in the sandbox registry beside the projects, never inside them.
     if (sandboxes := inner_sandboxes_dir(source)).is_dir():
         shutil.copytree(sandboxes, inner_sandboxes_dir(home / PROJECTS_DIR))
+    # An entry: its registries complete before its first write (`io.py::complete_durable`).
+    complete_registries()
     accept_terms(local_stores(tenant=None), TERMS_VERSION)
     print(f"[e2e] walk world {home} from {source}")
     return 0

@@ -315,7 +315,12 @@ BASELINE = {
     # w7-rows6 (-31): a Refusal carries its notes; every read of a cycle's draw is `drawn_partition`.
     # withdraw-bulletin (+69): the host takes a bulletin back at its terminal and its bot,
     # its dismissals with it; without it, a posted word stood forever.
-    "package_lines": 113762,
+    # w8-spine (−44): the repair's readers go with their producer; `Pass.recorded` goes.
+    # w8-gate (+5): `io.py::_durable` reads `Kind.durable` (and `complete_durable`); seven callers' flags go.
+    # w8-resolve (+4): `SchemaResolution` is the base a dataset read and a run share; `ReadoutProjection` takes its inputs.
+    # w8-launch (+61): the embedded launch and head-to-head file their commands (`Hosted`), a mint
+    # takes `step_rounds`, `new --draft` starts a kept check-in; `EmbeddedMint`/`EmbeddedResume` go.
+    "package_lines": 113788,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -384,6 +389,8 @@ BASELINE = {
     # w7-web2 (−6): `ServedBackpressure`'s epochs and sender, `Evidence.generated_at`,
     # `HeadToHead.verdict_absent`, `MeResponse.issuer`.
     # w7-spend (−3): `MeteredSpend`'s rate and floor flags no reader read.
+    # withdraw-bulletin (+1): `WithdrawBulletinPayload.bulletin_id`, a host-only kind no browser sends.
+    # w8-launch (−1): measured at its landing; one served property gained a reader.
     "p_served": 197,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
@@ -393,7 +400,9 @@ BASELINE = {
     # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
     # withdraw-bulletin (+1): `commands/bulletin_acts.py`, the one handler module of the three bulletin
     # kinds (post, withdraw, dismiss).
-    "p_command": 12,
+    # w8-launch (+2): `embedded_run.py` files the three launch kinds it holds; `cli/main.py` spells
+    # `start-checkin`'s draft as `new --draft`.
+    "p_command": 14,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,

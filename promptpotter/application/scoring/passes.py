@@ -272,7 +272,7 @@ def _scored_candidate(stores: Stores, hop: CycleHop, candidate_id: str) -> tuple
         stores.campaigns.standing_rounds(hop, moment=None).rounds.items()
     ):
         arm = held.close.arms.get(ArmKey(candidate_id))
-        if isinstance(arm, Concluded) and arm.role != MeasurementRole.PARENT:
+        if isinstance(arm, Concluded) and arm.role.is_proposal:
             return round_num, arm
     raise DiagnosticError(
         f"no round of {hop.campaign_id}/{hop.cycle_id} scored candidate {candidate_id!r}."
@@ -602,7 +602,13 @@ async def _grade(stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
         dashboard = DashboardCheckout(cycle_dir)
         assert dashboard.live.value() is not None, "a launched cycle with rounds is declared"
         dashboard.drain()
-        readout = ReadoutProjection(session, config, sink=None)
+        readout = ReadoutProjection(
+            stores,
+            session.bound_resolution,
+            session.dataset,
+            measured_unit=session.backend_client.connector.measured_unit,
+            sink=None,
+        )
         banked: BenchPasses | None = None
         # The round an `at_end` launch grades under: its last.
         with (

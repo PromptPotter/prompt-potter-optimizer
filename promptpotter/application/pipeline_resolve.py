@@ -15,7 +15,6 @@ from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
     effective_config,
-    load_dataset_campaign_config,
     selected_config,
 )
 from promptpotter.application.datasets.draft_campaign import (
@@ -388,17 +387,6 @@ async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
     )
 
 
-async def dataset_pipeline(
-    stores: Stores, dataset: ResolvedDataset, *, experiment: BaseModel | None
-) -> dict[str, Any]:
-    """A dataset's pipeline outside a run, over the experiment its panel holds today."""
-    definition = runnable_definition(dataset)
-    served = await served_pipeline(
-        stores, definition.owner, endpoint=definition.endpoint, experiment=experiment
-    )
-    return served.over(definition.pipeline)
-
-
 def experiment_outside_run(stores: Stores, dataset: ResolvedDataset | None) -> BaseModel | None:
     if dataset is None:
         return None
@@ -675,19 +663,13 @@ class Resolution:
 
 
 @dataclass(frozen=True)
-class RunResolution(Resolution):
-    """One run's whole resolution: its grading, and its schema, params and optimizer selection as
-    the ONE fold (`ParamLayers`) lays its line over *read*. *read* is its mint's record
-    (`resolved`), or a launch's own read, which `Session.bound` lays the mint's layers into
-    (`run_resolution`). *menu_at*: where a run reads today's menu; a read off records reads none.
-    A ledger that lost its read still grades: only its pipeline refuses."""
+class SchemaResolution:
+    """A pipeline as its config narrows it, no cycle, no bank: a dataset read's (`outside_run`), every
+    run's base. *menu_at*: where it reads today's menu; a read off records reads none."""
 
+    config: CampaignConfig
     recorded: PipelineRead | FileUnreadableError
-    cycle: CycleConfig
-    workspace: Path
     menu_at: Path | None
-    # A merge outside a run's own parse of *recorded* (`merge_outside_run`); any other parses it.
-    parsed: PipelineSchema | None = None
 
     @property
     def read(self) -> PipelineRead:
@@ -697,28 +679,38 @@ class RunResolution(Resolution):
 
     @functools.cached_property
     def declared(self) -> PipelineSchema:
-        return self.parsed or self.read.declared_schema()
+        return self.read.declared_schema()
+
+    @functools.cached_property
+    def schema(self) -> PipelineSchema:
+        """The running chain, narrowed and excluded as the config declares."""
+        return _resolve_active_schema(
+            self.declared,
+            exclude=list(self.config.exclude_nodes),
+            narrowing=self.config.optimizer_narrowing,
+            workspace=self.menu_at,
+        )
+
+
+@dataclass(frozen=True)
+class RunResolution(SchemaResolution, Resolution):
+    """Its grading, params and optimizer as the ONE fold (`ParamLayers`) lays its line over *read*:
+    its mint's record (`resolved`), or a launch's own, which `Session.bound` lays the mint's layers
+    into (`run_resolution`). A ledger that lost its read still grades: only its pipeline refuses."""
+
+    cycle: CycleConfig
+    workspace: Path
 
     @functools.cached_property
     def layers(self) -> ParamLayers:
         return ParamLayers(
-            schema=_resolve_active_schema(
-                self.declared,
-                exclude=list(self.config.exclude_nodes),
-                narrowing=self.config.optimizer_narrowing,
-                workspace=self.menu_at,
-            ),
+            schema=self.schema,
             workspace=self.workspace,
             dataset=self.read.dataset_overlay,
             campaign=self.config.pipeline_overlay,
             free_tier=self.read.free_tier_overlay,
             start=self.cycle.start_overlay,
         )
-
-    @property
-    def schema(self) -> PipelineSchema:
-        """The running chain, narrowed and excluded as the line declares."""
-        return self.layers.schema
 
     @functools.cached_property
     def folded(self) -> FoldedParams:
@@ -814,6 +806,24 @@ class DraftPipeline(RunResolution):
         return draft_criterion(self.config.scoring, campaign_terms(self.connector))
 
 
+def outside_run(
+    stores: Stores, local: Mapping[str, Any], config_layers: ConfigLayers, served: ServedPipeline
+) -> SchemaResolution:
+    """*config_layers* over *local* as a mint would lay them, opening no session."""
+    templated = with_node_templates(local)
+    declaration = served.over(templated)
+    declared = parse_pipeline_response(declaration)
+    laid = laid_config(stores, config_layers, connector=served.connector.name, schema=declared)
+    fence = free_fence(stores, served.connector.name)
+    read = PipelineRead(
+        declaration=declaration,
+        dataset_overlay=pipeline_node_overlay(templated),
+        free_tier_overlay=free_tier_overlay(laid.config, declared, fence),
+        knob_layers=laid.knob_layers,
+    )
+    return SchemaResolution(laid.config, read, menu_at=None)
+
+
 def merge_outside_run(
     stores: Stores,
     local: dict[str, Any],
@@ -822,30 +832,19 @@ def merge_outside_run(
     *,
     verifier_graded: bool,
 ) -> DraftPipeline:
-    """*config_layers* over *local* as a mint would lay them, opening no session."""
-    templated = with_node_templates(local)
-    declaration = served.over(templated)
-    declared = parse_pipeline_response(declaration)
-    laid = laid_config(stores, config_layers, connector=served.connector.name, schema=declared)
-    fence = free_fence(stores, served.connector.name)
+    """`outside_run`, graded under *verifier_graded*, as a check-in reads it."""
+    base = outside_run(stores, local, config_layers, served)
     return DraftPipeline(
-        laid.config,
+        base.config,
         verifier_graded,
-        recorded=PipelineRead(
-            declaration=declaration,
-            dataset_overlay=pipeline_node_overlay(templated),
-            free_tier_overlay=free_tier_overlay(laid.config, declared, fence),
-            knob_layers=laid.knob_layers,
-        ),
-        cycle=CycleConfig.laid(laid.config, ()),
-        workspace=stores.base_dir,
+        recorded=base.recorded,
         menu_at=None,
-        # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
-        parsed=declared,
+        cycle=CycleConfig.laid(base.config, ()),
+        workspace=stores.base_dir,
         config_layers=config_layers,
         local=local,
         connector=served.connector,
-        free=_task_fenced(fence),
+        free=_task_fenced(free_fence(stores, served.connector.name)),
     )
 
 
@@ -1091,22 +1090,22 @@ async def resolve_pipeline_for_dataset(
 ) -> DatasetPipelineResponse:
     """*above*: the datasets enclosing this one on its branch, which it may not nest."""
     dataset = resolve_dataset(stores, dataset_name)
-    experiment = experiment_outside_run(stores, dataset)
-    declared = await dataset_pipeline(stores, dataset, experiment=experiment)
-    cfg = load_dataset_campaign_config(dataset)
     definition = runnable_definition(dataset)
-    schema = parse_pipeline_response(declared)
-    filtered = _resolve_active_schema(
-        schema, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
+    served = await served_pipeline(
+        stores,
+        definition.owner,
+        endpoint=definition.endpoint,
+        experiment=experiment_outside_run(stores, dataset),
     )
+    res = outside_run(stores, definition.pipeline, ConfigLayers.of(dataset, None), served)
     # Declared, valueless: nothing steers it.
-    rows = filtered.node_config_schema(steer_bound=False)
+    rows = res.schema.node_config_schema(steer_bound=False)
     return DatasetPipelineResponse(
         connector=definition.connector,
-        view=filtered.view,
+        view=res.schema.view,
         node_config_schema=rows,
         reach=reach_map(rows),
-        nests=[await _nested(stores, ref, above | {dataset_name}) for ref in _nests(schema)],
+        nests=[await _nested(stores, ref, above | {dataset_name}) for ref in _nests(res.declared)],
     )
 
 

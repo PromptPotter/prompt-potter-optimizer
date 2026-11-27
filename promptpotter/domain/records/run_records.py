@@ -911,8 +911,6 @@ class ForkDirection(enum.StrEnum):
     OFFSHOOT = "offshoot"
     # The CHILD is the continuation; the parent is what was left behind.
     SUPERSEDE = "supersede"
-    # BOTH continue identically. MEASURED, so no trigger implies it: it rides `ForkSpec.direction`.
-    EQUIVALENT = "equivalent"
 
 
 # Derived from the trigger, never stored. Exhaustiveness is checked at import below.
@@ -1221,12 +1219,10 @@ class ForkSpec(FrozenModel):
     issued_by: Principal
     # The parent arm the fork branches from: the one its caller named, else the pick the parent's line stood on.
     from_candidate: RoundArm
-    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
-    direction: ForkDirection | None = None
 
     @property
-    def resolved_direction(self) -> ForkDirection:
-        return self.direction or FORK_DIRECTION[self.trigger]
+    def direction(self) -> ForkDirection:
+        return FORK_DIRECTION[self.trigger]
 
 
 class ForkCutFrom(CheckpointInputs, kind="fork_cut"):
@@ -1346,14 +1342,6 @@ class CycleSupersededRecord(CycleRecord):
 
     record_type: Literal["cycle_superseded"] = "cycle_superseded"
     successor_cycle_id: str
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class ForkGradedRecord(CycleRecord):
-    """A cut's MEASURED direction, on the branch: it overrides the one its trigger implies."""
-
-    record_type: Literal["fork_graded"] = "fork_graded"
-    direction: ForkDirection
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

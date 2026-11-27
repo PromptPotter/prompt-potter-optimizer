@@ -24,7 +24,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
-from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
@@ -449,7 +448,7 @@ def walked_position(rounds: Sequence[RoundOutcome], key: ArmKey) -> ArmPosition 
             for rr in reversed(rounds)
             if (arm := rr.arms.get(key)) is not None
             and arm.position is not None
-            and arm.role != MeasurementRole.PARENT
+            and arm.role.is_proposal
         ),
         None,
     )

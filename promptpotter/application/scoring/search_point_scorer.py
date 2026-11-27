@@ -234,7 +234,7 @@ def open_walk(
         session=session,
         kind=kind,
         feed=feed,
-        recorded=measuring if row.recorded else None,
+        recorded=measuring,
         sample_index=sample_index,
         recorder=_ArchiveRecorder(
             session=session, search_point=search_point, kind=kind, entry=entry

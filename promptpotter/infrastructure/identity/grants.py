@@ -118,11 +118,11 @@ def list_grants(path: Path) -> dict[str, PrincipalGrant]:
 
 def _append_audit(audit_path: Path, **row: str | int) -> None:
     """One audit line of a grant or a block edit, stamped; written before its effect."""
-    append_jsonl(audit_path, {"ts": utcnow_iso(), **row}, durable=True)
+    append_jsonl(audit_path, {"ts": utcnow_iso(), **row})
 
 
 def _write(path: Path, grants: dict[str, PrincipalGrant]) -> None:
-    write_json(path, GrantsFile(grants=grants).model_dump(mode="json"), durable=True)
+    write_json(path, GrantsFile(grants=grants).model_dump(mode="json"))
 
 
 def grant_principal(
@@ -230,7 +230,7 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
 
 
 def _write_emails(path: Path, emails: list[str]) -> None:
-    write_json(path, Blocklist(emails=emails).model_dump(mode="json"), durable=True)
+    write_json(path, Blocklist(emails=emails).model_dump(mode="json"))
 
 
 def _normalize(email: str) -> str:

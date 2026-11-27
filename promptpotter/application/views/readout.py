@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.hard_sample_sorter import rank_hard_samples
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.nodes import ReviewReading
-from promptpotter.application.scoring.closed_rounds import closed_rounds
+from promptpotter.application.pipeline_resolve import RunResolution
+from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.measurement_log import cycle_hard_samples
 from promptpotter.application.served_dashboard import lookahead_axes
 from promptpotter.application.views.render.ansi import (
@@ -73,7 +72,6 @@ from promptpotter.domain.arms import (
     arm_elimination,
     arm_name,
 )
-from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
@@ -133,8 +131,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -152,15 +152,23 @@ class ReadoutMissedInitError(RuntimeError):
 class ReadoutProjection(Projection):
     derives = "readout.log"
 
-    def __init__(self, session: Session, config: CampaignConfig, *, sink: StatusFn | None) -> None:
-        self._session, self._config = session, config
+    def __init__(
+        self,
+        stores: Stores,
+        res: RunResolution,
+        dataset: ResolvedDataset | None,
+        *,
+        measured_unit: MeasuredUnit,
+        sink: StatusFn | None,
+    ) -> None:
+        self._stores, self._res, self._dataset = stores, res, dataset
         self._round_num = 0
         self._sink = sink
-        self._schema = session.bound_resolution.chain
+        self._schema = res.chain
         self._display_tags = display_tags(self._schema)
         # The round's opening, whose proposer and parent its population's table reads.
         self._opened: ProposeOpened | None = None
-        self.measured_unit: MeasuredUnit = session.backend_client.connector.measured_unit
+        self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
         # The fold of `closed_rounds` over the statements it was read at.
@@ -182,7 +190,7 @@ class ReadoutProjection(Projection):
         self._block_size = 1
         self._headed: set[int] = set()
         self._readout: Path | None = None
-        self._campaigns = session.store.campaigns
+        self._campaigns = stores.campaigns
         self._hop: CycleHop | None = None
         # The election and a race speak in keys; the narration names each arm as announced.
         self._narration = Narration()
@@ -302,7 +310,7 @@ class ReadoutProjection(Projection):
     def _stop_digest(self) -> None:
         """What a stop reads off the cycle's ledger: its spend per bucket, each hold on the last
         scale, the optimizer's review and the hard samples."""
-        hop, session = self._hop, self._session
+        hop, config = self._hop, self._res.config
         assert hop is not None, "a run stops on the readout it opened"
         for line in render_spend_breakdown(scan_ledger_spend(self._campaigns.chain(hop)).spend):
             self._write(f"{DIM}{line}{RESET}")
@@ -314,17 +322,17 @@ class ReadoutProjection(Projection):
         for line in render_holds(served_rounds(closed, {}, last_scale)):
             self._write(line)
         _, audits, review = self._reviewed()
-        for line in render_cycle_review(review, audits, self._config.optimization.optimizer):
+        for line in render_cycle_review(review, audits, config.optimization.optimizer):
             self._write(line)
-        hard = cycle_hard_samples(session.store, hop, self._rounds(), self._config)
+        hard = cycle_hard_samples(self._stores, hop, self._rounds(), config)
         measured = hard.ranked_keys
         order, ranked = rank_hard_samples(
             hard,
             {key: hard.positions[key] for key in measured},
             measured=set(measured),
-            order=self._config.hard_sample_order,
+            order=config.hard_sample_order,
         )
-        queries = {sample.key: sample.query for sample in session.bank.samples}
+        queries = {sample.key: sample.query for sample in cycle_bank(self._stores, hop).samples}
         for line in render_hard_sample_heatmap(hard, queries, order, ranked):
             self._write(line)
 
@@ -337,27 +345,21 @@ class ReadoutProjection(Projection):
         ):
             hop = self._hop
             assert hop is not None, "a round closes on the readout it opened"
-            scorer = self._session.state.scoring.scorer
-            self._folded = (
-                stood,
-                closed_rounds(self._session.store, hop, scorer, moment=None),
-            )
+            self._folded = (stood, closed_rounds(self._stores, hop, self._res.scorer, moment=None))
         return self._folded[1]
 
     def _reviewed(self) -> tuple[list[RoundResult], list[RoundAudit | None], ReviewReading | None]:
         """The optimizer's review of every round the cycle closed, read off its ledger."""
-        session, hop, config = self._session, self._hop, self._config
+        hop = self._hop
         assert hop is not None, "a round closes on the readout it opened"
         rounds = self._rounds()
         audits = round_audits(self._campaigns.cycle_dir(hop), [r.round for r in rounds])
-        framing = campaign_framing(session.store, config, session.dataset)
+        framing = campaign_framing(self._stores, self._res.config, self._dataset)
         asked = (framing.pipeline_purpose, framing.optimization_goals, framing.key_challenges)
-        optimizer = select_optimizer(config.optimization)
-        return (
-            rounds,
-            audits,
-            optimizer.review(rounds, audits, context_object=[c for c in asked if c.strip()]),
+        review = self._res.optimizer.review(
+            rounds, audits, context_object=[c for c in asked if c.strip()]
         )
+        return rounds, audits, review
 
     def _handle_pass_graded(self, record: PassGradedRecord) -> None:
         self._write(render_pass_graded(record))

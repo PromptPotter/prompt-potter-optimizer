@@ -199,7 +199,7 @@ class CycleLayout:
 
     @property
     def optimized_surface(self) -> Path:
-        return self.cycle_dir / "optimized.md"
+        return self.cycle_dir / "optimized.txt"
 
     @property
     def readout(self) -> Path:

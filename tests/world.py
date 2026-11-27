@@ -40,6 +40,7 @@ from offline_world import (
 )
 from pydantic import SecretStr
 
+from promptpotter import connectors
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.embedded_run import run_campaign, run_head_to_head
@@ -47,6 +48,7 @@ from promptpotter.application.initialization.scoring_scope import arm_diagnostic
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.mint import mint_framed_cycle
+from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.optimizer_manifest import (
     manifest_directories,
     running_prompt,
@@ -55,6 +57,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.pipeline_resolve import bind_resolution, laid_session, run_resolution
 from promptpotter.config.paths import install_datasets_root, optimizer_manifest_path, user_data_root
 from promptpotter.config.settings import settings
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.command_kinds import (
     ArmRequest,
@@ -70,6 +73,9 @@ from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.run_scope import scoped
+from promptpotter.infrastructure.store.dataset_access import FAMILY_FILE, ORIGIN_FILE
+from promptpotter.infrastructure.store.io import read_yaml, write_yaml
+from promptpotter.shared.plugin_registry import Registry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -159,6 +165,16 @@ class World:
         family = DATASET.split("/")[0]
         if not (installed := self.stores.install_datasets_root / family).is_dir():
             shutil.copytree(install_datasets_root() / family, installed)
+
+    @contextmanager
+    def family(self) -> Iterator[dict[str, Any]]:
+        """The world's dataset family as its install tier holds it, edited as an operator edits a
+        definition: written back as the block exits, for every later opening to read."""
+        assert self.stores.install_datasets_root != install_datasets_root(), "the wheel's tier"
+        path = self.stores.install_datasets_root / DATASET.split("/")[0] / FAMILY_FILE
+        held = read_yaml(path)
+        yield held
+        write_yaml(path, held)
 
     def _answer(self, script: Script) -> None:
         """The network answers *script*: every later run of this world, resumes and forks included."""
@@ -342,18 +358,50 @@ class World:
         return [self._ran(session, result) for _, session, result in ran]
 
     @asynccontextmanager
-    async def opened(self, rows: int = 40) -> AsyncIterator[Session]:
+    async def opened(
+        self, rows: int = 40, *, connector: Connector | None = None
+    ) -> AsyncIterator[Session]:
         """A session on the world's dataset as every door opens one, scoring as a pass outside a
-        run does (`scoring_scope.py::open_diagnostic`); its client closes as the block exits."""
+        run does (`scoring_scope.py::open_diagnostic`); its client closes as the block exits.
+        *connector* serves the dataset as a plugin's does: registered (`serving`), named by its
+        family, which then lays no node and ships no origin, the graph being the connector's."""
         config = campaign_config("potter", 1, bench_trigger="at_end")
-        self._lay(Script(config, rows, 0))
-        async with init_services(
-            DATASET, identity=self.stores.identity, stores=self.stores
-        ) as session:
-            laid, config = laid_session(session, ConfigLayers.stating(stated(config)))
-            bound = bind_resolution(laid, run_resolution(laid, CycleConfig.laid(config, ())))
-            with arm_diagnostic_scoring(bound, config):
-                yield bound
+        script = Script(config, rows, 0)
+        self._answer(script)
+        with pytest.MonkeyPatch.context() as mp:
+            if connector is not None:
+                serving(mp, connector)
+                graph = (connector.pipeline_declaration or self.net.backend.declared)(
+                    self.stores, None
+                )["nodes"]
+                with self.family() as held:
+                    declared = held["pipeline"]["nodes"]
+                    if graph.keys() != declared.keys():
+                        # A node the family never declared runs on the family's task model.
+                        owned = {"config": {"model": declared["llm_only"]["config"]["model"]}}
+                        held["pipeline"]["nodes"] = {n: declared.get(n, owned) for n in graph}
+                        origin = self.stores.install_datasets_root / DATASET / ORIGIN_FILE
+                        origin.unlink()
+                    held["pipeline"]["connector"] = connector.name
+            stand_in_fetch(self.stores, script.samples)
+            async with init_services(
+                DATASET, identity=self.stores.identity, stores=self.stores
+            ) as session:
+                laid, config = laid_session(session, ConfigLayers.stating(stated(config)))
+                bound = bind_resolution(laid, run_resolution(laid, CycleConfig.laid(config, ())))
+                with arm_diagnostic_scoring(bound, config):
+                    yield bound
+
+
+def serving(mp: pytest.MonkeyPatch, *added: Connector) -> None:
+    """*added* in the connector table beside the built-ins, as a plugin registers one, for *mp*'s
+    span: the table completes on them, so a connector its checks refuse raises here."""
+    members = [*connectors._builtins()]
+    built_in = {c.name for _, c in members if isinstance(c, Connector)}
+    members += [(c.name, c) for c in added if c.name not in built_in]
+    table = Registry(connectors.CONNECTORS.group, members.copy, connectors._validate)
+    mp.setattr(connectors, "CONNECTORS", table)
+    complete_registries()
 
 
 def shared_run[T](

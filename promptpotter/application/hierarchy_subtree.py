@@ -390,7 +390,7 @@ def _superseding(cycle: _ListedCycle, cycles: list[_ListedCycle]) -> list[_Liste
         for child in cycles
         if child.parent is not None
         and (spec := child.index.fork)
-        and spec.resolved_direction is ForkDirection.SUPERSEDE
+        and spec.direction is ForkDirection.SUPERSEDE
     ]
     return supersede_line(cycle, supersedes)
 

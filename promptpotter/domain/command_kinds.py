@@ -15,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    PlainSerializer,
     SecretStr,
     SerializerFunctionWrapHandler,
     TypeAdapter,
@@ -670,6 +671,10 @@ class SetSampleLookaheadPayload(LookaheadPress, LoopPayload, kind=CommandKind.SE
     cli_spellings: ClassVar[Mapping[str, str]] = {"auto": "--every-round"}
 
 
+# A launch's step: its run pauses `stepped` past this many rounds, 0 before round 1 closes.
+StepRounds = Annotated[WireInt, Field(ge=0, le=100)] | None
+
+
 class LaunchPayload(CommandPayload):
     """A launch kind: its run may start at a look-ahead, filed as `set-sample-lookahead` on its
     cycle once the run holds it, before the walk's first cell."""
@@ -800,7 +805,7 @@ class StartRunPayload(LaunchPayload, CyclePayload, kind=CommandKind.START_RUN):
     cli_spellings: ClassVar[Mapping[str, str]] = {"mode.from_round": "--from"}
 
     budget: Budget = Budget()
-    step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
+    step_rounds: StepRounds = None
     mode: RunMode = RunMode()
 
 
@@ -1149,6 +1154,7 @@ class StartCheckinPayload(LaunchPayload, DraftPayload, kind=CommandKind.START_CH
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
     draft field holds it. Acked at admission, so it lands with the draft on the root cycle."""
 
+    cli_spellings: ClassVar[Mapping[str, str]] = {"draft_id": "--draft"}
     budget: Budget = Budget()
     head_to_head: HeadToHeadRequest | None = Field(
         default=None,
@@ -1166,12 +1172,29 @@ class StartCheckinPayload(LaunchPayload, DraftPayload, kind=CommandKind.START_CH
         return self
 
 
+# The CommandRecord carries what was sent: a default there records a knob nobody set.
+StatedCampaign = Annotated[
+    CampaignLayer,
+    PlainSerializer(
+        lambda stated: stated.model_dump(mode="json", exclude_unset=True),
+        return_type=dict[str, JsonValue],
+    ),
+]
+_STATED = (
+    "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`, laid "
+    "over the defaults"
+)
+
+
 class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
     """Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,
     priced and admitted before any is minted, so a refused arm leaves none behind."""
 
     dataset_name: str = Field(min_length=1, max_length=64)
     head_to_head: HeadToHeadRequest
+    campaign_config: StatedCampaign | None = Field(
+        default=None, description=f"{_STATED}, every arm's"
+    )
     cli_spellings: ClassVar[Mapping[str, str]] = {
         "dataset_name": "dataset",
         "head_to_head.head_to_head_id": "--head-to-head",
@@ -1190,15 +1213,14 @@ class MintCampaignPayload(LaunchPayload, kind=CommandKind.MINT_CAMPAIGN):
     cli_spellings: ClassVar[Mapping[str, str]] = {"dataset_name": "dataset"}
     dataset_name: str = Field(min_length=1, max_length=64)
     budget: Budget = Budget()
+    step_rounds: StepRounds = None
     optimization: OptimizationOverrides | None = Field(
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
     )
-    campaign_config: CampaignLayer | None = Field(
-        default=None,
-        description="A campaign declaration standing in for the dataset's own "
-        "`dataset.yaml::campaign`, laid over the defaults; `optimization` still lays over it",
+    campaign_config: StatedCampaign | None = Field(
+        default=None, description=f"{_STATED}; `optimization` still lays over it"
     )
     task_text: str | None = Field(
         default=None,
@@ -1217,10 +1239,6 @@ class MintCampaignPayload(LaunchPayload, kind=CommandKind.MINT_CAMPAIGN):
         """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
         data: dict[str, JsonValue] = handler(self)
         data["optimization"] = self.optimization_sent or None
-        stated = self.campaign_config
-        data["campaign_config"] = (
-            None if stated is None else stated.model_dump(mode="json", exclude_unset=True)
-        )
         return data
 
     @model_validator(mode="after")

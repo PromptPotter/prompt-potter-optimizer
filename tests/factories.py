@@ -18,17 +18,15 @@ from offline_run import ByCallIdentity, cited_panel, text_templates
 from offline_world import FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle, RoundContext
-from promptpotter.application.config_map import bench_defaults_pin
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
-    declare_run,
 )
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
-from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.launch import admit
-from promptpotter.application.jobs.launcher.mint_and_start import EmbeddedMint
+from promptpotter.application.jobs.launcher.mint_and_start import FreshMint, Hosted
 from promptpotter.application.jobs.launcher.opening import claim_cycle
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import run_spec
@@ -44,8 +42,6 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
-from promptpotter.application.pipeline_resolve import RunResolution
-from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.entry import launch_scope, open_line
 from promptpotter.application.runner.inner import spawn
@@ -60,7 +56,6 @@ from promptpotter.config.paths import (
     research_datasets_root,
     user_data_root,
 )
-from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import (
     PROBE_WORKLOAD,
     Connector,
@@ -88,7 +83,6 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
-    BankPartition,
     BenchCurve,
     BenchScore,
     LiftCost,
@@ -97,7 +91,7 @@ from promptpotter.domain.bench import (
     bench_status,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose, RunDeclaration
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -125,7 +119,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -134,7 +127,6 @@ from promptpotter.domain.records.run_records import (
     CycleMintedRecord,
     ForkSpec,
     Hold,
-    PipelineRead,
     Running,
     RunPhaseRecord,
     RunWiringRecord,
@@ -188,7 +180,6 @@ from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FAMILY_FILE,
-    ResolvedDataset,
     campaign_defaults,
     resolve_dataset,
 )
@@ -555,60 +546,6 @@ def billed_call(
     return TokenUsageRecord(money=price if replay else bill, **record)
 
 
-def loop_session(
-    stores: Stores,
-    schema: PipelineSchema,
-    samples: Sequence[Sample],
-    *,
-    client: BackendClient | None = None,
-    scorer: Scorer | None = None,
-    partition: BankPartition | None = None,
-    control: RunControl | None = None,
-    hop: CycleHop | None = None,
-    dataset: ResolvedDataset | None = None,
-    dataset_name: str | None = None,
-    declaration: dict[str, Any] | None = None,
-) -> Session:
-    """*declaration*: the wire *schema* parses from, for a fact whose plan re-reads it."""
-    read = PipelineRead(declaration=declaration or {}, dataset_overlay={})
-    config, bank = defaulted_config(), Bank.of(samples)
-    session = Session(
-        store=stores,
-        backend_client=backend_client(
-            stores.jobs_dir, max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
-        )
-        if client is None
-        else client,
-        pipeline_read=read,
-        resolution=RunResolution(
-            config,
-            bank.verifier_graded,
-            recorded=read,
-            cycle=CycleConfig.laid(config, ()),
-            workspace=stores.base_dir,
-            menu_at=None,
-            parsed=schema,
-        ),
-        bank=bank,
-        dataset_name=(
-            dataset_name if dataset_name is not None else "" if dataset is None else dataset.name
-        ),
-        dataset=dataset,
-        campaign=None if hop is None else stores.campaigns.campaign(hop.campaign_id),
-        cycle_id="" if hop is None else hop.cycle_id,
-        drawn=None if hop is None else partition,
-        state=LaunchState(control=RunControl() if control is None else control),
-    )
-    session.state.scoring = ScorerSetup(
-        scorer=scorer or scorer_of(),
-        partition=partition
-        or BankPartition(defaulted_config().dataset_split, tuple(samples), (), ()),
-        degradation_checks=(),
-        judges=(),
-    )
-    return session
-
-
 PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS, rewrite_field="instruction")
 
 
@@ -734,7 +671,7 @@ async def opened_round(
     layers = ConfigLayers(campaign_defaults(), raw)
     admitted = await asyncio.to_thread(
         admit,
-        EmbeddedMint(resolve_dataset(entered, dataset), Budget(), layers, None),
+        FreshMint(resolve_dataset(entered, dataset), Budget(), layers, None, hosted=Hosted()),
         RunMode(),
         stores=stores,
         job_registry=JobRegistry.attach(stores.jobs_dir),
@@ -753,7 +690,7 @@ async def launched(held: HeldRun, *, round_num: int) -> AsyncIterator[RoundConte
     """Run init on a held cycle as its door opens it, through round 0's door
     (`loop.py::open_origin_round`): round *round_num*, held open inside the launch's scope."""
     running, cycle_config = held.session, held.cycle
-    observers = await asyncio.to_thread(enter_cycle, running, cycle_config.config)
+    observers = await asyncio.to_thread(enter_cycle, running)
     try:
         with launch_scope(running, observers, cycle_config.config):
             prep = await open_launch(
@@ -805,38 +742,6 @@ def defaulted_config(layer: Mapping[str, Any] | None = None) -> CampaignConfig:
     )
 
 
-def minted_campaign(
-    hop: CycleHop,
-    *,
-    config: CampaignConfig | None = None,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
-    dataset_name: str = "ds1",
-    **fields: Any,
-) -> Campaign:
-    """A manifest minted as the mint seam does: *config* declared, whole, under *purpose*."""
-    config = config or defaulted_config({"optimization": {"degradation_threshold": 0.4}})
-    return Campaign(
-        campaign_id=hop.campaign_id,
-        dataset_name=dataset_name,
-        created_at=fields.pop("created_at", ""),
-        root_cycle_id=hop.cycle_id,
-        root_content_hash=fields.pop("root_content_hash", "origin"),
-        treatment=select_optimizer(config.optimization).treatment(
-            frozenset(Presumption), PackShelf(account=None)
-        ),
-        declaration=RunDeclaration(
-            spec=declare_run(
-                config,
-                dataset_hash=fields.pop("dataset_hash", "bank"),
-                connector=fields.pop("connector", "termnorm"),
-                bench_defaults_pin=bench_defaults_pin(),
-            ),
-            purpose=purpose,
-        ),
-        **fields,
-    )
-
-
 def run_wiring(measurement_node: str = "l1_score") -> RunWiringRecord:
     """A launch's wiring on one cell at a time, declaring no limit: what a dashboard folds first."""
     return RunWiringRecord(
@@ -862,40 +767,18 @@ def minted_dataset(stores: Stores, campaign: Campaign) -> None:
     )
 
 
-def stored_campaign(stores: Stores, campaign: Campaign) -> None:
-    """Stored as the mint stores it: the root minted, its resolved run landed before the manifest."""
-    stores.campaigns.mint_cycle(campaign.root_hop)
-    node = {"type": "llm", "config": {"model": "m"}}
-    stores.campaigns.write_resolved_run(
-        campaign.root_hop,
-        PipelineRead(
-            declaration={
-                "nodes": {"a": node},
-                "pipelines": {"default": ["a"]},
-            },
-            dataset_overlay={},
-        ),
-        experiment=None,
-        model_capabilities={},
-    )
-    stores.campaigns.create_campaign(campaign)
-
-
 def laid_ledger(cycle_dir: Path) -> CycleEventLog:
     """A scratch ledger in a directory laid as a mint lays one: `open` never creates the cycle."""
     cycle_dir.mkdir(parents=True, exist_ok=True)
     return CycleEventLog.open(CycleDir(cycle_dir))
 
 
-def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
-    """A minted cycle a producer holds and has declared running: what a loop command lands on."""
-    hop = CycleHop(campaign_id="camp-cmd", cycle_id="cycle_cmd00000000")
-    stores.campaigns.create_campaign(minted_campaign(hop))
-    stores.campaigns.mint_cycle(hop)
+def walking_cycle(stores: Stores, hop: CycleHop) -> Path:
+    """Minted *hop* a producer holds and has declared running: what a loop command lands on."""
     cycle_dir = stores.campaigns.cycle_dir(hop)
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
     hold_cycle(cycle_dir)
-    return hop, cycle_dir
+    return cycle_dir
 
 
 def run_holding(stores: Stores, hop: CycleHop) -> str:
@@ -912,9 +795,7 @@ def run_holding(stores: Stores, hop: CycleHop) -> str:
     for move in (LaunchMove.ADMIT, LaunchMove.START):
         registry.move(job.job_id, move)
     claim_cycle(stores, hop, job.job_id)
-    cycle_dir = stores.campaigns.cycle_dir(hop)
-    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
-    hold_cycle(cycle_dir)
+    walking_cycle(stores, hop)
     return job.job_id
 
 

@@ -11,33 +11,33 @@ from typing import Any
 from promptpotter.application.account import local_stores
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.launcher.admission import refuse_campaign
 from promptpotter.application.jobs.launcher.head_to_head import (
+    AdmittedHeadToHead,
     HeldArm,
-    admit_head_to_head,
-    dataset_arms,
     run_each,
 )
-from promptpotter.application.jobs.launcher.launch import admit
-from promptpotter.application.jobs.launcher.mint_and_start import EmbeddedMint, EmbeddedResume
+from promptpotter.application.jobs.launcher.launch import Inline, Launched
+from promptpotter.application.jobs.launcher.mint_and_start import Hosted
 from promptpotter.application.jobs.reaper import sweep
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.command_kinds import Door, HeadToHeadRequest
+from promptpotter.domain.command_kinds import (
+    Door,
+    HeadToHeadRequest,
+    MintCampaignPayload,
+    MintHeadToHeadPayload,
+    StartRunPayload,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -108,7 +108,8 @@ async def run_campaign(
     mode: RunMode,
 ) -> tuple[Session, CycleResult]:
     """*target* is a dataset (a host's, written first), whose campaign the run mints under *campaign_config* (the dataset's
-    own where none), or a cycle, which it resumes under its campaign's declaration. Answers the
+    own where none), or a cycle, which it resumes under its campaign's declaration and *mode*.
+    Filed as `mint-campaign` or `start-run` at the host's door, held here (`Hosted`). Answers the
     session bound to the cycle the run ended on, whose backend client it closes on every exit.
     Under ``origin_gate: strict`` an unhealthy origin halts it, and a resume proceeds; under an
     ``arm_gate`` it blocks until ``submit-arms`` answers."""
@@ -116,7 +117,7 @@ async def run_campaign(
     if isinstance(target, HostDefinition):
         stores.write_own_definition(**vars(target))
         target = target.slug
-    request: EmbeddedMint | EmbeddedResume
+    payload: StartRunPayload | MintCampaignPayload
     if isinstance(target, CycleHop):
         if campaign_config is not None or rows is not None:
             raise PayloadInvalidError(
@@ -124,24 +125,24 @@ async def run_campaign(
                 "no config and no rows to resume it",
                 code="resume_declared",
             )
-        refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(target)).campaign)
-        request = EmbeddedResume(at, budget, step_rounds)
-    else:
-        dataset = resolve_dataset(stores, target)
-        # The config the mint declares runs as laid (`authored.py::effective_config`).
-        layers = ConfigLayers.of(dataset, campaign_config)
-        request = EmbeddedMint(dataset, budget, layers, None, program, rows, step_rounds)
-    # Admitted and probed BEFORE the session, the mint's paid framing and a resume's bind: a
-    # refusal opens and writes nothing.
-    admitted = await asyncio.to_thread(
-        admit,
-        request,
-        mode,
-        stores=stores,
-        job_registry=JobRegistry.attach(stores.jobs_dir),
-        inline=None,
-    )
-    held = await admitted.held()
+        payload = StartRunPayload(
+            campaign_id=target.campaign_id,
+            cycle_id=target.cycle_id,
+            budget=budget,
+            step_rounds=step_rounds,
+            mode=mode,
+        )
+    else:  # a mint has no record for *mode* to rewind or diverge from
+        payload = MintCampaignPayload(
+            dataset_name=target,
+            budget=budget,
+            step_rounds=step_rounds,
+            campaign_config=campaign_config,
+        )
+    dispatcher = CommandDispatcher(stores, inline=Inline(hosted=Hosted(program, rows)))
+    launched = (await dispatcher.dispatch(CommandCall(payload, door=Door.HOST))).result
+    assert isinstance(launched, Launched) and launched.held is not None, "a hosted launch is held"
+    held = await launched.held
     return await held.run(readout_sink=readout_sink)
 
 
@@ -154,9 +155,9 @@ async def run_head_to_head(
     mode: RunMode,
     readout_sink: StatusFn | None = None,
 ) -> list[tuple[str, Session, CycleResult]]:
-    """Arms of one head-to-head on *dataset_name*, each answered by its key: every arm planned and
-    admitted before any is minted, then run one after another in the host's loop, on the one
-    backend client it closes on every exit.
+    """Arms of one head-to-head on *dataset_name*, each answered by its key: filed as
+    `head-to-head` at the host's door, every arm planned and admitted before any is minted, then
+    run one after another in the host's loop, on the one backend client it closes on every exit.
 
     Raises what ``head-to-head`` refuses the browser's and the terminal's act on.
     """
@@ -166,12 +167,11 @@ async def run_head_to_head(
         ended, result = await replace(arm.held, mode=mode).run(readout_sink=readout_sink)
         return arm.arm_key, ended, result
 
-    arms = await dataset_arms(stores, resolve_dataset(stores, dataset_name))
-    async with arms.closing:
-        admitted = await admit_head_to_head(
-            replace(arms, layers=ConfigLayers.stating(campaign_config)),
-            request,
-            job_registry=JobRegistry.attach(stores.jobs_dir),
-            holder=EmbeddedRun(arms.session.measured_dataset),
-        )
+    payload = MintHeadToHeadPayload(
+        dataset_name=dataset_name, head_to_head=request, campaign_config=campaign_config
+    )
+    dispatcher = CommandDispatcher(stores, inline=Inline(hosted=Hosted()))
+    admitted = (await dispatcher.dispatch(CommandCall(payload, door=Door.HOST))).result
+    assert isinstance(admitted, AdmittedHeadToHead), "a hosted head-to-head is held"
+    async with admitted.source.closing:
         return await run_each(await admitted.minted(), _run)

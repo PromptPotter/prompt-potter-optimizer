@@ -16,7 +16,8 @@ python -m promptpotter new <file.csv> --set raw_task_description='what the promp
 Omit `--set` to let the resolver propose the framing and ask; `--set` takes `EditDraftPatch`'s own
 dotted paths: `--set config.optimization.optimizer=capo` and
 `--set config.optimization.nodes.<node>.config.<knob>=V` are the picker's answers. A run stopping short
-of a complete origin keeps its check-in; Discard is `discard-draft <draft_id>`.
+of a complete origin keeps its check-in: `new --draft <draft_id> --set …` edits, resolves and starts it
+(an `open-dataset-draft` / `open-origin-draft` one too); Discard is `discard-draft <draft_id>`.
 
 ## Fast path — Claude-simulated check-in
 

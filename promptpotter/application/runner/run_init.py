@@ -178,7 +178,6 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
 
 def enter_cycle(
     session: Session,
-    campaign_config: CampaignConfig,
     *,
     readout_sink: StatusFn | None = None,
     forked_from: RunObservers | None = None,
@@ -187,7 +186,6 @@ def enter_cycle(
     cycle declared running, its inbox voided and its pointer the latest."""
     observers = build_run_observers(
         session=session,
-        campaign_config=campaign_config,
         readout_sink=readout_sink,
         forked_from=forked_from,
     )
@@ -210,13 +208,11 @@ def enter_cycle(
     return observers
 
 
-def _rebased_observers(
-    session: Session, cut: ForkCut, observers: RunObservers, prep: PreparedRun
-) -> RunObservers:
+def _rebased_observers(session: Session, cut: ForkCut, observers: RunObservers) -> RunObservers:
     # The cut's last step: everything the fork stands on landed before it supersedes its parent.
     cut.take(session.store)
     _rebase_held(session, cut.parent)
-    return enter_cycle(session, prep.campaign_config, forked_from=observers)
+    return enter_cycle(session, forked_from=observers)
 
 
 def _rebase_held(session: Session, parent: CycleHop) -> None:
@@ -246,7 +242,7 @@ async def onto_fork(
     held share, the wiring and *parent*'s release. Taken and rebased off the loop: both wait
     on a gate."""
     session = session.bound(CampaignCycle(session.bound_campaign, cut.child.cycle_id))
-    observers = await asyncio.to_thread(_rebased_observers, session, cut, parent, prep)
+    observers = await asyncio.to_thread(_rebased_observers, session, cut, parent)
     # A fork's config is already admitted, so it is wired as its observers open.
     declare_run_wiring(session, prep.campaign_config, selected=prep.optimizer)
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.

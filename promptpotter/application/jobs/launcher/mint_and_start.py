@@ -43,7 +43,6 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.opening import Opening
     from promptpotter.application.pipeline_resolve import DraftPipeline
 
@@ -64,6 +63,15 @@ def assert_origin_ready(draft: DraftFile, pipeline: DraftPipeline) -> None:
     readiness = origin_readiness(draft, pipeline)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
+
+
+@dataclass(frozen=True, slots=True)
+class Hosted:
+    """A host program's own run (`embedded_run.py`), held by the process that filed it: no slot,
+    as the host schedules itself; a mint's session on its *program*, its bank *rows*."""
+
+    program: object | None = None
+    rows: Sequence[Sample] | None = None
 
 
 class LaunchRequest:
@@ -92,12 +100,18 @@ class LaunchRequest:
         return Budget() if self.at is None else stores.campaigns.armed_budget(self.at)
 
     @property
+    def hosted(self) -> Hosted | None:
+        return None
+
+    @property
     def dataset_name(self) -> str:
         raise NotImplementedError
 
     @property
     def holder(self) -> CampaignLaunch | EmbeddedRun | InnerRun:
-        """Slotted unless a kind runs where a host or an enclosing run schedules it."""
+        """Slotted unless a host or an enclosing run schedules it."""
+        if self.hosted is not None:
+            return EmbeddedRun(self.dataset_name)
         return CampaignLaunch(self.dataset_name)
 
     def connector(self, stores: Stores) -> str:
@@ -128,6 +142,8 @@ class FreshMint(LaunchRequest):
     budget: Budget
     layers: ConfigLayers
     task_text: str | None
+    step_rounds: int | None = None
+    hosted: Hosted | None = field(default=None)  # a field: the shape's inherited one is no default
 
     @property
     def dataset_name(self) -> str:
@@ -151,21 +167,24 @@ class FreshMint(LaunchRequest):
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self.campaign_config(stores), self.connector(stores))
 
-    def session(self, stores: Stores) -> AbstractAsyncContextManager[Session]:
-        return init_services(
-            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
-        )
-
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
-        """The session, past the probe, then the mint: a refused one writes nothing."""
-        async with self.session(stores) as session:
+        """The session, past the probe, then the mint: a refused one writes nothing. A host's
+        *rows* replace the definition's bank, which the mint labels."""
+        hosted = self.hosted or Hosted()
+        async with init_services(
+            dataset_name=self.dataset_name,
+            identity=stores.identity,
+            stores=stores,
+            program=hosted.program,
+        ) as session:
+            if hosted.rows is not None:
+                bank = Bank.of(hosted.rows)
+                stores.tenant_datasets.put_bank(bank)
+                session = replace(session, bank=bank)
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
-                session,
-                config,
-                session.bank.samples,
-                task_text=self.task_text,
+                session, config, session.bank.samples, task_text=self.task_text
             )
 
 
@@ -174,6 +193,7 @@ class ExistingCycle(LaunchRequest):
     at: CampaignCycle = field()  # a field: the shape's inherited `at` is no default
     budget: Budget
     step_rounds: int | None = None
+    hosted: Hosted | None = field(default=None)
 
     @property
     def dataset_name(self) -> str:
@@ -241,44 +261,6 @@ class ForkLaunch(LaunchRequest):
         cut = cut_operator_fork(opening.stores, self.payload, self.start)
         opening.land_cut(cut, held)
         return ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddedMint(FreshMint):
-    """A host's fresh campaign: no slot, its session on the host's *program*, its bank *rows*."""
-
-    program: object | None = None
-    rows: Sequence[Sample] | None = None
-    step_rounds: int | None = None
-
-    @property
-    def holder(self) -> EmbeddedRun:
-        return EmbeddedRun(self.dataset_name)
-
-    @asynccontextmanager
-    async def session(self, stores: Stores) -> AsyncIterator[Session]:
-        """*rows* replace the definition's bank, which the mint labels."""
-        async with init_services(
-            dataset_name=self.dataset_name,
-            identity=stores.identity,
-            stores=stores,
-            program=self.program,
-        ) as session:
-            if self.rows is None:
-                yield session
-                return
-            bank = Bank.of(self.rows)
-            stores.tenant_datasets.put_bank(bank)
-            yield replace(session, bank=bank)
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddedResume(ExistingCycle):
-    """A host's resume of a cycle: no slot."""
-
-    @property
-    def holder(self) -> EmbeddedRun:
-        return EmbeddedRun(self.dataset_name)
 
 
 @dataclass(frozen=True, slots=True)

@@ -33,8 +33,6 @@ from promptpotter.domain.records.run_records import (
     CycleSupersededRecord,
     ElectionRecord,
     Ended,
-    ForkDirection,
-    ForkGradedRecord,
     ForkSpec,
     LaunchClockRecord,
     Paused,
@@ -182,7 +180,6 @@ class CycleFacts(NamedTuple):
     final: CycleFinalRecord | None = None
     superseded_by: str | None = None
     error: ErrorRecord | None = None
-    direction: ForkDirection | None = None
     interventions: tuple[Intervention, ...] = ()
     spawned_by: SpawnedBy | None = None
     formula: str | None = None
@@ -190,17 +187,13 @@ class CycleFacts(NamedTuple):
 
     @property
     def fork(self) -> ForkSpec | None:
-        spec = None if self.minted is None else self.minted.fork
-        if spec is None or self.direction is None:
-            return spec
-        return spec.model_copy(update={"direction": self.direction})
+        return None if self.minted is None else self.minted.fork
 
 
 _CycleFact = (
     CycleMintedRecord
     | CycleFinalRecord
     | CycleSupersededRecord
-    | ForkGradedRecord
     | ArmActRecord
     | SpawnedRecord
     | RunPhaseRecord
@@ -256,8 +249,6 @@ class _CycleFactsFold:
                 held = held._replace(final=record)
             case CycleSupersededRecord():
                 held = held._replace(superseded_by=record.successor_cycle_id)
-            case ForkGradedRecord():
-                held = held._replace(direction=record.direction)
             case ArmActRecord():
                 if not record.act.babysits:
                     return

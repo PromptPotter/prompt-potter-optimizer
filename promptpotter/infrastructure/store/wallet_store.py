@@ -100,17 +100,14 @@ class TenantApiKeyStore:
         return removed
 
     def _rewrite(self, change: Callable[[dict[str, HeldKey]], dict[str, HeldKey]]) -> None:
-        """A survivor (`data_root.py::Kind.durable`), read and replaced under its write lock."""
+        """Read and replaced under its write lock."""
         with write_lock(self.path):
             keys = change(self.load())
-            write_json(
-                self.path,
-                {
-                    p: {"secret": k.secret.get_secret_value(), "added_at": k.added_at}
-                    for p, k in keys.items()
-                },
-                durable=True,
-            )
+            held = {
+                p: {"secret": k.secret.get_secret_value(), "added_at": k.added_at}
+                for p, k in keys.items()
+            }
+            write_json(self.path, held)
 
 
 class ChargeBook:
@@ -123,8 +120,7 @@ class ChargeBook:
     def append(self, *lines: ChargeLine) -> None:
         """One fact's *lines* in one locked write, so no crash or other writer lands between them."""
         raw = "\n".join(line.model_dump_json() for line in lines).encode("utf-8")
-        # Durable (`data_root.py::Kind.durable`): a bill line a power loss takes under-charges.
-        append_line(self.path, raw, durable=True)
+        append_line(self.path, raw)
 
     def held_on(self, ledger: Path) -> str:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()

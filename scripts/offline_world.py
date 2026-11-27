@@ -360,6 +360,15 @@ class FakeBackend:
         # The graph `/pipeline` serves, one pipeline walking every node in order.
         self.nodes: dict[str, dict[str, Any]] = {"llm_only": LLM_ONLY_NODE}
 
+    def declared(self, *_: Any) -> dict[str, Any]:
+        """The graph `/pipeline` serves: an in-process connector's `pipeline_declaration`."""
+        return {
+            "name": "TermNorm",
+            "version": "offline",
+            "nodes": self.nodes,
+            "pipelines": {next(iter(self.nodes)): list(self.nodes)},
+        }
+
     def respond(
         self, request: httpx.Request, body: bytes
     ) -> httpx.Response | Awaitable[httpx.Response] | None:
@@ -374,16 +383,10 @@ class FakeBackend:
             return fault
         match path:
             case "/pipeline":
-                pipeline = {
-                    "name": "TermNorm",
-                    "version": "offline",
-                    "nodes": self.nodes,
-                    "pipelines": {next(iter(self.nodes)): list(self.nodes)},
-                }
                 answer = {
                     "status": "success",
                     "message": "Pipeline configuration",
-                    "data": pipeline,
+                    "data": self.declared(),
                 }
             case "/status":
                 answer = {"status": "ok"}

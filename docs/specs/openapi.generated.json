@@ -7963,8 +7963,7 @@
         "description": "Which side of a cut the run CONTINUES on, the half a cut alone cannot say.",
         "enum": [
           "offshoot",
-          "supersede",
-          "equivalent"
+          "supersede"
         ],
         "title": "ForkDirection",
         "type": "string"
@@ -11074,7 +11073,6 @@
           "panel",
           "backfill",
           "parent",
-          "repair",
           "overlap",
           "verify",
           "bench",
@@ -11428,6 +11426,19 @@
             ],
             "description": "Laid over the dataset's own `optimization` before the mint freezes it; only the fields sent move anything"
           },
+          "step_rounds": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Rounds"
+          },
           "task_text": {
             "anyOf": [
               {
@@ -11453,6 +11464,17 @@
         "additionalProperties": false,
         "description": "Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,\npriced and admitted before any is minted, so a refused arm leaves none behind.",
         "properties": {
+          "campaign_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignLayer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`, laid over the defaults, every arm's"
+          },
           "dataset_name": {
             "maxLength": 64,
             "minLength": 1,
@@ -11474,6 +11496,20 @@
         "additionalProperties": false,
         "description": "Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,\npriced and admitted before any is minted, so a refused arm leaves none behind.",
         "properties": {
+          "campaign_config": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`, laid over the defaults, every arm's"
+          },
           "dataset_name": {
             "maxLength": 64,
             "minLength": 1,
@@ -17335,7 +17371,6 @@
               "election",
               "error",
               "flight",
-              "fork_graded",
               "health",
               "hold",
               "launch_clock",
@@ -17530,7 +17565,7 @@
             "anyOf": [
               {
                 "maximum": 100.0,
-                "minimum": 1.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {

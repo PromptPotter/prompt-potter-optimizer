@@ -61,4 +61,5 @@ PositiveWireFloat = Annotated[
 # One file's bound at every door: each transport reads one byte past it, and the bytes' own
 # validation refuses that byte (`IngestUploadPayload.blob`, `EditDraftPatch.answer_terms_file`).
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+UPLOAD_READ_BYTES = MAX_UPLOAD_BYTES + 1
 UploadBytes = Annotated[bytes, Field(max_length=MAX_UPLOAD_BYTES)]

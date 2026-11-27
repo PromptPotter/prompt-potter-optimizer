@@ -75,7 +75,7 @@ def _write(path: Path, tokens: dict[str, ApiToken]) -> None:
         kept[token.user_id] = kept.get(token.user_id, 0) + 1
         if kept[token.user_id] > _KEPT_REVOKED:
             del tokens[digest]
-    write_json(path, TokensFile(tokens=tokens).model_dump(mode="json"), durable=True)
+    write_json(path, TokensFile(tokens=tokens).model_dump(mode="json"))
 
 
 def account_tokens(path: Path, user_id: str) -> list[ApiToken]:

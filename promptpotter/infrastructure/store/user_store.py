@@ -48,8 +48,6 @@ class User(FrozenModel):
 
 
 class UserStore:
-    """Both files survive a landing, so each write is durable (`data_root.py::Kind.durable`)."""
-
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
 
@@ -74,10 +72,10 @@ class UserStore:
         return changed
 
     def _write(self, user: User) -> None:
-        write_json(self._path(), user.model_dump(), durable=True)
+        write_json(self._path(), user.model_dump())
 
     def record(self, line: ConsentLine) -> None:
-        append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"), durable=True)
+        append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"))
 
     def consent_trail(self) -> list[ConsentLine]:
         return read_rows(self._base_dir / CONSENT_FILE, ConsentLine.model_validate_json)

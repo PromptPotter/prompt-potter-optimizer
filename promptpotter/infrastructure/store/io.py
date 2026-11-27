@@ -1,8 +1,10 @@
 import asyncio
 import contextlib
+import glob
 import itertools
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -324,6 +326,32 @@ def _place(path: Path) -> Path | None:
     return path.relative_to(root) if path.is_relative_to(root) else None
 
 
+def globbed(patterns: tuple[str, ...]) -> re.Pattern[str]:
+    """`PurePath.full_match`'s semantics, compiled once: it recompiles per call."""
+    return re.compile(
+        "|".join(glob.translate(p, recursive=True, include_hidden=True, seps="/") for p in patterns)
+    )
+
+
+# The `data_root.py::Kind.durable` rows, laid by `landing.py::complete_registries` (they sit above
+# this module): before then a write under the data root refuses, never guessing its fsync.
+_DURABLE: list[re.Pattern[str]] = []
+
+
+def complete_durable(patterns: tuple[str, ...]) -> None:
+    _DURABLE[:] = [globbed(patterns)]
+
+
+def _durable(path: Path) -> bool:
+    """Spelled as a stamp's subject is (`stamp`): a realpath per write costs ~80 µs."""
+    at, root = _spelled(path), _spelled(user_data_root())
+    if not at.startswith(root + os.sep):
+        return False
+    if not _DURABLE:
+        raise RuntimeError(f"{path} was written before this process completed its registries")
+    return _DURABLE[0].match(at[len(root) + 1 :].replace(os.sep, "/")) is not None
+
+
 def refuse_off_workspace(workspace: Path) -> None:
     """A workspace stands at one of `WORKSPACE_SHAPES`, or no anchor binds under it."""
     if not ((rel := _place(workspace)) and any(rel.full_match(s) for s in WORKSPACE_SHAPES)):
@@ -368,13 +396,14 @@ def _synced(f: IO[Any]) -> None:
     os.fsync(f.fileno())
 
 
-def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
-    """*durable* (a `data_root.py::Kind.durable` row's writer) fsyncs the file before the replace and
-    its directory after, so a power loss never brings it back empty; run data stays fast. The
+def write_bytes(path: Path, data: bytes) -> None:
+    """A durable row's write (`_durable`) fsyncs the file before the replace and its directory
+    after, so a power loss never brings it back empty; run data stays fast. The
     temporary's lock holds from its creation to the replace on POSIX, so a wipe reads it as a write in
     flight; on Windows it lapses at the close, and a reset in that gap unlinks the temporary."""
     # Dot-named, which the cycle file listing skips.
     temp = partial(tempfile.mkstemp, dir=_long_path(path.parent), prefix=".", suffix=".tmp")
+    durable = _durable(path)
     fd, tmp = _created(path, temp)
     _try_lock(fd)
     try:
@@ -393,15 +422,9 @@ def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
     stamp(path)
 
 
-def write_json(
-    path: Path,
-    data: Any,
-    *,
-    default: Callable[[Any], Any] | None = None,
-    durable: bool = False,
-) -> None:
+def write_json(path: Path, data: Any, *, default: Callable[[Any], Any] | None = None) -> None:
     text = json.dumps(data, indent=2, ensure_ascii=False, default=default)
-    write_bytes(path, text.encode("utf-8"), durable=durable)
+    write_bytes(path, text.encode("utf-8"))
 
 
 def write_text(path: Path, content: str) -> None:
@@ -684,23 +707,23 @@ _APPENDED: dict[str, tuple[int, int, int]] = {}
 _APPENDED_HELD = 4096
 
 
-def append_line(path: Path, line: bytes, *, durable: bool = False) -> range:
+def append_line(path: Path, line: bytes) -> range:
     """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows.
 
     Under the lock no append is in flight, so an unterminated last line is a crashed one: it is cut
     back to the last newline before this line lands. No reader counted those bytes (`complete_lines`,
     `FileMark.end`), and the append that wrote them never returned. A file still ending where this
     process's last append left it is opened append-only: it ends on a line written whole.
-    *durable* fsyncs the line before it returns (`write_bytes`)."""
-    with appending(path, durable=durable) as put:
+    A durable row's line is fsynced before it returns (`write_bytes`)."""
+    with appending(path) as put:
         return put(line)
 
 
 @contextlib.contextmanager
-def appending(path: Path, *, durable: bool = False) -> Iterator[Callable[[bytes], range]]:
+def appending(path: Path) -> Iterator[Callable[[bytes], range]]:
     """`append_line` held: what is read of *path* under it is what the line lands after, so a
     writer refusing a line the file already holds refuses it inside the write."""
-    name = _long_path(path)
+    name, durable = _long_path(path), _durable(path)
     with write_lock(path):
         try:
             yield lambda line: _append_held(name, line + b"\n", durable=durable)
@@ -759,10 +782,10 @@ class Appended(NamedTuple):
             yield line, range(start, start := start + len(line) + 1)
 
 
-def append_jsonl(path: Path, *rows: dict[str, Any], durable: bool = False) -> Appended:
+def append_jsonl(path: Path, *rows: dict[str, Any]) -> Appended:
     """THE appender of JSON rows: every row lands in one locked write."""
     lines = tuple(json.dumps(row, ensure_ascii=False).encode("utf-8") for row in rows)
-    return Appended(lines, append_line(path, b"\n".join(lines), durable=durable))
+    return Appended(lines, append_line(path, b"\n".join(lines)))
 
 
 class FileMark(NamedTuple):

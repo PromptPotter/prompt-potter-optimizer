@@ -32,6 +32,7 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.origin_readiness import checklist_field
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.launcher.run_job import HeldRun
@@ -70,7 +71,7 @@ from promptpotter.domain.phases import stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
+from promptpotter.domain.strict_model import UPLOAD_READ_BYTES
 from promptpotter.presentation.cli.first_run import ensure_api_key
 from promptpotter.presentation.cli.main import (
     ARM_GRAMMAR,
@@ -297,8 +298,8 @@ def _gap_path(field: str) -> tuple[str, ...]:
 
 def _draft_kept(draft_id: str) -> str:
     return (
-        f"Check-in {draft_id} is kept: finish it in the browser, or drop it with "
-        f"`promptpotter discard-draft {draft_id}`."
+        f"Check-in {draft_id} is kept: finish it by `promptpotter new --draft {draft_id}` or in "
+        f"the browser, or drop it with `promptpotter discard-draft {draft_id}`."
     )
 
 
@@ -317,7 +318,7 @@ def _said_incomplete(
     lines += [
         "",
         "Confirm the open fields and re-run:",
-        "  promptpotter new <file> "
+        f"  promptpotter new --draft {draft_id} "
         + " ".join(f"--set {'.'.join(_gap_path(g.field))}=<value>" for g in gaps),
     ]
     refused.add_note("\n".join(lines))
@@ -329,9 +330,8 @@ async def _ingest_checkin(args: argparse.Namespace, dispatcher: CommandDispatche
     file_path = Path(args.dataset)
 
     def _bounded_read() -> bytes:
-        # One byte past the cap, which the bytes' own bound refuses (`UploadBytes`).
         with file_path.open("rb") as fh:
-            return fh.read(MAX_UPLOAD_BYTES + 1)
+            return fh.read(UPLOAD_READ_BYTES)
 
     payload = PayloadInvalidError.validating(
         IngestUploadPayload,
@@ -428,6 +428,7 @@ def _named_mint(args: argparse.Namespace, dispatcher: CommandDispatcher) -> Mint
             "campaign_config": declared,
             "task_text": task_text,
             "budget": budget,
+            "step_rounds": args.step_rounds,
             "lookahead": lookahead_from_args(args),
         },
     )
@@ -440,13 +441,19 @@ def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 
 async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
+    is_file = args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)
+    if args.draft is None and not is_file:
         dispatcher = CommandDispatcher(local_stores(tenant=args.tenant), inline=inline_launch(args))
         return await mint_and_run(args, dispatcher, _named_mint(args, dispatcher))
+    if args.step_rounds is not None or (args.draft and args.dataset):
+        raise PayloadInvalidError(
+            "a check-in starts from a FILE or a kept --draft, one of them, and takes no "
+            "--step-rounds."
+        )
     sets = args.sets
     patch = _sets_to_patch(sets) if sets else None
     dispatcher = CommandDispatcher(local_stores(tenant=args.tenant))
-    draft_id = await _ingest_checkin(args, dispatcher)
+    draft_id = args.draft or await _ingest_checkin(args, dispatcher)
     try:
         held = await _hold_checkin(args, dispatcher, draft_id, patch)
     except PotterError as exc:
@@ -533,7 +540,7 @@ def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
     def declared(r: HeadToHeadRequest) -> list[tuple[str, dict[str, Any]]]:
         return [(a.arm_key, r.declared_optimization(a)) for a in r.arms]
 
-    if declared(back) != declared(request):
+    if mint.campaign_config is not None or declared(back) != declared(request):
         raise PotterError(f"no `head-to-head` command line spells {mint.model_dump()}")
     return shlex.join(["python", "-m", "promptpotter", *words])
 
@@ -568,8 +575,10 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
         PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
         for _, hop in arms
     ]
+    launched = outcome.result
+    assert isinstance(launched, HeadToHeadLaunched), "a terminal head-to-head is detached"
     with ctrl_c_pauses(dispatcher, pauses):
-        await asyncio.gather(*outcome.result.exits)
+        await asyncio.gather(*launched.exits)
     ended = [
         f"  {arm_key}: {hop.campaign_id} — {dispatcher.stores.run_state(hop).run_phase.value}"
         for arm_key, hop in arms

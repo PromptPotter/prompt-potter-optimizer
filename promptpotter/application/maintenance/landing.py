@@ -49,6 +49,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure import projections
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
+    KINDS,
     LANDED_SCHEMA_FILE,
     LIVE_LOCKS,
     LOAD_ERRORS,
@@ -66,6 +67,7 @@ from promptpotter.infrastructure.store.data_root import (
 from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     INNER_SANDBOXES_DIR,
+    complete_durable,
     iter_files,
     read_text_optional,
     rmtree_robust,
@@ -102,6 +104,7 @@ def complete_registries() -> None:
     for member in NODE_MEMBERS.table.values():
         member.complete()
     STATE_KINDS.complete()
+    complete_durable(tuple(p for kind in KINDS if kind.durable for p in kind.patterns))
     walked(projections)
     LedgerIndex.readers(*health.LEDGER_FOLDS)
     LedgerIndex.check_every_arm_read()
@@ -490,8 +493,7 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     kept: list[Unloadable] = []
     with registry.admission_gate() if landing.reset is None else resetting(landing.reset, registry):
         for one in landing.staged:
-            # A staged file is a survivor's (`data_root.py::Kind.durable`).
-            write_bytes(one.path, one.data, durable=True)
+            write_bytes(one.path, one.data)
         for swap in landing.swaps:
             complete_definition_swap(swap)
         for cache in landing.caches:

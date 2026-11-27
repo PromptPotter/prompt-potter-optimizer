@@ -136,7 +136,7 @@ class _Arm(FrozenModel):
 
     @model_validator(mode="after")
     def _only_a_parent_is_unwalked(self) -> Self:
-        if self.position is None and self.role != MeasurementRole.PARENT:
+        if self.position is None and self.role.is_proposal:
             raise ValueError(f"a {self.role} arm is walked: it holds its position")
         return self
 

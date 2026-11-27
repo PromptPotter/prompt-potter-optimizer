@@ -29,6 +29,7 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import ServedPipeline
 from promptpotter.domain.command_kinds import HeadToHeadRequest
+from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun
 from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
@@ -75,14 +76,17 @@ class CheckinArms:
 type ArmSource = DatasetArms | CheckinArms
 
 
-async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
+async def dataset_arms(
+    stores: Stores, dataset: ResolvedDataset, stated: CampaignLayer | None
+) -> DatasetArms:
+    """*stated* is a declaration in place of the dataset's own (`ConfigLayers.of`)."""
     definition = runnable_definition(dataset)
     await refuse_unreachable(stores, dataset.name, definition.connector, definition.endpoint)
     closing = AsyncExitStack()
     session = await closing.enter_async_context(
         init_services(dataset_name=dataset.name, identity=stores.identity, stores=stores)
     )
-    return DatasetArms(session, ConfigLayers.of(dataset, None), closing)
+    return DatasetArms(session, ConfigLayers.of(dataset, stated), closing)
 
 
 async def checkin_arms(
@@ -200,22 +204,26 @@ async def admit_head_to_head(
     job_registry: JobRegistry,
     holder: CampaignLaunch | EmbeddedRun,
 ) -> AdmittedHeadToHead:
-    """Each arm's budget is its own declaration's, so an arm binds on what it declared alone."""
+    """Each arm's budget is its own declaration's, so an arm binds on what it declared alone. A
+    refusal closes *source*, whose session nothing else would close."""
     session, layers, opened = _opened(source)
-    plans = await arm_plans(
-        session,
-        layers,
-        request,
-        session.bank.samples,
-        origin_override=None if opened is None else opened.origin_override,
-    )
-    configs = [(effective_config(plan.spec), plan.spec.environment.connector) for plan in plans]
-    asks = [
-        (config.optimization.budget, sends_on(session.store, config, connector))
-        for config, connector in configs
-    ]
-    # Off the loop, once: the sweep and the admission wait on the gate and scan every ledger.
-    admitted = await asyncio.to_thread(_admit, asks, session.store, job_registry, holder)
+    async with AsyncExitStack() as refused:
+        refused.push_async_exit(source.closing)
+        plans = await arm_plans(
+            session,
+            layers,
+            request,
+            session.bank.samples,
+            origin_override=None if opened is None else opened.origin_override,
+        )
+        configs = [(effective_config(plan.spec), plan.spec.environment.connector) for plan in plans]
+        asks = [
+            (config.optimization.budget, sends_on(session.store, config, connector))
+            for config, connector in configs
+        ]
+        # Off the loop, once: the sweep and the admission wait on the gate and scan every ledger.
+        admitted = await asyncio.to_thread(_admit, asks, session.store, job_registry, holder)
+        refused.pop_all()
     return AdmittedHeadToHead(source, request, plans, admitted)
 
 

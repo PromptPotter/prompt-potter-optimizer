@@ -2148,7 +2148,6 @@
             "election": "#/components/schemas/ElectionRecord",
             "error": "#/components/schemas/ErrorRecord",
             "flight": "#/components/schemas/FlightRecord",
-            "fork_graded": "#/components/schemas/ForkGradedRecord",
             "health": "#/components/schemas/HealthRecord",
             "hold": "#/components/schemas/Hold",
             "launch_clock": "#/components/schemas/LaunchClockRecord",
@@ -2230,9 +2229,6 @@
           },
           {
             "$ref": "#/components/schemas/FlightRecord"
-          },
-          {
-            "$ref": "#/components/schemas/ForkGradedRecord"
           },
           {
             "$ref": "#/components/schemas/HealthRecord"
@@ -3561,54 +3557,9 @@
         "title": "FlipCounts",
         "type": "object"
       },
-      "ForkDirection": {
-        "description": "Which side of a cut the run CONTINUES on, the half a cut alone cannot say.",
-        "enum": [
-          "offshoot",
-          "supersede",
-          "equivalent"
-        ],
-        "title": "ForkDirection",
-        "type": "string"
-      },
-      "ForkGradedRecord": {
-        "additionalProperties": false,
-        "description": "A cut's MEASURED direction, on the branch: it overrides the one its trigger implies.",
-        "properties": {
-          "direction": {
-            "$ref": "#/components/schemas/ForkDirection"
-          },
-          "record_type": {
-            "const": "fork_graded",
-            "default": "fork_graded",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "direction"
-        ],
-        "title": "ForkGradedRecord",
-        "type": "object"
-      },
       "ForkSpec": {
         "additionalProperties": false,
         "properties": {
-          "direction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForkDirection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "from_candidate": {
             "$ref": "#/components/schemas/RoundArm"
           },
@@ -4651,7 +4602,6 @@
           "panel",
           "backfill",
           "parent",
-          "repair",
           "overlap",
           "verify",
           "bench",
@@ -6254,7 +6204,6 @@
               "election",
               "error",
               "flight",
-              "fork_graded",
               "health",
               "hold",
               "launch_clock",

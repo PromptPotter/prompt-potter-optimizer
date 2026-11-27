@@ -332,7 +332,7 @@ def cycle_entry(
             parent=Subject(hop.campaign_id, parent_id, inside=inside).address,
             cut_round=cut,
             trigger=fork.trigger,
-            direction=fork.resolved_direction,
+            direction=fork.direction,
             issued_by=fork.issued_by.display,
         )
     )

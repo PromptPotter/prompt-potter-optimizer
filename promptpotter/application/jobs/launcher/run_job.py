@@ -300,9 +300,7 @@ async def run_held_job(
     # own producer may still be running it.
     opening.owns(None)
     await asyncio.to_thread(opening.job_registry.move, opening.job_id, LaunchMove.START)
-    observers = await asyncio.to_thread(
-        enter_cycle, session, cycle.config, readout_sink=readout_sink
-    )
+    observers = await asyncio.to_thread(enter_cycle, session, readout_sink=readout_sink)
     # Anything raised from here fired OUTSIDE the runner's try, an interrupt aside: it stamps.
     opening.running_on(session.hop)
     ended, result = await run_optimization(

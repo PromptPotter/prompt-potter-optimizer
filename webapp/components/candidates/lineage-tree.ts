@@ -252,7 +252,6 @@ export const TRIGGER_GLYPH: Record<CycleSpawn["trigger"], string> = {
 export const DIRECTION_GLYPH: Record<CycleSpawn["direction"], string> = {
   offshoot: "",
   supersede: "↳",
-  equivalent: "≡",
 };
 
 const candidateRound = (c: HierarchyCandidate): number => c.facts.reading.arm.round;

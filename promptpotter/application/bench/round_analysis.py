@@ -62,7 +62,7 @@ def ended_on(
 def head_health(
     round: int, head: Concluded, rows: CellSheet, *, picked: bool, priors: Sequence[RoundResult]
 ) -> DegradationHealth:
-    """A round's health, read off the rows of the arm it ended on: a close and a repair alike."""
+    """A round's health, read off the rows of the arm it ended on."""
     return compute_round_health(
         results=rows.cells,
         prior_healths=assemble_prior_healths(priors, round),
@@ -70,19 +70,6 @@ def head_health(
         is_origin=round == 0,
         constant_floor=origin_floor(rows) if round == 0 else None,
     )
-
-
-def mended_round(
-    rr: RoundResult, priors: Sequence[RoundResult], schema: PipelineSchema | None
-) -> RoundResult:
-    """*rr* with re-measured rows: its health and diagnostics re-read off them, never carried."""
-    head = rr.head
-    assert rr.election is not None and isinstance(head, Concluded), "a round ends on an arm"
-    health = head_health(
-        rr.round, head, rr.results, picked=rr.election.selected is not None, priors=priors
-    )
-    rr = rr.model_copy(update={"health": health})
-    return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
 
 
 # The bench calls it, outside any hashed module, and an optimizer prompt renders what it returns.

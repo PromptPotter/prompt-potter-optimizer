@@ -11,7 +11,6 @@ class MeasurementRole(enum.StrEnum):
     PANEL = "panel"
     BACKFILL = "backfill"
     PARENT = "parent"
-    REPAIR = "repair"
     # The origin panel beside a draw: the round's election pools it, no cross-round read does.
     OVERLAP = "overlap"
     VERIFY = "verify"

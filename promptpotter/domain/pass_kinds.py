@@ -20,8 +20,6 @@ class Pass:
     scopes: frozenset[RoleScope]
     # Its cells are an ARM of their round; any other kind's are a pass beside it.
     arm: bool
-    # Its cells reach the ledger one by one, so a live surface draws and ticks them.
-    recorded: bool
     # Asked of the loop's own measurement, which an answer's provenance grade credits.
     deliberate: bool
     # The spend kind its calls bill as, whatever each would otherwise bank as.
@@ -53,7 +51,6 @@ def _pass(
     scopes: frozenset[RoleScope],
     *,
     arm: bool = False,
-    recorded: bool = False,
     deliberate: bool = True,
     spend: TokenUsageKind | None = None,
     fresh: bool = False,
@@ -62,24 +59,20 @@ def _pass(
     max_speed: bool = False,
     checks: bool = False,
 ) -> Pass:
-    return Pass(
-        kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase, max_speed, checks
-    )
+    return Pass(kind, scopes, arm, deliberate, spend, fresh, keeps, phase, max_speed, checks)
 
 
 PASSES: dict[MeasurementRole, Pass] = {
     row.kind: row
     for row in (
-        _pass(MeasurementRole.ORIGIN, _DECISION, arm=True, recorded=True),
-        _pass(MeasurementRole.PANEL, _DECISION, arm=True, recorded=True, checks=True),
+        _pass(MeasurementRole.ORIGIN, _DECISION, arm=True),
+        _pass(MeasurementRole.PANEL, _DECISION, arm=True, checks=True),
         _pass(MeasurementRole.BACKFILL, _DECISION),
-        _pass(MeasurementRole.PARENT, _DECISION, arm=True, recorded=True),
-        _pass(MeasurementRole.REPAIR, _DECISION),
+        _pass(MeasurementRole.PARENT, _DECISION, arm=True),
         _pass(MeasurementRole.OVERLAP, _REPORT),
         _pass(
             MeasurementRole.VERIFY,
             _REPORT,
-            recorded=True,
             deliberate=False,
             spend="diagnostic",
             keeps=True,
@@ -90,7 +83,6 @@ PASSES: dict[MeasurementRole, Pass] = {
         _pass(
             MeasurementRole.BENCH,
             frozenset({RoleScope.BENCH}),
-            recorded=True,
             spend="bench",
             keeps=True,
             phase=CampaignPhase.BENCH,

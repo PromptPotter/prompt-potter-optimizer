@@ -79,7 +79,7 @@ from promptpotter.domain.command_kinds import (
     StartRunPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun, Job
 from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
@@ -305,7 +305,12 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             stores.campaigns.rewind_enters(hop, after)
         admitted = await asyncio.to_thread(
             admit,
-            ExistingCycle(dispatched.at, payload.budget, step_rounds=payload.step_rounds),
+            ExistingCycle(
+                dispatched.at,
+                payload.budget,
+                step_rounds=payload.step_rounds,
+                hosted=dispatcher.hosted,
+            ),
             payload.mode,
             stores=stores,
             job_registry=dispatcher.job_registry,
@@ -392,6 +397,8 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
                 payload.optimization_sent
             ),
             task_text=payload.task_text,
+            step_rounds=payload.step_rounds,
+            hosted=dispatcher.hosted,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         request.campaign_config(dispatcher.stores)
@@ -409,28 +416,35 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
     return _launch_applier(dispatcher, _apply_mint)
 
 
+# A Start's answer, and a hosted head-to-head's: its admission, launched once its mint closes (a
+# host's held, its arms minted in its own loop); or, answering a retry, the launch its first act
+# recorded.
+type StartAnswer = Admitted | AdmittedHeadToHead | Launched | HeadToHeadLaunched
+
+
+async def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
+    if isinstance(answer, Admitted | AdmittedHeadToHead):
+        await answer.withdraw(exc)
+
+
 async def mint_head_to_head(
     dispatched: Dispatched[MintHeadToHeadPayload],
-) -> Applier[HeadToHeadLaunched]:
+) -> Applier[AdmittedHeadToHead | HeadToHeadLaunched]:
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
-    stores, request = dispatcher.stores, payload.head_to_head
+    stores, request, hosted = dispatcher.stores, payload.head_to_head, dispatcher.hosted
+    name = payload.dataset_name
 
-    async def _act() -> HeadToHeadLaunched:
-        source = await dataset_arms(stores, offered_dataset(stores, payload.dataset_name))
+    async def _act() -> AdmittedHeadToHead | HeadToHeadLaunched:
+        dataset = offered_dataset(stores, name)
         admitted = await admit_head_to_head(
-            source,
+            await dataset_arms(stores, dataset, payload.campaign_config),
             request,
             job_registry=dispatcher.job_registry,
-            holder=CampaignLaunch(payload.dataset_name),
+            holder=CampaignLaunch(name) if hosted is None else EmbeddedRun(name),
         )
-        return await admitted.launched()
+        return admitted if hosted is not None else await admitted.launched()
 
-    return Applier(_act, effect_fn=_launched_effect)
-
-
-# A Start's answer: its admission, launched once its mint closes; or, answering a retry, the
-# launch its first act recorded.
-type StartAnswer = Admitted | AdmittedHeadToHead | Launched | HeadToHeadLaunched
+    return Applier(_act, effect_fn=_launched_effect, rides=_withdraw)
 
 
 async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[StartAnswer]:
@@ -465,10 +479,6 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             job_registry=dispatcher.job_registry,
             holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
-
-    async def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
-        if isinstance(answer, Admitted | AdmittedHeadToHead):
-            await answer.withdraw(exc)
 
     # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
     # holds the claim, and is not found once it minted. A retry under its key answers the first

@@ -719,25 +719,16 @@ class CampaignStore:
         for leaf in leaves:
             by_delivery.setdefault(leaf.delivery, []).append(leaf)
         lines = [
-            "# What this cycle optimizes",
-            "",
-            "Derived at run init from `PipelineSchema.value_tree`, never hand-maintained.",
-            "**may-not-arrive** marks a channel the model reads only if it OPENS the artifact",
-            "carrying the value — there, a value can be mutated every round and reach nothing.",
-            "",
-            "These are the AXES. The VALUES they currently hold are the `resolved_run` record on",
-            "this cycle's ledger, appended on the same cadence — not copied here, because a second",
-            "copy of a value is one that can disagree with the declaration it came from.",
-            "",
+            "What this cycle optimizes: its axes, derived at run init from the pipeline's value tree.",
+            "The values they hold are this cycle's resolved_run record. A may-not-arrive channel",
+            "reaches the model only if it opens the artifact carrying the value.",
         ]
         for delivery in sorted(by_delivery):
             group = by_delivery[delivery]
-            caveat = " · **may-not-arrive**" if group[0].may_not_arrive else ""
-            lines.append(f"## {delivery} — {group[0].visibility}{caveat}")
-            lines.append("")
+            caveat = " · may-not-arrive" if group[0].may_not_arrive else ""
+            lines += ["", f"{delivery} — {group[0].visibility}{caveat}"]
             lines += [
-                f"- `{leaf.path}` ({leaf.kind}){'' if leaf.mutable else ' — PINNED'}"
-                for leaf in group
+                f"  {leaf.path} ({leaf.kind}){'' if leaf.mutable else ' PINNED'}" for leaf in group
             ]
-            lines.append("")
+        lines.append("")
         write_text(self.layout(hop).optimized_surface, "\n".join(lines))

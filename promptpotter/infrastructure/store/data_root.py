@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import functools
-import glob
-import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
@@ -81,6 +79,7 @@ from promptpotter.infrastructure.store.io import (
     STAMP_FILE,
     WORKSPACE_SHAPES,
     complete_lines,
+    globbed,
     parse_yaml,
     read_bytes_optional,
     read_lines,
@@ -200,12 +199,7 @@ _FOR_A_PERSON = Opaque("written for a person to read, never read back")
 _PICKLED = Opaque("folds this process pickled, by their ledger's file_sig and code")
 
 
-@functools.cache
-def _compiled(patterns: tuple[str, ...]) -> re.Pattern[str]:
-    """`PurePath.full_match`'s semantics, compiled once: it recompiles per call."""
-    return re.compile(
-        "|".join(glob.translate(p, recursive=True, include_hidden=True, seps="/") for p in patterns)
-    )
+_compiled = functools.cache(globbed)
 
 
 class Kind(NamedTuple):
@@ -230,7 +224,7 @@ class Kind(NamedTuple):
 
     @property
     def durable(self) -> bool:
-        """Its writer fsyncs file and directory (`io.py::write_bytes`'s *durable*): who an account is
+        """Its write fsyncs file and directory (`io.py::complete_durable`): who an account is
         and what the install is set with, which a power loss must not empty, and the bill, whose
         lost line under-charges; run data stays fast."""
         return self.fate is Fate.SURVIVOR or self.glob == CHARGES_FILE

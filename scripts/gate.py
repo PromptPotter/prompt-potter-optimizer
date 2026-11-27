@@ -164,6 +164,21 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
+# The landing key hashes the code a load runs (`build_ts_types.py::derived_landing_key`, ~2.4 s, too
+# dear for every entry), so any code edit moves it: `--staged` stages it as the commit's own step.
+_LANDING_KEY = "promptpotter/application/maintenance/built_key.py"
+
+
+def _ts_types(sel: Selection) -> Outcome:
+    rc, out = run([sys.executable, "-X", "utf8", "scripts/build_ts_types.py"], REPO)
+    if rc or not sel.staged:
+        return (rc, out) if rc else _rewrote(out)
+    if (staged := git("add", "--", _LANDING_KEY))[0]:
+        return staged
+    key = Path(_LANDING_KEY)
+    return _rewrote("\n".join(n for n in out.splitlines() if Path(n.removeprefix("wrote ")) != key))
+
+
 def _rewrote(out: str) -> Outcome:
     # Every regenerator writes through `processes.py::replace_changed` and names each output on a
     # line, `wrote` where it moved and `unchanged` where it did not: a run naming none is unjudged.
@@ -1770,7 +1785,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "ts-types",
         "py",
-        _probe("scripts/build_ts_types.py", _rewrote),
+        _ts_types,
         mb=190,  # 153
         tier="commit",
         reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES, _ESTIMATE_WORDS),
@@ -2159,13 +2174,18 @@ def _proven_in(commit: str, asked: Sequence[str], *, files: str | None = None) -
     code, local = git("rev-parse", "--local-env-vars")
     if code:
         raise RuntimeError(f"git rev-parse --local-env-vars: {local}")
-    for var in local.split():
-        os.environ.pop(var, None)
+    committing = {var: os.environ.pop(var) for var in local.split() if var in os.environ}
     _sweep_checkouts()
     with _checkout(commit, files=files) as tree:
         argv = [sys.executable, "scripts/gate.py", *asked]
         env = {**os.environ, "PYTHONPATH": str(tree)}
-        return subprocess.run(argv, cwd=tree, env=env, stdin=subprocess.DEVNULL).returncode
+        rc = subprocess.run(argv, cwd=tree, env=env, stdin=subprocess.DEVNULL).returncode
+        if files is not None:
+            # The index's checkout staged its landing key (`_ts_types`): the commit's index takes it.
+            shutil.copyfile(tree / _LANDING_KEY, REPO / _LANDING_KEY)
+            if (staged := run(["git", "add", "--", _LANDING_KEY], REPO, **committing))[0]:
+                raise RuntimeError(f"git add {_LANDING_KEY}: {staged[1]}")
+        return rc
 
 
 def _tree_is_index() -> bool:

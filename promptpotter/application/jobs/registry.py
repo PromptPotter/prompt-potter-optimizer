@@ -431,7 +431,7 @@ class JobRegistry:
     def _index(self, ids: Iterable[str]) -> None:
         """Written under the gate by the writer of the job files it names, after them: a reader
         between the two reads a released job, which no live listing counts."""
-        write_json(self._dir / LIVE_JOBS_INDEX, sorted(set(ids)), durable=True)
+        write_json(self._dir / LIVE_JOBS_INDEX, sorted(set(ids)))
 
     def list_launches(self, *, user_id: str | None = None) -> list[Job]:
         """Campaign launches in flight, queued included: what an account's concurrency limit holds."""
@@ -486,12 +486,12 @@ class JobRegistry:
         return reaped
 
     def _persist(self, job: Job) -> None:
-        """A live job file is a survivor (`data_root.py::Kind.durable`); an ended one is run data,
-        filed among the ended once no count reads it: every release but today's campaign launches,
-        which the daily quota counts off the jobs dir under the gate."""
+        """A live job file is a survivor; an ended one is run data, filed among the ended once no
+        count reads it: every release but today's campaign launches, which the daily quota counts
+        off the jobs dir under the gate."""
         ended = job.released and not _counted_on(job, utcnow_iso()[:10])
         path = self._ended_path(job.job_id) if ended else self._path(job.job_id)
-        write_json(path, JOB_ADAPTER.dump_python(job, mode="json"), durable=not ended)
+        write_json(path, JOB_ADAPTER.dump_python(job, mode="json"))
         if ended:
             unlink_robust(self._path(job.job_id))
         indexed = set(self._indexed())

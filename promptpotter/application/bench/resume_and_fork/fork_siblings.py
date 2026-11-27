@@ -125,7 +125,7 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
                 f"{arm.state.label} of round {named.round} is a refused proposal, keyed by its "
                 "position: it measured no individual to fork from"
             )
-        if arm.state.role is not MeasurementRole.PARENT:
+        if arm.state.role.is_proposal:
             return named
         if (position := arm.state.position) is None:
             raise PayloadInvalidError(

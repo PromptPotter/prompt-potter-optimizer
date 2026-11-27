@@ -152,7 +152,6 @@ class RunObservers:
 def build_run_observers(
     *,
     session: Session,
-    campaign_config: CampaignConfig,
     readout_sink: StatusFn | None = None,
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
@@ -166,7 +165,6 @@ def build_run_observers(
             projecting,
             hold,
             session=session,
-            campaign_config=campaign_config,
             forked_from=forked_from,
             readout_sink=readout_sink,
         )
@@ -182,12 +180,17 @@ def _bind_observers(
     hold: ProducerHold,
     *,
     session: Session,
-    campaign_config: CampaignConfig,
     readout_sink: StatusFn | None,
     forked_from: RunObservers | None,
 ) -> RunObservers:
     readout = (
-        ReadoutProjection(session, campaign_config, sink=readout_sink)
+        ReadoutProjection(
+            session.store,
+            session.bound_resolution,
+            session.dataset,
+            measured_unit=session.backend_client.connector.measured_unit,
+            sink=readout_sink,
+        )
         if forked_from is None
         else forked_from.readout
     )

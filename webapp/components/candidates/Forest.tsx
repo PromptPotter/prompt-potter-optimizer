@@ -313,9 +313,6 @@ export function Forest({
                   {spawn?.direction === "supersede"
                     ? "\n↳ this branch is the line — the parent keeps what it was cut from"
                     : ""}
-                  {spawn?.direction === "equivalent"
-                    ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
-                    : ""}
                   {` · ${figureOf(cycle, "state")?.value}`}
                   {selection ? ` · ${selection.label}: ${selection.value}` : ""}
                   {isEmpty

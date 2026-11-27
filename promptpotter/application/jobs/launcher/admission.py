@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, contextmanager
+from functools import cmp_to_key
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
 from promptpotter import connectors
@@ -15,6 +16,7 @@ from promptpotter.application.jobs.launcher.opening import (
 )
 from promptpotter.application.jobs.quota import (
     admit_launch,
+    admitting_before,
     call_book,
     check_launch_quotas,
     declare_run_budget,
@@ -204,8 +206,8 @@ def admitted(stores: Stores, campaign: Campaign, run: RunState) -> RunAdmission:
 
 def refuse_campaign(stores: Stores, campaign: Campaign) -> None:
     """Asked of every run and pass on *campaign* before anything is queued, claimed, probed or
-    bound: first under the slot door's gate (`request_jobs`) or, for an embedded resume, before
-    its session opens (`embedded_run.py`), and again past a queue's wait or a detached run's
+    bound: first under the slot door's gate (`request_jobs`) or, for a hosted resume, at its
+    slotless admission (`launch.py::admit`), and again past a queue's wait or a detached run's
     handoff. The inner door asks `campaign_refusal` itself: its refusal is a cell's."""
     if (refused := campaign_refusal(stores, campaign)) is not None:
         raise refused
@@ -469,25 +471,29 @@ def admit_arms(
         ]
         for opening in openings:
             refused.push(opening)
-        admitted = [
-            (
-                opening,
-                admit_and_share(
-                    budget,
-                    Budget(),
-                    stores=stores,
-                    job_registry=job_registry,
-                    job=opening.job,
-                    campaign=None,
-                    hop=None,
-                    step_rounds=None,
-                    sends=sends,
-                ),
+        arms = list(zip(openings, declared, strict=True))
+        # In the order a wallet read ranks its siblings (`quota.py::admitting_before`): an arm
+        # admitted before an earlier-ranked one still asked would read it contending.
+        shares = {
+            opening.job_id: admit_and_share(
+                budget,
+                Budget(),
+                stores=stores,
+                job_registry=job_registry,
+                job=opening.job,
+                campaign=None,
+                hop=None,
+                step_rounds=None,
+                sends=sends,
             )
-            for opening, (budget, sends) in zip(openings, declared, strict=True)
-        ]
+            for opening, (budget, sends) in sorted(arms, key=cmp_to_key(_ranked))
+        }
         refused.pop_all()
-    return admitted
+    return [(opening, shares[opening.job_id]) for opening in openings]
+
+
+def _ranked(arm: tuple[Opening, object], other: tuple[Opening, object]) -> int:
+    return admitting_before(other[0].job, arm[0].job) - admitting_before(arm[0].job, other[0].job)
 
 
 def _arm_jobs(

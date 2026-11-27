@@ -32,6 +32,7 @@ from promptpotter.domain.command_kinds import (
     LookaheadCells,
     LookaheadPress,
     ReadKind,
+    StartCheckinPayload,
     StartRunPayload,
 )
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
@@ -111,6 +112,16 @@ NO_WAIT = Arg(
     "--no-wait",
     action="store_true",
     help="Refuse instead of waiting when every run slot on the machine is taken.",
+)
+
+STEP_ROUNDS = Arg(
+    "--step-rounds",
+    dest="step_rounds",
+    type=int,
+    default=None,
+    metavar="N",
+    help="Run N rounds (0-100; 0 pauses before round 1 closes), then pause the cycle as "
+    "`stepped` — a step, not a budget stop (contrast `--max-rounds`).",
 )
 
 
@@ -310,7 +321,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         unspelled={
             "filename": "the FILE positional: its name",
             "blob": "the FILE positional: its bytes",
-            "draft_id": "the draft the FILE form's ingest-upload mints, named back on each later kind",
             "patch": "`--set`, `--slug` and `--task-*`, folded into one patch",
             "optimization": "`--set KNOB=VALUE`, folded per knob",
             "campaign_config": "`--config FILE`'s `campaign` section",
@@ -336,6 +346,13 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 default=None,
                 help="A definition file whose `campaign` section replaces the dataset's own.",
             ),
+            Arg(
+                StartCheckinPayload.cli_spelling("draft_id"),
+                default=None,
+                metavar="ID",
+                help="A kept check-in (`open-dataset-draft`, `open-origin-draft`, a FILE form's) "
+                "to edit by `--set`, resolve and start, in place of a NAME or FILE.",
+            ),
             Arg("--task-file", default=None, help="Override the dataset's task.md"),
             Arg("--task-text", default=None, help="Override the dataset's task.md inline"),
             Arg(
@@ -358,6 +375,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "`--set column_query=input` or `--set config.scoring.matcher=exact`, applied "
                 "before the resolver runs.",
             ),
+            STEP_ROUNDS,
             NO_WAIT,
             *BUDGET_AXES,
             *LOOKAHEAD_ARGS,
@@ -366,6 +384,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "head-to-head",
         "cli.commands.launch:cmd_head_to_head",
+        unspelled={
+            "campaign_config": "a terminal's arms run their dataset's own declaration; a host's "
+            "state theirs",
+        },
         help="Mint the arms of one controlled head-to-head on a dataset NAME in one act, each a "
         "campaign on the same origin and bench set that searches prompts alone, and run them side "
         "by side, each in its own process, until every arm ends. Every arm is planned, priced on "
@@ -469,15 +491,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "Steering a node to a gateway or to a model it does not permit is a babysit act: "
                 "it requires the `campaign.babysit` capability and grades the fork's runs C.",
             ),
-            Arg(
-                "--step-rounds",
-                dest="step_rounds",
-                type=int,
-                default=None,
-                metavar="N",
-                help="Run N rounds (1-100), then pause the cycle as `stepped` — a step, not a "
-                "budget stop (contrast `--max-rounds`).",
-            ),
+            STEP_ROUNDS,
             NO_WAIT,
             *BUDGET_AXES,
             *LOOKAHEAD_ARGS,

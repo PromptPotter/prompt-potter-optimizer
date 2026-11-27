@@ -194,7 +194,6 @@ from promptpotter.application.pipeline_resolve import (
     campaign_admits,
     campaign_config_map,
     cycle_config,
-    dataset_pipeline,
     declared_config,
     defaults_drift,
     draft_config,
@@ -209,6 +208,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_at,
     resolved_output_schemas,
     run_resolution,
+    served_pipeline,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.preflight import refuse_off_contract
@@ -276,6 +276,7 @@ from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
+    CommandKind,
     Door,
     ForkCyclePayload,
     ForkStart,
@@ -1171,6 +1172,16 @@ def test_a_fresh_embedded_launch_on_a_dead_backend_opens_no_session(
         )
     assert offline.backend.asked[asked:] == ["/status"], (
         "the refused launch opened a session on its backend before its probe"
+    )
+
+
+def test_an_embedded_launch_is_filed_as_its_command(world: World) -> None:
+    # The resume reads the cycle its mint left.
+    ran = asyncio.run(world.campaign(rounds=0, rows=24))
+    asyncio.run(world.resume(ran.hop))
+    filed = [record.kind for _, record in world.stores.commands.book().lines()]
+    assert filed == [CommandKind.MINT_CAMPAIGN, CommandKind.START_RUN], (
+        f"an embedded launch went unfiled: {filed}"
     )
 
 
@@ -3455,7 +3466,7 @@ def test_a_pause_filed_while_a_launch_claims_or_folds_its_cycle_is_that_launchs_
 
     with monkeypatch.context() as filing:
         filing.setattr(Stores, "void_inbox", void_after_a_pause)
-        observers = enter_cycle(opened, launch.config)
+        observers = enter_cycle(opened)
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
     )
@@ -3474,7 +3485,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     # index nor its cycle held once released.
     stores, opened, ledger_path = launch.stores, launch.opened, launch.ledger.path
     root = launch.campaign.root_hop
-    observers = enter_cycle(opened, launch.config)
+    observers = enter_cycle(opened)
     with LedgerIndex.of(ledger_path).projecting() as joiner:
         assert joiner.add(DashboardCheckout(launch.root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
@@ -3509,14 +3520,14 @@ def test_a_build_that_raises_past_its_projections_checkout_lets_go_of_them(
 ) -> None:
     with monkeypatch.context() as broken, pytest.raises(OSError, match="no observers"):
         broken.setattr(RunObservers, "__init__", Mock(side_effect=OSError("no observers")))
-        enter_cycle(launch.opened, launch.config)
+        enter_cycle(launch.opened)
     assert launch.let_go(), "a build that raised kept its ledger's projections or its cycle"
 
 
 def test_a_run_whose_exit_unwound_on_an_error_drains_nothing_and_lets_go(
     monkeypatch: pytest.MonkeyPatch, launch: _Launch, offline: Router
 ) -> None:
-    observers = enter_cycle(launch.opened, launch.config)
+    observers = enter_cycle(launch.opened)
     # An exit on an error drains nothing: a drain's own fault would replace the error in flight.
     drained = Mock()
     monkeypatch.setattr(DashboardCheckout, "drain", drained)
@@ -3653,7 +3664,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     sibling = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_sibling")
     stores.campaigns.mint_cycle(sibling)
     declare_run_wiring(opened, launched, selected=select_optimizer(launched.optimization))
-    observers = enter_cycle(opened, launched)
+    observers = enter_cycle(opened)
     with scoped(account=stores):
         book = spend_book(1.0, metered_on=ledger.path)
     bound = Budget(usd=0.25, tokens=0)
@@ -3719,7 +3730,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
         (job,) = request_jobs(
             stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=opened.hop
         )
-        return job.job_id, enter_cycle(opened, launched)
+        return job.job_id, enter_cycle(opened)
 
     def pause(key: str) -> Opened[object, Any]:
         call = CommandCall(PauseCyclePayload(**address), key, door=Door.HOST)
@@ -3925,11 +3936,14 @@ def outer() -> _Outer:
                     "campaign": {"optimization": {"degradation_threshold": 0.4}},
                 },
             )
-    schema = parse_pipeline_response(
-        asyncio.run(
-            dataset_pipeline(stores, dataset, experiment=experiment_outside_run(stores, dataset))
-        )
+    definition = runnable_definition(dataset)
+    served = served_pipeline(
+        stores,
+        definition.owner,
+        endpoint=definition.endpoint,
+        experiment=experiment_outside_run(stores, dataset),
     )
+    schema = parse_pipeline_response(asyncio.run(served).over(definition.pipeline))
     return _Outer(stores, dataset, declared_panel.panel, schema)
 
 

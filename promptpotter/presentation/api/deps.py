@@ -17,7 +17,7 @@ from promptpotter.application.read_params import ReadParams
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import CommandKind, ReadKind
-from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody
+from promptpotter.domain.strict_model import UPLOAD_READ_BYTES, RequestBody
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.api.middleware.oidc import Resolved
@@ -175,9 +175,7 @@ def read_input(model: type[ReadParams]) -> Any:
 
 
 async def bounded_read(upload: UploadFile) -> bytes:
-    """At most one byte past ``MAX_UPLOAD_BYTES``: the bytes' own bound (`UploadBytes`) refuses
-    that byte, so this read holds no policy of its own."""
-    return await upload.read(MAX_UPLOAD_BYTES + 1)
+    return await upload.read(UPLOAD_READ_BYTES)
 
 
 def sent_idempotency_key(

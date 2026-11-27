@@ -13,7 +13,15 @@ import json
 import random
 import signal
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -49,12 +57,9 @@ from factories import (
     filed_under,
     inner_sandbox,
     ledger_records,
-    loop_session,
     measurement,
     measurements,
     member_rows,
-    minted_campaign,
-    minted_dataset,
     on_jumping_clock,
     opened_round,
     optimizer_state,
@@ -74,7 +79,7 @@ from factories import (
 )
 from offline_world import FakeHarness, Router
 from pydantic import SecretStr, ValidationError
-from world import Shared, World, shared_run
+from world import Shared, World, serving, shared_run
 
 from promptpotter import connectors
 from promptpotter.application.bench import node_context
@@ -127,7 +132,6 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     paid_pass,
 )
-from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.record import SpineCycle
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -246,7 +250,7 @@ from promptpotter.application.scoring.selection import (
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
-from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.arms import (
     ArmPosition,
@@ -285,6 +289,7 @@ from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_events import CommandAckRecord
 from promptpotter.domain.command_kinds import (
     CancelPayload,
+    CommandKind,
     CommandPayload,
     Door,
     HeldOutPayload,
@@ -338,10 +343,8 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
-    ObservationMapping,
     PipelineNode,
 )
 from promptpotter.domain.pool import BlockPool
@@ -394,7 +397,6 @@ from promptpotter.domain.verification import (
     VerifyStrategy,
 )
 from promptpotter.domain.wounds import ValidationReason
-from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
@@ -424,7 +426,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import Principal, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
-from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.statistics import paired_mean_t
 
 _H2H_FORMULA = "env_reward"
@@ -999,23 +1000,17 @@ def _probe_term(name: str, **rest: Any) -> CellTerm:
     return CellTerm(name=name, direction="high", description="A probe term.", **rest)
 
 
-def _table_refuses(monkeypatch: pytest.MonkeyPatch, *, probe: Connector | None = None) -> bool:
-    members = [*connectors._builtins(), *([("probe", probe)] if probe else [])]
+def _table_refuses(monkeypatch: pytest.MonkeyPatch, *probe: Connector) -> bool:
     with monkeypatch.context() as patched:
-        patched.setattr(
-            connectors,
-            "CONNECTORS",
-            Registry(connectors.CONNECTORS.group, members.copy, connectors._validate),
-        )
         try:
-            complete_registries()
+            serving(patched, *probe)
         except RuntimeError:
             return True
     return False
 
 
 def _connector_refuses(monkeypatch: pytest.MonkeyPatch, **declared: Any) -> bool:
-    return _table_refuses(monkeypatch, probe=fake_connector("probe", **declared))
+    return _table_refuses(monkeypatch, fake_connector("probe", **declared))
 
 
 def _package_evaluator_refuses(monkeypatch: pytest.MonkeyPatch, name: str) -> bool:
@@ -1038,22 +1033,20 @@ def _reporting_connector() -> Connector:
     return fake_connector("reporting", reported_keys=("rounds",))
 
 
-def _judge_refuses(name: str) -> bool:
-    stores = workspace()
-    observed = PipelineNode(
-        name="llm_only",
-        tunes_llm=False,
-        observation_name="llm_only",
-        observation_mappings=[ObservationMapping(pipeline_key="env_reward")],
-    )
-    session = loop_session(
-        stores,
-        pipeline_schema(nodes=[observed]),
-        samples(2),
-        client=BackendClient(
-            _reporting_connector(), endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
-        ),
-    )
+def _judges_refused(world: World, names: Iterable[str]) -> set[str]:
+    with world.family() as held:
+        held["pipeline"]["nodes"]["llm_only"]["optimizer"]["observation_mappings"].append(
+            {"pipeline_key": "env_reward", "output_field": "env_reward"}
+        )
+
+    async def refused() -> set[str]:
+        async with world.opened(connector=_reporting_connector()) as session:
+            return {name for name in names if _judge_refuses(session, name)}
+
+    return asyncio.run(refused())
+
+
+def _judge_refuses(session: Session, name: str) -> bool:
     spec = JudgeSpec(
         name="sealqa",
         stages=[JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")],
@@ -1087,14 +1080,8 @@ def _observation_refuses(monkeypatch: pytest.MonkeyPatch, name: str) -> bool:
             }
         },
     )
-    members = [*connectors._builtins(), ("reporting", _reporting_connector())]
     with monkeypatch.context() as patched:
-        patched.setattr(
-            connectors,
-            "CONNECTORS",
-            Registry(connectors.CONNECTORS.group, members.copy, connectors._validate),
-        )
-        connectors.CONNECTORS.complete()
+        serving(patched, _reporting_connector())
         try:
             asyncio.run(_init("observed", stores))
         except PayloadInvalidError as exc:
@@ -1103,38 +1090,43 @@ def _observation_refuses(monkeypatch: pytest.MonkeyPatch, name: str) -> bool:
     raise AssertionError("an observation door admitted a dataset holding no rows")
 
 
-def _namespace_doors(monkeypatch: pytest.MonkeyPatch) -> dict[str, Callable[[str], bool]]:
-    return {
+def _assert_owned(
+    monkeypatch: pytest.MonkeyPatch, world: World, owned: tuple[tuple[str, set[str]], ...]
+) -> None:
+    doors: dict[str, Callable[[str], bool]] = {
         "connector term": lambda n: _connector_refuses(monkeypatch, cell_terms=(_probe_term(n),)),
         "reported key": lambda n: _connector_refuses(monkeypatch, reported_keys=(n,)),
         "package evaluator": lambda n: _package_evaluator_refuses(monkeypatch, n),
-        "campaign judge": _judge_refuses,
         "observation key": lambda n: _observation_refuses(monkeypatch, n),
     }
-
-
-def _assert_owned(monkeypatch: pytest.MonkeyPatch, owned: tuple[tuple[str, set[str]], ...]) -> None:
-    doors = _namespace_doors(monkeypatch)
+    judged = _judges_refused(world, (name for name, _ in owned))
     for name, admitted_at in owned:
         refused_at = {door for door, refuses in doors.items() if refuses(name)}
-        assert refused_at == set(doors) - admitted_at, f"{name!r} admitted where another owns it"
+        refused_at |= {"campaign judge"} if name in judged else set()
+        assert refused_at == NAMESPACE_DOORS - admitted_at, (
+            f"{name!r} admitted where another owns it"
+        )
+
+
+NAMESPACE_DOORS = frozenset(
+    {"connector term", "reported key", "package evaluator", "campaign judge", "observation key"}
+)
 
 
 # Unrefused, a judge named `max` breaks every `max(...)` formula, and a connector term
 # `n_turns` reads its report on a dial and the turn count in a formula.
-@pytest.mark.usefixtures("offline")
 def test_a_fresh_name_is_admitted_by_every_door_to_the_cell_namespace(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, world: World
 ) -> None:
-    _assert_owned(monkeypatch, (("fresh_term", set(_namespace_doors(monkeypatch))),))
+    _assert_owned(monkeypatch, world, (("fresh_term", set(NAMESPACE_DOORS)),))
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_name_another_owner_binds_is_refused_by_every_door_to_the_cell_namespace(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, world: World
 ) -> None:
     _assert_owned(
         monkeypatch,
+        world,
         (
             # Two owners served it once: the grade's rank, and a report's read on the channel alone.
             ("ground_truth_rank", set()),
@@ -1151,20 +1143,19 @@ def test_a_name_another_owner_binds_is_refused_by_every_door_to_the_cell_namespa
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_name_a_report_or_an_observation_may_fill_is_refused_only_where_another_owner_binds(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, world: World
 ) -> None:
-    doors = set(_namespace_doors(monkeypatch))
     _assert_owned(
         monkeypatch,
+        world,
         (
             ("latency", {"reported key"}),  # a core term: a report answers its channel
             ("target_prompt_chars", {"observation key"}),  # a PipelineData field, never a report's
             ("total_time", {"observation key"}),  # a PipelineData key: an observation fills it
             # The L4 connector's term: another connector may declare it, nothing its campaigns read.
             ("rounds", {"connector term", "reported key"}),
-            ("env_reward", doors - {"campaign judge"}),  # a campaign's observation
+            ("env_reward", set(NAMESPACE_DOORS - {"campaign judge"})),  # a campaign's observation
         ),
     )
 
@@ -1387,9 +1378,6 @@ def _charged_by_length() -> tuple[CellSheet, CellSheet]:
         )
 
     return walked(set(range(17)), 2768), walked(set(range(14, 18)), 692)
-
-
-_PEER_HOP = CycleHop(campaign_id="peer", cycle_id="cycle_peer")
 
 
 def _bench_pass(
@@ -1986,26 +1974,27 @@ def test_a_crossover_donor_gives_a_minority_of_the_loci_the_two_differ_on() -> N
 
 class _Filed(NamedTuple):
     stores: Stores
-    cycle_dir: Path
+    hop: CycleHop
+
+    @property
+    def cycle_dir(self) -> Path:
+        return self.stores.campaigns.cycle_dir(self.hop)
 
 
 @pytest.fixture
-def filed_cycle() -> _Filed:
-    """A campaign minted at `_PEER_HOP` with its dataset and its cycle: what a command door finds."""
-    stores, peer = workspace(), minted_campaign(_PEER_HOP)
-    stores.campaigns.create_campaign(peer)
-    minted_dataset(stores, peer)
-    stores.campaigns.mint_cycle(_PEER_HOP)
-    return _Filed(stores, stores.campaigns.cycle_dir(_PEER_HOP))
+def filed_cycle(world: World) -> _Filed:
+    """A campaign minted by the world's real mint: what a command door finds."""
+    return _Filed(world.stores, asyncio.run(world.minted()))
 
 
 async def _held_pass(
-    stores: Stores, stop: Callable[[], Awaitable[object]], acting: str | None = None
+    filed: _Filed, stop: Callable[[], Awaitable[object]], acting: str | None = None
 ) -> None:
+    stores = filed.stores
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
-        at=stores.campaigns.campaign_cycle(_PEER_HOP),
+        at=stores.campaigns.campaign_cycle(filed.hop),
         declared=Budget(),
         sends=(),
         acting=acting,
@@ -2014,7 +2003,7 @@ async def _held_pass(
         # What the walk and every wait inside a pass do once its cancel stands.
         walk = RunControl(
             commands=stores.commands,
-            enclosing=(stores.subject(_PEER_HOP),),
+            enclosing=(stores.subject(filed.hop),),
             acting=() if acting is None else (acting,),
         )
         if walk.pause_requested() and (abort := run_scope().abort_check) is not None and abort():
@@ -2032,19 +2021,19 @@ def _cancels(stores: Stores) -> list[object]:
 
 
 def _passing(
-    stores: Stores, stop: Callable[[], Awaitable[object]]
+    filed: _Filed, stop: Callable[[], Awaitable[object]]
 ) -> Callable[[Any], Awaitable[Any]]:
     async def _verify(dispatched: Any) -> Applier[None]:
-        return Applier(lambda: _held_pass(stores, stop, dispatched.command_id))
+        return Applier(lambda: _held_pass(filed, stop, dispatched.command_id))
 
     return _verify
 
 
-def _verify_call(candidate_id: str) -> CommandCall[Any]:
+def _verify_call(hop: CycleHop, candidate_id: str) -> CommandCall[Any]:
     return CommandCall(
         VerifyCandidatePayload(
-            campaign_id=_PEER_HOP.campaign_id,
-            cycle_id=_PEER_HOP.cycle_id,
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
             candidate_id=candidate_id,
         ),
         door=Door.HOST,
@@ -2072,8 +2061,8 @@ def test_a_host_cancel_stops_a_pass_by_its_commands_cancel(
 
     async def _host_cancel() -> tuple[HostTask, str]:
         sent = {
-            "campaign_id": _PEER_HOP.campaign_id,
-            "cycle_id": _PEER_HOP.cycle_id,
+            "campaign_id": filed_cycle.hop.campaign_id,
+            "cycle_id": filed_cycle.hop.cycle_id,
             "candidate_id": "held",
             IDEMPOTENCY_KEY: "held",
         }
@@ -2087,7 +2076,7 @@ def test_a_host_cancel_stops_a_pass_by_its_commands_cancel(
 
     before = len(_cancels(stores))
     with monkeypatch.context() as patched:
-        patched.setattr(measuring, "verify_candidate", _passing(stores, _cancel_held))
+        patched.setattr(measuring, "verify_candidate", _passing(filed_cycle, _cancel_held))
         cancelled, result_code = asyncio.run(_host_cancel())
     assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
         "a host cancel left the pass running"
@@ -2115,7 +2104,7 @@ def test_a_ctrl_c_stops_a_pass_by_its_commands_cancel(
 ) -> None:
     stores, cycle_dir = filed_cycle.stores, filed_cycle.cycle_dir
     landed: list[str] = []
-    pressed_call = _verify_call("pressed")
+    pressed_call = _verify_call(filed_cycle.hop, "pressed")
 
     async def _press() -> None:
         signal.raise_signal(signal.SIGINT)
@@ -2127,7 +2116,7 @@ def test_a_ctrl_c_stops_a_pass_by_its_commands_cancel(
 
     async def _ctrl_c() -> str:
         with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _passing(stores, _press))
+            patched.setattr(measuring, "verify_candidate", _passing(filed_cycle, _press))
             with (
                 pytest.raises(PassStoppedError) as ended,
                 ctrl_c_stops_pass(CommandDispatcher(stores), pressed_call),
@@ -2144,17 +2133,16 @@ def test_a_ctrl_c_stops_a_pass_by_its_commands_cancel(
 
 
 def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
-    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed, world: World
 ) -> None:
     stores = filed_cycle.stores
     # The command addresses the leaf by the id prefix a read takes, below its chain, so the act
     # reaches the leaf's campaign under its full id.
-    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
-    sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
+    peer = filed_cycle.hop
+    sandbox = inner_sandbox(stores, peer.campaign_id, peer.cycle_id)
     (sandbox / stores.tenant_id).mkdir(exist_ok=True)
-    inner = descend_store(stores, (_PEER_HOP,))
-    inner.campaigns.create_campaign(minted_campaign(leaf))
-    inner.campaigns.mint_cycle(leaf)
+    inner = descend_store(stores, (peer,))
+    leaf = asyncio.run(World(inner, world.net, world.scratch / "inner").minted())
     reached: list[CycleHop] = []
 
     async def _verify_reached(dispatched: Any) -> Any:
@@ -2162,7 +2150,7 @@ def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
         raise ConflictError("reached")
 
     addressed = Subject.parse(
-        f"candidate:innerds/{leaf.cycle_id}/r1/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
+        f"candidate:{leaf.campaign_id[:7]}/{leaf.cycle_id}/r1/c1;in={peer.campaign_id}::{peer.cycle_id}"
     )
     verify = VerifyCandidatePayload.model_validate(
         {**addressed.command_fields, "candidate_id": addressed.candidate_id}
@@ -2184,14 +2172,16 @@ def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
         benched.append(dispatched.payload.campaign_id)
         raise ConflictError("reached")
 
-    bench_by_prefix = HeldOutPayload(campaign_id=_PEER_HOP.campaign_id[:3])
+    bench_by_prefix = HeldOutPayload(campaign_id=filed_cycle.hop.campaign_id[:3])
     with monkeypatch.context() as patched:
         patched.setattr(measuring, "held_out", _bench_reached)
         with pytest.raises(ConflictError):
             asyncio.run(
                 CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix, door=Door.HOST))
             )
-    assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
+    assert benched == [filed_cycle.hop.campaign_id], (
+        "a campaign's command acted on the typed prefix"
+    )
 
 
 def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
@@ -2201,8 +2191,8 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
     host = HostSession(Caller(stores))
     # The filing names the pass's cycle even once another campaign shares the sent prefix.
     sent_by_prefix = {
-        "campaign_id": _PEER_HOP.campaign_id[:3],
-        "cycle_id": _PEER_HOP.cycle_id,
+        "campaign_id": filed_cycle.hop.campaign_id[:3],
+        "cycle_id": filed_cycle.hop.cycle_id,
         "candidate_id": "c1",
         IDEMPOTENCY_KEY: "verify-by-prefix",
     }
@@ -2223,7 +2213,7 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
         tracked = asyncio.run(_tracked_by_prefix())
     filed = stores.commands.book().filing(tracked.task_id)
     assert filed is not None and isinstance(filed.payload, VerifyCandidatePayload), filed
-    assert filed.payload.campaign_id == _PEER_HOP.campaign_id, (
+    assert filed.payload.campaign_id == filed_cycle.hop.campaign_id, (
         "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
     )
 
@@ -3331,9 +3321,11 @@ def _human_intervened(space: Any, hop: Any) -> bool:
 
 
 # Each press reads the inbox and the phase the press before it left.
-def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped() -> None:
-    commanded = workspace()
-    command_hop, command_dir = walking_cycle(commanded)
+def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped(
+    world: World,
+) -> None:
+    commanded, command_hop = world.stores, asyncio.run(world.minted())
+    command_dir = walking_cycle(commanded, command_hop)
     commands = CycleEventLog.open(CycleDir(command_dir))
     control = RunControl(commands=commanded.commands, cycle=commanded.subject(command_hop))
     address = {"campaign_id": command_hop.campaign_id, "cycle_id": command_hop.cycle_id}
@@ -4319,6 +4311,14 @@ def test_a_head_to_heads_arms_are_controlled_and_corrected_as_one_family(
         )
 
 
+def test_an_embedded_head_to_head_is_filed_as_its_command(head_to_head: Shared) -> None:
+    with head_to_head.reading() as stores:
+        filed = [record.kind for _, record in stores.commands.book().lines()]
+    assert filed == [CommandKind.HEAD_TO_HEAD, CommandKind.MINT_CAMPAIGN], (
+        f"an embedded head-to-head went unfiled: {filed}"
+    )
+
+
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_campaign_outside_the_head_to_head_joins_its_treatments_arm_uncorrected_with_it(
     world: World, head_to_head: Shared
@@ -4393,32 +4393,23 @@ _HARNESS_ROW = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=_H
 
 
 @pytest.fixture
-def harness_cell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., MeasuredCell]:
+def harness_cell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, world: World
+) -> Callable[..., MeasuredCell]:
     monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": FakeHarness.URL})
     monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
-    stores = workspace()
-    harness = n8n.CONNECTOR
-    assert harness.pipeline_declaration is not None
-    graph = harness.pipeline_declaration(stores, None)
-    session = loop_session(
-        stores,
-        parse_pipeline_response(graph),
-        [],
-        client=BackendClient(
-            harness, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
-        ),
-    )
 
     def cell(params: dict[str, Any], book_usd: float | None = None) -> MeasuredCell:
         async def measured() -> MeasuredCell:
-            with (
-                scoped(ledger=CycleEventLog(tmp_path / "harness.jsonl")),
-                scoped(round=1),
-                scoped(book=spend_book(book_usd, usd_reserve=None)),
-            ):
-                return await measure_sample(
-                    _HARNESS_ROW, session, PipelineParams.model_validate(params)
-                )
+            async with world.opened(connector=n8n.CONNECTOR) as session:
+                with (
+                    scoped(ledger=CycleEventLog(tmp_path / "harness.jsonl")),
+                    scoped(round=1),
+                    scoped(book=spend_book(book_usd, usd_reserve=None)),
+                ):
+                    return await measure_sample(
+                        _HARNESS_ROW, session, PipelineParams.model_validate(params)
+                    )
 
         return asyncio.run(measured())
 
