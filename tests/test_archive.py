@@ -378,7 +378,7 @@ def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_wou
 # 2. The archive on disk
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> None:
     archive = built_stores.archive
     entry = filed_under(LLM_ONLY, "kept")
@@ -457,7 +457,7 @@ def test_a_reindex_beside_a_run_in_another_process_refuses_until_it_ends(
     assert reindex_measurement_archive(built_stores, apply=True) == {"indexed": 0, "undescribed": 0}
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_named_after(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -483,7 +483,7 @@ def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_na
 
 
 # Each step reads on from where the feed's last advance left it.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -540,7 +540,7 @@ def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     assert archive.detail_lines(file_key), "the cell file stopped reading after a crash"
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_four_writers_on_one_file_at_once_keep_every_row(built_stores: Stores) -> None:
     # Windows runs `O_APPEND` as seek-then-write, so what keeps every row is the lock under
     # `append_jsonl`, taken on a fresh handle per append.
@@ -601,7 +601,7 @@ def compacted_rows(built_stores: Stores) -> _Compacted:
     return _Compacted(compacted, compacted_bank, compacted_refs, whole)
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_compaction_round_trips_every_field_it_moved(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -734,7 +734,7 @@ def test_an_arms_index_refresh_reloads_only_the_populations_its_walks_moved(
 
 
 # The re-cut moves the name the relabel placed on the bank.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     built_stores: Stores, compacted_rows: _Compacted
 ) -> None:
@@ -1795,7 +1795,7 @@ def test_a_fork_whose_withdraw_fails_names_its_kept_stub_on_the_refusal(
 
 
 # The steered forks cut from the applied scenario's fork, and from each other.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
     world: World, line: Shared
 ) -> None:
@@ -1850,7 +1850,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
 
 # With no edit it steers nothing and stamps no intervention; a field cleared in the panel drops
 # the candidate's value, and the layer below shows.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operators_edit(
     world: World, line: Shared
 ) -> None:
@@ -2226,10 +2226,6 @@ def test_a_superseded_cycle_offers_no_start_and_its_launch_door_refuses_one(
 
     with pytest.raises(ConflictError, match=fork.cycle_id):
         asyncio.run(launch())
-
-
-def _addr(hop: CycleHop, rnd: int, individual: str) -> str:
-    return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(individual)).address
 
 
 def _cycle_of(hop: CycleHop) -> str:

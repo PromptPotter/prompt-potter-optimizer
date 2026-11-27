@@ -19,11 +19,11 @@
 
 - **A rule a test reaches only through a walk is a rule left unexposed**: expose it in production as its own function, never a test seam. `scoring/row_policy.py::send_rows` is the model: pure, so its facts are a table.
 - **A journey is never replayed by hand in pytest.** No fake race, no hand-driven `run_walks`, no hand-seated cycle: an invariant of the walk is a leg, every optimizer at once. A fact a leg cannot carry yet is a leg added (`run_one`'s knobs), never a pytest stand-in.
-- **An edge reads what the world ran.** `seat`, `_peer_cycle`, `close_round` and hand-seated cycles are the old shape: a file migrating to the world deletes them; `factories.py` keeps only builders of values no door produces.
+- **An edge reads what the world ran.** A cycle a fact walks opens through run init's door, `factories.py::opened_round`, the backend answering what the fact declares (`FakeBackend.answers`) on the graph it declares (`FakeBackend.nodes`), an L4 outer's on its inner campaigns (`factories.py::l4_panel`); no fact seats a cycle by hand; `factories.py` keeps only builders of values no door produces.
 
 ## The world (`tests/world.py`)
 
-- `world` (fixture): `World(stores, net, scratch)` — the fact's stores at its own data root (`own_home`), the network answered by `scripts/offline_world.py` (`offline`).
+- `world` (fixture): `World(stores, net, scratch)` — the fact's stores at its own data root (`own_home`, which binds its account, so a fact that never sends asks for no `offline`), the network answered by `scripts/offline_world.py` (`offline`).
 - `await world.campaign(optimizer="potter", rounds=1, rows=40, step_rounds=None, knobs=None, hardness=0, origin_gate=None, down=False) -> Ran`: a fresh campaign minted and run through `embedded_run.py::run_campaign`, on the offline run's script (`ByCallIdentity`, `FakeBackend`, `synthetic_rows`); `step_rounds` pauses at that boundary, `down` has the backend refuse every cell.
 - `await world.resume(hop, from_round=None, on_divergence=HALT, step_rounds=None) -> Ran`: the same entry, resuming; `from_round` rewinds as `--from` does.
 - `await world.fork(hop, round, **ForkCyclePayload) -> Ran`: a fork through the `fork_cycle` command door, run inline.
@@ -42,6 +42,8 @@
   | `origin_forks` | archive | on `line`: two steers off round 1's crown, origin unmodified and edited | ~1.6 s | 2 |
   | `gated` | archive | an origin the gate halts | ~0.3 s | 2 (one reads in place) |
   | `steered_line` | identity | a root on a served menu, forked at 0 on a wider one | ~2.7 s | 7 |
+  | `banked_line` | scoring | a CAPO bench line opened through `opened_round`, round 1 closed, the origin's bench pass banked; its facts lay the backend's answers | ~0.6 s | 5 (2 read the run's `Cycle`, so walk their own) |
+  | `l4_outer` | identity | an L4 outer over a potter and a CAPO seat (`l4_panel`) opened through `opened_round`; a fact re-opens its copy, the inner cells read off the archive | ~1.8 s | 3 (~0.3 s each) |
   | `head_to_head` | scoring | potter, capo, gepa as one head-to-head, and a lone capo, 60 rows (gepa's floor) | ~3.6 s | 3 |
 - `Ran.session`, `Ran.result`, `Ran.hop`; `world.ledger(hop)`, `world.records(hop)`; `world.net` is the `Router` (`net.backend.faults`, `net.llm.sent`, `net.rates`).
 - Its teardown is the fixtures': `offline` restores the network and asserts nothing went unrouted, `own_home`'s tree goes with `tmp_path`.
