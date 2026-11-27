@@ -82,6 +82,7 @@ from pydantic import SecretStr, ValidationError
 from world import Shared, World, serving, shared_run
 
 from promptpotter import connectors
+from promptpotter.application import optimizer_contract as node_contract
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import (
@@ -131,8 +132,8 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.record import SpineCycle
+from promptpotter.application.optimizer_contract import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import (
     seed_instructions,
 )
@@ -141,7 +142,6 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1Edit,
@@ -157,13 +157,13 @@ from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
     LadderAsk,
     NextAction,
-    _rebase_request,
     as_read_by,
     ask_l2_escalation,
     bank_and_route,
     decide_escalation,
     l2_fired,
     l3_fired,
+    rebase_request,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationLadder, PoBBKnobs
 from promptpotter.application.optimizers.potter.l1 import applied_edits
@@ -4453,7 +4453,10 @@ async def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stand
             carried = [ind.id for ind in cycle.population]
             assert len(carried) == 3 and short not in carried, f"{case}: elected below the floor"
             full = next(key for key in list(rows)[3:] if key != short)
-            assert full in carried, f"{case}: an offspring the budget paid for in full was dropped"
+            # Every arm answers alike, so the full offspring ties the carried; a tie keeps draw order.
+            assert len(rows[full]) == len(rows[ArmKey(carried[0])]) and (
+                closed.folds[full].fitness == closed.folds[ArmKey(carried[0])].fitness
+            ), f"{case}: an offspring the budget paid for in full was read short"
             assert cycle.rounds[-1].round == cut_round
             cycle.unwind_unclosed()
             assert [rr.round for rr in cycle.rounds] == list(range(cut_round)) and (
@@ -5208,9 +5211,7 @@ async def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             "an arm two rounds list kept the layer's prompt from composing"
         )
         standing = fork_proposal_model(tuple(offer))
-        refork = _rebase_request(
-            forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
-        )
+        refork = rebase_request(forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer)
         assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
             "a fork standing on a round-1 arm cuts at round 2"
         )
@@ -5226,7 +5227,7 @@ async def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
             and hangs_from.election.verdict_reason == line[1].election.verdict_reason
         ), "a re-election is not told apart from the selector's own verdict"
-        stood_on_pick = _rebase_request(
+        stood_on_pick = rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
         )
         assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (

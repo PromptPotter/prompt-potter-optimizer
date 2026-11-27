@@ -1403,7 +1403,7 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
             ),
             [RoundEnding.CROWNED, unwalked],
         ),
-        (PopulationKept(objective=objective, survivors=[unwalked]), [unwalked]),
+        (PopulationKept(survivors=[unwalked], earlier={}), [unwalked]),
     ):
         [gone] = replay_all_mismatches(
             _round(round=3, cells={}),
@@ -1412,18 +1412,19 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
         assert gone.current_outcome in (False, None, [], [RoundEnding.HELD, None]), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
-    # Two survivors walked on disjoint cells share no reading: neither is ranked above the other.
+    # The reference's reading: each survivor on every cell it was read on, earlier rounds' included,
+    # so an incumbent's deeper blocks outrank an offspring's one lucky block.
     chars = {"target_prompt_chars": 10}
-    apart = sheet(measurements([1.0] * 4, sample_ids=[10, 11, 12, 13], pipeline_data=chars))
-    bar = sheet(measurements([0.0] * 4, pipeline_data=chars))
-    survived = PopulationKept(objective=objective, survivors=[unwalked, bar_arm])
-    [disjoint] = replay_all_mismatches(
-        _round(round=3, cells={unwalked: apart, bar_arm: bar}),
-        [decision(survived, [unwalked], node=None)],
+    lucky = sheet(
+        measurements([1.0, 1.0, 0.0, 0.0], sample_ids=[10, 11, 12, 13], pipeline_data=chars)
     )
-    assert disjoint.current_outcome == [], (
-        "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
-    )
+    rows = {unwalked: lucky, bar_arm: sheet(measurements([0.0] * 4, pipeline_data=chars))}
+    for earlier, ranked in (
+        ({bar_arm: {f"e{i}": 1.0 for i in range(8)}}, [bar_arm, unwalked]),
+        ({}, [unwalked, bar_arm]),
+    ):
+        survived = PopulationKept(survivors=[unwalked, bar_arm], earlier=earlier)
+        assert survived.rank(rows) == ranked, f"population_kept on {earlier} ranked otherwise"
 
 
 def _selected(stores: Stores, hop: CycleHop) -> set[str]:

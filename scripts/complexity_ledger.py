@@ -1039,11 +1039,13 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.config_map import KNOBS, member_knob_count
-    from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
+    from promptpotter.application.maintenance.landing import complete_registries
+    from promptpotter.application.optimizer_contract import NODE_MEMBERS, CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.record_kinds import RECORDS
 
+    complete_registries()
     py_files = _package_files("*.py")
     source = _source_counts(py_files)
     sites = _sites()

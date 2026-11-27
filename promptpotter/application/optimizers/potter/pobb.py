@@ -15,7 +15,7 @@ from promptpotter.application.intelligence.rasch import (
     theta_cells,
     theta_on_ruler,
 )
-from promptpotter.application.optimizers.nodes import RaceSnapshot
+from promptpotter.application.optimizer_contract import RaceSnapshot
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.scoring.row_policy import FieldRead
 from promptpotter.domain.cycle_paths import Lens

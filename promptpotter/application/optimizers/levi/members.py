@@ -10,6 +10,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from pydantic import Field, model_validator
 
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
@@ -19,15 +20,7 @@ from promptpotter.application.bench.node_context import (
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.descriptors import (
-    DescriptorFeature,
-    behaviour_descriptor,
-    cell_objectives,
-)
-from promptpotter.application.optimizers.fence import fence_untrusted
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     CycleRead,
     MeasuredRound,
     PromptArity,
@@ -36,6 +29,13 @@ from promptpotter.application.optimizers.nodes import (
     RoundSamples,
     Selection,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.optimizers.descriptors import (
+    DescriptorFeature,
+    behaviour_descriptor,
+    cell_objectives,
+)
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import child, shown, task_description
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Proposal
@@ -231,7 +231,7 @@ class ProxySelected(Replayed, ProxyCssKnobs, kind="proxy_selected"):
         return self.choose({cid: ctx.round_data.sheet_of(cid) for cid in self.calibration_ids})
 
 
-class ProxyCss(nodes.Sampler):
+class ProxyCss(optimizer_contract.Sampler):
     """The same cells in the same order every round, resume and fork."""
 
     name: ClassVar[str] = "proxy_css"
@@ -240,12 +240,14 @@ class ProxyCss(nodes.Sampler):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: ProxyCssKnobs, search: int, pipeline: str) -> nodes.DrawSize:
+    def drawn(
+        self, knobs: ProxyCssKnobs, search: int, pipeline: str
+    ) -> optimizer_contract.DrawSize:
         # The proxy is chosen among the discovery set, which the search split must hold whole.
         if knobs.discovery > search:
-            return nodes.DrawSize(cells=0, block_size=0)
+            return optimizer_contract.DrawSize(cells=0, block_size=0)
         cells = knobs.discovery if pipeline == INITIAL_POPULATION else knobs.size
-        return nodes.DrawSize(cells=cells, block_size=cells)
+        return optimizer_contract.DrawSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -257,14 +259,16 @@ class ProxyCss(nodes.Sampler):
                     f"that large, and this one holds {len(pool)}"
                 )
             discovery = pool[: knobs.discovery]
-            return nodes.RoundSamples(
+            return optimizer_contract.RoundSamples(
                 cells=discovery, order=list(discovery), block_size=len(discovery)
             )
         by_key = {s.key: s for s in pool}
         if missing := [key for key in calibration.proxy if key not in by_key]:
             raise ValueError(f"proxy_css: {len(missing)} proxy cells left the search split")
         cells = [by_key[key] for key in calibration.proxy]
-        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=len(cells))
+        return optimizer_contract.RoundSamples(
+            cells=cells, order=list(cells), block_size=len(cells)
+        )
 
 
 def _lloyd(points: np.ndarray, k: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
@@ -371,7 +375,7 @@ def _calibrate(
     return LeviCalibration(proxy=proxy, centroids=centres.tolist(), stats=stats)
 
 
-class MapElites(nodes.Selector):
+class MapElites(optimizer_contract.Selector):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
@@ -455,7 +459,7 @@ class MapElites(nodes.Selector):
         )
         ctx.put(DescriptorCalibration(calibration=calibration))
         ctx.put(EliteArchive(elites=archive))
-        return nodes.Selection(
+        return optimizer_contract.Selection(
             leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
             ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
             electable=len(measured.electable),
@@ -484,13 +488,13 @@ class LeviSeedKnobs(RewriteKnobs):
     )
 
 
-class LeviSeed(nodes.Proposer):
+class LeviSeed(optimizer_contract.Proposer):
     """The seed pass `M_l.DIVERSESEED` (Alg. 1): the calibration round's arms."""
 
     name: ClassVar[str] = "levi_seed"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    proposes: ClassVar[nodes.Proposing] = "opens"
+    proposes: ClassVar[optimizer_contract.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
@@ -509,16 +513,16 @@ class LeviSeed(nodes.Proposer):
             seeds.append(proposal)
             if not proposal.validation_failures:
                 shown.append((proposal.individual, None))
-        return nodes.Proposals(seeds)
+        return optimizer_contract.Proposals(seeds)
 
 
-class LeviParadigmShift(nodes.Proposer):
+class LeviParadigmShift(optimizer_contract.Proposer):
     """The large model's route (§3.2, App. F)."""
 
     name: ClassVar[str] = "levi_paradigm_shift"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    proposes: ClassVar[nodes.Proposing] = "adds"
+    proposes: ClassVar[optimizer_contract.Proposing] = "adds"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
@@ -549,7 +553,7 @@ class LeviParadigmShift(nodes.Proposer):
     async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         n_clusters = ctx.knobs(LeviParadigmShiftKnobs).n_clusters
         shift = await self._shift(ctx, n_clusters, len(proposals.proposals))
-        return nodes.Proposals([*proposals.proposals, shift])
+        return optimizer_contract.Proposals([*proposals.proposals, shift])
 
     async def _shift(self, ctx: NodeContext, n_clusters: int, idx: int) -> Proposal:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -607,13 +611,13 @@ def _softmax_pick(elites: Sequence[LeviElite], temperature: float, rng: random.R
     return rng.choices(list(elites), weights=weights)[0]
 
 
-class LeviRefine(nodes.Proposer):
+class LeviRefine(optimizer_contract.Proposer):
     """The small model's route (§3.2, Alg. 2 lines 9-10)."""
 
     name: ClassVar[str] = "levi_refine"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    proposes: ClassVar[nodes.Proposing] = "opens"
+    proposes: ClassVar[optimizer_contract.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
@@ -632,7 +636,7 @@ class LeviRefine(nodes.Proposer):
         asked = [self._refinement(ctx, calibration, elites, i) for i in range(shift.interval - 1)]
         replies = await ctx.read(Calls).ask_each({i: p for i, (_, p) in enumerate(asked)})
         node = ctx.read(Target).prompt_node
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [
                 child(ctx, node, [parent], raw, f"refine {parent.id[:6]}")
                 for (parent, _), raw in zip(asked, replies, strict=True)

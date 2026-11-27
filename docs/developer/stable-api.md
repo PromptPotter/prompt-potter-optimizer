@@ -138,5 +138,5 @@ A malformed, unknown or revoked token is a 401 naming its next act (`code` `toke
 
 ## 8. What is NOT stable
 
-- **Internal module structure, private names, and runtime dataclass shapes** beyond §1–§7; package `__init__` files re-export nothing — this document is the public surface. In-memory caches. Prompt templates at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, tunable on any release. The optimizer node types (`application/optimizers/nodes.py`) and the `NodeContext` a member is handed. Test helpers and the `webapp/` layout.
+- **Internal module structure, private names, and runtime dataclass shapes** beyond §1–§7; package `__init__` files re-export nothing — this document is the public surface. In-memory caches. Prompt templates at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, tunable on any release. The optimizer node types (`application/optimizer_contract.py`) and the `NodeContext` a member is handed. Test helpers and the `webapp/` layout.
 - **The REST API** (`docs/specs/openapi.generated.json`) beyond §6's stream and §7b's door: identity is a browser session cookie (`promptpotter_session`) or §7b's bearer, one resolver for both (`presentation/api/middleware/oidc.py`); a route's payload may move between minor versions.

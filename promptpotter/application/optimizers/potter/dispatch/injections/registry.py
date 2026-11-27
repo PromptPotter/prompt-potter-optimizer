@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from promptpotter.application.optimizers.nodes import LlmNode
+from promptpotter.application.optimizer_contract import LlmNode
 from promptpotter.application.optimizers.potter.dispatch import injections as _injections_pkg
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     _Injection,

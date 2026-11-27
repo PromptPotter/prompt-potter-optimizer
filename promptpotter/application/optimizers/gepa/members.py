@@ -9,6 +9,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
@@ -20,11 +21,7 @@ from promptpotter.application.bench.node_context import (
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.descriptors import cell_objectives
-from promptpotter.application.optimizers.fence import fence_untrusted
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     CycleRead,
     MeasuredRound,
     PromptArity,
@@ -33,6 +30,9 @@ from promptpotter.application.optimizers.nodes import (
     RoundSamples,
     Selection,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.optimizers.descriptors import cell_objectives
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.application.scoring.race_protocol import Decision, View, next_block
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
@@ -150,7 +150,7 @@ class MinibatchKnobs(StrictModel):
     )
 
 
-class Minibatch(nodes.Sampler):
+class Minibatch(optimizer_contract.Sampler):
     name: ClassVar[str] = "minibatch"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = MinibatchKnobs
@@ -159,9 +159,11 @@ class Minibatch(nodes.Sampler):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: MinibatchKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
+    def drawn(
+        self, knobs: MinibatchKnobs, search: int, _pipeline: str
+    ) -> optimizer_contract.DrawSize:
         fits = search - knobs.pareto_size >= knobs.size
-        return nodes.DrawSize(
+        return optimizer_contract.DrawSize(
             cells=knobs.size + knobs.pareto_size if fits else 0, block_size=knobs.size
         )
 
@@ -183,16 +185,18 @@ class Minibatch(nodes.Sampler):
         ctx.put(ParetoSet(keys=[s.key for s in pareto]))
         batch = ctx.read(Replay).rng().sample(feedback, knobs.size)
         cells = [*batch, *pareto]
-        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=knobs.size)
+        return optimizer_contract.RoundSamples(
+            cells=cells, order=list(cells), block_size=knobs.size
+        )
 
 
-class GepaReflect(nodes.Proposer):
+class GepaReflect(optimizer_contract.Proposer):
     """Alg. 1 lines 7-12; its module is the parent's next prompt node, round-robin per lineage (the reference's default selector)."""
 
     name: ClassVar[str] = "gepa_reflect"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "each"
-    proposes: ClassVar[nodes.Proposing] = "opens"
+    proposes: ClassVar[optimizer_contract.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
@@ -204,7 +208,7 @@ class GepaReflect(nodes.Proposer):
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
 
-    def parent_read(self, panel: nodes.DrawSize) -> int:
+    def parent_read(self, panel: optimizer_contract.DrawSize) -> int:
         return panel.block_size
 
     async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
@@ -243,7 +247,7 @@ class GepaReflect(nodes.Proposer):
         )
         bar = MinibatchBar(parent_id=parent.id, objectives=cell_objectives(rows))
         ctx.emit(MinibatchBars(bars={proposal.individual.id: bar}))
-        return nodes.Proposals(proposals=[proposal])
+        return optimizer_contract.Proposals(proposals=[proposal])
 
 
 def minibatch_improves(
@@ -258,7 +262,7 @@ def minibatch_improves(
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class _GateRace(nodes.Race):
+class _GateRace(optimizer_contract.Race):
     gate = "not_improved"
 
     def __init__(
@@ -348,7 +352,7 @@ class _GateRace(nodes.Race):
         )
 
 
-class MinibatchGate(nodes.Eliminator):
+class MinibatchGate(optimizer_contract.Eliminator):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({MinibatchBars})
@@ -405,7 +409,7 @@ def draw_parent(
     return rng.choices(ids, weights=[frequency[cid] for cid in ids])[0]
 
 
-class Pareto(nodes.Selector):
+class Pareto(optimizer_contract.Selector):
     name: ClassVar[str] = "pareto"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})
@@ -451,7 +455,7 @@ class Pareto(nodes.Selector):
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
-    def parent_read(self, panel: nodes.DrawSize) -> int:
+    def parent_read(self, panel: optimizer_contract.DrawSize) -> int:
         return panel.cells - panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
@@ -478,7 +482,7 @@ class Pareto(nodes.Selector):
             candidates[ind.id] = {key: graded[key] for key in pareto_set}
         if not candidates:
             ctx.put(ParetoScores())
-            return nodes.Selection(
+            return optimizer_contract.Selection(
                 leading=None,
                 ending=RoundEnding.HELD,
                 electable=len(measured.electable),
@@ -502,7 +506,7 @@ class Pareto(nodes.Selector):
         )
         ctx.put(ParetoScores(scores=candidates, parent_id=parent_id))
         leading = selected_id or max(admitted, key=aggregates.__getitem__, default="")
-        return nodes.Selection(
+        return optimizer_contract.Selection(
             leading=ArmKey(leading) if leading else None,
             ending=RoundEnding.CROWNED if selected_id else RoundEnding.HELD,
             electable=len(measured.electable),

@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
 
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
@@ -24,9 +25,8 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     stratum_shares,
 )
 from promptpotter.application.intelligence.rasch import build_round_order
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.mask.backprop import ForkDecline
+from promptpotter.application.optimizer_contract import (
     CycleRead,
     Draw,
     MeasuredRound,
@@ -37,11 +37,13 @@ from promptpotter.application.optimizers.nodes import (
     RoundSamples,
     Selection,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     VIEW_READS,
     VIEW_SEES,
+    DispatchHub,
     PotterView,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
@@ -71,15 +73,24 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 from promptpotter.application.optimizers.potter.election import elect_on_pairings
 from promptpotter.application.optimizers.potter.escalation import (
     ESCALATION_RULES,
+    L1_LAYOUT_REFUSED,
+    L2_PATIENCE_SPENT,
+    EscalationReading,
     Fire,
-    LayerCall,
+    L2EscalationTrigger,
+    L3EscalationTrigger,
+    LadderInputs,
+    LayerReading,
     NextAction,
     PotterPhase,
     TransitionResult,
+    as_read_by,
+    ask_l2_escalation,
     bank_and_route,
-    escalate_l2,
+    decide_heal,
     l2_fired,
     l3_fired,
+    rebase_request,
 )
 from promptpotter.application.optimizers.potter.knobs import (
     AdaptiveQueueKnobs,
@@ -122,8 +133,10 @@ from promptpotter.domain.phase_acts import (
     StepOpened,
     TextFact,
 )
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
+from promptpotter.domain.records.run_records import RebaseRequest, RoundWarningRecord
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit
@@ -133,6 +146,8 @@ from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import ValidationReason
+from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
+from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 
 
 def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
@@ -145,7 +160,7 @@ def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
     return list(out.values())
 
 
-class AdaptiveQueue(nodes.Sampler):
+class AdaptiveQueue(optimizer_contract.Sampler):
     """ONE order every arm walks: shared prefixes keep paired stats comparable."""
 
     name: ClassVar[str] = "adaptive_queue"
@@ -153,11 +168,13 @@ class AdaptiveQueue(nodes.Sampler):
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Parent, Ruler, Bounds, Replay})
     size_knob: ClassVar[str | None] = "sp_budget_round"
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ADAPTIVE_QUEUE
+    couplings: ClassVar[tuple[optimizer_contract.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
-    def drawn(self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str) -> nodes.DrawSize:
+    def drawn(
+        self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str
+    ) -> optimizer_contract.DrawSize:
         # Unclamped: a budget above the search split is the finding preflight reports.
-        return nodes.DrawSize(cells=knobs.sp_budget_round, block_size=1)
+        return optimizer_contract.DrawSize(cells=knobs.sp_budget_round, block_size=1)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         view = ctx.read(Ruler).difficulty
@@ -189,7 +206,7 @@ class AdaptiveQueue(nodes.Sampler):
             parent_grades(ctx.read(Parent).own_rows), view.ruler, by_id, n_min=n_min
         )
         # Every cell closes a block: PoBB decides after each one.
-        return nodes.RoundSamples(
+        return optimizer_contract.RoundSamples(
             cells=cells,
             order=[by_id[sid] for sid in order],
             block_size=1,
@@ -197,10 +214,10 @@ class AdaptiveQueue(nodes.Sampler):
         )
 
 
-class L1Generate(LayoutNode, nodes.Proposer):
+class L1Generate(LayoutNode, optimizer_contract.Proposer):
     name: ClassVar[str] = "l1_generate"
     prompt_arity: ClassVar[PromptArity] = "each"
-    proposes: ClassVar[nodes.Proposing] = "opens"
+    proposes: ClassVar[optimizer_contract.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
@@ -210,8 +227,8 @@ class L1Generate(LayoutNode, nodes.Proposer):
     # what L1 is shown.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType(
         {
-            BlockPool: nodes.AccessKnob(L1GenerateKnobs, "block_access"),
-            DemoPool: nodes.CountKnob(L1GenerateKnobs, "k_max"),
+            BlockPool: optimizer_contract.AccessKnob(L1GenerateKnobs, "block_access"),
+            DemoPool: optimizer_contract.CountKnob(L1GenerateKnobs, "k_max"),
         }
     )
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
@@ -259,13 +276,15 @@ class L1Generate(LayoutNode, nodes.Proposer):
         hosted = knobs.recombination_host == self.name or ladder.fires_l2
         return knobs.n_variants + (knobs.recombine if hosted else 0)
 
-    def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
+    def opening(
+        self, ctx: NodeContext, bench: optimizer_contract.RoundOpening
+    ) -> optimizer_contract.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
         prior = ctx.round_num - 1
         critiqued = ctx.round_num > 0 and bool(ctx.recall(Critique, prior).readout)
         # A round the critique failed is said: the generate below runs without one.
         critique = "critique from round" if critiqued else "no critique from round"
-        return nodes.RoundOpening(
+        return optimizer_contract.RoundOpening(
             facts={
                 "L1 stalled rounds": CountFact(value=ctx.slice(Ladder).l1_stall_count),
                 "L2 after stalled rounds": CountFact(value=ctx.knobs(EscalationKnobs).l1_patience),
@@ -296,7 +315,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return await propose_l1_population(ctx)
 
 
-class PoBB(nodes.Eliminator):
+class PoBB(optimizer_contract.Eliminator):
     name: ClassVar[str] = "pobb"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
@@ -307,7 +326,7 @@ class PoBB(nodes.Eliminator):
     # A PoBB stop ends the buying of an arm: a `draw` vote reads it on its draw, `overlap` never
     # seats it (`election.py::seated`).
     stop_disqualifies: ClassVar[bool] = False
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = POBB
+    couplings: ClassVar[tuple[optimizer_contract.MemberCoupling, ...]] = POBB
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         epsilon = selected.knobs_of(self.name, PoBBKnobs).epsilon
@@ -321,7 +340,7 @@ class PoBB(nodes.Eliminator):
         return PoBBRace(ctx, panel)
 
 
-class ThetaElection(nodes.Selector):
+class ThetaElection(optimizer_contract.Selector):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ElectionKnobs
@@ -345,7 +364,7 @@ class ThetaElection(nodes.Selector):
         return elect_on_pairings(ctx, measured)
 
 
-class L1Critique(LayoutNode, nodes.Adapter):
+class L1Critique(LayoutNode, optimizer_contract.Adapter):
     """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
@@ -387,7 +406,7 @@ class L2Context(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
 
-    def reply_model(self, view: PotterView) -> type[BaseModel]:
+    def reply_model(self, view: PotterView) -> type[L2ContextOutput]:
         return build_l2_response_model(
             view.silent_l1_panels,
             view.recombination_offer(self.name),
@@ -507,7 +526,7 @@ class L3Plan(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
 
-    def reply_model(self, view: PotterView) -> type[BaseModel]:
+    def reply_model(self, view: PotterView) -> type[L3PlanOutput]:
         return build_l3_response_model(
             terminating=view.terminate_offer is not None,
             forking=view.rebase_offered,
@@ -564,7 +583,83 @@ class L3Plan(LayoutNode):
         )
 
 
-class Escalation(nodes.Controller):
+async def _run_transition[L: (L2Context, L3Plan)](
+    layer: L, ctx: NodeContext, fire: Fire
+) -> tuple[TransitionResult, RebaseRequest | ForkDecline | None] | None:
+    """The layer under its own context (`NodeContext.fire`), with the fork its proposal asks, or
+    why none may; ``None`` when the output never parsed."""
+    ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_act(ctx, fire))
+    ladder = ctx.slice(Ladder)
+    # The prompt reports the verdict that asked for it, which lands only if this fire does.
+    view = PotterView(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
+    calls = ctx.read(Calls)
+    filled = DispatchHub.fill(calls.prompt(), view)
+    try:
+        result = layer.parse(ctx, await calls.answer(layer.reply_model(view), filled))
+    except OptimizerPromptParseError as parse_err:
+        # Unhandled it kills the cycle, and under L4 that voids a whole outer sample.
+        append_record(
+            RoundWarningRecord(
+                kind="layer_parse_failure",
+                severity="error",
+                message=(
+                    f"{layer.name} returned unusable output "
+                    f"({'empty/truncated' if parse_err.is_empty else 'schema-noncompliant'}) "
+                    "— the prior framing was kept and the loop continues."
+                ),
+                round=current_round(),
+                detail={
+                    "node": layer.name,
+                    "layer": layer.layer_id,
+                    **parse_err.warning_detail(),
+                },
+            )
+        )
+        ctx.read(Progress).phase(layer.phase.phase, "exit", StepClosed(facts={}, audit=None))
+        return None
+
+    # Its memory, restated onto the closed round, since a resume or fork starts from there.
+    layer.land(ctx, result)
+    proposal = result.fork_proposal
+    fork = (
+        rebase_request(ctx, layer.layer_id, proposal, view.reelect_offer)
+        if proposal is not None
+        else None
+    )
+    closed = layer.exit_act(ctx, result)
+    if isinstance(fork, ForkDecline):
+        assert proposal is not None
+        # The step's own record names the proposal and why no node took it; the readout prints it.
+        declined = TextFact(value=f"{proposal.reason} — {fork.value}")
+        closed = StepClosed(facts={**closed.facts, "fork declined": declined}, audit=closed.audit)
+    ctx.read(Progress).phase(layer.phase.phase, "exit", closed)
+    return result, fork
+
+
+async def _fire_layer[L: (L2Context, L3Plan)](
+    ctx: NodeContext, layer: L, fire: Fire
+) -> TransitionResult | None:
+    """The ladder is the controller's: it banks the fire once the layer landed, before the
+    layer-control channel, where terminate outranks rebase."""
+    landed = await _run_transition(layer, ctx.fire(type(layer)), fire)
+    if landed is None:
+        return None
+    result, fork = landed
+    ctx.put(layer.record(ctx.slice(Ladder), fire))
+    ctx.restate(Ladder)
+    # Present only where the reply schema offered it (`PotterView.terminate_offer`); never a
+    # stand-in reason: a blank stop is not a decision.
+    if result.terminate_proposal is not None and (
+        reason := result.terminate_proposal.reason.strip()
+    ):
+        raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{layer.layer_id}: {reason}")
+    if isinstance(fork, RebaseRequest):
+        # The runner words its stop once the fork is cut (`fork_siblings.py::ForkCut.said`).
+        raise StopLoop(StopReason.REBASED, fork=fork)
+    return result
+
+
+class Escalation(optimizer_contract.Controller):
     name: ClassVar[str] = "escalation"
     kind: ClassVar[NodeKind] = NodeKind.CONTROLLER
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs
@@ -572,7 +667,7 @@ class Escalation(nodes.Controller):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Bounds, Replay})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = LADDER
+    couplings: ClassVar[tuple[optimizer_contract.MemberCoupling, ...]] = LADDER
     priced_surface: ClassVar[Mapping[str, int]] = {"escalation_rules": len(ESCALATION_RULES)}
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
@@ -618,12 +713,77 @@ class Escalation(nodes.Controller):
         return event.rule if event.next_action == NextAction.FIRE_L2 else None
 
     async def act(self, ctx: NodeContext, cause: str) -> None:
-        if stop := await escalate_l2(
-            ctx,
-            cause=cause,
-            l2=LayerCall(L2, ctx.fire(L2Context)),
-            l3=LayerCall(L3, ctx.fire(L3Plan)),
-        ):
+        opt = ctx.knobs(EscalationKnobs)
+        ask = ask_l2_escalation(
+            ctx.slice(Ladder),
+            rounds=ctx.read(Lineage).rounds,
+            escalation_ladder=opt.escalation_ladder,
+            l2_patience=opt.l2_patience,
+            l3_patience=opt.l3_patience,
+        )
+
+        # Recorded fired or not.
+        replay = ctx.read(Replay)
+        replay.decide(
+            L2EscalationTrigger(
+                reading=EscalationReading.read(
+                    ask.l2, patience=opt.l2_patience, fires=ctx.slice(Ladder).l2.fires, rule=cause
+                )
+            ),
+            ask.next_action == NextAction.FIRE_L2,
+        )
+
+        if ask.next_action == NextAction.FIRE_L2:
+            result = await _fire_layer(ctx, L2, Fire(cause, ask))
+            heal = decide_heal(
+                LadderInputs(
+                    escalation_ladder=opt.escalation_ladder,
+                    l2_stall_count=ask.l2.stall_count,
+                    l2_patience=opt.l2_patience,
+                    l3_stall_count=ask.l3.stall_count,
+                    l3_patience=opt.l3_patience,
+                    l1_layout_refused=result is not None and result.l1_layout_refused,
+                )
+            )
+            if heal.next_action is NextAction.FIRE_L3:
+                assert result is not None
+                # A heal reads no gate, so its record banks the counters the ladder holds.
+                held_l3 = ctx.slice(Ladder).l3
+                held = LayerReading(held_l3.stall_count, held_l3.entered_round)
+                replay.decide(
+                    L3EscalationTrigger(
+                        reading=EscalationReading.read(
+                            held,
+                            patience=opt.l3_patience,
+                            fires=held_l3.fires,
+                            rule=L1_LAYOUT_REFUSED,
+                        ),
+                        heal=True,
+                        l2_guard_breaches=[o.validator_id for o in result.l2_guard_breaches],
+                    ),
+                    True,
+                )
+                await _fire_layer(ctx, L3, Fire(L1_LAYOUT_REFUSED, None))
+            return
+        if ask.next_action is NextAction.CONTINUE:
+            return
+
+        replay.decide(
+            L3EscalationTrigger(
+                reading=EscalationReading.read(
+                    ask.l3,
+                    patience=opt.l3_patience,
+                    fires=ctx.slice(Ladder).l3.fires,
+                    rule=L2_PATIENCE_SPENT,
+                ),
+                heal=False,
+                l2_guard_breaches=[],
+            ),
+            ask.next_action == NextAction.FIRE_L3,
+        )
+        if ask.next_action == NextAction.FIRE_L3:
+            await _fire_layer(ctx, L3, Fire(L2_PATIENCE_SPENT, ask))
+        elif stop := ask.stop_reason:
             raise StopLoop(stop)
 
 

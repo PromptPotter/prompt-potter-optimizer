@@ -16,7 +16,7 @@ from typing import NamedTuple
 from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter import connectors
-from promptpotter.application import health, optimizers
+from promptpotter.application import health
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.landing_key import landing_key
@@ -29,12 +29,13 @@ from promptpotter.application.maintenance.reset import (
     resetting,
 )
 from promptpotter.application.notices import tell_landed
+from promptpotter.application.optimizer_contract import MANIFESTS, NODE_MEMBERS
 from promptpotter.application.optimizer_manifest import (
     bench_choice,
     checkin_manifest,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS
+from promptpotter.application.optimizers import builtin_members
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.scoring.evaluators import connector_name_refusals
 from promptpotter.application.scoring.judges import registry as judge_registry
@@ -101,7 +102,8 @@ def complete_registries() -> None:
             where = f"connector {name!r} [{connectors.CONNECTORS.origins[name]}]"
             raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
     judge_registry.JUDGES.complete()
-    optimizers.MANIFESTS.complete()
+    MANIFESTS.complete()
+    NODE_MEMBERS.complete(*builtin_members())
     for member in NODE_MEMBERS.table.values():
         member.complete()
     STATE_KINDS.complete()
@@ -123,7 +125,7 @@ def check_treatment(name: str) -> None:
 def check_every_treatment() -> None:
     """Every optimizer, and the check-in as every check-in and mint reads it, an install shadow
     included: a process serving any campaign reads them all at entry."""
-    for name in optimizers.MANIFESTS.table:
+    for name in MANIFESTS.table:
         check_treatment(name)
     checkin_manifest()
 

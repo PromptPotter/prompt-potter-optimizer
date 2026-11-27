@@ -98,19 +98,20 @@ from promptpotter.application.maintenance.landing import (
     check_every_treatment,
     complete_registries,
 )
+from promptpotter.application.optimizer_contract import (
+    BEHAVIOUR_KEYS_FILE,
+    MANIFESTS,
+    NODE_MEMBERS,
+    BehaviourKeys,
+)
 from promptpotter.application.optimizer_manifest import (
     bench_choice,
     manifest_directories,
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers import member_package_dir
 from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
-from promptpotter.application.optimizers.nodes import (
-    BEHAVIOUR_KEYS_FILE,
-    NODE_MEMBERS,
-    BehaviourKeys,
-    member_package_dir,
-)
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
@@ -259,6 +260,9 @@ HEALS: dict[str, tuple[Heal, ...]] = {
     "L2ContextOutput_0": (Heal.NONCOMPLIANT, Heal.NONCOMPLIANT),
 }
 WOUNDED = "wounded"
+# The optimizers whose race settles an arm FOR it once the survivors are known (CAPO's `locked_in`):
+# the straight run must settle one, so the catch-up a locked arm owes is walked by the real loop.
+LOCKS_IN = ("capo",)
 # Per optimizer, calls answered invalid on every send (by `requests/` name) and the mark its run
 # records: L1 no candidates, an L2 fire a warning, a text node's child its parse failure.
 WOUNDS: dict[str, dict[str, tuple[tuple[Heal, ...], str]]] = {
@@ -2092,7 +2096,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 def digests() -> dict[str, str]:
     check_every_treatment()
     out = {"estimator": BehaviourKeys.held().cell_estimator}
-    for name in sorted(optimizers.MANIFESTS.table):
+    for name in sorted(MANIFESTS.table):
         selected = select_optimizer(bench_choice(name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
@@ -2101,11 +2105,11 @@ def digests() -> dict[str, str]:
 
 
 def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
-    """Regenerates `nodes.py::BEHAVIOUR_KEYS_FILE` from each built-in's straight-run trace in
+    """Regenerates `optimizer_contract.py::BEHAVIOUR_KEYS_FILE` from each built-in's straight-run trace in
     *home*, naming it on a `wrote` or `unchanged` line (`gate.py::_rewrote`); `True` where it moved."""
     builtin = {
-        n for n in optimizers.MANIFESTS.table
-        if optimizers.MANIFESTS.get(n).directory.is_relative_to(PACKAGE_ROOT)
+        n for n in MANIFESTS.table
+        if MANIFESTS.get(n).directory.is_relative_to(PACKAGE_ROOT)
     }  # fmt: skip
     held = BehaviourKeys.held()
     fingerprints = {n: f for n, f in held.fingerprints.items() if n in builtin}
@@ -2265,7 +2269,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
         for node, member in NODE_MEMBERS.table.items()
     }
     owners = {d for d in packages.values() if d} | {
-        d for n in optimizers.MANIFESTS.table if (d := owned(optimizers.MANIFESTS.get(n).directory))
+        d for n in MANIFESTS.table if (d := owned(MANIFESTS.get(n).directory))
     }
 
     def imports(files: Iterable[Path]) -> set[str]:
@@ -2507,8 +2511,16 @@ def moved_against(home: Path, earlier: Path, names: Sequence[str]) -> list[str]:
 
 
 def read_straight(name: str, workspace: Path) -> int:
-    ran = BehaviourTrace.read(workspace).decisions["run"]
+    """Prints the straight run's reading; nonzero where its bench is ungraded, or a race that
+    settles arms `locked_in` (`LOCKS_IN`) settled none."""
+    decisions = BehaviourTrace.read(workspace).decisions
+    ran = decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
+    locked = sum(
+        arm["locked_at"] is not None for r in decisions["rounds"] for arm in r["arms"].values()
+    )
+    if name in LOCKS_IN:
+        print(f"{name}: its race settled {locked} arms locked_in{'' if locked else ' (owed 1+)'}")
     bench = ran["bench"]
     lift = None if bench is None else bench["vs_origin"]["lift"]
     headline = (
@@ -2519,7 +2531,7 @@ def read_straight(name: str, workspace: Path) -> int:
         else f"none ({bench['vs_origin']['read']})"
     )
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
-    return int(not _graded(bench))
+    return int(not _graded(bench) or (name in LOCKS_IN and not locked))
 
 
 def _the_record(workspace: Path) -> dict[str, Any]:
@@ -3137,11 +3149,7 @@ def main() -> int:
     home = named_home()
     check_every_treatment()
     arm_names = args.optimizer or ["potter", "capo", "gepa"]
-    names = (
-        list(CONTROLLED)
-        if args.controlled
-        else args.optimizer or sorted(optimizers.MANIFESTS.table)
-    )
+    names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(MANIFESTS.table)
     kept = LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = holds_run(home, run)

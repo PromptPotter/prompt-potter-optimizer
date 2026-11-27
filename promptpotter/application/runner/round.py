@@ -26,7 +26,7 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     OPERATOR_SEAT,
     MeasuredRound,
     Proposals,
@@ -148,8 +148,7 @@ from promptpotter.shared.errors import SendRefusedError, fault_said
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import RoundPlan
-    from promptpotter.application.optimizers.nodes import (
+    from promptpotter.application.optimizer_contract import (
         Controller,
         Eliminator,
         Proposer,
@@ -157,6 +156,7 @@ if TYPE_CHECKING:
         Selection,
         Selector,
     )
+    from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.scoring.race_protocol import Decider
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 

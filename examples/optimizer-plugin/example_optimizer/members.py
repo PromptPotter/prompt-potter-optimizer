@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Annotated, ClassVar
 from pydantic import Field
 
 from example_optimizer import prompts
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
-from promptpotter.application.optimizers import ManifestDir, nodes
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizer_contract import ManifestDir, RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.origin_panel import RoundEnding
@@ -22,14 +22,14 @@ from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
+    from promptpotter.application.optimizer_contract import (
         MeasuredRound,
         PromptArity,
         Proposals,
         RoundSamples,
         Selection,
     )
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.sample import Sample
@@ -47,20 +47,22 @@ class DrawKnobs(StrictModel):
     size: Annotated[int, Knob(Estimand.SELECTION)] = Field(ge=1, description="Cells a round draws.")
 
 
-class RandomDraw(nodes.Sampler):
+class RandomDraw(optimizer_contract.Sampler):
     name: ClassVar[str] = "example_draw"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
     sees = frozenset({Replay})
     size_knob: ClassVar[str | None] = "size"
 
-    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
+    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> optimizer_contract.DrawSize:
         cells = min(knobs.size, search)
-        return nodes.DrawSize(cells=cells, block_size=cells)
+        return optimizer_contract.DrawSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         cells = ctx.read(Replay).rng().sample(pool, min(ctx.knobs(DrawKnobs).size, len(pool)))
-        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=len(cells))
+        return optimizer_contract.RoundSamples(
+            cells=cells, order=list(cells), block_size=len(cells)
+        )
 
 
 class ProposeKnobs(RewriteKnobs):
@@ -69,11 +71,11 @@ class ProposeKnobs(RewriteKnobs):
     )
 
 
-class Propose(nodes.Proposer):
+class Propose(optimizer_contract.Proposer):
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    proposes: ClassVar[nodes.Proposing] = "opens"
+    proposes: ClassVar[optimizer_contract.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
@@ -86,12 +88,12 @@ class Propose(nodes.Proposer):
         prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent, node))
         variants = ctx.knobs(ProposeKnobs).variants
         answers = await ctx.read(Calls).ask_each(dict.fromkeys(range(variants), prompt))
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [child(ctx, node, [parent], raw, f"rephrase {i}") for i, raw in enumerate(answers)]
         )
 
 
-class Keep(nodes.Selector):
+class Keep(optimizer_contract.Selector):
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees = frozenset({Lineage, Replay})
@@ -112,7 +114,7 @@ class Keep(nodes.Selector):
         bar = folds[measured.parent.key].composite_fitness
         selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
         ctx.read(Replay).decide(ExampleKept(ranked=ranked), selected or "")
-        return nodes.Selection(
+        return optimizer_contract.Selection(
             leading=ranked[0] if ranked else None,
             ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
             electable=len(measured.electable),

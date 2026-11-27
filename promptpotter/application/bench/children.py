@@ -228,13 +228,14 @@ def _prompt_chars(individual: OptSearchPoint) -> int:
 def length_failures(
     child: OptSearchPoint, main: OptSearchPoint, budget: int | None
 ) -> list[ValidationFailure]:
-    """Grown or trimmed alike, every field summed against the main parent's; ``None`` bounds nothing."""
+    """Grown or trimmed alike, every field summed against the main parent's; ``None`` bounds nothing.
+    The verdict names the variation that last wrote the child, a crossover's or a mutation's."""
     moved = _prompt_chars(child) - _prompt_chars(main)
     if budget is None or abs(moved) <= budget:
         return []
     return [
         ValidationFailure(
-            axis="variant",
+            axis=child.lineage.variations[-1].node,
             value=f"{moved:+d} chars",
             allowed=[str(budget)],
             reason=ValidationReason.OVER_CEILING,

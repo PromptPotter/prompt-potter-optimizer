@@ -14,13 +14,13 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.optimizer_contract import BehaviourKeys
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
     fired_on,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import BehaviourKeys
 from promptpotter.domain.campaign_config import (
     ArmGateMode,
     CampaignConfig,

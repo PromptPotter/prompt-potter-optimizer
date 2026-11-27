@@ -153,6 +153,13 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.optimizer_contract import (
+    NODE_MEMBERS,
+    MintFacts,
+    Proposals,
+    RoundSamples,
+    unfit_pipeline,
+)
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
@@ -163,13 +170,6 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import (
-    NODE_MEMBERS,
-    MintFacts,
-    Proposals,
-    RoundSamples,
-    unfit_pipeline,
-)
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
     clustered_sample_ids,
@@ -300,7 +300,13 @@ from promptpotter.domain.layer_fold import (
     patch_between,
     rules_of,
 )
-from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
+from promptpotter.domain.opt_search_point import (
+    IndividualLineage,
+    Locus,
+    NodePrompt,
+    OptSearchPoint,
+    Variation,
+)
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_manifest import resolved_key
@@ -4710,6 +4716,10 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
     # Every child is minted through `Children.child`, which books this rule: grown or trimmed alike.
     n = 10
     main = prompted(instruction="x" * (2 * n), persona="r" * n)
+    # The verdict names the variation that last wrote the child: a crossover's, never one axis.
+    wrote = "potter:locus_crossover"
+    steps = [Variation(node=node, mode="deterministic") for node in ("potter:mating", wrote)]
+    crossed = IndividualLineage(variations=steps)
     for instruction, persona, refused in (
         ("x" * (3 * n), "r" * n, False),
         ("x" * n, "", True),
@@ -4717,9 +4727,11 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
         ("x" * (n - 1), "r" * n, True),
         ("x" * (3 * n), "r" * (n // 2), False),
     ):
-        child = prompted(instruction=instruction, persona=persona)
-        booked = [f.reason for f in length_failures(child, main, n)]
-        assert booked == ([ValidationReason.OVER_CEILING] if refused else []), (
+        child = prompted(instruction=instruction, persona=persona).model_copy(
+            update={"lineage": crossed}
+        )
+        booked = [(f.reason, f.axis) for f in length_failures(child, main, n)]
+        assert booked == ([(ValidationReason.OVER_CEILING, wrote)] if refused else []), (
             f"a child of {len(instruction)}+{len(persona)} chars over a 30-char main was judged wrong"
         )
     assert length_failures(prompted(instruction="x" * 99), main, None) == [], "None bounds nothing"

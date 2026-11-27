@@ -38,8 +38,8 @@ from promptpotter.application.free_tier import (
 )
 from promptpotter.application.initialization.session import Session, drawn_partition
 from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.optimizer_contract import MintFacts
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.optimizers.nodes import MintFacts
 from promptpotter.application.pipeline_responses import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,

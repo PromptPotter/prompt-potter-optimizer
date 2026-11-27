@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from promptpotter.application.optimizers.nodes import MemberCoupling
+from promptpotter.application.optimizer_contract import MemberCoupling
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationKnobs
 from promptpotter.domain.campaign_config import Estimand
 

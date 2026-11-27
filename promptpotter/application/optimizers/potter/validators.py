@@ -7,7 +7,7 @@ from collections.abc import Collection, Mapping, Sequence
 from itertools import pairwise
 from typing import Any
 
-from promptpotter.application.optimizers.nodes import llm_nodes
+from promptpotter.application.optimizer_contract import llm_nodes
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
     SCHEMA_DESCRIPTION_MAX_CHARS,

@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar
 
 from pydantic import Field
 
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
@@ -17,10 +18,7 @@ from promptpotter.application.bench.node_context import (
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.descriptors import prompt_chars
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     CycleRead,
     Draw,
     MeasuredRound,
@@ -31,6 +29,8 @@ from promptpotter.application.optimizers.nodes import (
     RoundSamples,
     Selection,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.paper_templates import (
     rewrite,
     rewritten,
@@ -124,13 +124,19 @@ class PairedTCut(Replayed, kind="paired_t_cut"):
 
 
 class PopulationKept(Replayed, kind="population_kept"):
-    objective: CapoObjective
     survivors: list[ArmKey]
+    # Each survivor's scores on the cells earlier rounds read it on, which a replay's one round lacks.
+    earlier: dict[ArmKey, dict[str, float]]
 
     def rank(self, rows: Mapping[ArmKey, CellSheet]) -> list[ArmKey]:
-        return _rank_survivors(
-            self.survivors, {key: rows[key] for key in self.survivors}, objective=self.objective
-        )
+        """promptolution's CAPO: best-first by mean raw score over every cell each survivor was
+        evaluated on, its cache across rounds included; an arm with no graded cell is unranked."""
+        readings = {
+            key: read
+            for key in self.survivors
+            if (read := {**self.earlier.get(key, {}), **_scores(rows[key].cells)})
+        }
+        return sorted(readings, key=lambda key: -sum(readings[key].values()) / len(readings[key]))
 
     def replay(self, ctx: ReplayContext) -> list[ArmKey]:
         return self.rank({key: ctx.round_data.rows(key) for key in self.survivors})
@@ -156,24 +162,24 @@ def cross_shots(parents: Sequence[Sequence[str]], *, rng: random.Random) -> list
     return rng.sample(union, min(n, len(union)))
 
 
-class FewShot(nodes.Proposer):
+class FewShot(optimizer_contract.Proposer):
     name: ClassVar[str] = "few_shot"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
     proposes: ClassVar[Proposing] = "edits"
     variation_mode: ClassVar[VariationMode] = "deterministic"
-    knobs: ClassVar[type[StrictModel]] = nodes.ShotKnobs
+    knobs: ClassVar[type[StrictModel]] = optimizer_contract.ShotKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Replay, Target})
     draws: ClassVar[Mapping[type[Pool], Draw]] = {
-        DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
+        DemoPool: optimizer_contract.CountKnob(optimizer_contract.ShotKnobs, "k_max")
     }
 
     async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
-        k_max = ctx.knobs(nodes.ShotKnobs).k_max
+        k_max = ctx.knobs(optimizer_contract.ShotKnobs).k_max
         pool = [s.key for s in ctx.drawn(DemoPool)]
         node = ctx.read(Target).prompt_node.name
         children, replay = ctx.read(Children), ctx.read(Replay)
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [
                 children.edit(
                     proposal,
@@ -204,7 +210,7 @@ class BlocksKnobs(StrictModel):
     )
 
 
-class Blocks(nodes.Sampler):
+class Blocks(optimizer_contract.Sampler):
     """The same cells in the same blocks every round, resume and fork: never shuffled."""
 
     name: ClassVar[str] = "blocks"
@@ -212,9 +218,11 @@ class Blocks(nodes.Sampler):
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
+    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> optimizer_contract.DrawSize:
         n_blocks = min(knobs.max_blocks, search // knobs.block_size)
-        return nodes.DrawSize(cells=n_blocks * knobs.block_size, block_size=knobs.block_size)
+        return optimizer_contract.DrawSize(
+            cells=n_blocks * knobs.block_size, block_size=knobs.block_size
+        )
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
@@ -241,7 +249,9 @@ class Blocks(nodes.Sampler):
                 f"{knobs.block_size}"
             )
         cells = pool[: n_blocks * knobs.block_size]
-        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=knobs.block_size)
+        return optimizer_contract.RoundSamples(
+            cells=cells, order=list(cells), block_size=knobs.block_size
+        )
 
 
 class PairedTKnobs(StrictModel):
@@ -266,25 +276,8 @@ def _cell_objectives(cells: Sequence[GradedCell], objective: CapoObjective) -> d
     return {cell.key: objective.of(cell, chars) for cell in graded}
 
 
-def _rank_survivors(
-    survivors: Sequence[ArmKey],
-    rows: Mapping[ArmKey, CellSheet],
-    *,
-    objective: CapoObjective,
-) -> list[ArmKey]:
-    # An arm with no graded cell, or none its rivals share, is absent from the ranking, as an
-    # untested rival is from the race.
-    readings = {
-        key: read for key in survivors if (read := _cell_objectives(rows[key].cells, objective))
-    }
-    shared = set.intersection(*(set(r) for r in readings.values())) if readings else set()
-    if not shared:
-        return []
-
-    def mean(key: ArmKey) -> float:
-        return sum(readings[key][s] for s in shared) / len(shared)
-
-    return sorted(readings, key=mean, reverse=True)
+def _scores(cells: Sequence[GradedCell]) -> dict[str, float]:
+    return {c.key: float(ROW_GRADES["fitness"].read(c)) for c in cells if c.scored}
 
 
 def _readings(
@@ -304,7 +297,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace(nodes.Race):
+class PairedTRace(optimizer_contract.Race):
     gate = "outscored"
     settled = "settled"
 
@@ -350,7 +343,7 @@ class PairedTRace(nodes.Race):
             # A rival's one-sided p is also P(arm beats it) as a t fiducial, which `p_better` reads.
             breakdown = {pid: p for pid, (p, _) in tested.items()}
             p_best = min(p for p, _ in tested.values())
-            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
+            snapshot = optimizer_contract.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
             self._progress.race_standing(snapshot)
             # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
             beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)
@@ -429,7 +422,7 @@ class PairedTRace(nodes.Race):
         return Elimination(reason=reason, context=context)
 
 
-class PairedT(nodes.Eliminator):
+class PairedT(optimizer_contract.Eliminator):
     name: ClassVar[str] = "paired_t"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PairedTKnobs
@@ -492,7 +485,7 @@ def seed_instructions(raw: str) -> list[str] | None:
     return [s.strip() for s in listed if s.strip()] or None
 
 
-class CapoInit(nodes.Proposer):
+class CapoInit(optimizer_contract.Proposer):
     """Draws the initial population, which sets the objective every later race and selection ranks on."""
 
     name: ClassVar[str] = "capo_init"
@@ -505,7 +498,9 @@ class CapoInit(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Lineage, Replay, Target}
     )
-    draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(CapoInitKnobs, "k_max")}
+    draws: ClassVar[Mapping[type[Pool], Draw]] = {
+        DemoPool: optimizer_contract.CountKnob(CapoInitKnobs, "k_max")
+    }
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, CapoInitKnobs).size
@@ -531,7 +526,7 @@ class CapoInit(nodes.Proposer):
         children = ctx.read(Children)
         origin = ctx.read(Lineage).origin
         # Out of form, the reply is one child refused, as every text node's is (`paper_templates.py`).
-        initial = nodes.Proposals(
+        initial = optimizer_contract.Proposals(
             (
                 []
                 if listed is not None
@@ -568,7 +563,7 @@ def _mated(ctx: NodeContext, proposals: Proposals) -> list[list[OptSearchPoint]]
     return [lineage.parents(p.individual) for p in proposals.proposals]
 
 
-class CapoCrossover(nodes.Proposer):
+class CapoCrossover(optimizer_contract.Proposer):
     name: ClassVar[str] = "capo_crossover"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -584,12 +579,12 @@ class CapoCrossover(nodes.Proposer):
         answers = await ctx.read(Calls).ask_each(
             {i: crossover_prompt(ctx, a, b) for i, (a, b) in enumerate(pairs)}
         )
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [rewrite(ctx, p, raw) for p, raw in zip(proposals.proposals, answers, strict=True)]
         )
 
 
-class ShotCrossover(nodes.Proposer):
+class ShotCrossover(optimizer_contract.Proposer):
     name: ClassVar[str] = "shot_crossover"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -601,7 +596,7 @@ class ShotCrossover(nodes.Proposer):
         rng = ctx.read(Replay).rng()
         node = ctx.read(Target).prompt_node.name
         children = ctx.read(Children)
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [
                 children.edit(
                     p,
@@ -616,7 +611,7 @@ class ShotCrossover(nodes.Proposer):
         )
 
 
-class CapoMutate(nodes.Proposer):
+class CapoMutate(optimizer_contract.Proposer):
     """A child its crossover already failed is passed on untouched: it will never be measured."""
 
     name: ClassVar[str] = "capo_mutate"
@@ -636,10 +631,10 @@ class CapoMutate(nodes.Proposer):
         for i, raw in zip(live, answers, strict=True):
             was = mutated[i].individual.lineage.changes_description
             mutated[i] = rewrite(ctx, mutated[i], raw, f"{was}, rephrased")
-        return nodes.Proposals(mutated)
+        return optimizer_contract.Proposals(mutated)
 
 
-class PopulationRejoin(nodes.Proposer):
+class PopulationRejoin(optimizer_contract.Proposer):
     """Members go AHEAD of the offspring: they walk first, so every offspring is raced against them."""
 
     name: ClassVar[str] = "population_rejoin"
@@ -653,7 +648,7 @@ class PopulationRejoin(nodes.Proposer):
         return selected.reached_knobs(self, SurvivalKnobs).size
 
     async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [
                 *(Proposal(individual=m) for m in ctx.read(Lineage).population),
                 *proposals.proposals,
@@ -661,12 +656,12 @@ class PopulationRejoin(nodes.Proposer):
         )
 
 
-class PopulationSelector(nodes.Selector):
-    """Ranks the race's survivors on CAPO's objective; `survival` keeps the top μ."""
+class PopulationSelector(optimizer_contract.Selector):
+    """Ranks the race's survivors as the reference ranks them (`PopulationKept.rank`); `survival`
+    keeps the top μ."""
 
     name: ClassVar[str] = "population"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_partial: ClassVar[bool] = True
 
@@ -683,25 +678,33 @@ class PopulationSelector(nodes.Selector):
         walked = {cell.key for cell in rows.get(ArmKey(ctx.read(Lineage).parent.id), NO_CELLS)}
         return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
 
-    def parent_read(self, panel: nodes.DrawSize) -> int:
+    def parent_read(self, panel: optimizer_contract.DrawSize) -> int:
         # Round 1's origin is no arm and reads block one; later the incumbent races as an arm.
         return panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
-        objective = ctx.slice(CapoObjective)
-        inputs = PopulationKept(objective=objective, survivors=measured.electable)
+        lineage = ctx.read(Lineage)
+        earlier = {
+            key: read
+            for key in measured.electable
+            if (
+                read := {
+                    k: v for rr in lineage.rounds for k, v in _scores(rr.rows(key).cells).items()
+                }
+            )
+        }
+        inputs = PopulationKept(survivors=measured.electable, earlier=earlier)
         ranked = ctx.read(Replay).decide(inputs, inputs.rank(measured.rows))
         best = ranked[0] if ranked else None
-        lineage = ctx.read(Lineage)
         carried = lineage.population
         verdict = (
-            f"ranked {len(ranked)} surviving arms by mean objective (length penalty "
-            f"{objective.length_penalty}) on their shared cells; best {measured.labels[best]}"
+            f"ranked {len(ranked)} surviving arms by mean score on every cell each was read "
+            f"on; best {measured.labels[best]}"
             if best is not None
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
         crowned = best is not None and best != lineage.parent.id
-        return nodes.Selection(
+        return optimizer_contract.Selection(
             # The race's best survivor, which the incumbent may be: it races as an arm.
             leading=best,
             ending=RoundEnding.CROWNED if crowned else RoundEnding.HELD,

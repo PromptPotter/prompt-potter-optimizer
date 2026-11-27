@@ -6,15 +6,14 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application import optimizers
 from promptpotter.application.config_map import ConfigNodeKnobs, node_knobs
+from promptpotter.application.optimizer_contract import MANIFESTS, KnobDraw, MintFacts
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     bench_choice,
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
@@ -39,7 +38,7 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import Initializer
+    from promptpotter.application.optimizer_contract import Initializer
 
 
 class KnobRef(StrictModel):
@@ -437,8 +436,8 @@ def optimizer_setup(
 
 def optimizer_roster() -> OptimizerRoster:
     default = campaign_defaults()["optimization"]["optimizer"]
-    names = sorted(optimizers.MANIFESTS.table, key=lambda n: (n != default, n))
-    origins = optimizers.MANIFESTS.origins
+    names = sorted(MANIFESTS.table, key=lambda n: (n != default, n))
+    origins = MANIFESTS.origins
     entries = []
     for name in names:
         selected = select_optimizer(bench_choice(name))

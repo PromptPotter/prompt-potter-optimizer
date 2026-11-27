@@ -19,7 +19,7 @@ from promptpotter.application.intelligence.rasch import (
     responses_binary,
     responses_of,
 )
-from promptpotter.application.optimizers.nodes import Race, RoundSamples
+from promptpotter.application.optimizer_contract import Race, RoundSamples
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,

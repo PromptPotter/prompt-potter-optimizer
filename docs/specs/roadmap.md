@@ -356,12 +356,6 @@ each ends as a rule built or a closed note.
 - **INVESTIGATE — does an errored cell bias a head-to-head?** `gpt-oss-20b:nitro` can end
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a miss.
   *Re-test:* per arm, the hit rate of error rows against the arm's other rows.
-- **INVESTIGATE — CAPO's survivors are ranked on another reading than the reference ranks them on.**
-  `capo/members.py::_rank_survivors` keeps μ best-first by mean objective on the cells all survivors
-  measured; promptolution's CAPO sorts survivors on raw score over every cell each was evaluated on,
-  cached across rounds, so an incumbent's deeper blocks from earlier races count. After a one-block race
-  the two can crown differently. **Decided 2026-11-27:** the bench compares the reference's reading for CAPO's survivors. *Re-test:* on a CAPO run with
-  offspring < μ, rank one round's survivors both ways.
 - **An optimizer's round price is its name's, not its treatment's**
   (`application/head_to_head_price.py::optimizer_round_price`): the three `escalation_ladder` arms read
   one potter price, though an `l1` round sends fewer optimizer calls than a `full` one. Action: key it on
@@ -561,7 +555,7 @@ set of one entry kind (`individual` · `block` · `shot`) that nodes draw from u
 (`off` · `open` · `closed`); a **variation node** turns parents and pool entries into arms. Owed, in
 order: (1) `mix` on the opening node, a knob, then the mode head-to-head (PAID), matched on USD and
 cells, with a fresh individual as donor separating recombination from macro-mutation; (2) L4 reach,
-`mix` and access as levers (`application/optimizers/nodes.py::LlmNode.outer_levers`), the instrument
+`mix` and access as levers (`application/optimizer_contract.py::LlmNode.outer_levers`), the instrument
 never; (3) a pool fed while a campaign runs, its writers declared, a write a record at a round boundary,
 a controlled arm taking none; (4) parent and survivor rules past `tournament`, ranked on θ alone, and the
 paper compositions (EvoPrompt, PhaseEvo, GEPA's merge). Never a shipped block library.

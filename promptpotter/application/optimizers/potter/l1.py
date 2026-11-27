@@ -15,7 +15,7 @@ from promptpotter.application.bench.node_context import (
     Ruler,
     Target,
 )
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     CheckResult,
     Proposals,
     ReviewReading,

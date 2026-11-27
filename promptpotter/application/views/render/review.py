@@ -1,12 +1,12 @@
 """The optimizer's review of its rounds as readout text: each round's checks at its close (its
 critique is the round block's note), the cycle's stats at its stop.
-``optimizers/nodes.py::Reviewer`` reads; this words it."""
+``optimizer_contract.py::Reviewer`` reads; this words it."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
+from promptpotter.application.optimizer_contract import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.primitives import _node_line
 from promptpotter.domain.round_audit import RoundAudit
 

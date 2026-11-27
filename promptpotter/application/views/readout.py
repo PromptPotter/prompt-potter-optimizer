@@ -9,7 +9,7 @@ from typing import Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.intelligence.hard_sample_sorter import rank_hard_samples
-from promptpotter.application.optimizers.nodes import ReviewReading
+from promptpotter.application.optimizer_contract import ReviewReading
 from promptpotter.application.pipeline_resolve import RunResolution
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.measurement_log import cycle_hard_samples

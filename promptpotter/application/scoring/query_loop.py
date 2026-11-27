@@ -89,7 +89,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import Race
+    from promptpotter.application.optimizer_contract import Race
 
 
 _BUDGET_STOPS = frozenset(

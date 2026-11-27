@@ -32,8 +32,8 @@ settle before L4 spends.
     narrower parameter cannot close these, so each part needs the protocol it reads in a module of
     its own;
   - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`;
-  - bench ↔ optimizers: bench still reads `nodes.py`'s `CycleRead`, member protocols and
-    `NODE_MEMBERS`, because the plugin contract and the round types share that module. Moving
+  - bench ↔ the plugin contract: bench reads `optimizer_contract.py`'s `CycleRead`, member
+    protocols and `NODE_MEMBERS`, which name the bench's `NodeContext` and `RoundContext`. Moving
     `CycleRead` alone re-formed runtime cycles.
 
   Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
@@ -247,9 +247,13 @@ read standing rounds off the ledger.
   cancel leaves the thread minting. Root: the cut completes or names its child before the await can be
   cancelled. **Rides with:** area 03's chain. **Re-test:** a cancel injected during the cut leaves no
   child cycle its parent's stop does not name.
-- **The runner is imported from above** (map pass): `scoring/passes.py` and `evidence/head_to_head.py`
-  import `runner/bench.py`, and `jobs/launcher/run_job.py` imports `runner/entry.py` while `runner/`
-  imports `jobs/` at 11 sites. Root: what both sides read moves down. **Rides with:** area 03's chain.
+- **The runner is imported from above** (map pass, w11-plugin): `scoring/passes.py` imports nine
+  `runner/bench.py` functions (`bench_origin`, `line_passes`, `live_cycle_run`, `read_cycle_bench`…) and
+  `runner/output.py::ExportProjection`, `evidence/head_to_head.py` seven (`bench_line`, `pair_on_bench`,
+  `read_bench`…), and `jobs/launcher/run_job.py` imports `runner/entry.py::run_optimization` and
+  `runner/run_init.py::enter_cycle` while `runner/` imports `jobs/` at 11 sites (bench 1, entry 1,
+  `inner/spawn.py` 6, run_init 3); the contract's move made none trivial. Root: the bench pass's lines
+  move below scoring and evidence, and the launch's seam below both runner and jobs. **Rides with:** area 03's chain.
   **Re-test:** `git grep -n "^from promptpotter.application.runner" -- promptpotter/application/scoring
   promptpotter/application/evidence promptpotter/application/jobs` is empty.
 - **The embedded fresh door probes its backend after its session opens** (w7-open, not re-tested):
@@ -720,22 +724,29 @@ selection explicit.
 
 **Target:** Every optimizer is a manifest whose knobs are its nodes' `config`, registered in the one
 entry-point registry, so a third party ships one with no edit here; its working state rides the round as
-`optimizer_state`; potter's bad prompt is fixed in the dispatch hub; no fourth layer. `optimizers/nodes.py`
-holds the member protocols, the round types, the review readings, the knob types and `BehaviourKeys`, and 13
-modules outside `optimizers/` import it.
+`optimizer_state`; potter's bad prompt is fixed in the dispatch hub; no fourth layer. The plugin contract
+(`application/optimizer_contract.py`) sits below the bench; outside `optimizers/` only the landing's loader
+imports an optimizer package.
 
-**Unexamined:** `dispatch/facade.py`,
-`validators.py`, `dispatch/bundle.py`, `dispatch/layout.py`, `knobs.py`, `dispatch/injections/layer_state.py`,
-`l1.py`, `behavior_checks.py`, `optimizer_manifest.py`, `potter/members.py`, `dispatch/injections/panels.py`
-
+- **Potter's dispatch spells a rule twice and a cap inline** (w11-plugin census):
+  `potter/dispatch/layout.py::unplaceable_edit` refuses an edit placed twice and
+  `potter/dispatch/layout.py::coerce_l1_layout` asserts it again; `potter/behavior_checks.py`'s
+  `_REBUT_SIGNALS` must match the words `potter/dispatch/injections/panels.py` tells the model to write;
+  `panels.py` and `potter/dispatch/injections/layer_state.py` cut text at inline literals (`[:70]`,
+  `char_cap=400`, `char_cap=2400`) beside `potter/dispatch/bundle.py`'s caps, and `layer_state.py`'s
+  `_r_l1_layout` re-derives `potter/dispatch/prompts.py::node_layout`; `potter/validators.py` books its
+  no-op, duplicate and repeat verdicts under the placeholder axis `variant`, no locus, which
+  `domain/wounds.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
+  whole-candidate verdict names no axis. **Rides with:** area 09's chain. **Re-test:**
+  `git grep -c 'axis="variant"' -- promptpotter` is 0 and `layer_state.py` names no `char_cap=` literal.
 - **Selection and the race are written once per peer, not in the backbone** (w10-survey):
   `capo/members.py::PopulationSelector.select`, `gepa/members.py::Pareto.select` and
   `levi/members.py::MapElites.select` each re-derive the leader, a tie rule and the `RoundEnding` /
   `Selection`; `capo/members.py::PairedTRace.decide` and `gepa/members.py::_GateRace.decide` are one
   `scoring/race_protocol.py::next_block` body and both build the `eliminated` `StopSignal`;
   `kind == "eliminated"` is counted in `capo/members.py`, `gepa/members.py` and
-  `potter/dispatch/injections/panels.py`; the shared-cell mean is written four times
-  (`capo/members.py::_rank_survivors`, `capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
+  `potter/dispatch/injections/panels.py`; the shared-cell mean is written three times
+  (`capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
   `gepa/members.py::_aggregate`) beside `optimizers/descriptors.py::cell_objectives`. Root: the backbone
   takes a score map and owns crown, hold and the stop signal; a peer supplies the ranking. **Rides with:**
   area 09's chain. **Re-test:** `git grep -n "next_block(" -- promptpotter/application/optimizers` is 0 in
@@ -753,10 +764,6 @@ modules outside `optimizers/` import it.
   on the fitness column, yet the pipeline node, its knobs and `row_policy.py` still spell
   `theta_election`. Action: rename it to what it decides (with its doc row; a behaviour-key move).
   **Rides with:** area 09's chain. **Re-test:** `git grep -c theta_election -- promptpotter` is 0.
-- **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
-  `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
-  fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
-  `git grep -n "class EscalationLayer" -- promptpotter` is empty.
 - **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
@@ -770,21 +777,6 @@ modules outside `optimizers/` import it.
   names `mechanism` and `claim` before `sample_ids` in the layout and `schemas.py::FailureCluster`'s
   order, and each id appears once in the whole reply. Open: the paid proof. **Re-test:** the banked
   inputs (`.scratch/wave-2/bank/row111/`) re-asked under `l1_critique/1` as it now renders finish `stop`.
-- **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
-  a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
-  id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it
-  receives. **Rides with:** the next variation chain. **Re-test:** a hosted recombination keeps its id.
-- **An over-budget crossover child books its verdict under axis `variant`**: `bench/children.py`'s
-  one length check cannot tell which mutation minted the child. Action: the verdict names the
-  mutation kind. **Rides with:** the row above. **Re-test:** a crossover child's OVER_CEILING names
-  crossover.
-- **The plugin contract lives inside `optimizers/`** (map pass): `optimizers/nodes.py` holds the member
-  protocols, the round types, the review readings, the knob types and `BehaviourKeys`, and 13 modules
-  outside `optimizers/` import it (`bench/cycle.py`, `bench/node_context.py`, `runner/round.py`…), against
-  §0's "the bench never imports an optimizer". **Decided 2026-11-27:** the contract moves below the
-  bench; the bench ↔ optimizers knot of **The layering is fictional at runtime** closes with it.
-  **Rides with:** the 09 + 03 chain. **Re-test:** no module under `runner/` or `bench/` imports
-  `application/optimizers/`.
 - **A held round's words are the election match's fall-through** (w8-round, 11-27):
   `promptpotter/application/optimizers/potter/election.py::_verdict_reason` — a HELD round (and
   ADOPTED) reaches the closing `return` of the `match`, since `RoundDecision.ending` is typed
@@ -831,7 +823,7 @@ AUC.
   `UntakenBoughtRecord`. tw-j's e2e L4 fixture discarded 0 outer cells at press depth 4 and at 6
   seats: the path is unreached, not refuted. **Rides with:** wave 6 (L4). **Re-test:** an L4 leg
   pressed past one outer cell discards one, and its ledger names it untaken.
-- **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the
+- **The estimator has no golden corpus**: its key (`optimizer_contract.py::BehaviourKeys.cell_estimator`) reads the
   L4 leg's trace on the offline world, not its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Decided 2026-11-27:** the corpus is the offline world's L4 leg outputs, committed under 1 MB. **Re-test:** the
@@ -1262,10 +1254,8 @@ budgets.
   decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
   A green rerun is a gate or desk defect, never a pass: a twin's pause point or its replay depends on
   something the leg does not pin. **Re-test:** five desk runs of the leg read UNMOVED.
-- **Tests seat what a world door should make** (w9-entry, w9-pass): `tests/test_security.py` hand-seats a
-  `ForkCut`, and no offline leg exercises CAPO's `locked_in` path, so w9-pass's catch-up is proven by
-  unit tests alone. **Rides with:** area 14's chain. **Re-test:** a world leg settles a CAPO race
-  `locked_in`; `git grep -c "ForkCut(" -- tests/test_security.py` is 0.
+- **Tests seat what a world door should make** (w9-entry): `tests/test_security.py` hand-seats a
+  `ForkCut`. **Rides with:** area 14's chain. **Re-test:** `git grep -c "ForkCut(" -- tests/test_security.py` is 0.
 - **`gate.py --changed` proves nothing for a committed link** (w7-ver2, HO1063): on a clean tree it runs 0
   checks, and its `specs` go red when their generator rewrites. **Rides with:** area 14's chain.
   **Re-test:** `--changed` after a commit checks that commit's files, and a regenerated spec reads green.
