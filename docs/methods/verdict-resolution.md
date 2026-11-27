@@ -104,7 +104,7 @@ fitness column, say which column it used.
 
 **No harness rule ranks rounds by their own readings.** The run has one ceiling stop: the declared
 pick's own level on the origin panel, read at its one-sided anytime-valid lower bound
-(`shared/statistics.py::anytime_level_lower` at `termination.py::_CEILING_ALPHA`), so a level looked at every round
+(`shared/statistics.py::anytime_level_lower` at `application/run_stop.py::_CEILING_ALPHA`), so a level looked at every round
 spends no α it was not given; never a point estimate of a truncated draw, C0's rate taken as known, or
 each round's composite high-water. `halt_at_fitness` is its target; 9 of 9 bounds at 0.56, 20 of 20
 at 0.77. Potter's L2 and L3 patience count the round's stall as L1's does

@@ -137,12 +137,12 @@ from promptpotter.application.pipeline_resolve import (
     laid_session,
 )
 from promptpotter.application.run_phase_control import budget_stop
+from promptpotter.application.run_stop import StopLoop, panel_gate_tripped, run_stop_reason
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
-from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
@@ -204,11 +204,7 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.layer_fold import UNBOUNDED, Layer, fold_layers
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import (
-    CampaignPhase,
-    PauseCause,
-    StopReason,
-)
+from promptpotter.domain.phases import CampaignPhase, PauseCause, StopReason
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -238,7 +234,6 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     SpendTombstoneRecord,
     StandingBudgetRecord,
-    StopLoop,
     TokenUsageRecord,
 )
 from promptpotter.domain.run_mode import RunMode

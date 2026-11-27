@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import ProducerHold
+from promptpotter.application.run_stop import run_stop_detail, run_stop_reason
 from promptpotter.application.runner.output import ExportProjection
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.served_dashboard import spend_counts
@@ -17,11 +19,13 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
     PauseCause,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
 )
+from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     CycleShareRecord,
     RunPhaseRecord,
@@ -29,7 +33,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.spend import MONEY_AXES, Budget, StopSpend
 from promptpotter.infrastructure.llm.spend_book import SpendBook
-from promptpotter.infrastructure.llm.telemetry import billing_ledger
+from promptpotter.infrastructure.llm.telemetry import append_record, billing_ledger, current_round
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
@@ -71,6 +75,24 @@ def declare_run_stop(
         cause, detail = session.state.control.take_pause() or (interrupted_by, "")
         stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
     session.store.declare_stop(session.hop, stop)
+
+
+def end_run_on(exc: BaseException) -> tuple[StopReason, ErrorRecord | None, str]:
+    """Call INSIDE the ``except``: the traceback is read off the live exception, dead by finalize.
+    Answers the stop, its error record where it failed, and `run_stop_detail`."""
+    reason, detail = run_stop_reason(exc), run_stop_detail(exc)
+    info = STOP_REASON_INFO[reason]
+    if info.outcome is not StopOutcome.FAILED:
+        return reason, None, detail
+    record = ErrorRecord.raised(
+        exc,
+        kind=type(exc).__name__,
+        stop_reason=reason,
+        traceback=traceback.format_exc() if info.has_traceback else None,
+        round=current_round(),
+    )
+    append_record(record)
+    return reason, record, detail
 
 
 def declare_run_wiring(

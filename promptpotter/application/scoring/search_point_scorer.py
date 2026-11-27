@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import ArchiveEntry, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint

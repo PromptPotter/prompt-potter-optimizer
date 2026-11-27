@@ -1,29 +1,15 @@
-"""The spend ceiling's stop is not here: ``RunControl.budget_tripped``."""
+"""How a run stops: the `StopLoop` signal, the reason and detail a raised stop ends on, and the gates
+that trip one. The words themselves are the domain's (`domain/phases.py::StopReason`)."""
 
 from __future__ import annotations
 
 import asyncio
-import traceback
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.account_words import refusal_words
-from promptpotter.domain.campaign_config import (
-    GateMode,
-    OptimizationConfig,
-)
 from promptpotter.domain.paired_reading import ReadingState
-from promptpotter.domain.phases import (
-    ERROR_CATEGORY_INFO,
-    STOP_REASON_INFO,
-    StopOutcome,
-    StopReason,
-)
-from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import StopLoop
-from promptpotter.domain.round_health import DegradationHealth
-from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import GradedCell
-from promptpotter.infrastructure.llm.telemetry import append_record, current_round
+from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.shared.errors import (
     ErrorCategory,
     OptimizerTimeoutError,
@@ -33,6 +19,34 @@ from promptpotter.shared.errors import (
     SendRefusedError,
 )
 from promptpotter.shared.statistics import anytime_level_lower
+
+if TYPE_CHECKING:
+    from promptpotter.domain.campaign_config import GateMode, OptimizationConfig
+    from promptpotter.domain.records.run_records import RebaseRequest
+    from promptpotter.domain.round_health import DegradationHealth
+    from promptpotter.domain.run_standing import RunStanding
+    from promptpotter.domain.scoring import GradedCell
+
+
+class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
+    def __init__(
+        self,
+        reason: StopReason,
+        *,
+        unmeasured: int | None = None,
+        fork: RebaseRequest | None = None,
+        detail: str = "",
+    ) -> None:
+        if (reason is StopReason.REBASED) != (fork is not None):
+            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
+        self.reason = reason
+        # Why its raiser stopped, in its own words: its run-phase record's `detail`.
+        self.detail = detail
+        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
+        self.unmeasured = unmeasured
+        self.fork = fork
+        super().__init__(reason.value)
+
 
 RUN_STOPS = (StopLoop, SendRefusedError)
 # `SystemExit` and `GeneratorExit` still pass.
@@ -66,24 +80,6 @@ def run_stop_detail(exc: BaseException) -> str:
     if isinstance(exc, SendRefusedError):
         return refusal_words(exc)
     return exc.detail if isinstance(exc, StopLoop) else ""
-
-
-def end_run_on(exc: BaseException) -> tuple[StopReason, ErrorRecord | None, str]:
-    """Call INSIDE the ``except``: the traceback is read off the live exception, dead by finalize.
-    Answers the stop, its error record where it failed, and `run_stop_detail`."""
-    reason, detail = run_stop_reason(exc), run_stop_detail(exc)
-    info = STOP_REASON_INFO[reason]
-    if info.outcome is not StopOutcome.FAILED:
-        return reason, None, detail
-    record = ErrorRecord.raised(
-        exc,
-        kind=type(exc).__name__,
-        stop_reason=reason,
-        traceback=traceback.format_exc() if info.has_traceback else None,
-        round=current_round(),
-    )
-    append_record(record)
-    return reason, record, detail
 
 
 def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason | None:

@@ -22,6 +22,7 @@ from promptpotter.application.initialization.session import LaunchClock, drawn_p
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_phase_control import budget_stop
+from promptpotter.application.run_stop import RUN_STOPS, run_stop_reason
 from promptpotter.application.runner.bench import (
     bank_campaign_result,
     bench_origin,
@@ -34,7 +35,6 @@ from promptpotter.application.runner.bench import (
     read_cycle_bench,
 )
 from promptpotter.application.runner.output import ExportProjection
-from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
 from promptpotter.application.scoring.search_point_scorer import score_search_point

@@ -14,7 +14,7 @@ from typing import Any
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import AdmissionGate
-from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.application.run_stop import run_stop_reason
 from promptpotter.config.paths import (
     ENDED_JOBS_DIR,
     LIVE_JOBS_INDEX,

@@ -10,7 +10,7 @@
 
 ## Stops and the ladder
 
-- **Boundary stops are the bench's** (`runner/termination.py::standing_tripped`); potter's `escalation` node stops on its own exhaustion, a layer through `terminate_proposal`. No round-number threshold inside the loops.
+- **Boundary stops are the bench's** (`application/run_stop.py::standing_tripped`); potter's `escalation` node stops on its own exhaustion, a layer through `terminate_proposal`. No round-number threshold inside the loops.
 - **`escalation_ladder` (`full` / `l1_l2` / `l1`) is the ablation arm**: a patience paces the ladder, never shortens it, and L1's prompt is identical across arms.
 
 ## L1 — what `l1_generate` may propose

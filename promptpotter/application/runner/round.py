@@ -38,11 +38,11 @@ from promptpotter.application.optimizers.nodes import (
     RoundSamples,
     RoundWalk,
 )
+from promptpotter.application.run_stop import StopLoop, panel_gate_tripped, standing_tripped
 from promptpotter.application.runner.bench import (
     line_outlay,
     reserve_selection_pass,
 )
-from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.scoring.arm_states import (
     conclude,
     cut_invalid,
@@ -127,7 +127,6 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     Running,
     RunPhaseRecord,
-    StopLoop,
 )
 from promptpotter.domain.results import Election, InRunCells, RoundResult, round_document_digest
 from promptpotter.domain.run_standing import (

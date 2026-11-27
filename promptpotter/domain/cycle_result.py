@@ -68,7 +68,7 @@ class CycleResult(StrictModel):
     resumed_from_round: int = 1
     # ``None`` only on an init-crash before any observer wired up.
     spend: SpendRollup | None = None
-    # Set where the stop's ``STOP_REASON_INFO`` row is FAILED (``runner/termination.py::end_run_on``).
+    # Set where the stop's ``STOP_REASON_INFO`` row is FAILED (``run_observers.py::end_run_on``).
     error: ErrorRecord | None = None
     bench: BenchScore
     # ``None`` where the line banked no origin pass: `bench.status` says why.

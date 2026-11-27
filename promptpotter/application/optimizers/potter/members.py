@@ -109,6 +109,7 @@ from promptpotter.application.optimizers.potter.records import (
     Recombination,
 )
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.crowning_bar import THETA_CROWNS
@@ -124,7 +125,6 @@ from promptpotter.domain.phase_acts import (
 )
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
-from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit

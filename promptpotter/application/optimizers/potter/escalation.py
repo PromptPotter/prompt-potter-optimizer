@@ -38,6 +38,7 @@ from promptpotter.application.optimizers.potter.records import (
     LayerCounters,
     Recombination,
 )
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.origin_panel import StallEffect
 from promptpotter.domain.paired_reading import RoundArm
@@ -51,7 +52,6 @@ from promptpotter.domain.records.run_records import (
     RebaseRequest,
     RoundStatement,
     RoundWarningRecord,
-    StopLoop,
 )
 from promptpotter.domain.results import Reelection, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
@@ -389,8 +389,8 @@ def _layer_control(
     ):
         raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{fired.layer.layer_id}: {reason}")
     if isinstance(fork, RebaseRequest):
-        cut = f"forked at round {fork.fork_from_round} by {fork.issued_by.display}"
-        raise StopLoop(StopReason.REBASED, fork=fork, detail=f"{cut}: {fork.reason}")
+        # The runner words its stop once the fork is cut (`fork_siblings.py::ForkCut.said`).
+        raise StopLoop(StopReason.REBASED, fork=fork)
 
 
 def _rebase_request(

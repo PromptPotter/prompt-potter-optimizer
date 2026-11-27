@@ -2,4 +2,4 @@
 not hand-edit: the key a data root lands under (`landing.py::LandedStamp`), so no process hashes the
 code a load runs at its entry."""
 
-LANDING_KEY = "dd6302f0dafbd46e"
+LANDING_KEY = "cba2eb700a9b4f88"

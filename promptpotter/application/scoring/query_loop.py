@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_phase_control import Flight, budget_stop
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.race_protocol import (
     BATCH,
     Decider,
@@ -47,7 +48,6 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     SampleScoredRecord,
     SampleStartedRecord,
-    StopLoop,
 )
 from promptpotter.domain.records.untaken import UntakenBoughtRecord
 from promptpotter.domain.results_health import is_deprecated

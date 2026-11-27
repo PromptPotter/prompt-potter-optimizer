@@ -25,6 +25,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.paired import RoundPairs
 from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
 from promptpotter.config.paths import PACKAGE_ROOT
@@ -48,7 +49,6 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.ruler import DeltaRuler
@@ -682,7 +682,7 @@ class Adapter(NodeMember, Protocol):
 
 
 class Controller(NodeMember, Protocol):
-    """Whether the run STOPS is the bench's (``runner/termination.py::standing_tripped``); ``act`` may still raise ``StopLoop``."""
+    """Whether the run STOPS is the bench's (``application/run_stop.py::standing_tripped``); ``act`` may still raise ``StopLoop``."""
 
     @property
     def fires(self) -> frozenset[type]:

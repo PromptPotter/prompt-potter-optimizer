@@ -11,7 +11,8 @@ from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.shares import declare_round_allowance
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.run_observers import RunObservers, declare_run_stop
+from promptpotter.application.run_observers import RunObservers, declare_run_stop, end_run_on
+from promptpotter.application.run_stop import RUN_ENDS, RUN_STOPS
 from promptpotter.application.runner.bench import (
     bank_campaign_result,
     bench_selection,
@@ -30,11 +31,6 @@ from promptpotter.application.runner.run_init import (
     open_cycle,
     open_launch,
     start_launch,
-)
-from promptpotter.application.runner.termination import (
-    RUN_ENDS,
-    RUN_STOPS,
-    end_run_on,
 )
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.bench import BenchCurve, BenchScore
@@ -147,9 +143,6 @@ def close_cycle(
     finished_at = utcnow_iso()
     # Drained on every exit, a raise while banking included: the artifacts name what landed.
     try:
-        # Before the result is built: a decision made after the last round has no next `close_round`.
-        if cycle is not None:
-            flush_pending_decisions(cycle)
         banked = None if cycle is None else cycle.bench_passes
         bench = declare_line_bench(
             session, config, passes=banked, selecting=False, ending=stop_reason
@@ -250,7 +243,11 @@ async def open_line(
     if cut is not None:
         # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
         declare_run_stop(
-            session, observers, StopReason.REBASED, interrupted_by=PauseCause.INTERRUPT
+            session,
+            observers,
+            StopReason.REBASED,
+            interrupted_by=PauseCause.INTERRUPT,
+            detail=cut.said(session.store),
         )
         observers.drain_all()
         cycle.session, observers = await onto_fork(session, cut, observers, prep=prep)
@@ -264,8 +261,8 @@ class _CycleOutcome:
 
     session: Session
     cycle_result: CycleResult
-    # The rebase the line continues onto; ``None`` where the line ends on this cycle.
-    fork: RebaseRequest | None
+    # The fork the line continues onto, cut before the stop naming it; ``None`` where it ends here.
+    onto: tuple[PreparedRun, ForkCut] | None
     observers: RunObservers
     # Re-raised at the launch's exit, past its clock: it must reach the canceller.
     cancelled: asyncio.CancelledError | None
@@ -309,14 +306,19 @@ async def _run_single_cycle(
         if isinstance(exc, asyncio.CancelledError):
             cancel_exc = exc
 
-    if (
-        cycle is not None
-        and book is not None
-        and cycle.bench_passes is not None
-        and STOP_REASON_INFO[stop_reason].grades_selection
-    ):
-        book.release_aside()
-        try:
+    onto: tuple[PreparedRun, ForkCut] | None = None
+    try:
+        if cycle is not None:
+            # Before the result is built: a decision made after the last round has no next
+            # `close_round`, and a rebase's fork lifts it.
+            flush_pending_decisions(cycle)
+        if (
+            cycle is not None
+            and book is not None
+            and cycle.bench_passes is not None
+            and STOP_REASON_INFO[stop_reason].grades_selection
+        ):
+            book.release_aside()
             # Under the last round, as the `held-out` verb grades it (`scoring/passes.py::grade_line_bench`).
             with scoped(round=cycle.rounds[-1].round):
                 cycle.bench_passes = await bench_selection(
@@ -326,14 +328,16 @@ async def _run_single_cycle(
                     banked=cycle.bench_passes,
                     trigger=cycle.config.bench_trigger,
                 )
-        except RUN_ENDS as exc:
-            # A pause leaves the pass owed, which the resume takes again; anything else that ends it
-            # is the stop the cycle closes on, never an escape past `close_cycle`.
-            stop_reason, cycle_error, detail = end_run_on(exc)
-            if isinstance(exc, asyncio.CancelledError):
-                cancel_exc = exc
-
-    rebasing = fork is not None and cancel_exc is None and stop_reason == StopReason.REBASED
+        elif fork is not None and cancel_exc is None and stop_reason == StopReason.REBASED:
+            # Before the stop, which names the fork; off the loop: its reads wait on the line.
+            onto = await asyncio.to_thread(_cut_rebase_fork, prep, session, fork)
+            detail = onto[1].said(session.store)
+    except RUN_ENDS as exc:
+        # A pause leaves the pass owed, which the resume takes again; anything else that ends it
+        # is the stop the cycle closes on, never an escape past `close_cycle`.
+        stop_reason, cycle_error, detail = end_run_on(exc)
+        if isinstance(exc, asyncio.CancelledError):
+            cancel_exc = exc
     cycle_result = close_cycle(
         cycle,
         session,
@@ -343,7 +347,7 @@ async def _run_single_cycle(
         open_round=open_round,
         config=campaign_config,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
-        rebasing=rebasing,
+        rebasing=onto is not None,
         selected=prep.optimizer,
         detail=detail,
     )
@@ -353,7 +357,7 @@ async def _run_single_cycle(
     return _CycleOutcome(
         session=session,
         cycle_result=cycle_result,
-        fork=fork if rebasing else None,
+        onto=onto,
         observers=observers,
         cancelled=cancel_exc,
     )
@@ -413,12 +417,11 @@ async def _run_line(
             mode=mode,
             step_rounds=step_rounds,
         )
-        if outcome.fork is None:
+        if outcome.onto is None:
             return outcome
         # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
         mode = mode.model_copy(update={"from_round": None})
-        # Cut off the loop: its reads wait on the parent's line.
-        prep, cut = await asyncio.to_thread(_cut_rebase_fork, prep, outcome.session, outcome.fork)
+        prep, cut = outcome.onto
         session, observers = await onto_fork(outcome.session, cut, outcome.observers, prep=prep)
 
 
@@ -468,7 +471,7 @@ async def run_optimization(
                         selected=optimizer,
                         detail=detail,
                     ),
-                    fork=None,
+                    onto=None,
                     observers=observers,
                     cancelled=None,
                 )

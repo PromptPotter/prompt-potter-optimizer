@@ -13,18 +13,15 @@ from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.repair import origin_only
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.origin import lock_criterion
+from promptpotter.application.run_observers import end_run_on
 from promptpotter.application.run_phase_control import budget_stop
+from promptpotter.application.run_stop import RUN_ENDS, StopLoop, origin_gate_tripped
 from promptpotter.application.runner.bench import bench_origin, declare_line_bench
 from promptpotter.application.runner.round import (
     emit_origin_round,
     execute_round,
     post_round,
     run_init,
-)
-from promptpotter.application.runner.termination import (
-    RUN_ENDS,
-    end_run_on,
-    origin_gate_tripped,
 )
 from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -35,7 +32,6 @@ from promptpotter.domain.records.run_records import (
     OriginGatePass,
     RebaseRequest,
     RoundEnteredRecord,
-    StopLoop,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import require_spend_book

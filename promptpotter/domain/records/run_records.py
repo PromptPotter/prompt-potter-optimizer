@@ -1406,23 +1406,3 @@ class RebaseRequest(FrozenModel):
                 f"{self.fork_from_round - 1}, not the round {self.hangs_from.round} it re-elects"
             )
         return self
-
-
-class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
-    def __init__(
-        self,
-        reason: StopReason,
-        *,
-        unmeasured: int | None = None,
-        fork: RebaseRequest | None = None,
-        detail: str = "",
-    ) -> None:
-        if (reason is StopReason.REBASED) != (fork is not None):
-            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
-        self.reason = reason
-        # Why its raiser stopped, in its own words: its run-phase record's `detail`.
-        self.detail = detail
-        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
-        self.unmeasured = unmeasured
-        self.fork = fork
-        super().__init__(reason.value)

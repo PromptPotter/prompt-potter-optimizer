@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import campaign_refusal
 from promptpotter.application.pipeline_resolve import Resolution, resolved
-from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.application.run_stop import run_stop_reason
 from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
     walked_rows,

@@ -249,15 +249,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/28 · lb
 
-- **Wave B — `application/runner/` is 10 modules, not 8.** lb collapsed it by phase (21 modules to
-  10) and deleted the ledger-scan forwarders. `inner/narrative.py` has
-  since gone and the count is still 10; `termination.py` is the row below.
-  **Held:** the termination row. **Re-test:** `git ls-files 'promptpotter/application/runner/*.py' | grep -vc __init__` is 8 or fewer.
-- **`runner/termination.py` is a phase module that `jobs/` reads**: `jobs/registry.py` imports
-  `run_stop_reason`, so the stop vocabulary cannot join a phase module without a cycle
-  (`scoring/closed_rounds.py` → `pipeline_resolve.py` → `jobs/quota.py` → `jobs/registry.py`). Action:
-  the stop vocabulary moves to `domain/phases`. **Held:** no chain reaches `domain/phases` yet.
-  **Re-test:** `git ls-files promptpotter/application/runner/termination.py` is non-empty.
+- **Wave B — `application/runner/` is 9 modules, not 8.** lb collapsed it by phase (21 modules to
+  10) and deleted the ledger-scan forwarders. `inner/narrative.py` has since gone, and the stop
+  vocabulary moved to `domain/phases.py`; the count is 9.
+  **Re-test:** `git ls-files 'promptpotter/application/runner/*.py' | grep -vc __init__` is 8 or fewer.
 
 ### batch/29 · xconn
 
@@ -621,11 +616,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   fingerprint carries a name it should not (`optimizer_manifest.py::behaviour_key`), or the doc is
   stale. Root: whichever side is wrong. **Rides with:** wave 6. **Re-test:** rename `_guard_evidence`
   and read `offline_run.py --digests`.
-- **The never-closed-origin edge of `fork_edge` has no door** (tw-x row 5):
-  `application/bench/resume_and_fork/fork_siblings.py:136-148` is reached by no fork, since
-  `cut_operator_fork` refuses an unmeasured origin, so test_identity's sibling stop-record stays on
-  `mint_cycle`. Root: the edge is dead (delete it) or a door reaches it. **Rides with:** wave 6.
-  **Re-test:** the coverage run reaches `fork_siblings.py:137`, or the lines are gone.
 - **No door yields a recorded capability menu or a dataset with a panel** (tw-x row 7): two
   `write_resolved_run` seats stay in test_identity. Door: the offline world's OpenRouter catalogue
   (`offline_world.py`, `openrouter.ai/api/v1/models`) moved between a world campaign and its resume,
@@ -701,14 +691,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   enters but does not report. Suspected root: the landing's index row is written only once a run has
   started. **Rides with:** wave 6. **Re-test:** a first landing on an empty root writes the index, and
   the fixture mints.
-
-### wave-6 · what the v0.8.21 box test showed (2026-11-26)
-
-- **"Rebased to fork" names no fork**: a layer's rebase stop names its cut round, issuer and reason
-  (`escalation.py`'s detail), but no stop names the fork the run continues on: that rebase is cut
-  after its stop is declared (`runner/entry.py::_run_single_cycle`), and `runner/entry.py::open_line`'s
-  divergence stop passes no detail. Door: the cut precedes the stop, whose detail names the child
-  cycle. **Rides with:** the next `runner/entry.py` chain (w8-fork landed without it).
 
 ### wave-7 · what the w7 chains filed (2026-11-27)
 

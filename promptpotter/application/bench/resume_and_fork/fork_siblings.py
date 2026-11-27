@@ -168,6 +168,13 @@ class ForkCut:
     child: CycleHop
     direction: ForkDirection
 
+    def said(self, stores: Stores) -> str:
+        """The parent's REBASED stop's detail: the fork its line continues on, as its mint holds it."""
+        minted = stores.campaigns.last(self.child, CycleMintedRecord)
+        assert minted is not None and minted.fork is not None, "a cut mints its fork"
+        by, reason = minted.fork.issued_by.display, minted.fork.reason
+        return f"forked at round {minted.cut_round} onto {self.child.cycle_id} by {by}: {reason}"
+
     def take(self, stores: Stores) -> str:
         # An offshoot's parent keeps running, hence the DIRECTION.
         if self.direction is ForkDirection.SUPERSEDE:

@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.domain.command_kinds import UNARMED, LookaheadPress, SubmitArmsPayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.phases import (
@@ -16,7 +17,6 @@ from promptpotter.domain.records.run_records import (
     FlightRecord,
     FlightWaiting,
     PhaseRecord,
-    StopLoop,
 )
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import append_record, bound_round

@@ -112,10 +112,7 @@ from promptpotter.application.pipeline_resolve import (
     cycle_config,
     permitted_narrowing,
 )
-from promptpotter.application.runner.termination import (
-    run_stop_detail,
-    run_stop_reason,
-)
+from promptpotter.application.run_stop import StopLoop, run_stop_detail, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.paired import RoundPairs, grade_measurands
@@ -165,6 +162,7 @@ from promptpotter.domain.records.run_records import (
     CycleShareRecord,
     CycleStart,
     CycleSupersededRecord,
+    Ended,
     ForkSpec,
     ForkTrigger,
     OriginGatePass,
@@ -173,11 +171,10 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     SampleScoredRecord,
     SpawnedBy,
-    StopLoop,
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
-from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.run_standing import walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer
@@ -230,6 +227,7 @@ from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.main import potter_error_handler
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
+    MINT_FRESH,
     BadRequestError,
     ConflictError,
     FileKind,
@@ -1490,6 +1488,20 @@ def test_a_resume_rewinding_that_halts_on_a_divergence_below_it_displaces_no_rou
 
 
 @pytest.mark.usefixtures("optimizing_memory")
+def test_a_line_rebased_onto_a_fork_names_the_fork_in_its_stop(world: World, line: Shared) -> None:
+    adopted, (hop, _) = world.adopt(line), line.made
+    adopted.edit_proposer()
+    forked = asyncio.run(adopted.resume(hop, on_divergence=OnDivergence.FORK))
+    assert forked.hop != hop, "guard: the divergence forked"
+    stop = adopted.stores.campaigns.last(hop, RunPhaseRecord)
+    assert stop is not None and isinstance(stop.state, Ended), "guard: the parent ended"
+    assert stop.state.stop_reason is StopReason.REBASED, "guard: the parent rebased"
+    assert forked.hop.cycle_id in stop.state.detail and "resume_divergence" in stop.state.detail, (
+        f"the parent's stop names no fork it continues on: {stop.state.detail!r}"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_the_archive_lost_or_a_rewind_past_the_ledger_offers_a_resume_the_terminal_takes(
     world: World, line: Shared
 ) -> None:
@@ -2058,6 +2070,17 @@ def test_a_line_stands_on_its_origin_until_an_election_crowns_another(
         assert fork_edge(standing, cut_round, None) == RoundArm(round=below, arm=crowns[below]), (
             f"a cut at {cut_round} stands on another candidate than the newest crown below it"
         )
+
+
+def test_a_fork_of_a_line_that_never_walked_its_origin_is_refused_cutting_nothing(
+    world: World,
+) -> None:
+    hop = asyncio.run(world.minted())
+    cycles = world.stores.campaigns.cycle_dir(hop).parent
+    with pytest.raises(ConflictError, match="measured no origin") as refused:
+        asyncio.run(world.fork(hop, 0))
+    assert refused.value.next_acts == (MINT_FRESH,), "the refusal names no fresh mint"
+    assert [p.name for p in cycles.iterdir()] == [hop.cycle_id], "a refused fork cut a cycle"
 
 
 @pytest.mark.usefixtures("optimizing_memory")

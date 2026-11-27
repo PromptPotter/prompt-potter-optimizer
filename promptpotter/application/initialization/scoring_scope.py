@@ -17,6 +17,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.preflight import refuse_below_reasoning_floor
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.runner.inner.tasks import (
     inner_spawn_of,
 )
@@ -30,7 +31,6 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.phases import stop_refused
-from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog

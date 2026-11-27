@@ -188,6 +188,7 @@ from promptpotter.application.optimizers.variation.members import (
     most_donated,
 )
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.run_stop import StopLoop, panel_gate_tripped, standing_tripped
 from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
     LineSpan,
@@ -207,7 +208,6 @@ from promptpotter.application.runner.round import (
     hold_for_operator,
     post_round,
 )
-from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
@@ -362,7 +362,6 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     Running,
     RunPhaseRecord,
-    StopLoop,
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
