@@ -608,16 +608,6 @@ selection explicit.
 **Unexamined:** `connectors/dspy_module.py`, `infrastructure/llm/openai_compat.py`,
 `infrastructure/llm/base.py`
 
-- **`connectors/harbor.py` is six responsibilities in one module** (w10-survey, 1,545 lines; ~110 bind
-  `CONNECTOR`): roster pinning (`_pinned_roster`, `_registry_roster`, `pin_roster`), the container and image
-  harness (`_agent_install_script`, `_trial_config`), the agent model and sender (`_AgentModel`,
-  `_install_model`), the trial runner (`_run_episode`, `_back_off`) and trial-result parsing
-  (`_read_trajectory`, `_trial_failures`, `_digest`: about 400 lines of pure folds over `TrialResult`) sit
-  beside the contract. Root: "a built-in is one module binding `CONNECTOR`" holds for a connector small
-  enough to be one module; harbor is a package. Action: `connectors/harbor/` whose `__init__.py` binds
-  `CONNECTOR`, with `roster.py`, `harness.py`, `agent_model.py`, `trial.py`, `parse.py`; first check the
-  one-module probes. **Rides with:** area 08's chain. **Re-test:**
-  `wc -l promptpotter/connectors/harbor.py` is under 400.
 - **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
   `terminus-2`, `application/datasets/loaders.py::_harbor_tasks` loads the roster,
   `presentation/cli/commands/writes.py` imports `pin_roster`, and `domain/scoring.py` and
@@ -625,15 +615,6 @@ selection explicit.
   owns; `application/pipeline_resolve.py` keeps a "twin" of `connectors/harbor.py::INSTRUMENT_KEY`. Root: a
   connector declares its panel, dataset loader and reward key; core reads the declaration. **Re-test:**
   `git grep -nE "env_reward" -- 'promptpotter/*.py' ':!promptpotter/connectors/harbor.py'` is empty.
-- **Connectors repeat one mechanism** (w10-survey): `connectors/dspy_module.py::_NOT_THE_PROMPT` and
-  `connectors/harbor.py::_NOT_THE_PROMPT` (adds `SERVER`) name one concept twice;
-  `connectors/harbor.py::_back_off`, `infrastructure/backend.py` and `infrastructure/llm/openai_compat.py`
-  each write the warn-then-record retry around `resend_wait`; `connectors/harbor.py::_TERMINAL_ESC` is a
-  third ANSI regex beside `application/views/render/primitives.py::_ANSI_RE` and
-  `application/views/readout.py::_ANSI_RE`; harbor reaches Harbor's private `_env_vars`,
-  `_prompt_template`, `_llm`, `_extra_env` and `_get_combined_install_command` (7 sites, all in
-  `harbor.py`). Root: one retry-and-record, one ANSI strip in `shared/`, one denylist. **Re-test:**
-  `git grep -c "_NOT_THE_PROMPT = " -- 'promptpotter/*.py'` lists one file.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**

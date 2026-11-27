@@ -90,7 +90,9 @@ def _clock(data: dict[str, Any], spent_s: float) -> None:
 
 
 @dataclass
-class _CellSends:
+class CellSends:
+    """One cell's resends, each warned on its ledger: a run the API server hosts has no console."""
+
     query: str
     budget: SendBudget
     recovered: bool = False
@@ -108,8 +110,10 @@ class _CellSends:
             )
         )
 
-    def wait_after(self, outcome: SendOutcome) -> float | None:
-        return self.budget.resend_wait() if outcome.resendable else None
+    def wait_after(self, outcome: SendOutcome, cause: str) -> float | None:
+        if not outcome.resendable:
+            return None
+        return self.budget.resend_wait(f"backend cell {self.query!r}", cause)
 
 
 class MachineSlots:
@@ -354,7 +358,7 @@ class BackendClient:
         paid_by: KeySource,
     ) -> tuple[SendOutcome, dict[str, Any] | None, S]:
         client = self.http
-        sends = _CellSends(query, drawn_budget())
+        sends = CellSends(query, drawn_budget())
         while True:
             wait: float | None = None
             unreachable: tuple[httpx.TransportError, SendOutcome] | None = None
@@ -374,12 +378,13 @@ class BackendClient:
                         if not outcome.sent:
                             unreachable = exc, outcome
                         else:
-                            wait = sends.wait_after(outcome)
+                            error_class = exc.__class__.__name__
+                            wait = sends.wait_after(outcome, error_class)
                             sends.warn(
                                 "transport_error",
                                 wait_s=wait or 0.0,
                                 resending=wait is not None,
-                                error_class=exc.__class__.__name__,
+                                error_class=error_class,
                                 final=wait is None,
                             )
                             if wait is None:
@@ -419,20 +424,13 @@ class BackendClient:
         client: httpx.AsyncClient,
         resp: httpx.Response,
         outcome: SendOutcome,
-        sends: _CellSends,
+        sends: CellSends,
     ) -> float | None:
         code = resp.status_code
         if outcome.resendable and (refused := self._guard.resend_refused(resp)) is not None:
             # The backend's own hole, never a bound of ours: a resume re-measures it.
             raise cell_failure(f"HTTP {code} {refused}", ErrorCategory.SERVER, spent={})
-        if (wait := sends.wait_after(outcome)) is not None:
-            logger.warning(
-                "Backend %d (attempt %d/%d); waiting %.1fs",
-                code,
-                sends.budget.resent,
-                sends.budget.attempts,
-                wait,
-            )
+        if (wait := sends.wait_after(outcome, f"HTTP {code}")) is not None:
             sends.warn("server_error", wait_s=wait, resending=True, status_code=code)
         elif (
             code == 400
@@ -444,7 +442,7 @@ class BackendClient:
         return wait
 
     async def _wait_out_outage(
-        self, unreachable: httpx.TransportError, outcome: SendOutcome, sends: _CellSends
+        self, unreachable: httpx.TransportError, outcome: SendOutcome, sends: CellSends
     ) -> None:
         error_class = unreachable.__class__.__name__
         if sends.down_since is None:

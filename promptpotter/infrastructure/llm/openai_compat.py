@@ -444,7 +444,9 @@ class OpenAICompatibleClient:
                                 ticket, headers=outcome.headers, body=outcome.detail
                             )
                             continue
-                        wait = budget.resend_wait() if outcome.resendable else None
+                        what = f"{self._provider_name} {label.node}"
+                        cause = type(exc).__name__
+                        wait = budget.resend_wait(what, cause) if outcome.resendable else None
                         if wait is None:
                             # The wire's failure carries its close, a raw `ConnectionError` too;
                             # a typed refusal, a model's missing remedy or a bug raises as itself.
@@ -452,15 +454,6 @@ class OpenAICompatibleClient:
                             if not wire and outcome.failure is not ErrorCategory.CONNECTION:
                                 raise
                             raise FailedSendError(outcome) from exc
-                        logger.warning(
-                            "%s: %s on %s (attempt %d/%d); waiting %.1fs",
-                            self._provider_name,
-                            type(exc).__name__,
-                            label.node,
-                            budget.resent,
-                            budget.attempts,
-                            wait,
-                        )
                     else:
                         backpressure.eased(ticket)
                         apply_discovered_caps(

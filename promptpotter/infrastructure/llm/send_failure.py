@@ -11,6 +11,16 @@ from promptpotter.shared.errors import (
     UngeneratedRequestError,
 )
 
+# What a cell's send ends it on, never a score: the program never saw the provider answer.
+NOT_THE_PROMPT = frozenset(
+    {
+        ErrorCategory.PROVIDER_THROTTLED,
+        ErrorCategory.PROVIDER_CREDIT,
+        ErrorCategory.CONNECTION,
+        ErrorCategory.SERVER,
+    }
+)
+
 
 class FailedSendError(Exception):
     """A send closed failed; ``outcome`` is what its close decided, the category every reader takes."""
