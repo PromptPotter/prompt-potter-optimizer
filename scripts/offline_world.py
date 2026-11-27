@@ -264,6 +264,28 @@ LLM_ONLY_NODE: dict[str, Any] = {
 }
 
 
+def prompt_node(name: str, start: Mapping[str, str]) -> dict[str, Any]:
+    """A node a test declares, served as `llm_only` is: its prompt fields, each starting as *start*."""
+    fields = list(start)
+    return LLM_ONLY_NODE | {
+        "prompt_info": {
+            **LLM_ONLY_NODE["prompt_info"],
+            "family": name,
+            "fields": fields,
+            "rewrite_field": fields[0],
+            "start": dict(start),
+        },
+        "optimizer": {
+            **LLM_ONLY_NODE["optimizer"],
+            "param_keys": [
+                *(k for k in LLM_ONLY_NODE["optimizer"]["param_keys"] if k not in PROMPT_FIELDS),
+                *fields,
+            ],
+            "observation_name": name,
+        },
+    }
+
+
 class FakeHarness:
     """The n8n eval-harness edge: one webhook at `URL`, each POST kept in `asked` as its headers
     and body. *says* is the policy: a reply body, or a response carrying a status."""
@@ -296,9 +318,10 @@ type Fault = httpx.Response | httpx.RequestError | Hang
 
 
 class FakeBackend:
-    """The backend edge: TermNorm's wire at `AT`, one `llm_only` node, every path asked kept in
-    `asked`. *faults* answer a path's requests, in order, before the backend does; *hardness* moves
-    each row's `k` by its own draw, so the δ ruler spans the rows and θ holds a level."""
+    """The backend edge: TermNorm's wire at `AT`, the node graph `nodes` walked in order (`llm_only`
+    unless a test declares one, `prompt_node`), every path asked kept in `asked`. *faults* answer
+    a path's requests, in order, before the backend does; *hardness* moves each row's `k` by its
+    own draw, so the δ ruler spans the rows and θ holds a level."""
 
     AT = "127.0.0.1:8000"
     URL = f"http://{AT}"
@@ -332,6 +355,10 @@ class FakeBackend:
         self.origin_errors = 0
         # Awaited before each cell is answered, inside the run's own task: an operator acting mid-walk.
         self.before_answer: Callable[[], Awaitable[None]] | None = None
+        # A test's own answers: whether the cell of (prompt, query) is right, in place of the skill.
+        self.answers: Callable[[str, str], bool] | None = None
+        # The graph `/pipeline` serves, one pipeline walking every node in order.
+        self.nodes: dict[str, dict[str, Any]] = {"llm_only": LLM_ONLY_NODE}
 
     def respond(
         self, request: httpx.Request, body: bytes
@@ -350,8 +377,8 @@ class FakeBackend:
                 pipeline = {
                     "name": "TermNorm",
                     "version": "offline",
-                    "nodes": {"llm_only": LLM_ONLY_NODE},
-                    "pipelines": {"llm_only": ["llm_only"]},
+                    "nodes": self.nodes,
+                    "pipelines": {next(iter(self.nodes)): list(self.nodes)},
                 }
                 answer = {
                     "status": "success",
@@ -364,22 +391,15 @@ class FakeBackend:
                 answer = {"status": "success", "data": {"terms_count": 0}}
             case "/matches":
                 payload = json.loads(body)
-                self.sent.append(
-                    (
-                        str(payload["node_config"]["llm_only"]["prompt"]),
-                        payload["query"],
-                        current_round(),
-                    )
-                )
+                prompt = self.prompt(payload)
+                self.sent.append((prompt, payload["query"], current_round()))
                 if self.down:
                     return _json(500, {"detail": "offline: the backend is down"}, request)
                 answer = self.matches(payload)
                 hook = self.before_answer
                 # A cell's own lag, in loop turns keyed on what it asks: calls out at once return
                 # in another order than sent, the same order in every process.
-                lag = (
-                    draw("lag", payload["node_config"]["llm_only"]["prompt"], payload["query"]) % 4
-                )
+                lag = draw("lag", prompt, payload["query"]) % 4
                 if not lag and hook is None:
                     return _json(200, answer, request)
 
@@ -395,23 +415,32 @@ class FakeBackend:
                 return None
         return _json(200, answer, request)
 
+    def prompt(self, payload: dict[str, Any]) -> str:
+        """Every node's prompt the cell sent, in walk order."""
+        return "\n".join(str(payload["node_config"][n]["prompt"]) for n in self.nodes)
+
     def matches(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.cells += 1
         if self.cells == INTERRUPT_AT_CELL:
             for _ in range(self.interrupts):
                 signal.raise_signal(signal.SIGINT)
         query = payload["query"]
-        node_cfg = payload["node_config"]["llm_only"]
+        terminal = list(self.nodes)[-1]
+        node_cfg = payload["node_config"][terminal]
         # The prompt the skill is read off keys every draw: a wire key's spelling moves none.
-        prompt = str(node_cfg["prompt"])
+        prompt = self.prompt(payload)
         marks = MARKER.findall(prompt)
         tag = marks[-1] if marks else None
         k = self.SKILL.get(tag, 1 + draw("skill", tag) % 9)
         k += self.hardness * (draw("hard", query) % 3 - 1)
         gt = self.truth[query]
-        if tag is None and self.origin_errors and draw("errs", query) % self.origin_errors == 0:
+        label: str | None
+        if self.answers is not None:
+            right = self.answers(prompt, query)
+            label = gt if right else next(lab for lab in LABELS if lab != gt)
+        elif tag is None and self.origin_errors and draw("errs", query) % self.origin_errors == 0:
             # The pipeline's own failure on the row, which the walk charges as a miss.
-            label: str | None = "ERROR"
+            label = "ERROR"
         elif draw("cell", prompt, query) % 10 < k:
             label = gt
         else:
@@ -423,10 +452,10 @@ class FakeBackend:
             "data": {
                 "final_ranking": [{"candidate": label, "relevance_score": 1.0}],
                 "reasoning_trace": f"offline trace for k={k}",
-                "diagnostics": {"step_statuses": {"llm_only": "success"}, "warnings": []},
-                "step_timings": {"llm_only": 1.0},
+                "diagnostics": {"step_statuses": {terminal: "success"}, "warnings": []},
+                "step_timings": {terminal: 1.0},
                 "step_tokens": {
-                    "llm_only": {
+                    terminal: {
                         "input": 400 + len(prompt) // 4,
                         "output": 200 + draw("out", prompt) % 400,
                         "cost_usd": 0.0,
@@ -438,7 +467,7 @@ class FakeBackend:
                     }
                 },
                 "total_time": 1.0,
-                "terminal_node": "llm_only",
+                "terminal_node": terminal,
             },
         }
 

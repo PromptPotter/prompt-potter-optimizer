@@ -244,7 +244,6 @@ def test_an_llm_judge_metrics_send_is_the_cells_billed_beside_the_programs(
 
 
 # The host's state is read per cell.
-@pytest.mark.usefixtures("offline")
 def test_a_dbllmbench_image_rebuilt_under_its_tag_fails_the_cell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -261,7 +260,6 @@ def test_a_dbllmbench_image_rebuilt_under_its_tag_fails_the_cell(
         jumping_clock(dbllmbench._check_image(image))
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -280,7 +278,6 @@ def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
 
 
 # An n8n cell is keyed on the URL the wire posts to.
-@pytest.mark.usefixtures("offline")
 def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,7 +292,6 @@ def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
 
 
 # Each dataset names its endpoint; adding one is no `.env` edit of another's.
-@pytest.mark.usefixtures("offline")
 def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(monkeypatch: pytest.MonkeyPatch) -> None:
     stores = workspace()
     harness = n8n.CONNECTOR.identity_config

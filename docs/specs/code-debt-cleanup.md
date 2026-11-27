@@ -147,13 +147,6 @@ row it closes.
 passes-5 landed a pause standing for its hold and one reader of a reply's usage; holders-3 `reindex`'s
 plan/apply pair and a temporary locked through its replace. Left:
 
-- **`_peer_cycle` seats an origin reading the archive does not hold** (usage-1's report):
-  `tests/test_scoring.py::_peer_cycle`'s `measured_origin` builds round 0's seated sheet from the
-  bare `_measure`, never `score_search_point`, so the reading names rows no cell file backs and no
-  round 0 closes; a fact reading round 0 walks it itself (`_closed_origin`, `open_origin_round`).
-  Root: seat the origin through the walk that files it. **Rides with:** the chain owning
-  `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
-  round-0 rows.
 - **Two precedence rules join an arm's rows** (small-13's report): `bench/cycle.py::ArmWalk.continued`
   keeps the EARLIER row (`where(_unheld)`), while `CellSheet.merged` lets the later scored row win.
   Root: one rule, `merged`'s; `continued` merges without the filter. **Re-test:** an arm re-read on a
@@ -429,12 +422,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
   next chain touching `paper/bbeh-comparison/`.
-- **A test seat binds a campaign disk does not hold** (load-2's review, cut by load-3):
-  `factories.py::loop_session` seats a synthetic `minted_campaign(hop)`; reading the stored one
-  breaks 19 facts whose fixtures seat a hop (`test_scoring.py::_PEER_HOP`) and store its campaign
-  after, across `test_scoring.py` / `test_security.py`. Action: each seat stores its campaign first,
-  and `loop_session` reads it. **Re-test:** `git grep -c "minted_campaign(hop)" -- tests/factories.py`
-  drops by the seat's one.
 
 ### batch/31 · box
 
@@ -474,21 +461,16 @@ and derived the knob couplings from each member's draws and the escalation ladde
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
 
-- **`seat`, `_peer_cycle` and `close_round` replay production by hand**: the harness opens its line
-  through `runner/entry.py::launch_scope` and `runner/entry.py::open_line`, as `run_optimization`
-  does, but 30 `seat` sites (a custom `schema=`, `scorer=` or `origin=`), 16 `close_round` sites and
-  14 `tests/test_scoring.py::_peer_cycle` sites build a `Cycle` by hand on `factories.py::loop_session`,
-  whose connector holds its own sends, so no cell it sends gets a bound and the world cannot measure
-  it: `_peer_cycle` patches `query_loop.measure_sample` instead. Action: `FakeBackend` serves the
-  pipeline and answers a test declares, the sites open through `run_init_round` on it, and `seat`,
-  `_peer_cycle` and `close_round` go. **Rides with:** tests-w's successor, whose Owns are tests-w's.
-  **Re-test:** `git grep -c "def seat(\|def close_round(" -- tests/factories.py` is 0.
-- **Smells the test-shape split left** (reported by its builders): facts that never touch the
-  network take the `offline` fixture only because `factories.py::spend_book` needs the account it
-  binds; seven `tests/test_scoring.py` bench facts re-run the CAPO round for a live cycle (the
-  `_peer_cycle` row above), the command-door facts among them needing no bench round. Action: a spend
-  book binds an account without the offline world; the bench facts share one module-scoped round.
-  **Rides with:** tests-w's successor.
+- **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
+  through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
+  line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
+  `tests/conftest.py::own_home`, buying back about half. Left: the budget-cut table
+  (`test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`, ~3 s) opens
+  a campaign per case, each writing its own cut under its own panel gate, and a CAPO round on 16 rows
+  walks in ~0.7 s, a tenth of it one `fsync` of `charges.jsonl` per send. Action: a round costs what
+  its cells cost, found in the run's write path, never by the test. **Rides with:** tests-w's
+  successor. **Re-test:** the wall is back under 77.8 s, and `pytest --durations=10` lists no peer
+  fact over 2 s.
 - **One guard is tested once per door**: tests grew +2.3k lines in three days, mostly security and
   identity, a test per door of one guard; the test-shape split (landing 43) kept every assert. Action:
   a guard living at one choke point is tested once, over the table of its doors; a guard spelled at
@@ -496,7 +478,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **A test stands outside the harness**: `tests/test_archive.py` fakes a `HeldRun` with a
   `SimpleNamespace` (`test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent`), so a
   renamed field passes there; the real `Admitted.held` needs a runnable bank under the hand-built
-  scenario line (the `seat` row's root). Action: the real record. **Rides with:** tests-w's successor.
+  scenario line. Action: the real record. **Rides with:** tests-w's successor.
   **Re-test:** `git grep -c "SimpleNamespace" -- tests/test_archive.py` is 0.
 
 ### batch/32 · ts-score
@@ -749,7 +731,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **Re-test:** `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
 - **One test world (root F)**: `seat(` 36/5, `_peer_cycle(` 16/1, `close_round(` 17/4, `loop_session(` 25/7
   and `minted_campaign(` 82/6 over `tests/`; `tests/factories.py` holds 57 builders. **Closes:**
-  **`seat`, `_peer_cycle` and `close_round` replay production by hand**, **`_peer_cycle` seats an origin reading the archive does not hold**,
+  **`_peer_cycle` seats an origin reading the archive does not hold**,
   **A test seat binds a campaign disk does not hold**, **Smells the test-shape split left**, **A test stands outside the harness**.
   **Run data:** none. **Size:** large, tests only; cheaper after A, the harness then opens through the one opening.
   **Rides with:** tests-w's successor. **Re-test:** `git grep -c "def _peer_cycle" -- tests` is 0.
