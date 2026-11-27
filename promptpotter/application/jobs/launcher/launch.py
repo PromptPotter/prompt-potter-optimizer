@@ -61,9 +61,9 @@ async def hold(request: LaunchRequest, opening: Opening, mode: RunMode) -> HeldR
     try:
         async with AsyncExitStack() as closing:
             closing.push_async_exit(opening)
-            held = await admit_and_hold(request, opening)
-            opened = await closing.enter_async_context(request.open(opening.stores))
-            if request.at is None:
+            held, standing = await admit_and_hold(request, opening)
+            opened = await closing.enter_async_context(standing.open(opening.stores))
+            if standing.at is None:
                 await asyncio.to_thread(opening.land, opened.hop, held)
             return HeldRun.of(opening, opened, held, closing.pop_all(), mode)
     finally:

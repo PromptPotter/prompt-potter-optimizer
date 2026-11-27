@@ -47,7 +47,7 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.host_surface import HostAnswer, HostHold, HostSession, HostTask
 from promptpotter.config.settings import settings
 from promptpotter.domain.refusal import Refusal
-from promptpotter.presentation.cli.main import CommandResult
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import PotterError
 
 TASKS_EXTENSION = "io.modelcontextprotocol/tasks"

@@ -98,12 +98,15 @@ from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
+    admit_and_hold,
     admit_and_share,
     paid_call,
     paid_pass,
     request_jobs,
     slotless_opening,
 )
+from promptpotter.application.jobs.launcher.launch import Inline, admit
+from promptpotter.application.jobs.launcher.mint_and_start import ForkLaunch
 from promptpotter.application.jobs.launcher.opening import Opening, claim_cycle, open_spend_book
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
@@ -1582,7 +1585,7 @@ def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(moved))).append(
         billed_call(0.10, input_tokens=210_000)
     )
-    registry = JobRegistry(tmp_path / "jobs-4", capacity=lambda _live: 1)
+    registry = JobRegistry(tmp_path / "4" / "jobs", capacity=lambda _live: 1)
     job = registry.request_slot(
         user_id="default",
         principal_id="default",
@@ -1738,6 +1741,22 @@ def test_a_third_fork_is_refused_while_its_siblings_hold_the_ceiling_whole(
     _, fork_c, _, _ = _forks_a_and_b_admitted(world, ran_24, shared_ceiling)
     with pytest.raises(QuotaExceededError):
         shared_ceiling.launch(fork_c, 1.0)
+
+
+def test_an_admitted_fork_holds_its_share_against_a_sibling_admitted_before_its_run_opens(
+    built_stores: Stores, world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
+) -> None:
+    shared, launch, share, bill = shared_ceiling
+    root, fork_a = _line(world, 1, ran_24)
+    bill(root, 0.25)
+    asked = ForkCyclePayload(campaign_id=root.campaign_id, cycle_id=root.cycle_id)
+    request = ForkLaunch(_at(built_stores, root), asked, CycleStart(), Budget(usd=0.5))
+    forking = admit(request, RunMode(), stores=built_stores, job_registry=shared, inline=Inline())
+    held, _ = asyncio.run(admit_and_hold(request, forking.opening))
+    _, sibling = launch(fork_a, 1.0)
+    assert share(sibling) == pytest.approx(1.0 - 0.25 - held.share.usd_amount), (
+        "a sibling admitted after a fork's admission spends the fork's share: two cycles, two ceilings"
+    )
 
 
 def test_a_fork_arms_its_campaigns_ceiling_which_the_launch_that_moved_it_wrote_on_the_root(
@@ -4383,7 +4402,7 @@ def _two_admitted_runs(
     """Two runs admitted at $0 reserve on one $0.30 coupon: the account, its registry, their hops."""
     racer = _web_account("sub-8")
     racer.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
-    racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
+    racing = JobRegistry(tmp_path / "8" / "jobs", capacity=lambda _live: 2)
     raced = [_minted(racer, offline).hop for _ in range(2)]
     for racing_hop in raced:
         held_job = racing.request_slot(
@@ -4459,7 +4478,7 @@ def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign
     hop = _minted(stores, offline).hop
     at = _at(stores, hop)
     stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
-    registry = JobRegistry(tmp_path / "jobs-g", capacity=lambda _live: 1)
+    registry = JobRegistry(tmp_path / "g" / "jobs", capacity=lambda _live: 1)
     with pytest.raises(NotFoundError):
         change_budget(Budget(usd=0.2), stores=stores, job_registry=registry, at=at, sends=_CELLS)
     assert not stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (

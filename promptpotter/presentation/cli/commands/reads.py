@@ -44,7 +44,8 @@ from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle, Hie
 from promptpotter.domain.phases import RUN_PHASE_INFO
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.launch import head_to_head_command
-from promptpotter.presentation.cli.main import VERB_PACKAGE, VERBS, CommandResult, said_text
+from promptpotter.presentation.cli.main import VERB_PACKAGE, VERBS, said_text
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.named_rows import imported
 

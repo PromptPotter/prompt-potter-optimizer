@@ -86,6 +86,8 @@ class Selection:
     walk_world: Path | None = None
     # The base home `equals-main` reads the offline run against (`--against`).
     against: Path | None = None
+    # What reading the tree decided, said once the run is in its locked env (the re-exec reads it again).
+    note: str = ""
 
     @property
     def world(self) -> Path:
@@ -100,15 +102,16 @@ class Selection:
             _, untracked = git("ls-files", "-o", "--exclude-standard")
             moved = [path for row in _name_status("HEAD") for path in row[1:]]
             fresh = [*filter(None, untracked.split("\n"))]
+            note = ""
             if not moved and not fresh:
                 # A clean tree changed nothing since HEAD, so a committed link is read against
-                # where its branch left `origin/main`.
-                _, base = git("merge-base", "HEAD", "origin/main")
-                print(
-                    f"gate --changed: tree clean, reading against merge-base {base.strip()[:9]} with origin/main"
+                # where its branch left the line it was cut from.
+                ref, base = _branch_base()
+                note = (
+                    f"gate --changed: tree clean, reading against merge-base {base[:9]} with {ref}"
                 )
-                moved = [path for row in _name_status(base.strip()) for path in row[1:]]
-            return cls(False, (), (), (*moved, *fresh))
+                moved = [path for row in _name_status(base) for path in row[1:]]
+            return cls(False, (), (), (*moved, *fresh), note=note)
         if not staged:
             return cls(False, (), ())
         rows = _name_status("--cached")
@@ -125,6 +128,25 @@ class Selection:
             ),
             staged_paths=tuple(path for row in rows for path in row[1:]),
         )
+
+
+def _branch_base() -> tuple[str, str]:
+    """The line the branch was cut from and its merge-base with HEAD: its upstream when set, else
+    the `origin/land/*` or `origin/main` whose merge-base is the fewest commits behind HEAD."""
+    code, upstream = git("rev-parse", "--abbrev-ref", "@{upstream}")
+    if code == 0 and upstream.strip():
+        candidates = [upstream.strip()]
+    else:
+        _, refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/land")
+        candidates = [*filter(None, refs.split("\n")), "origin/main"]
+    found: list[tuple[int, str, str]] = []
+    for ref in candidates:
+        code, base = git("merge-base", "HEAD", ref)
+        if code == 0:
+            _, ahead = git("rev-list", "--count", f"{base.strip()}..HEAD")
+            found.append((int(ahead), ref, base.strip()))
+    _, ref, base = min(found)
+    return ref, base
 
 
 def _name_status(against: str) -> list[list[str]]:
@@ -239,9 +261,6 @@ _FAULT_LAYERS = ("application", "domain")
 _DECLARED_SWALLOWS: dict[str, str] = {
     "application/account.py::_dataset_of::FileUnreadableError": (
         "a trail line names its campaign's dataset; an unreadable manifest refuses its own reads"
-    ),
-    "application/bench/resume_and_fork/fork_siblings.py::ForkCut.withdraw::Exception": (
-        "a cleanup fault never masks the refusal its caller re-raises; a cut it keeps lists"
     ),
     "application/datasets/origin_resolve.py::raised_commands::ValidationError": (
         "a check-in finding the draft's patch model refuses is no finding"
@@ -2406,7 +2425,8 @@ def _parser() -> argparse.ArgumentParser:
         "--changed",
         action="store_true",
         help="while iterating: the checks that read a file changed since HEAD (on a clean tree, "
-        "since the merge-base with origin/main, named on stdout), and inside vitest and eslint "
+        "since the merge-base with the branch's upstream or nearest origin/land/*, named on stdout), "
+        "and inside vitest and eslint "
         "only what owns one",
     )
     parser.add_argument(
@@ -2466,6 +2486,8 @@ def main() -> int:
     if not args.push and any(c.pinned for c in checks):
         # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
         _reexec_pinned()
+    if sel.note:
+        print(sel.note)
     if args.push:
         return _prove_tips(sys.stdin.read(), checks)
     if args.staged and checks and not _tree_is_index():

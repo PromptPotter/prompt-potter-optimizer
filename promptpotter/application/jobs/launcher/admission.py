@@ -327,8 +327,11 @@ def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
     )
 
 
-async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget:
-    """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
+async def admit_and_hold(
+    request: LaunchRequest, opening: Opening
+) -> tuple[HeldBudget, LaunchRequest]:
+    """The request's config is resolved IN here, after the queue wait, so the budget admitted is
+    the one the run starts under; answered with what it opens (`LaunchRequest.stand`)."""
     stores, job_registry, job = opening.stores, opening.job_registry, opening.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     at, campaign = request.at, request.campaign
@@ -351,21 +354,27 @@ async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget
         armed=request.armed_budget(stores),
         requested=request.budget,
     )
+    sends = request.sends(stores)
+
+    def admitted() -> tuple[HeldBudget, LaunchRequest]:
+        # One gate over the share and the stand: a sibling admitted after it reads its share.
+        with job_registry.admission_gate():
+            held = admit_and_share(
+                declared,
+                asked,
+                stores=stores,
+                job_registry=job_registry,
+                job=job,
+                campaign=campaign,
+                hop=None if at is None else at.hop,
+                step_rounds=request.step_rounds,
+                sends=sends,
+                enclosing=enclosing,
+            )
+            return held, request.stand(opening, held)
+
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
-    held = await asyncio.to_thread(
-        admit_and_share,
-        declared,
-        asked,
-        stores=stores,
-        job_registry=job_registry,
-        job=job,
-        campaign=campaign,
-        hop=None if at is None else at.hop,
-        step_rounds=request.step_rounds,
-        sends=request.sends(stores),
-        enclosing=enclosing,
-    )
-    return held
+    return await asyncio.to_thread(admitted)
 
 
 def admit_and_share(

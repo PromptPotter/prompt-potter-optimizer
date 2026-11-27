@@ -80,12 +80,12 @@ from promptpotter.presentation.cli.main import (
     ARM_GRAMMAR,
     SET_GRAMMAR,
     VERBS,
-    CommandResult,
     budget_from_args,
     build_parser,
     lookahead_from_args,
     said_text,
 )
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import (
     ConflictError,
     DatasetAccessError,

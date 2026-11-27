@@ -41,7 +41,8 @@ from promptpotter.domain.command_kinds import (
     Door,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.presentation.cli.main import CommandResult, budget_from_args
+from promptpotter.presentation.cli.main import budget_from_args
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
 

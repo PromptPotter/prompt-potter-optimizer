@@ -1067,39 +1067,38 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
   `npm test` now queues behind the clone's lock (`scripts/queue_then.py`). **Re-test:** five looping
   builders plus one gate on the Windows desk reap none.
-- **A fork's cut is not withdrawn by its opening's exit** (w7-open2):
-  `jobs/launcher/mint_and_start.py::ForkLaunch.open` cuts the fork, but a failure after the hold opens
-  and before the fork's run takes the cut (`opening.land`) is not withdrawn there.
-  `commands/launching.py::_held_fork` withdraws only the failures after `held()`. Root: the opening's
-  exit withdraws the cut once its job is released. **Re-test:** a raise between the cut and the land
-  leaves no stub cycle.
-- **An admitted fork holds no share until it is cut** (w7-open2): in that window a sibling is admitted
-  against the campaign without the fork's share, as one admitted beside a mint is. Root: an admitted
-  request's share is held on its campaign from admission. **Re-test:** a sibling admitted between a
-  fork's admission and its cut reads the fork's share.
+- **`io.py::_SUBJECTS` is a process-global registry** (w7-ver2; w7-rows4's door backed out): the
+  subject roots a write stamps are declared into a module set by each `Stores` and `JobRegistry`
+  built (`stamped_subject`), so a write in a process that built no owning store stamps nothing.
+  w7-rows4 read the subject off the path by NAME (nearest ancestor named like a workspace, `jobs` or an
+  archive home). That is unsound: a workspace holds user-named directories (`datasets/<name>`), so a
+  dataset named `jobs` or `projects` takes its workspace's stamps and its readers serve stale data;
+  matched root-first, an install path through a `projects` directory misfires instead. Backed out at
+  landing. Root: a subject is matched relative to the configured data root (`layout.py` names each
+  root under it), never by a name anywhere on the path. **Re-test:** `git grep -c "stamped_subject("
+  -- promptpotter` is 0, and a write under `datasets/jobs/` moves its workspace's version.
+- **An exception's notes reach only the CLI's human door** (w7-rows5): `ForkCut.withdraw` names the
+  stub it kept as a note on the refusal it rides, and only `cli/main.py` prints `__notes__`.
+  `Refusal.of` drops them, so `--json`, the API and the webapp show nothing of the kept stub. Root: a
+  `Refusal` carries its notes, served by every door. **Re-test:** a fork whose withdraw fails names
+  its stub in the API's refusal body.
+- **Can a `promptpotter-self` panel seat run an optimizer other than potter?** (w7-tests3, open
+  question): `panel.inner_campaign.optimization.nodes` (`adaptive_queue`, `l1_generate`, `escalation`)
+  lays potter's nodes over each seat's inner campaign. w7-tests3's mixed test panel (a CAPO seat
+  beside potter's) had to narrow a copy per seat to open. If a seat may select its own optimizer,
+  this is a defect: the panel's geometry needs a per-optimizer layer, or the seat's optimizer owns
+  its nodes. If seats are potter by design, the family says so and refuses any other. **Re-test:** a
+  panel with a CAPO seat either opens with no potter node in that seat's config, or is refused by name.
 - **The gate rewrites `maintenance/built_key.py` on every code change** (w7-small; the wave-7 landing
   hit it at each squash): a committed key of the code tree is stale after any edit, so every commit
   regenerates it first. Root: the key is computed where it is read, or the gate's write is the
   commit's own step. **Re-test:** a code-only commit needs no regenerated file.
-- **The MCP host door loads the CLI's verb table** (w7-rows3): `presentation/mcp/server.py` imports
-  `CommandResult` from `cli.main`. Root: `CommandResult` lives below presentation. The stdio host test
-  (2.05–2.44 s, over budget) loads the `mcp` SDK (~0.42 s) and the host door's application closure
-  (~0.7 s, `bench.llm_call` 0.45 s of it), never `promptpotter.main`. **Re-test:** the host door
-  imports no `cli` module; the test's wall is re-measured against its budget.
-- **`--changed` on a branch off an unlanded `land/*` lists the whole wave** (w7-rows3): a clean tree
-  diffs against `origin/main`'s merge-base. Root: the base is the branch's upstream. **Re-test:** one
-  commit ahead of `land/w7`, `--changed` lists that commit's checks only.
 - **A subject's stamp grows a byte per write** (w7-ver2): `io.py::stamp` appends one byte to the
   subject root's `.stamp` per write, and `io.py::stamp_of` reads `(st_ino, st_size)`, sound only
   because the one inode only grows; rotating or truncating it races the `O_APPEND` writers and can hand
   a reader a version it held before. Door: a compaction that keeps the version monotonic (a new inode
   whose first read is never an earlier pair, taken under the subject's lock). **Re-test:** a store at
   1M writes holds a stamp under 4 KiB, and no reader sees its version repeat across the compaction.
-- **`io.py::_SUBJECTS` is a process-global registry** (w7-ver2): the subject roots a write stamps are
-  declared into a module set by each `Stores` and `JobRegistry` built (`stamped_subject`), a global
-  standing in for the keyed subject, so a write in a process that never built the owning store stamps
-  nothing, in silence. Door: the subject is a fact of the layout (`layout.py` names each root), read
-  by `stamp` off the path. **Re-test:** `git grep -c "stamped_subject(" -- promptpotter` is 0.
 
 ## Held — no wave-4 chain yet
 
