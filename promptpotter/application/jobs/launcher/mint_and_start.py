@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    ForkCut,
+    cut_operator_fork,
+    fork_config,
+    operator_start,
+    operator_trigger,
+)
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
@@ -18,11 +26,16 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.domain.campaign import CampaignCycle
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign import Campaign, CampaignCycle
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.checkin_draft import DraftFile
+from promptpotter.domain.command_kinds import ForkCyclePayload
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun
+from promptpotter.domain.records.run_records import FORK_DIRECTION, CycleStart
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
@@ -63,7 +76,6 @@ class LaunchRequest:
     cycle at its `open`; the rest open the cycle ``at`` names."""
 
     __slots__ = ()
-    verb: ClassVar[str]
     budget: Budget
 
     @property
@@ -73,6 +85,15 @@ class LaunchRequest:
     @property
     def step_rounds(self) -> int | None:
         return None
+
+    @property
+    def campaign(self) -> Campaign | None:
+        """What it spends on: its cycle's campaign, none where its open mints one."""
+        return None if self.at is None else self.at.campaign
+
+    def armed_budget(self, stores: Stores) -> Budget:
+        """The axes an operator named: its campaign's money and its cycle's own."""
+        return Budget() if self.at is None else stores.campaigns.armed_budget(self.at)
 
     @property
     def dataset_name(self) -> str:
@@ -102,8 +123,6 @@ class LaunchRequest:
 
 @dataclass(frozen=True, slots=True)
 class FreshMint(LaunchRequest):
-    verb: ClassVar[str] = "mint"
-
     # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
     dataset: ResolvedDataset
     budget: Budget
@@ -132,12 +151,15 @@ class FreshMint(LaunchRequest):
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self.campaign_config(stores), self.connector(stores))
 
+    def session(self, stores: Stores) -> AbstractAsyncContextManager[Session]:
+        return init_services(
+            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
+        )
+
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
-        """The session, then the mint: a refused one writes nothing."""
-        async with init_services(
-            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
-        ) as session:
+        """The session, past the probe, then the mint: a refused one writes nothing."""
+        async with self.session(stores) as session:
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
                 session,
@@ -149,8 +171,6 @@ class FreshMint(LaunchRequest):
 
 @dataclass(frozen=True, slots=True)
 class ExistingCycle(LaunchRequest):
-    verb: ClassVar[str] = "start-run"
-
     at: CampaignCycle = field()  # a field: the shape's inherited `at` is no default
     budget: Budget
     step_rounds: int | None = None
@@ -178,36 +198,92 @@ class ExistingCycle(LaunchRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class EmbeddedMint(LaunchRequest):
-    """A host's fresh campaign, minted on the session the host laid and closes."""
+class ForkLaunch(LaunchRequest):
+    """An operator's fork of *parent*, admitted on its parent's campaign before any cut: its open
+    cuts the child, which its hold lands it on as a mint's, so a refused fork writes nothing."""
 
-    verb: ClassVar[str] = "mint"
-
-    session: Session
-    config: CampaignConfig
+    parent: CampaignCycle
+    payload: ForkCyclePayload
+    start: CycleStart  # as `parse_cycle_start` froze it; `operator_start` lays it for the cut
     budget: Budget
-    step_rounds: int | None = None
 
     @property
     def dataset_name(self) -> str:
-        assert self.session.dataset is not None, "a host's session resolved its dataset"
-        return self.session.dataset.name
+        return self.parent.campaign.dataset_name
+
+    @property
+    def holder(self) -> CampaignLaunch:
+        return CampaignLaunch(self.dataset_name, campaign_id=self.parent.campaign.campaign_id)
+
+    @property
+    def campaign(self) -> Campaign:
+        return self.parent.campaign
+
+    def connector(self, _stores: Stores) -> str:
+        return self.parent.campaign.connector
+
+    def armed_budget(self, stores: Stores) -> Budget:
+        # A fork inherits no standing budget of its parent's cycle.
+        return stores.campaigns.read_campaign_ceiling(self.parent.campaign).budget
+
+    def _config(self, stores: Stores) -> CycleConfig:
+        return fork_config(stores, self.parent, operator_start(stores, self.payload, self.start))
+
+    def declared_budget(self, stores: Stores) -> Budget:
+        return self._config(stores).config.optimization.budget
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return sends_on(stores, self._config(stores).config, self.connector(stores))
+
+    def cut(self, child: CycleHop) -> ForkCut:
+        """The cut its open made, onto *child*."""
+        direction = FORK_DIRECTION[operator_trigger(self.payload)]
+        return ForkCut(parent=self.parent.hop, child=child, direction=direction)
+
+    @asynccontextmanager
+    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
+        """The cut, then its child bound as a start-run's cycle: a cut whose binding raised is
+        withdrawn."""
+        cut = cut_operator_fork(stores, self.payload, self.start)
+        child = ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
+        try:
+            async with AsyncExitStack() as binding:
+                opened = await binding.enter_async_context(child.open(stores))
+                bound = binding.pop_all()
+        except BaseException:
+            await asyncio.to_thread(cut.withdraw, stores, JobRegistry.attach(stores.jobs_dir))
+            raise
+        async with bound:
+            yield opened
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddedMint(FreshMint):
+    """A host's fresh campaign: no slot, its session on the host's *program*, its bank *rows*."""
+
+    program: object | None = None
+    rows: Sequence[Sample] | None = None
+    step_rounds: int | None = None
 
     @property
     def holder(self) -> EmbeddedRun:
-        return EmbeddedRun(self.session.measured_dataset)
-
-    def declared_budget(self, _stores: Stores) -> Budget:
-        return self.config.optimization.budget
-
-    def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self.config, self.connector(stores))
+        return EmbeddedRun(self.dataset_name)
 
     @asynccontextmanager
-    async def open(self, _stores: Stores) -> AsyncIterator[OpenedCycle]:
-        yield await mint_framed_cycle(
-            self.session, self.config, self.session.bank.samples, task_text=None
-        )
+    async def session(self, stores: Stores) -> AsyncIterator[Session]:
+        """*rows* replace the definition's bank, which the mint labels."""
+        async with init_services(
+            dataset_name=self.dataset_name,
+            identity=stores.identity,
+            stores=stores,
+            program=self.program,
+        ) as session:
+            if self.rows is None:
+                yield session
+                return
+            bank = Bank.of(self.rows)
+            stores.tenant_datasets.put_bank(bank)
+            yield replace(session, bank=bank)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,8 +299,6 @@ class EmbeddedResume(ExistingCycle):
 class InnerSeat(LaunchRequest):
     """A seat's inner campaign, planned before its admission: minted at its open where *at* names
     none, else resumed. A share of the enclosing run's book, never a slot."""
-
-    verb: ClassVar[str] = "inner"
 
     plan: CyclePlan
     campaign_id: str

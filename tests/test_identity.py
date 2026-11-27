@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
 
+import httpx
 import openpyxl
 import pytest
 import yaml
@@ -1153,6 +1154,21 @@ def test_an_l4_launch_whose_inner_backend_is_unaddressed_is_refused_before_its_m
         asyncio.run(run_campaign("outer", stores=built_stores, budget=Budget(), mode=RunMode()))
     assert refused.value.details["connector"] == "termnorm", "the refusal named another backend"
     assert built_stores.campaigns.list_campaign_ids() == [], "the refused launch minted"
+
+
+def test_a_fresh_embedded_launch_on_a_dead_backend_opens_no_session(
+    built_stores: Stores, offline: Router
+) -> None:
+    launched_bank(built_stores, offline, samples(40, "TRUE", query="claim "))
+    offline.backend.faults["/status"] = [httpx.ConnectError("offline: the backend is dead")]
+    asked = len(offline.backend.asked)
+    with pytest.raises(BackendUnreachableError):
+        asyncio.run(
+            run_campaign(LAUNCHED_DATASET, stores=built_stores, budget=Budget(), mode=RunMode())
+        )
+    assert offline.backend.asked[asked:] == ["/status"], (
+        "the refused launch opened a session on its backend before its probe"
+    )
 
 
 def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
@@ -4597,7 +4613,8 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
     built_stores.drafts.write_draft(
         owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging")
     )
-    held_before = built_stores.tenant_datasets.held_version("email-tagging")
+    banks = built_stores.account_dir / "banks"
+    held_before = sorted((p.name, p.read_bytes()) for p in banks.glob("*") if p.is_file())
     with pytest.raises(SlugTakenError):
         asyncio.run(
             dispatch_start_checkin(
@@ -4611,9 +4628,9 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
     assert not built_stores.tenant_datasets.dataset_dir("email-tagging").exists(), (
         "a Start landed an account's definition over the install's"
     )
-    assert built_stores.tenant_datasets.held_version("email-tagging") == held_before, (
-        "a refused Start recorded a cut"
-    )
+    assert (
+        sorted((p.name, p.read_bytes()) for p in banks.glob("*") if p.is_file()) == held_before
+    ), "a refused Start recorded a cut"
 
 
 def test_a_critique_cluster_says_what_it_holds_before_its_id_list_opens() -> None:

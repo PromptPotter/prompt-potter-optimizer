@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import operator
 import re
 import time
 from collections.abc import Callable
@@ -162,6 +163,8 @@ class ReadoutProjection(Projection):
         self.measured_unit: MeasuredUnit = session.backend_client.connector.measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
+        # The fold of `closed_rounds` over the statements it was read at.
+        self._folded: tuple[tuple[RoundStatement, ...], list[RoundResult]] | None = None
         self.sample_counter = 0
         # Folded off the launch's INIT, and the wiring's display metric.
         self._formula: CellFormula | None = None
@@ -313,8 +316,7 @@ class ReadoutProjection(Projection):
         _, audits, review = self._reviewed()
         for line in render_cycle_review(review, audits, self._config.optimization.optimizer):
             self._write(line)
-        scorer = session.state.scoring.scorer
-        hard = cycle_hard_samples(session.store, hop, scorer, self._config)
+        hard = cycle_hard_samples(session.store, hop, self._rounds(), self._config)
         measured = hard.ranked_keys
         order, ranked = rank_hard_samples(
             hard,
@@ -326,11 +328,27 @@ class ReadoutProjection(Projection):
         for line in render_hard_sample_heatmap(hard, queries, order, ranked):
             self._write(line)
 
+    def _rounds(self) -> list[RoundResult]:
+        """The closed rounds, folded once per standing set: the review at a close and the stop's
+        review and hard samples read one fold, and a re-close folds again."""
+        stood = tuple(self._closed[n] for n in sorted(self._closed))
+        if self._folded is None or not (
+            len(self._folded[0]) == len(stood) and all(map(operator.is_, self._folded[0], stood))
+        ):
+            hop = self._hop
+            assert hop is not None, "a round closes on the readout it opened"
+            scorer = self._session.state.scoring.scorer
+            self._folded = (
+                stood,
+                closed_rounds(self._session.store, hop, scorer, moment=None),
+            )
+        return self._folded[1]
+
     def _reviewed(self) -> tuple[list[RoundResult], list[RoundAudit | None], ReviewReading | None]:
         """The optimizer's review of every round the cycle closed, read off its ledger."""
         session, hop, config = self._session, self._hop, self._config
         assert hop is not None, "a round closes on the readout it opened"
-        rounds = closed_rounds(session.store, hop, session.state.scoring.scorer, moment=None)
+        rounds = self._rounds()
         audits = round_audits(self._campaigns.cycle_dir(hop), [r.round for r in rounds])
         framing = campaign_framing(session.store, config, session.dataset)
         asked = (framing.pipeline_purpose, framing.optimization_goals, framing.key_challenges)

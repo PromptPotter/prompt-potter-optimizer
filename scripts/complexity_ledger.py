@@ -290,7 +290,13 @@ BASELINE = {
     # w7-gate (+2): `health.py::webapp_bundle` hashes the worktree's `webapp/` in an index of its own.
     # w7-web (+78): the words the browser composed are served (a lookahead's segments, a subject's
     # cell means, the lifetime bill and its caveats, a sample movement's tone); 12 unread fields go.
-    "package_lines": 113306,
+    # w7-ver2 (+85): a writer stamps its subject's version (`io.py::stamp`, `Stores.stamps`), each
+    # read compares stamps, and a held closed series is not re-sent; `remove_bare_dir` prunes a stamp.
+    # w7-rows (+160): five host-admin bot verbs become command kinds through the dispatcher
+    # (payloads, `operator_acts.py`, the served contract), and `claim_default` re-keys dismissals.
+    # w7-open2 (+93): a fork is a `ForkLaunch` request kind whose `open` cuts it, admitted before its
+    # cut on its campaign (`domain/job.py::launch_campaign`), which quota and shares read.
+    "package_lines": 113644,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -361,7 +367,8 @@ BASELINE = {
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 10,
+    # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
+    "p_command": 11,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,

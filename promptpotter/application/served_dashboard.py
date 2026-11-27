@@ -81,6 +81,7 @@ from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words, epoch_seconds
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 
@@ -445,6 +446,13 @@ class ServedDashboard(DashboardFacts):
         description="The cycle's candidate line, read across its fork chain: every closed round's "
         "arms in round order, then the round in flight's while no round file holds it. The bars, "
         "the tree strip and the chart are views of it."
+    )
+    series_version: str = Field(
+        description="The closed series' version: `rounds` and their arms of `line`, as served."
+    )
+    series_held: bool = Field(
+        description="The asker named this `series_version` as the one it holds: `rounds` is empty "
+        "and `line` holds the round in flight's arms alone, so no frame re-sends a closed round."
     )
     observed: ArmName | None = Field(
         description="The arm a surface following the run shows (`_observed`); null before any "
@@ -831,8 +839,10 @@ def _serve(
     run_limits: RunLimits,
     standing: _Present | None,
     owners: _Addresser,
+    held_series: str | None,
 ) -> ServedDashboard:
-    """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since."""
+    """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since;
+    *held_series* is the closed series' version its asker holds, which is not re-sent."""
     banked: dict[str, Any] = {name: getattr(state, name) for name in DashboardFacts.model_fields}
     in_flight, allowed = state.in_flight, state.lookahead_allowed
     # A hold is read against the clock: a past moment has none, and a dead producer holds nothing.
@@ -856,8 +866,18 @@ def _serve(
     live = standing is not None and run.producer.appending
     line_round = next((r for r in reversed(rounds) if overlap_line(r.overlap)), None)
     axis = _round_axis(state, live=live)
+    closed_line = [
+        LineArm(address=owners(r.round, c.reading.arm.key), reading=c.reading)
+        for r in rounds
+        for c in r.candidates
+    ]
+    version = stable_hash(
+        [r.model_dump(mode="json") for r in rounds]
+        + [a.model_dump(mode="json") for a in closed_line]
+    )
+    elided = version == held_series
     return ServedDashboard(
-        **banked | {"rounds": rounds},
+        **banked | {"rounds": [] if elided else rounds},
         sample_coverage=SampleCoverage.of(rounds),
         run_limits=run_limits,
         campaign_id=hop.campaign_id,
@@ -919,12 +939,10 @@ def _serve(
             label=f"Its line runs on in fork {run.runs_on}",
             value=run.runs_on,
         ),
+        series_version=version,
+        series_held=elided,
         line=[
-            *(
-                LineArm(address=owners(r.round, c.reading.arm.key), reading=c.reading)
-                for r in rounds
-                for c in r.candidates
-            ),
+            *([] if elided else closed_line),
             *(
                 LineArm(
                     address=owners(state.current_round.round, c.reading.arm.key),
@@ -949,9 +967,10 @@ def _serve(
 
 
 def served_dashboard(
-    stores: Stores, hop: CycleHop, *, at: int | None = None
+    stores: Stores, hop: CycleHop, *, at: int | None = None, series: str | None = None
 ) -> ServedDashboard | WarmingDashboard:
-    """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
+    """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed;
+    ``series`` is the closed series' version the asker holds (`ServedDashboard.series_held`)."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = stores.run_state(hop)
     seat = stores.campaigns.campaign_cycle(hop)
@@ -985,6 +1004,7 @@ def served_dashboard(
             run_limits=folded,
             standing=None,
             owners=_addresser(stores, hop),
+            held_series=series,
         )
     config = cycle_config(stores, seat).config
     limits = _binding(stores, seat, config, run, folded)
@@ -1015,4 +1035,5 @@ def served_dashboard(
             at=time.time(),
         ),
         owners=_addresser(stores, hop),
+        held_series=series,
     )

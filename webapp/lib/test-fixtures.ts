@@ -560,6 +560,8 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     successor: null,
     line: [],
     rounds: [],
+    series_version: "",
+    series_held: false,
     sample_coverage: { measuring_rounds: 0, samples: [] },
     overlap_line_round: null,
     overlap_line_n: null,

@@ -33,6 +33,16 @@ def post(path: Path, *, text: str, pops_up: bool) -> Bulletin:
     return bulletin
 
 
+def rekey(path: Path, *, old_id: str, new_id: str) -> None:
+    """An account's dismissals follow its id (`accounts.py::claim_default`)."""
+    with write_lock(path):
+        board = read_board(path)
+        if old_id in board.dismissed:
+            dismissed = dict(board.dismissed)
+            dismissed[new_id] = dismissed.pop(old_id)
+            _write(path, BulletinBoard(bulletins=board.bulletins, dismissed=dismissed))
+
+
 def dismiss(path: Path, *, account_id: str, bulletin_id: str) -> bool:
     """Whether *bulletin_id* names a bulletin; dismissing one twice writes once."""
     with write_lock(path):

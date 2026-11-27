@@ -27,7 +27,6 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
-from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.jobs.launcher.launch import admit
 from promptpotter.application.jobs.launcher.mint_and_start import EmbeddedMint
@@ -46,7 +45,6 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
-from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.entry import launch_scope, open_line
@@ -735,24 +733,21 @@ async def run_init_round(
         "task_framing": "off",
     }
     entered = await enter(stores)
-    async with init_services(
-        dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
-    ) as session:
-        session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
-        admitted = await asyncio.to_thread(
-            admit,
-            EmbeddedMint(session, config, Budget()),
-            RunMode(),
-            stores=stores,
-            job_registry=JobRegistry.attach(stores.jobs_dir),
-            inline=None,
+    layers = ConfigLayers(campaign_defaults(), raw)
+    admitted = await asyncio.to_thread(
+        admit,
+        EmbeddedMint(resolve_dataset(entered, LAUNCHED_DATASET), Budget(), layers, None),
+        RunMode(),
+        stores=stores,
+        job_registry=JobRegistry.attach(stores.jobs_dir),
+        inline=None,
+    )
+    held = await admitted.held()
+    async with held.closing:
+        ctx, held.opening.ended = await launched_round(
+            held.session, held.cycle, held.optimizer, held.budget, round_num=round_num
         )
-        held = await admitted.held()
-        async with held.closing:
-            ctx, held.opening.ended = await launched_round(
-                held.session, held.cycle, held.optimizer, held.budget, round_num=round_num
-            )
-        return ctx
+    return ctx
 
 
 async def launched_round(

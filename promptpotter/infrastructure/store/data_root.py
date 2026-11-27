@@ -78,6 +78,7 @@ from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
+    STAMP_FILE,
     WORKSPACE_SHAPES,
     complete_lines,
     parse_yaml,
@@ -635,6 +636,8 @@ _RETIRED = Parsed(_retired, None)
 
 KINDS: tuple[Kind, ...] = (
     ATOMIC_WRITE,
+    # A subject's version (`io.py::stamp`): its length moves with every write under it.
+    Kind("subject stamp", _INSTALL, f"**/{STAMP_FILE}", Fate.MACHINE, Opaque("one byte a write")),
     *INSTALL_KINDS,
     *ACCOUNT_KINDS,
     *WORKSPACE_KINDS,

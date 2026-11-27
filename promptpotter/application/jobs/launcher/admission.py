@@ -53,6 +53,7 @@ from promptpotter.domain.job import (
     PaidCall,
     ScoringPass,
     SlotHolder,
+    launch_campaign,
 )
 from promptpotter.domain.phases import (
     PauseCause,
@@ -225,15 +226,16 @@ def request_jobs(
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate(launching=True), slot_rate(stores, holder, hop, asked=count):
         # First, under the gate an archive or a delete takes too: a refused campaign's act is
-        # queued, claimed and debited nothing.
-        if hop != UNRESOLVED_HOP:
-            refuse_campaign(stores, stores.campaigns.campaign(hop.campaign_id))
+        # queued, claimed and debited nothing; a fork names its campaign before its cycle.
+        if (on := launch_campaign(holder, hop)) is not None:
+            refuse_campaign(stores, stores.campaigns.campaign(on))
         # A scoring pass is load, never a campaign the concurrent and daily ceilings count.
         if isinstance(holder, CampaignLaunch):
             check_launch_quotas(
                 user=account_of(stores),
                 stores=stores,
                 job_registry=job_registry,
+                holder=holder,
                 hop=hop,
                 launches=count,
             )
@@ -329,13 +331,13 @@ async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget
     """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
     stores, job_registry, job = opening.stores, opening.job_registry, opening.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
-    at = request.at
+    at, campaign = request.at, request.campaign
     if job.queued:
         await job_registry.await_claim(job.job_id)
-        if at is not None:
+        if campaign is not None:
             # Asked again past the wait: the slot door's claim held off an archive or a delete,
             # never a definition moved while the job waited.
-            refuse_campaign(stores, at.campaign)
+            refuse_campaign(stores, campaign)
 
     await refuse_unreachable(
         stores, request.dataset_name, request.connector(stores), request.endpoint(stores)
@@ -345,7 +347,9 @@ async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget
     if isinstance(request.holder, InnerRun) and enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
     declared, asked = declare_run_budget(
-        request.declared_budget(stores), stores=stores, at=at, requested=request.budget
+        request.declared_budget(stores),
+        armed=request.armed_budget(stores),
+        requested=request.budget,
     )
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     held = await asyncio.to_thread(
@@ -355,7 +359,8 @@ async def admit_and_hold(request: LaunchRequest, opening: Opening) -> HeldBudget
         stores=stores,
         job_registry=job_registry,
         job=job,
-        at=at,
+        campaign=campaign,
+        hop=None if at is None else at.hop,
         step_rounds=request.step_rounds,
         sends=request.sends(stores),
         enclosing=enclosing,
@@ -370,15 +375,20 @@ def admit_and_share(
     stores: Stores,
     job_registry: JobRegistry,
     job: Job,
-    at: CampaignCycle | None,
+    campaign: Campaign | None,
+    hop: CycleHop | None,
     step_rounds: int | None,
     sends: tuple[Send, ...],
     enclosing: SpendBook | None = None,
 ) -> HeldBudget:
     """THE admission of every run and pass, sending *sends*, and its hold on the account; an inner
-    run is admitted against what its *enclosing* book has left, whose hold binds what it sends."""
-    hop = None if at is None else at.hop
-    meter: CeilingMeter = "bill" if at is None else ceiling_meter(at.campaign.declaration.purpose)
+    run is admitted against what its *enclosing* book has left, whose hold binds what it sends.
+    *campaign* is what it spends on, *hop* the cycle its share lands on: ``None`` until its cut
+    or mint names one, which lands it (`opening.py::land_job`)."""
+    meter: CeilingMeter = (
+        "bill" if campaign is None else ceiling_meter(campaign.declaration.purpose)
+    )
+    campaign_id = None if campaign is None else campaign.campaign_id
     with job_registry.admission_gate():
         if enclosing is None:
             admitted, reserve = admit_launch(
@@ -387,7 +397,7 @@ def admit_and_share(
                 stores=stores,
                 job_registry=job_registry,
                 job_id=job.job_id,
-                hop=hop,
+                campaign_id=campaign_id,
                 sends=sends,
             )
             # The campaign's ceiling as composed, never as a delegate's claim clamped it: the
@@ -399,23 +409,30 @@ def admit_and_share(
             # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
             spent = (
                 NOTHING_METERED
-                if at is None
-                else stores.campaigns.metered_spend(at.campaign.campaign_id, meter)
+                if campaign_id is None
+                else stores.campaigns.metered_spend(campaign_id, meter)
             )
             room = enclosing.money_left().bound_over(spent)
             admitted, reserve = declared.over(_within(declared, room)), Budget()
             ceiling = admitted
         allotment = share_campaign_ceiling(
-            ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
+            ceiling,
+            stores=stores,
+            job_registry=job_registry,
+            job=job,
+            campaign_id=campaign_id,
+            hop=hop,
+            meter=meter,
         )
         hold_run(
             stores, job.job_id, reserve, parent=None if enclosing is None else draws_on(enclosing)
         )
         job_registry.move(job.job_id, LaunchMove.ADMIT)
-        if at is not None:
-            hold_moved(stores, at.hop, allotment)
+        if hop is not None:
+            hold_moved(stores, hop, allotment)
+        if campaign is not None:
             move_campaign_money(
-                asked, asked=asked, stores=stores, job_registry=job_registry, campaign=at.campaign
+                asked, asked=asked, stores=stores, job_registry=job_registry, campaign=campaign
             )
     return HeldBudget(
         admitted=admitted,
@@ -452,7 +469,8 @@ def admit_arms(
                     stores=stores,
                     job_registry=job_registry,
                     job=opening.job,
-                    at=None,
+                    campaign=None,
+                    hop=None,
                     step_rounds=None,
                     sends=sends,
                 ),
@@ -658,7 +676,8 @@ def _open_pass(
             stores=stores,
             job_registry=job_registry,
             job=job,
-            at=at,
+            campaign=None if at is None else at.campaign,
+            hop=None if at is None else at.hop,
             step_rounds=None,
             sends=sends,
         )

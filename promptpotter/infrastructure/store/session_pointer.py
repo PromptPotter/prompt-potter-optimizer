@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import validate_path_component, write_bytes, write_lock
+from promptpotter.infrastructure.store.io import (
+    unlink_robust,
+    validate_path_component,
+    write_bytes,
+    write_lock,
+)
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import FileUnreadableError
@@ -35,7 +40,7 @@ def clear_active_pointer(workspace: WorkspaceDir) -> None:
 def _point(workspace: WorkspaceDir, hop: CycleHop | None) -> None:
     path = active_pointer_path(workspace)
     if hop is None:
-        path.unlink(missing_ok=True)
+        unlink_robust(path)
         return
     validate_path_component(hop.campaign_id)
     validate_path_component(hop.cycle_id)

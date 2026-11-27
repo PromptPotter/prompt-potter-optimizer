@@ -8,7 +8,6 @@ from pydantic import Field
 from promptpotter.application.account import account_or_opening
 from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.config.paths import LIVE_JOBS_INDEX, UNSWEPT_DIR
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
@@ -23,8 +22,7 @@ from promptpotter.domain.job import (
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF, RunPhase
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.accounts import is_host
-from promptpotter.infrastructure.store.read_model import file_sig
+from promptpotter.infrastructure.store.io import stamp_of
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, acting_principal
 
@@ -247,15 +245,12 @@ def served_machine_status(stores: Stores, jobs: JobRegistry) -> MachineStatusRes
 
 
 def machine_version(stores: Stores, jobs: JobRegistry) -> tuple[object, ...]:
-    """Stats only, the same for every reader of the account's machine (never its served view): the
-    job files, the live index, the unswept steps, the landing, the capacity and the account's limit."""
-    jobs_dir = jobs.jobs_dir
+    """The same for every reader of the account's machine (never its served view): the jobs dir's
+    stamp (a job's move, the live index, an unswept step), the landing, the capacity and the
+    account's limit, beside the producers its live jobs stand on, whose death no write marks."""
     return (
-        *(
-            (path.name, file_sig(path))
-            for path in sorted((*jobs_dir.glob("*.json"), *jobs_dir.glob(f"{UNSWEPT_DIR}/*.json")))
-        ),
-        file_sig(jobs_dir / LIVE_JOBS_INDEX),
+        stamp_of(jobs.jobs_dir),
+        *(job.job_id for job in jobs.list_holding_spend()),
         jobs.landing(),
         resolve_run_capacity(len(jobs.list_running())),
         account_or_opening(stores).max_concurrent_cycles,
@@ -270,7 +265,7 @@ def machine_status(
     principal_id = acting_principal(identity).id
     account = str(identity.user_id)
     held = [MachineSlot.of(job, account=account) for job in jobs.list_running()]
-    sees_all = settings.MACHINE_STATUS_SCOPE == "all" or is_host(identity)
+    sees_all = settings.MACHINE_STATUS_SCOPE == "all" or identity.host
     running = [slot for slot in held if sees_all or slot.mine]
     capacity = resolve_run_capacity(len(held))
     # ONE ordering, the drain's own: numbering the caller's slice would read 1, 2, 3 to everyone.

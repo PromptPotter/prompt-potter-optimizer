@@ -18,7 +18,6 @@ from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import KnobLayer, PipelineNode, PipelineSchema
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.wallet import paying_key
 from promptpotter.infrastructure.store.io import read_yaml
@@ -35,7 +34,7 @@ def on_free_tier(stores: Stores) -> bool:
     """The box's DEFAULT coupon: the host and a hand-granted account are outside it, and a
     delegate stands where its delegator's account does. What the tier binds of a run is
     `free_fence`'s."""
-    return not is_host(stores.identity) and stores.grant.load() is None
+    return not stores.identity.host and stores.grant.load() is None
 
 
 def tier_ceiling(stores: Stores) -> float | None:

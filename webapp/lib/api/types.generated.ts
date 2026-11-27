@@ -38,7 +38,6 @@ export interface NextAct {
 
 export interface HealthResponse {
   status: string;
-  service: string;
   timestamp: string;
   /** `APP_VERSION` — the browser's one source of it */
   version: string;
@@ -73,7 +72,7 @@ export interface MeResponse {
   capabilities: string[];
   /** The kinds this account may file (`command_kinds.py::filable`): what an act on
    * the account (its campaigns' lifecycle, its usage, its keys) is drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
   access_state: 'active' | 'blocked';
   terms_version: string;
   terms_accepted_version: string | null;
@@ -306,10 +305,12 @@ export interface MachineSlot {
   started_at: string | null;
 }
 
-/** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
+/** A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names
+ * the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
   draft_id: string | null;
+  campaign_id: string | null;
   kind: 'campaign_launch';
 }
 
@@ -1279,7 +1280,7 @@ export interface SubtreeCampaignFacts {
   /** The kinds this read's reader may file (`command_kinds.py::filable`): what an
    * act no read offers (limits, look-ahead, a fork, a scenario, a bank) is
    * drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
 }
 
 /** A cycle as the subtree read serves it: its rounds under it. */
@@ -1792,6 +1793,12 @@ export interface ServedDashboard {
    * arms in round order, then the round in flight's while no round file holds
    * it. The bars, the tree strip and the chart are views of it. */
   line: LineArm[];
+  /** The closed series' version: `rounds` and their arms of `line`, as served. */
+  series_version: string;
+  /** The asker named this `series_version` as the one it holds: `rounds` is empty
+   * and `line` holds the round in flight's arms alone, so no frame re-sends a
+   * closed round. */
+  series_held: boolean;
   /** The arm a surface following the run shows (`_observed`); null before any arm
    * exists. */
   observed: ArmName | null;
@@ -5004,6 +5011,11 @@ export interface BankSnippetPayload {
   experiment: string;
 }
 
+/** Refuse every sign-in of an email on this box; only its host may. */
+export interface BlockEmailPayload {
+  email: string;
+}
+
 /** Stop a command still acting, by its id: a verify or bench pass stops at its
  * next cell and answers over what it measured. One that ended is left as it
  * ended. */
@@ -5144,6 +5156,13 @@ export interface ConfigOverrides {
   budget: Budget;
   nodes: Record<string, ManifestNodeOverlay>;
   scoring: string | Record<string, string> | null;
+}
+
+/** Delegate capabilities, named by a comma-separated list, from the host's
+ * account to another; only its host may. */
+export interface GrantDelegationPayload {
+  user_id: string;
+  capabilities: string;
 }
 
 /** Grade the campaign's origin and its selection on the held-out bench rows. */
@@ -5498,6 +5517,11 @@ export interface RevokeApiTokenPayload {
   token_id: string;
 }
 
+/** Take back an account's delegation; only the host may. */
+export interface RevokeDelegationPayload {
+  user_id: string;
+}
+
 /** Hold the caller's own key for a provider: its sends there go out on it, past
  * the coupon. Never served back, and recorded masked. */
 export interface SetApiKeyPayload {
@@ -5510,6 +5534,15 @@ export interface SetApiKeyPayload {
 export interface SetConcurrentCyclesPayload {
   /** The new limit. */
   max_concurrent_cycles: number;
+}
+
+/** Set an account's coupon face: dollars and tokens, `-` leaving a unit
+ * unbounded; `afresh` starts its draw now. Only the host may. */
+export interface SetCouponPayload {
+  user_id: string;
+  usd: string;
+  tokens: string;
+  afresh: boolean;
 }
 
 /** Raise or lower an existing cycle's spend, token, round or wall-clock bound, or
@@ -5634,6 +5667,11 @@ export interface UnarchiveCampaignPayload {
   reason: string;
 }
 
+/** Lift an email's block on this box; only its host may. */
+export interface UnblockEmailPayload {
+  email: string;
+}
+
 /** ``samples`` omitted is the ANSWER, not an absence: the count is derived from
  * the per-candidate round budget and the rounds run since this cycle's last
  * verification. A larger explicit count is refused, naming the budget — which
@@ -5668,7 +5706,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Every command kind, in its table's order (domain/command_kinds.py::CommandKind).
-export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "post-bulletin", "dismiss-bulletin", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
+export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "post-bulletin", "dismiss-bulletin", "block-email", "unblock-email", "grant-delegation", "revoke-delegation", "set-coupon", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
 export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "dismiss-bulletin" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
@@ -5684,6 +5722,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
+  "block-email": CommandSent<BlockEmailPayload, "email">;
   "cancel": CommandSent<CancelPayload, "command_id">;
   "cancel-queued": CommandSent<CancelQueuedRunPayload, "job_id">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -5694,6 +5733,7 @@ export interface CommandPayloads {
   "dismiss-bulletin": CommandSent<DismissBulletinPayload, "bulletin_id">;
   "edit-draft-campaign": CommandSent<EditDraftCampaignPayload, "draft_id" | "patch">;
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
+  "grant-delegation": CommandSent<GrantDelegationPayload, "user_id" | "capabilities">;
   "head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "held-out": CommandSent<HeldOutPayload, "campaign_id">;
   "list-api-tokens": CommandSent<ListApiTokensPayload, never>;
@@ -5707,8 +5747,10 @@ export interface CommandPayloads {
   "rename-campaign": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
   "revoke-api-token": CommandSent<RevokeApiTokenPayload, "token_id">;
+  "revoke-delegation": CommandSent<RevokeDelegationPayload, "user_id">;
   "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
+  "set-coupon": CommandSent<SetCouponPayload, "user_id" | "usd" | "tokens">;
   "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id">;
   "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
   "set-user-settings": CommandSent<SetUserSettingsPayload, "demo_mode_enabled">;
@@ -5717,6 +5759,7 @@ export interface CommandPayloads {
   "start-run": CommandSent<StartRunPayload, "campaign_id" | "cycle_id">;
   "submit-arms": CommandSent<SubmitArmsPayload, "campaign_id" | "cycle_id">;
   "unarchive-campaign": CommandSent<UnarchiveCampaignPayload, "campaign_id">;
+  "unblock-email": CommandSent<UnblockEmailPayload, "email">;
   "verify-candidate": CommandSent<VerifyCandidatePayload, "campaign_id" | "cycle_id" | "candidate_id">;
 }
 
@@ -5725,6 +5768,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
+  "block-email": CommandAcceptedBody;
   "cancel": CommandAcceptedBody;
   "cancel-queued": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;
@@ -5735,6 +5779,7 @@ export interface CommandResponses {
   "dismiss-bulletin": CommandAcceptedBody;
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": LaunchAnswer;
+  "grant-delegation": CommandAcceptedBody;
   "head-to-head": LaunchAnswer;
   "held-out": BenchScore;
   "ingest-upload": DraftCampaignWire;
@@ -5749,8 +5794,10 @@ export interface CommandResponses {
   "rename-campaign": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
   "revoke-api-token": CommandAcceptedBody;
+  "revoke-delegation": CommandAcceptedBody;
   "set-api-key": AccountKey;
   "set-concurrent-cycles": CommandAcceptedBody;
+  "set-coupon": CommandAcceptedBody;
   "set-limits": ArmedCaps;
   "set-sample-lookahead": CommandAcceptedBody;
   "set-user-settings": UserSettings;
@@ -5759,6 +5806,7 @@ export interface CommandResponses {
   "start-run": LaunchAnswer;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
+  "unblock-email": CommandAcceptedBody;
   "verify-candidate": PassGradedRecord | VerifySaturated;
 }
 
@@ -5810,7 +5858,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "912b41c61b8f91f7";
+export const SERVED_CONTRACT = "96973f4445b16fcb";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -310,7 +310,6 @@ _health = APIRouter(tags=["Health"])
 
 class HealthResponse(StrictModel):
     status: str
-    service: str
     timestamp: str
     version: str = Field(description="`APP_VERSION` — the browser's one source of it")
     webapp: Said | None = Field(
@@ -323,7 +322,6 @@ async def health_check() -> HealthResponse:
     bundle = await asyncio.to_thread(health.webapp_bundle)
     return HealthResponse(
         status="healthy",
-        service=settings.BRAND_SERVICE_NAME,
         timestamp=utcnow_iso(),
         version=APP_VERSION,
         webapp=Said(

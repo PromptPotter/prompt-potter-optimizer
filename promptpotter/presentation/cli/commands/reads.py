@@ -78,7 +78,8 @@ def bulletins_human(
     _params: ReadParams, read: AccountBulletins, _args: argparse.Namespace, _caller: Caller
 ) -> CommandResult:
     lines = [
-        f"{b.posted_at} {b.id}{' (dismissed)' if b.dismissed else ''}: {b.text}"
+        f"{b.posted_at} {b.id}{' (pops up)' if b.pops_up and not b.dismissed else ''}"
+        f"{' (dismissed)' if b.dismissed else ''}: {b.text}"
         for b in read.bulletins
     ]
     return CommandResult(data=read.model_dump(mode="json"), human="\n".join(lines) or "none")

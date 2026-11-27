@@ -14,7 +14,12 @@ from promptpotter.application.commands.dispatcher import (
     command_answer,
 )
 from promptpotter.application.commands.launching import launched
-from promptpotter.application.cycle_reads import FEED_VERSIONS_HEADER, feed_versions_said
+from promptpotter.application.cycle_reads import (
+    FEED_VERSIONS_HEADER,
+    FeedVersion,
+    feed_moves_said,
+    feed_versions,
+)
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_kinds import (
@@ -64,17 +69,24 @@ async def ingest_upload(
     }
     payload = PayloadInvalidError.validating(IngestUploadPayload, fields)
     dispatcher = CommandDispatcher(stores)
+    stood = await _stood(dispatcher)
     outcome = await dispatcher.answer(
         workspace_edits.ingest_upload, CommandCall(payload, key, door=Door.API)
     )
-    await _stamped(response, dispatcher)
+    await _stamped(response, dispatcher, stood)
     return outcome.result
 
 
-async def _stamped(response: Response, dispatcher: CommandDispatcher) -> None:
-    """The ack names the versions its write produced (`read-cache.ts::reached`)."""
+async def _stood(dispatcher: CommandDispatcher) -> dict[str, FeedVersion]:
+    return await off_loop(feed_versions, dispatcher.stores, dispatcher.job_registry)
+
+
+async def _stamped(
+    response: Response, dispatcher: CommandDispatcher, stood: dict[str, FeedVersion]
+) -> None:
+    """The ack names the versions its write moved (`read-cache.ts::reached`)."""
     response.headers[FEED_VERSIONS_HEADER] = await off_loop(
-        feed_versions_said, dispatcher.stores, dispatcher.job_registry
+        feed_moves_said, dispatcher.stores, dispatcher.job_registry, stood
     )
 
 
@@ -118,10 +130,11 @@ class _Dispatching:
         call = CommandCall(payload, key, door=Door.API)
         if command_id is not None:
             call = replace(call, command_id=command_id)
+        stood = await _stood(dispatcher)
         outcome = await dispatcher.dispatch(call)
         if self.answers is LaunchAnswer:
             outcome = replace(outcome, result=await launched(outcome, dispatcher, call.door))
-        await _stamped(response, dispatcher)
+        await _stamped(response, dispatcher, stood)
         return outcome.answer
 
 

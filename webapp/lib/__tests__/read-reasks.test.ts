@@ -56,7 +56,7 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
       const named = (init?.headers as Record<string, string> | undefined)?.[FEED_SUBJECT_HEADER];
       const stood = Object.fromEntries(
         Object.entries(at)
-          .filter(([subject]) => named !== undefined && subject.startsWith(named))
+          .filter(([subject]) => named?.split(",").some((n) => subject.startsWith(n)) === true)
           .map(([subject, n]) => [subject, feedVersion(n)]),
       );
       const headers = named === undefined ? {} : { [FEED_VERSIONS_HEADER]: JSON.stringify(stood) };
@@ -137,11 +137,11 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, inner: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 
-  it("re-asks the account's own reads on what it filed, and nothing a run moves", async () => {
+  it("re-asks the account's own reads and every read of its inbox on what it filed, and nothing a run moves", async () => {
     await mount();
     feed().frame("account", 2);
     await settle();
-    expect(asked).toEqual({ ...once, settings: 2 });
+    expect(asked).toEqual({ ...once, settings: 2, hierarchy: 2, top: 2, inner: 2, other: 2 });
   });
 
   it("is a hint, never the body: a repeated or replayed version re-asks nothing", async () => {

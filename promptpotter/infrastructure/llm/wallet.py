@@ -28,7 +28,6 @@ from promptpotter.domain.spend import (
     money_text,
     usd_text,
 )
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.base import ProviderKey
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import get_llm_client, host_key, host_key_attr
@@ -84,7 +83,7 @@ def read_coupon(stores: Stores) -> Coupon:
     grant = stores.grant.load()
     since = None if grant is None else grant.granted_at
     return Coupon(
-        face=face_of(grant, host=is_host(stores.identity)),
+        face=face_of(grant, host=stores.identity.host),
         spent=account_bill(stores.charges, since=since).host,
     )
 

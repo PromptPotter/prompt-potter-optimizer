@@ -19,7 +19,6 @@ from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
-    UNRESOLVED_HOP,
     CampaignLaunch,
     EmbeddedRun,
     InnerRun,
@@ -27,6 +26,7 @@ from promptpotter.domain.job import (
     JobHolder,
     PaidCall,
     ScoringPass,
+    launch_campaign,
 )
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.said import Said
@@ -43,7 +43,6 @@ from promptpotter.domain.spend import (
     money_text,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.wallet import (
@@ -121,14 +120,15 @@ class _Meter(NamedTuple):
     refusal: str
 
 
-def _new_campaign(stores: Stores, hop: CycleHop) -> bool:
-    """A stranger's fresh mint, a check-in's Start included (it names no cycle yet): what the
-    launch rate (per server process) and the daily ceiling (per home) meter. The host is exempt: they bound a stranger on its key."""
-    return not is_host(stores.identity) and hop == UNRESOLVED_HOP
+def _new_campaign(stores: Stores, holder: JobHolder, hop: CycleHop) -> bool:
+    """A stranger's fresh mint, a check-in's Start included (it names no cycle yet), never a fork
+    (it names its campaign): what the launch rate (per server process) and the daily ceiling (per
+    home) meter. The host is exempt: they bound a stranger on its key."""
+    return not stores.identity.host and launch_campaign(holder, hop) is None
 
 
 def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
-    if is_host(stores.identity):
+    if stores.identity.host:
         return None
     return _Meter(
         f"{verb}:{stores.identity.user_id}",
@@ -139,7 +139,7 @@ def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
 def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | None:
     match holder:
         case CampaignLaunch():
-            if not _new_campaign(stores, hop):
+            if not _new_campaign(stores, holder, hop):
                 return None
             return _Meter(
                 f"launch:{stores.identity.user_id}",
@@ -219,7 +219,7 @@ def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
     """A read is what a poll repeats, so it has the wider bucket; a write is every other request, a
     free verb's included. The host is exempt, as from every bucket that meters a stranger. Each
     bucket is this server process's (`_rate_buckets`): N servers over one home grant N times the rate."""
-    if is_host(identity):
+    if identity.host:
         return
     principal = acting_principal(identity).id
     if read and not _consume_rate_token(f"read:{principal}", burst=_READ_BURST, per_s=_READ_PER_S):
@@ -237,7 +237,13 @@ def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
 
 
 def check_launch_quotas(
-    *, user: User, stores: Stores, job_registry: JobRegistry, hop: CycleHop, launches: int
+    *,
+    user: User,
+    stores: Stores,
+    job_registry: JobRegistry,
+    holder: CampaignLaunch,
+    hop: CycleHop,
+    launches: int,
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, then the
     *launches* asked together — a head-to-head's arms, all admitted or none."""
@@ -256,7 +262,7 @@ def check_launch_quotas(
             ),
         )
 
-    if _new_campaign(stores, hop):
+    if _new_campaign(stores, holder, hop):
         today = campaigns_today(stores, job_registry, user.user_id)
         if today + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
@@ -277,11 +283,10 @@ def campaigns_today(stores: Stores, job_registry: JobRegistry, user_id: str) -> 
     for job in job_registry.list_launched_today(user_id=user_id):
         if not (job.admitted or job_registry.in_flight(job)):
             continue
-        campaign = (
-            None if job.hop == UNRESOLVED_HOP else stores.campaigns.load_campaign(job.campaign_id)
-        )
+        on = launch_campaign(job.holder, job.hop)
+        campaign = None if on is None else stores.campaigns.load_campaign(on)
         if campaign is None or campaign.created_at[:10] == job.created_at[:10]:
-            minted.add(job.job_id if campaign is None else job.campaign_id)
+            minted.add(job.job_id if campaign is None else campaign.campaign_id)
     return len(minted)
 
 
@@ -498,7 +503,7 @@ def admit_launch(
     stores: Stores,
     job_registry: JobRegistry,
     job_id: str,
-    hop: CycleHop | None,
+    campaign_id: str | None,
     sends: tuple[Send, ...],
 ) -> tuple[Budget, Budget]:
     """Refused WHOLE, never clamped. The admitted budget, then what the coupon reserves for it.
@@ -510,7 +515,7 @@ def admit_launch(
         stores=stores,
         job_registry=job_registry,
         excluding_job_id=job_id,
-        excluding_campaign=None if hop is None else hop.campaign_id,
+        excluding_campaign=campaign_id,
     )
     refusal = launch_refusal(
         wallet, declared, sends, stores=stores, refusing=job_registry.get(job_id)
@@ -625,22 +630,18 @@ def call_book(
 
 
 def declare_run_budget(
-    declared: Budget,
-    *,
-    stores: Stores,
-    at: CampaignCycle | None,
-    requested: Budget,
+    declared: Budget, *, armed: Budget, requested: Budget
 ) -> tuple[Budget, Budget]:
     """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
-    second, the axes an operator named (campaign, cycle, *requested*)."""
-    asked = Budget() if at is None else stores.campaigns.armed_budget(at)
-    asked = asked.over(requested)
+    second, the axes an operator named (*armed*: its campaign's and its cycle's, then
+    *requested*)."""
+    asked = armed.over(requested)
     return declared.over(asked), asked
 
 
 def next_launch_budget(config: CampaignConfig, *, stores: Stores, at: CampaignCycle) -> Budget:
     declared, _ = declare_run_budget(
-        config.optimization.budget, stores=stores, at=at, requested=Budget()
+        config.optimization.budget, armed=stores.campaigns.armed_budget(at), requested=Budget()
     )
     return declared
 
@@ -755,7 +756,7 @@ def _lowest(*values: float | None) -> float | None:
 
 
 def concurrent_cycles_writable(stores: Stores) -> bool:
-    return is_host(stores.identity) and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
+    return stores.identity.host and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
 
 
 def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:

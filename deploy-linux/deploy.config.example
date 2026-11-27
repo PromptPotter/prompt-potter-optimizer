@@ -103,7 +103,7 @@ OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
 #BRAND_SHORT_NAME="PromptPotter"
 # Full product name — web app manifest, schema.org JSON-LD.
 #BRAND_NAME="PromptPotter Live Unit"
-# Service title — FastAPI /docs title and the `service` field of /health.
+# Service title — FastAPI /docs title and the stop notices.
 #BRAND_SERVICE_NAME="PromptPotter Optimizer"
 #BRAND_DESCRIPTION="LLM-driven program evolution for prompts and pipeline parameters."
 

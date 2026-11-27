@@ -64,7 +64,7 @@ from promptpotter.application.bench.resume_and_fork.replayers import replay_all_
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_start
 from promptpotter.application.cycle_reads import feed_versions, open_family_ray
-from promptpotter.application.hierarchy import list_hierarchy
+from promptpotter.application.hierarchy import hierarchy_version, list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
     LineOwners,
     Reach,
@@ -195,7 +195,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_answers,
 )
-from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import (
     Appended,
     append_jsonl,
@@ -2108,6 +2108,26 @@ def test_an_archive_write_moves_the_subtrees_validator_and_the_feeds_store_versi
         "the feed's store version did not move forward on an archive write"
     )
     assert feed_versions(stores, feed_jobs)["store:"] == moved, "an unmoved store moved its version"
+
+
+def test_a_hand_edit_to_an_authored_definition_moves_the_hierarchy_and_the_feed(
+    world: World, displaced: Shared, tmp_path: Path
+) -> None:
+    # An authored tier has no writer: no stamp moves, so its version is the definition's own stat.
+    stores = world.adopt(displaced).stores
+    campaign = stores.campaigns.load_campaign(displaced.made.fork.campaign_id)
+    assert campaign is not None
+    definition = resolve_dataset(stores, campaign.dataset_name).directory / DEFINITION_FILE
+    feed_jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    etag, fed = hierarchy_version(stores, inside=()), feed_versions(stores, feed_jobs)["store:"]
+    with definition.open("a", encoding="utf-8") as hand:
+        hand.write("\n# an operator's hand edit\n")
+    assert hierarchy_version(stores, inside=()) != etag, (
+        "a hand edit to the definition left the hierarchy's ETag standing: a 304 serves its old card"
+    )
+    assert feed_versions(stores, feed_jobs)["store:"].n > fed.n, (
+        "a hand edit to the definition left the account feed's store version standing"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

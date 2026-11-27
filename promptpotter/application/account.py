@@ -16,7 +16,7 @@ from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
-from promptpotter.domain.command_kinds import CommandKind, filable
+from promptpotter.domain.command_kinds import CommandKind, Door, filable
 from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import Budget
@@ -168,7 +168,7 @@ def arrive(stores: Stores, *, device: Device | None) -> Arrival:
         if existing is not None:
             return Arrival(existing, opened=False)
         held = count_accounts(stores.projects_root)
-        if not accounts.is_host(stores.identity) and held >= settings.MAX_ACCOUNTS:
+        if not stores.identity.host and held >= settings.MAX_ACCOUNTS:
             raise AccountCeilingError(
                 f"This box holds its ceiling of {settings.MAX_ACCOUNTS} accounts "
                 f"({held} now), so it opens no new one.",
@@ -444,6 +444,16 @@ def local_stores(*, tenant: str | None) -> Stores:
     return build_stores(
         registered_or_default_identity(tenant), projects_root=default_projects_root()
     )
+
+
+def require_host(stores: Stores, door: Door) -> None:
+    """The host's administration of the box (decisions § 0004): never an inbound route, so the API
+    door refuses it; every capability-holder reaches the kind, only the host's terminal or bot acts."""
+    if door is Door.API or not stores.identity.host:
+        raise PayloadInvalidError(
+            "Only whoever runs this box administers it, from its terminal or its bot.",
+            code="administered_by_host",
+        )
 
 
 def blocked_emails() -> list[str]:

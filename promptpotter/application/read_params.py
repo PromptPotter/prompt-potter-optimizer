@@ -453,10 +453,16 @@ class CycleDashboardParams(
     """
 
     at: int | None = Field(default=None, ge=0, description="A line of the leaf cycle's own ledger")
+    series: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The `series_version` of the closed series the asker holds: matching, the "
+        "answer does not re-send it (`series_held`)",
+    )
 
     def served(self, cycle: ViewedCycle) -> ServedDashboard | WarmingDashboard:
         """Off a cycle already viewed, which a door reads its validator from first."""
-        return served_dashboard(cycle.stores, cycle.hop, at=self.at)
+        return served_dashboard(cycle.stores, cycle.hop, at=self.at, series=self.series)
 
     def answer(self, caller: Caller) -> ServedDashboard | WarmingDashboard:
         return self.served(self.viewed(caller))

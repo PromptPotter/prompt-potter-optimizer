@@ -2640,8 +2640,20 @@
           },
           "CampaignLaunch": {
             "additionalProperties": false,
-            "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
+            "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
             "properties": {
+              "campaign_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Campaign Id"
+              },
               "dataset_name": {
                 "title": "Dataset Name",
                 "type": "string"
