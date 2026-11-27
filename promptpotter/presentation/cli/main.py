@@ -838,6 +838,13 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         args=(Arg("command_id", help="The command's id, as `--json` or its door answered it."),),
     ),
     _read_verb(
+        "bulletins",
+        ReadKind.BULLETINS,
+        "cli.commands.reads:bulletins_human",
+        help="What the host posted to every account, newest first, each marked once you dismissed "
+        "it (`dismiss-bulletin`). Read-only, zero spend.",
+    ),
+    _read_verb(
         "machine-status",
         ReadKind.MACHINE_STATUS,
         "cli.commands.reads:machine_status_human",

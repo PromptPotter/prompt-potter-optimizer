@@ -9,6 +9,7 @@ import { TERMS } from "@/lib/terms";
 import { Icon, Term } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
+import { Bulletins } from "@/components/shell/Bulletins";
 import { AccountSpend } from "./AccountSpend";
 import { SidebarContent } from "./SidebarContent";
 import { FAMILIES } from "@/components/shell/families";
@@ -108,6 +109,7 @@ export function Sidebar() {
               <path d="M6 1.5A6.5 6.5 0 1 0 14.5 10 5 5 0 0 1 6 1.5z" />
             </Icon>
           </button>
+          {status === "authed" ? <Bulletins /> : null}
           {status === "authed" ? (
             <button
               type="button"

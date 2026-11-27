@@ -1,18 +1,19 @@
 import { useMemo } from "react";
 import { useViewedDashboard } from "@/lib/state/poll";
-import type { ServedRound } from "@/lib/api/types";
+import type { LineArm, ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/state/selection";
 import {
   barsAreCycles,
   candidateBars,
   candidatesAtPath,
   cycleAt,
-  liveCandidates,
   type LineageIndex,
 } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/state/workspace";
 import { useEveryCandidate } from "@/lib/prefs/candidates";
 import type { CandidateBar } from "@/lib/types";
+
+const NO_LINE: LineArm[] = [];
 
 export function useCandidateBars(index: LineageIndex) {
   const { dash } = useViewedDashboard();
@@ -39,11 +40,7 @@ export function useCandidateBars(index: LineageIndex) {
     return picked && barsAreCycles(picked) ? picked : (cycleAt(index, viewedPath) ?? undefined);
   }, [index, viewedPath, pickedAddress]);
 
-  const inflightByKey = useMemo(
-    () => new Map(liveCandidates(dash).map((c) => [c.reading.arm.key, c.reading])),
-    [dash],
-  );
-
+  const line = dash?.line ?? NO_LINE;
   const areCycles = useMemo(() => barsAreCycles(viewedNode), [viewedNode]);
 
   const marks = dash?.verification;
@@ -53,12 +50,12 @@ export function useCandidateBars(index: LineageIndex) {
       candidateBars({
         index,
         viewedNode,
-        inflightByKey,
+        line,
         sampleSet,
         marks: marks ?? [],
         every,
       }),
-    [index, viewedNode, inflightByKey, sampleSet, marks, every],
+    [index, viewedNode, line, sampleSet, marks, every],
   );
 
   const priorDominated = useMemo(

@@ -1753,6 +1753,73 @@
       ],
       "shape": null
     },
+    "bulletins": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/bulletins.json"
+      ],
+      "shape": {
+        "$defs": {
+          "Bulletin": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "pops_up": {
+                "title": "Pops Up",
+                "type": "boolean"
+              },
+              "posted_at": {
+                "title": "Posted At",
+                "type": "string"
+              },
+              "text": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "title": "Text",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "posted_at",
+              "text",
+              "pops_up"
+            ],
+            "title": "Bulletin",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "bulletins": {
+            "items": {
+              "$ref": "#/$defs/Bulletin"
+            },
+            "title": "Bulletins",
+            "type": "array"
+          },
+          "dismissed": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Dismissed",
+            "type": "object"
+          }
+        },
+        "required": [
+          "bulletins",
+          "dismissed"
+        ],
+        "title": "BulletinBoard",
+        "type": "object"
+      }
+    },
     "check-in manifest": {
       "fate": "SURVIVOR",
       "patterns": [

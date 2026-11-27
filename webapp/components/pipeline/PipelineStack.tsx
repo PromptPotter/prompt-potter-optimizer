@@ -45,7 +45,7 @@ export function PipelineStack({ datasetName }: Props) {
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
   const nested = useNestedPipelines(nests, served !== null);
-  const activeNode = dash?.current_round.active_node ?? null;
+  const active = dash?.active ?? null;
 
   const layers: Layer[] = [
     {
@@ -59,7 +59,7 @@ export function PipelineStack({ datasetName }: Props) {
       reach: served?.optimizer_setup.reach ?? null,
       scope: "optimizer",
       nestsNode: served?.optimizer_setup.measurement_node ?? null,
-      activeNode,
+      active,
       isLive,
     },
     {
@@ -73,7 +73,7 @@ export function PipelineStack({ datasetName }: Props) {
       reach: served?.reach ?? null,
       scope: "target",
       nestsNode: nests[0]?.node ?? null,
-      activeNode,
+      active,
       isLive,
     },
     ...nested.layers.map((l) => ({
@@ -89,7 +89,7 @@ export function PipelineStack({ datasetName }: Props) {
       // Read-only: an id collision in another dataset's namespace would light a node not running.
       scope: null,
       nestsNode: l.nestsNode,
-      activeNode: null,
+      active: null,
       isLive: false,
     })),
   ];

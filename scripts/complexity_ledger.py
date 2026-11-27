@@ -279,7 +279,11 @@ BASELINE = {
     # w7-small (+12): health probes only the offer's connectors (`offer_connectors`), and a sandbox
     # owner names its own hop (`SandboxOwner.hop`).
     # w7-text (−807): `log.md` and `review.md` excised; one round block off `ServedRound`.
-    "package_lines": 112903,
+    # w7-host (+239): the host's bulletins, a survivor beside the accounts: its board, its post and
+    # dismiss commands, the account's read at the API and the terminal, and the admin bot's `/bulletin`.
+    # w7-line (+19): the dashboard serves `active`, `successor` and `line`, and each line arm its
+    # open cells; `measuring_arm`, the race fold and the subtree's `inherited` go.
+    "package_lines": 113161,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -342,7 +346,8 @@ BASELINE = {
     # cfg-3 (+2): a campaign layer's nested partials (split, lives, judge, call target), served
     # where a door states a layer; three of their keys no surface reads by name yet.
     # vote (+3): `origin_panel_cells` on the three served campaign configs, which no surface edits yet.
-    "p_served": 210,
+    # w7-host (-1): the webapp's bulletins read every field they serve, and one more the account already did.
+    "p_served": 209,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

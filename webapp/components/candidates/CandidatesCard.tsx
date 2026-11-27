@@ -96,7 +96,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
           <FitnessChart
             ctx={m.seriesCtx}
             divergenceBoundary={m.divergenceBoundary}
-            inFlightIndex={m.inFlightIndex}
+            inFlightIndices={m.inFlightIndices}
             selectedKey={m.selectedKey}
             onSelect={m.onSelect}
             onGeometry={m.onGeometry}

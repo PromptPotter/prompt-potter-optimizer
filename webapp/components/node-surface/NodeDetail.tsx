@@ -99,8 +99,8 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
     ...(block ? [{ key: "run", label: `What it did in round ${viewedRound}`, data: block }] : []),
   ];
 
-  const livePhaseNode = dash?.current_round.active_node ?? null;
-  const isLiveNow = isLive && viewingLive && livePhaseNode === id && isOptimizer;
+  const active = dash?.active ?? null;
+  const isLiveNow = active !== null && active.scope === scope && active.node === id;
 
   return (
     <div className={cx("bnode", "box-full", isOptimizer && "bnode-wide")}>

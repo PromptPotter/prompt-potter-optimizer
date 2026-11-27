@@ -607,13 +607,6 @@ class _Build:
                 )
             )
         hung = cycle.hangs_from
-        inherited = [
-            o.cycle.at_round(round_, key)
-            for round_, o in sorted(head.owner.candidates.items())
-            if o is not head
-            for ran_in, key in o.arms
-            if ran_in == round_
-        ]
         return SubtreeCycle(
             **_fields(cycle.entry)
             | {
@@ -624,7 +617,6 @@ class _Build:
                     from_candidate=None
                     if cycle.index.fork is None or hung is None
                     else hung.address,
-                    inherited=inherited,
                     lens_criterion=None,
                     lens_shift=None,
                 ),

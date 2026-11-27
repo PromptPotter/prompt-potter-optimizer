@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 
+from promptpotter.domain.bulletin import BULLETIN_TEXT_CHARS
 from promptpotter.domain.campaign import ArmName, ArmSeat
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
@@ -381,6 +382,22 @@ class CommandKind(StrEnum):
         "workspace_edits:accept_terms",
         ACCOUNT_SELF_CAP,
         person("accept-terms"),
+    )
+    # The host's word to every account: its terminal and its admin bot post (`bulletins.py::post_bulletin`).
+    POST_BULLETIN = (
+        "post-bulletin",
+        "bulletin_acts:post_bulletin",
+        ACCOUNT_SELF_CAP,
+        Press(
+            "post-bulletin", host=False, no_browser="the host posts from its terminal or its bot"
+        ),
+    )
+    # Its account's own act: a host never dismisses one for its person.
+    DISMISS_BULLETIN = (
+        "dismiss-bulletin",
+        "bulletin_acts:dismiss_bulletin",
+        ACCOUNT_SELF_CAP,
+        person("dismiss-bulletin"),
     )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
@@ -1221,6 +1238,22 @@ class AcceptTermsPayload(CommandPayload, kind=CommandKind.ACCEPT_TERMS):
     version: str = Field(min_length=1, max_length=64)
 
 
+class PostBulletinPayload(CommandPayload, kind=CommandKind.POST_BULLETIN):
+    """Post a bulletin to every account on this box; only its host may."""
+
+    text: str = Field(min_length=1, max_length=BULLETIN_TEXT_CHARS)
+    pops_up: bool = Field(
+        default=False,
+        description="Open it at sign-in and on each page load until the account dismisses it.",
+    )
+
+
+class DismissBulletinPayload(CommandPayload, kind=CommandKind.DISMISS_BULLETIN):
+    """Dismiss one bulletin for the caller's account: it pops up no more, and the list marks it."""
+
+    bulletin_id: str = Field(min_length=1, max_length=64)
+
+
 class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):
     """Hold the caller's own key for a provider: its sends there go out on it, past the coupon.
     Never served back, and recorded masked."""
@@ -1342,6 +1375,7 @@ class ReadKind(StrEnum):
     """The read catalogue beside `CommandKind`: a row's wire inputs and answer are its `ReadParams` model."""
 
     ME = "me"
+    BULLETINS = "bulletins"
     USER_SETTINGS = "user-settings"
     QUOTA_STATUS = "quota-status"
     COUPON = "coupon"

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { figureOf, phaseWalks } from "@/lib/derivations";
+import { figureOf } from "@/lib/derivations";
 import { useViewedCycle } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -27,27 +27,24 @@ export function OptimizerCard() {
   const clashCount = clashes.active?.length ?? 0;
   const { dash, isLive } = useViewedDashboard();
   const runState = figureOf(useViewedCycle(), "state");
-  const activeId = dash?.current_round.active_node ?? null;
-  const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();
+  const active = dash?.active ?? null;
+  const { nodes: roundNodes } = useRoundNodes();
   const read = useConnector();
   const optimizerSetup = shownData(read)?.optimizer_setup ?? null;
 
-  const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
-  // What the round axis beside it does not already say: the node firing, else the SERVER's phase
-  // (never a local "idle": that word covers paused, held and dead alike).
-  const status =
-    !dash || !viewingLive
-      ? null
-      : isLive
-        ? activeId
-        : (runState?.value ?? null);
+  // One predicate, `isLive`, for its class and its glow (the served `active` is null unless
+  // appending). What the round axis beside it does not already say: where the line runs on, the node firing,
+  // else the SERVER's phase (never a local "idle": that word covers paused, held and dead alike).
+  const status = !dash
+    ? null
+    : (dash.successor?.label ?? (isLive ? (active?.node ?? null) : (runState?.value ?? null)));
 
   return (
-    <div className={cx("workflow-card", runIsRunning && "running")}>
+    <div className={cx("workflow-card", isLive && "running")}>
       <Toolbar className="workflow-toolbar">
         <span className="workflow-title">Optimizer</span>
         <RoundAxis />
-        <span className={cx("workflow-status", runIsRunning && "is-running")} aria-live="polite">
+        <span className={cx("workflow-status", isLive && "is-running")} aria-live="polite">
           {status}
         </span>
         <ToolbarSpacer />
@@ -87,7 +84,7 @@ export function OptimizerCard() {
             reach: optimizerSetup?.reach ?? null,
             scope: "optimizer",
             nestsNode: optimizerSetup?.measurement_node ?? null,
-            activeNode: isLive && viewingLive ? activeId : null,
+            active,
             isLive,
           }}
           tone="neutral"

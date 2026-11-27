@@ -89,7 +89,7 @@ export function PipelineSetupSection({
                   reach: pipeline.reach,
                   scope: "target",
                   nestsNode: null,
-                  activeNode: null,
+                  active: null,
                   isLive: false,
                 }}
                 tone="neutral"

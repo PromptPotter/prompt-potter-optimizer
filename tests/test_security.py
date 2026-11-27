@@ -68,6 +68,7 @@ from promptpotter.application import (
     account,
     app_visits,
     browser_sign_in,
+    bulletins,
     cycle_reads,
     health,
     notices,
@@ -188,6 +189,7 @@ from promptpotter.domain.command_kinds import (
     DeleteCampaignPayload,
     DeleteCyclePayload,
     DiscardDraftPayload,
+    DismissBulletinPayload,
     Door,
     EditDraftCampaignPayload,
     ForkCyclePayload,
@@ -196,6 +198,7 @@ from promptpotter.domain.command_kinds import (
     MintCampaignPayload,
     OpenDatasetDraftPayload,
     PauseCyclePayload,
+    PostBulletinPayload,
     ReadKind,
     SetApiKeyPayload,
     SetCampaignLabelPayload,
@@ -275,6 +278,7 @@ from promptpotter.infrastructure.identity.accounts import (
     identity_of_session,
     is_host,
 )
+from promptpotter.infrastructure.identity.bulletin_board import read_board
 from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
     block_email,
@@ -4983,3 +4987,50 @@ async def test_a_provider_error_files_one_refusal_in_fixed_words_only_on_a_live_
         assert answer == "/?auth_error=provider_returned_error"
         filed = _box_refusals()[len(before) :]
         assert len(filed) == 1 and word in filed[0] and "pwned" not in filed[0], filed
+
+
+# 7. Host bulletins
+
+
+async def _filed(stores: Stores, payload: CommandPayload, door: Door = Door.API) -> None:
+    await CommandDispatcher(stores).dispatch(CommandCall(payload, uuid.uuid4().hex, door=door))
+
+
+@pytest.mark.usefixtures("offline")
+async def test_only_the_host_posts_a_bulletin_and_a_dismissal_is_its_accounts_alone() -> None:
+    host, ada, bo = workspace(), _uploader("ada"), _uploader("bo")
+    board = default_identity_paths().bulletins
+    with pytest.raises(PayloadInvalidError) as refused:
+        await _filed(ada, PostBulletinPayload(text="a wipe at noon", pops_up=True))
+    assert refused.value.code == "bulletin_posted_by_host" and not board.exists(), "a guest posted"
+    await _filed(host, PostBulletinPayload(text="a wipe at noon", pops_up=True), Door.TERMINAL)
+    (posted,) = bulletins.account_bulletins(bo).bulletins
+    for _ in range(2):
+        await _filed(ada, DismissBulletinPayload(bulletin_id=posted.id))
+    with pytest.raises(NotFoundError):
+        await _filed(bo, DismissBulletinPayload(bulletin_id="never-posted"))
+    read = {
+        who: [(b.pops_up, b.dismissed) for b in bulletins.account_bulletins(stores).bulletins]
+        for who, stores in (("host", host), ("ada", ada), ("bo", bo))
+    }
+    assert read == {"host": [(True, False)], "ada": [(True, True)], "bo": [(True, False)]}, read
+    assert read_board(board).dismissed == {"ada": (posted.id,)}, "a dismissal was kept twice"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_an_account_reads_its_bulletins_at_the_api_and_only_its_session_dismisses_one(
+    token_box: _TokenBox,
+) -> None:
+    await _filed(workspace(), PostBulletinPayload(text="a wipe at noon"), Door.TERMINAL)
+    bearer = _bearer(_minted(token_box.browser, "step", "run", "create")["secret"])
+    for client in (token_box.browser, bearer):
+        (row,) = client.get("/api/v1/auth/bulletins").json()["bulletins"]
+        assert (row["text"], row["dismissed"]) == ("a wipe at noon", False), row
+    posted = {"bulletin_id": row["id"]}
+    assert _sent(bearer, CommandKind.DISMISS_BULLETIN, posted).status_code == 404, (
+        "a token dismissed"
+    )
+    assert _sent(token_box.browser, CommandKind.POST_BULLETIN, {"text": "x"}).status_code == 422
+    assert _sent(token_box.browser, CommandKind.DISMISS_BULLETIN, posted).status_code == 202
+    (row,) = bearer.get("/api/v1/auth/bulletins").json()["bulletins"]
+    assert row["dismissed"], "the session's dismissal was not its account's"

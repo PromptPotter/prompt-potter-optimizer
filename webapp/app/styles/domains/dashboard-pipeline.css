@@ -61,6 +61,7 @@
 .wf-hero-end{min-width:0;padding:var(--space-10) var(--space-14)}
 .wf-hero-node .val{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
+.wf-hero-node.llm.active{border-color:var(--color-success);box-shadow:0 0 7px rgba(var(--color-success-rgb),0.55);animation:pulse-active 1.6s ease-in-out infinite}
 .wf-hero-node.llm.running{
   border-color:var(--color-success-border);
   background:linear-gradient(180deg,rgba(var(--color-success-rgb),0.16) 0%,rgba(var(--color-success-rgb),0.04) 100%);

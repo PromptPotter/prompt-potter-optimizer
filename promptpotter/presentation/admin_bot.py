@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -15,11 +16,13 @@ from promptpotter.application.account import (
     grant,
     grants,
     host_user_id,
+    local_stores,
     revoke_grant,
     set_coupon,
     trail_by_email,
     unblock_email,
 )
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.application.maintenance.landing import land_at_entry
@@ -28,9 +31,11 @@ from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
+from promptpotter.domain.command_kinds import Door, PostBulletinPayload
 from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.spend import RATE_PRICED_LABEL, Budget, money_text, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 from promptpotter.shared.tls import tls_context
 
@@ -39,10 +44,11 @@ logger = logging.getLogger(__name__)
 _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _COUPON_USAGE = "/coupon <user_id> <usd|-> <tokens|-> [afresh]"
+_BULLETIN_USAGE = "/bulletin [popup] <text>"
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
     "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
-    f"{_COUPON_USAGE}\n/spend\n/trail <email>"
+    f"{_COUPON_USAGE}\n/spend\n/trail <email>\n{_BULLETIN_USAGE}"
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
@@ -88,7 +94,24 @@ def handle_command(command: str, argument: str, actor: str) -> str:
         return _render_install_spend()
     if command == "trail":
         return _render_trail(argument)
+    if command == "bulletin":
+        return _post_bulletin(argument)
     return _USAGE
+
+
+def _post_bulletin(argument: str) -> str:
+    """The host's word to every account, filed as the terminal's `post-bulletin` is."""
+    first, _, rest = argument.strip().partition(" ")
+    pops_up = first.lower() == "popup"
+    text = (rest if pops_up else argument).strip()
+    if not text:
+        return f"Usage: {_BULLETIN_USAGE}"
+    payload = PayloadInvalidError.validating(
+        PostBulletinPayload, {"text": text, "pops_up": pops_up}
+    )
+    call = CommandCall(payload, door=Door.TERMINAL)
+    asyncio.run(CommandDispatcher(local_stores(tenant=None)).dispatch(call))
+    return f"Posted to every account{', popping up' if pops_up else ''}: {text}"
 
 
 def _render_trail(argument: str) -> str:

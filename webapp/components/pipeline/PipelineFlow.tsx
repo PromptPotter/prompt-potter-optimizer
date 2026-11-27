@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useWidth } from "@/lib/hooks/useWidth";
 import {
+  type ActiveNode,
   type PipelineView,
   type PipelineViewEdge,
   type NodeReach,
@@ -92,7 +93,8 @@ export interface PipelineLayer {
   reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
-  activeNode: string | null;
+  // The served `current_round.active`: null unless the cycle is appending.
+  active: ActiveNode | null;
   isLive: boolean;
 }
 
@@ -124,7 +126,8 @@ interface Mark {
 }
 
 function PipelineBox({ view, layer, compact }: BoxProps) {
-  const { activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
+  const { active, reach: reachByNode, scope, nestsNode } = layer;
+  const lit = (id: string) => active !== null && active.scope === scope && active.node === id;
   const selected = useViewedNode();
   const { open, close } = useWorkspace();
   const served = shownData(useConnector());
@@ -177,7 +180,7 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
     const isSelected = isSel(sole.id);
     const soleModel = model(sole.id);
     return (
-      <div className={cx("wf-hero-node", "llm", isSelected && "selected")}>
+      <div className={cx("wf-hero-node", "llm", isSelected && "selected", lit(sole.id) && "active")}>
         <CardTag layer={layer} />
         <button
           type="button"
@@ -351,7 +354,7 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
           const m = marks.get(n.id);
           if (!m) return null;
           const isSelected = isSel(n.id);
-          const isActive = isLive && activeNode === n.id;
+          const isActive = lit(n.id);
           const dotCls = cx(
             "node",
             `kind-${n.kind}`,

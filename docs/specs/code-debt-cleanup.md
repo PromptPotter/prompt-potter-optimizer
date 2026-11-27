@@ -142,11 +142,6 @@ row it closes.
   moves. **Rides with:** webd, once the closed-round read is decided (narr 2 held it as that fork);
   its Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and the `dash.rounds` panes.
   **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
-- **The live dashboard tracks the race beside the narration** (narr-2's report):
-  `live_dashboard.py`'s `_race` / `_race_standings` (`:440-441`, filled `:712-713`) fold
-  `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
-  is one fold every door reads. **Rides with:** the row above. **Re-test:**
-  `git grep -n "_race_standings" -- promptpotter` is empty.
 - **A check-in cannot switch an upload between its connector's pipelines**: a draft edit has no chain
   key, so a mode outside the held chain is disabled (`PipelineSetupSection.tsx`), and
   `draft_build.py::_modes` ignores a definition's own `pipelines`. Action: a mode pick sets the draft's
@@ -1072,10 +1067,15 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A wiped campaign answers two failure kinds**: after the landing, a still-open tab asked
   `/campaigns/<wiped>/pipeline` (400) beside its `/hierarchy` and `/dashboard` (404). I7's GONE
   stops on a 404 alone, so that read keeps asking. Door: an absent campaign is a 404 at every read.
-  **Rides with:** wave 6. **Re-test:** each campaign read of a deleted campaign answers 404.
+  **Rides with:** wave 6. **Re-test:** each campaign read of a deleted campaign answers 404. Not
+  reproduced at `2c7dff34e` (w7-small: `/campaigns/gone/pipeline` answers 404 with and without `at=`,
+  over every hop shape); if the 400 recurs, capture the exact `at` the stale tab sent.
 - **"Rebased to fork" names no fork**: the readout's stop line names neither the round the fork was
-  cut at nor the layer's reason, so the run that continues reads as unexplained. Door: the stop's
-  words carry the cut round and the `RebaseRequest.reason`. **Rides with:** wave 6.
+  cut at nor the layer's reason, so the run that continues reads as unexplained. The stop renders in
+  `views/readout.py`, but no record carries either fact: `escalation.py`'s
+  `StopLoop(StopReason.REBASED, fork=…)` and `runner/entry.py::open_line`'s stop pass no detail.
+  Door: the stop's record carries the cut round and the `RebaseRequest.reason`, and its words read
+  them. **Rides with:** wave 6.
 - **A host-allowance halt below the face, unexplained**: a visitor's first run ended `host_allowance`
   at $0.041 spent of a $0.30 face (hold bound $0.06). Unchecked whether the run's own ceiling was
   worded as the host's allowance. **Rides with:** money. **Re-test:** a run halted on its own
@@ -1109,15 +1109,52 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   (`round.py::measure_overlap`): a pick cut short, a line gap or a trigger buys after the election,
   and the closed reading is the later one. Door: the election reads the round's last race, or the
   closed record names which it read. **Rides with:** θ off the round's statement.
-- **The candidate box reads one line from three sources**: the rounds and their chart off
-  `dashboard.json`'s `rounds`, the bars off the subtree's per-cycle children
-  (`webapp/lib/derivations/candidate-views.ts::candidateBars`), and an in-flight arm's half joined
-  onto its bar by arm key (`webapp/lib/derivations/candidate-views.ts::CandidateBarsInput`). They
-  diverged on the box: a rebase fork's dashboard held its parent's rounds and its bars lost them,
-  bridged by `SubtreeCycleEntryFacts.inherited`. Door: the line served once, round by round, each arm
-  by address with its reading, election and descent, live rows in the closed shape; the bars, the
-  chart and the paired tree are masks over it (every or leading arm, sample set, lens), and
-  `inherited` and the in-flight join go. **After:** the v0.8.21 tag, first.
+
+### wave-7 · what the w7 chains filed (2026-11-27)
+
+- **The masthead's candidate count names no count** (w7-line): the masthead still recounts candidates
+  beside `ServedDashboard.line`, so its number and the bars' can disagree on what they count (arms
+  scored over the line, or C0 plus every candidate). Door: a served count beside the line, named for
+  what it counts, read by the masthead. **Re-test:** the masthead derives no count of its own.
+- **`ActiveNode.scope` is never `target`** (w7-line): `live_dashboard.py::ActiveNode` declares
+  `optimizer | target`, but `_active_node` serves `optimizer` alone (a scoring pass runs as the
+  measurement node, an optimizer node), so the target layer never lights and the client's target
+  branch is dead. Door: under pp-self the outer fold serves the inner run's active node (it already
+  folds `record.inner`) as `target`; else the variant and the client's branch go. **Re-test:** a
+  `target` scope is produced, or `ActiveNode` has no `scope`.
+- **`cycle_reads.py` copies the live round's candidates into a second shape** (w7-line):
+  `application/cycle_reads.py:136` copies `current_round.candidates` whole. Door: its reader takes
+  the served line. **Re-test:** no copy of `current_round.candidates` outside the fold.
+- **A superseded cycle's successor is worded twice** (w7-line): `domain/phases.py:291`'s
+  `start_refusal` and `ServedDashboard.successor` each word the same fact. Root: one `Said` on
+  `RunState`, read by both. **Re-test:** one sentence names a cycle's successor.
+- **The readout folds the closed rounds three times at a stop** (w7-text): `views/readout.py`'s
+  `_reviewed` and `cycle_hard_samples` each fold `closed_rounds`, and the review folds again at every
+  close. Root: the projection keeps one round fold. **Re-test:** one `closed_rounds` fold per stop.
+- **`ReviewReading.feedback` has no reader** (w7-text): `potter/l1.py::review_reading` fills it, but the
+  critique reaches the readout as the round block's note. Deleting it moves capo-pobb's behaviour key,
+  so it waits for a planned re-key. **Re-test:** `git grep -n "feedback=\[" -- promptpotter/application/optimizers/potter/l1.py` is empty.
+- **`optimized.md` is a markdown artifact root G did not name** (w7-text):
+  `infrastructure/store/layout.py::optimized_surface`. Root G's question, the operator's to decide:
+  the winner's text as plain text in the folder, or a markdown file.
+- **`identity/accounts.py::is_host` wraps `identity.host`** (w7-host): a one-line wrapper; the roadmap
+  cites it. Door: callers read `identity.host`. **Re-test:** `git grep -c "def is_host" -- promptpotter` is 0.
+- **A bulletin dismissal has no account deleter to ride** (w7-host): no code deletes an account, so
+  "an account's deletion drops its dismissals in the same write" has no writer. It lands with the
+  account deleter (`bulletin_board.py` drops `dismissed[account_id]`).
+- **`claim_default` orphans the terminal's dismissals** (w7-host): `identity/accounts.py::claim_default`
+  renames the terminal's `default` account to the host id; dismissals filed as `default` stay there, so
+  the host sees those bulletins again. Door: the claim re-keys the account's dismissals in its write.
+- **The CLI's `bulletins` read hides which pop up** (w7-host): only the webapp shows the mark. Door:
+  the read's line names it.
+- **The admin bot's account commands bypass the dispatcher** (w7-host): its other admin commands call
+  `application.account` directly (decisions § 0004); `/bulletin` is the first to dispatch a
+  `CommandKind`. Door: each bot verb is a command kind. **Re-test:** the bot imports no
+  `application.account` writer.
+- **The gate rewrites `maintenance/built_key.py` on every code change** (w7-small; the wave-7 landing
+  hit it at each squash): a committed key of the code tree is stale after any edit, so every commit
+  regenerates it first. Root: the key is computed where it is read, or the gate's write is the
+  commit's own step. **Re-test:** a code-only commit needs no regenerated file.
 
 ## Held — no wave-4 chain yet
 

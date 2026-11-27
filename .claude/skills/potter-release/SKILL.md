@@ -87,9 +87,17 @@ history stays rewritable until the box has passed.
       promptpotter land-data --dry-run`. Each refusal is a fix on the branch, or a step the operator runs
       before `update.sh` (a store that left the data root moves out). The copy is account data: delete it
       once it proves.
+- [ ] A release that wipes run data (a landing's line drops it) warns every account FIRST, before
+      `update.sh`, with a bulletin that pops up until each one dismisses it. Its board is a survivor, so
+      the warning outlives the wipe. Send `/bulletin popup <text>` to the admin bot, or on the box, from its
+      checkout, `PROMPTPOTTER_HOME=<the unit's data root> .venv/bin/python -m promptpotter post-bulletin
+      "The next deploy, at <HH:MM> UTC, wipes run data: export what you keep." --pops-up`. Either way,
+      `python -m promptpotter bulletins` there reads it back. Give the accounts the time the text names.
 - [ ] Deploy the branch as `/potter-box` says (`./update.sh release/vX.Y.Z`). Verify: health on 127.0.0.1
       and on the public host, both units active, `offer_faults()` empty for the unit's `DATASET_OFFER`,
       `update.sh`'s `landed: proven N file(s)` line. The operator tests the UI there.
+- [ ] Once the box verifies, post the release note the same way, without `popup` / `--pops-up`, so it
+      waits in the list: `/bulletin vX.Y.Z is live: <the release body's bold intro>`.
 - [ ] Anything that fails here is fixed on the branch; steps 2 to 4 run again, the gate on the fix's
       delta alone and the desk landing only where the fix moves a shape the landing reads.
 
