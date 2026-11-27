@@ -7,10 +7,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
+from promptpotter.application.pipeline_resolve import (
+    Resolution,
+    bind_resolution,
+    cycle_config,
+    run_resolution,
+)
 from promptpotter.application.preflight import refuse_below_reasoning_floor
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.tasks import (
@@ -30,7 +34,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.run_scope import UNBOUND, RunScope, run_scope, scoped
@@ -53,10 +56,7 @@ def scorer_setup(
     """What *session* scores under *campaign_config*, built whole once per launch or pass."""
     connector = session.backend_client.connector
     return ScorerSetup(
-        scorer=scorer_of(
-            campaign_config,
-            verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
-        ),
+        scorer=Resolution(campaign_config, session.bank.verifier_graded).scorer,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
         judges=build_evaluators(
@@ -134,7 +134,7 @@ async def open_diagnostic(
     cycle = cycle_config(stores, at)
     config = cycle.config
     async with bind_cycle_session(stores, at) as bound:
-        session = configure_and_apply_pipeline(bound, cycle)
+        session = bind_resolution(bound, run_resolution(bound, cycle))
         # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
         session.state.control = RunControl(
             commands=stores.commands,

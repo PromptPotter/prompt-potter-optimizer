@@ -89,24 +89,6 @@ row it closes.
   restatement carry, so `.overlap` goes whole. Both reshape `RoundStatement` (a wipe). **Re-test:**
   `git grep -n "\.overlap\b" -- promptpotter` is empty.
 
-### batch/26 · stream-rk
-
-- **`ExportProjection` renders off a live `Session`**: `runner/output.py` reaches `session.state.scoring`
-  and its partition's `demo`. Action: it takes the scorer and partition off the ledger
-  (`PartitionRecord`, the declared formula), as `closed_rounds.py::campaign_scorer` does. **Held:**
-  the row below; until it lands, `campaign_scorer` grades a labelless cell unlike the run, and the
-  export would take that. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
-- **`campaign_scorer` grades a labelless cell unlike the run**: `scoring/closed_rounds.py::campaign_scorer`
-  compiles with `verifier_graded=False`, the run with `all_verifier_graded(bank)`
-  (`initialization/scoring_scope.py:64`). Under `rr(ground_truth_rank)` a `ground_truth=""` cell is
-  UNSCORED live and fitness 0.0 here, and a backend ranking reads every cell `not_found`; the served
-  round view (`cycle_reads.py`), hard samples (`measurement_log.py`) and evidence (`evidence/read.py`)
-  read it. Reachable: `wiring.py:95` admits a labelless ranker. Action: rank is a cell fact
-  (`backend_rank` and the matchers answer `None` where `facts.verifier_graded`), `ground_truth_rank`
-  and `n_candidates` join `ground_truth` in `compiler.py::_refuse_label_formula`, and the flag gates
-  refusal only. **Held:** no chain owns `scoring/` and `connectors/` together yet. **Re-test:** on a
-  `ground_truth=""` cell under `rr(ground_truth_rank)`, `campaign_scorer` and the run's scorer agree.
-
 ### batch/26 · narr (links 1-2, on stream-rk's tip)
 
 - **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `_cycle_cells`
@@ -127,12 +109,12 @@ row it closes.
   cut it: `wiring.py::init_services`, `session_bank` and `dataset_experiment` read the landed
   definition off disk). **Re-test:** one `select_optimizer` call
   between a draft's Start and its first cycle plan.
-- **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`, called at
+- **A per-cell criterion naming a term no cell carries compiles** (`pipeline_resolve.py::Resolution`, compiled at
   the check-in by `datasets/draft_patch.py`) and refuses per cell at the run. Root: `compiler.py::compile_scorer`
   refuses a name no owner holds, `evaluators.py::cell_name_owners` beside the campaign's own owners (the
   connector's terms and report keys, the observations); a check-in-only list in `draft_patch.py` would
   be a second spelling of that roster. **Held:** the owners ride the scoring spec first (rk-rest cut
-  it: no `scorer_of` reader outside the check-in holds them, and an optional owners argument is a
+  it: no `Resolution` reader outside the check-in holds them, and an optional owners argument is a
   flag); the compiler is a hashed unit, so the refusal moves digests. **Re-test:** a scoring edit `correct - no_such_term`
   is refused.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
@@ -582,7 +564,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
-- **A connector's two-valued term reaches no scorer** (readings-5's report): `authored.py::scorer_of`
+- **A connector's two-valued term reaches no scorer** (readings-5's report): `pipeline_resolve.py::Resolution`
   compiles from `CampaignConfig` alone, which names no connector, so a `CellTerm` or observation
   declaration cannot reach `matchers.py::fitness_scale_of`; harbor's `env_reward` is
   `float(reward)` of a panel's `reward_key`, two-valued only per task, so
@@ -729,24 +711,19 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   **Run data:** none. **Size:** large, about 10 files, a chain of 5–6 links. **Rides with:** admit-3.
   **Re-test:** `git grep -c "release(exc" -- promptpotter/application` is 0.
 - **`resolved(subject)` returns one run's schema, params, config, optimizer selection and scorer, built from records (root B)**:
-  two doors fold a cycle's pipeline: `pipeline_resolve.py:750 _campaign_merge` (the read, off records)
-  and `:1183 configure_and_apply_pipeline` (the run, off a live `Session`) each call
-  `_resolve_active_schema` (5/1) and build `ParamLayers(` (3/1) with the same six arguments, and the
-  run's side branches on `if session.cycle_id:` (`:1196`) to pick recorded or fresh layers. The scorer is
-  compiled at 10 `scorer_of(` call sites in 7 files; 9 pass `verifier_graded=False` by hand (9/6) and
-  only `initialization/scoring_scope.py:58` passes the bank's answer. `run_observers.py::_bind_observers`
-  builds three projections on a live `Session`, and `runner/output.py` reads `session.` 23 times.
-  Root: a `Session` binds the value to a live client and builds none of it. **Closes:**
-  **`ExportProjection` renders off a live `Session`**, **`campaign_scorer` grades a labelless cell unlike the run**,
+  w7-res landed its scorer half (`pipeline_resolve.py::Resolution`, `PartitionRecord.verifier_graded`),
+  w7-res2 the one fold (`pipeline_resolve.py::RunResolution`, read off records by `resolved`, off a
+  launch's read by `run_resolution`) and the export off records (`runner/output.py::ExportProjection`).
+  Open: `run_observers.py::_bind_observers` still hands `ReadoutProjection` (`views/readout.py`) a live
+  `Session`, and `Session.pipeline_schema` holds two facts: its read's parse before
+  `bind_resolution`, the chain as run after (`RunResolution.parsed` carries the first). Root: a
+  `Session` binds the value to a live client and builds none of it. **Closes:**
   **A check-in's cycle plan selects beside its landing's refusal**, **A per-cell criterion naming a term no cell carries compiles**,
   **A connector's two-valued term reaches no scorer**; adjacent: **The node document is typed two ways**,
   **The pipeline carrier is typed only at its door**, **A connector's name is looked up again**,
   **A launch's steer verdict reads the root's narrowing**, the reader half of **`SampleScoredRecord.running`**.
-  **Run data:** `verifier_graded` and the scorer's owners become a recorded fact of the mint if they are not
-  one already; the compiler is a hashed unit, so digests move. **Size:** large: `pipeline_resolve.py`,
-  `datasets/authored.py`, `scoring/closed_rounds.py`, `initialization/**`, six scorer callers.
   **Rides with:** a chain after ml-7 for `optimizer_manifest.py` and `config_map.py`.
-  **Re-test:** `git grep -c "verifier_graded=False" -- promptpotter` is 0.
+  **Re-test:** `git grep -c "ReadoutProjection(session" -- promptpotter` is 0.
 - **Every pass is a recorded pass (root C1)**: `domain/pass_kinds.py::PASSES` leaves `recorded` false on
   `BACKFILL`, `REPAIR`, `OVERLAP` and `NOISE_FLOOR`, whose cells reach the ledger not one by one;
   overlap and repair keep records of their own (`.overlap` 27/15, `RoundRestatedRecord` 19/6,
@@ -803,10 +780,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `evidence/read.py:362 _CycleFacts`. Root: a name is one thing; each pair renames the one that stopped
   describing its contents, with its doc and `CLAUDE.md` row. **Re-test:**
   `git ls-files promptpotter | xargs -n1 basename | sort | uniq -d | grep -v __init__` loses the seven.
-- **The `--set` path grammar lives in the CLI**: `presentation/cli/commands/launch.py:275-328` (`_laid`,
-  `_lay`, `_set_body`) walks a model's fields to build a patch, so no other door can spell a dotted path.
-  Root: the grammar moves to `application/`, and the CLI, the API and `/potter-run` call it.
-  **Re-test:** `git grep -n "def _set_body" -- promptpotter/presentation` is empty.
 - **A cycle's running job is found two ways**: `served_dashboard.py::spend_counts` (`:611`) takes this
   cycle's `hold_id` from its caller (`run_scope().book` in `run_observers.py:59`, the held run's job in
   `armed_caps`) and reads the siblings' through `_job_holding` (`:636`). Root: one reader of a cycle's
@@ -1059,6 +1032,18 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A bulletin dismissal has no account deleter to ride** (w7-host): no code deletes an account, so
   "an account's deletion drops its dismissals in the same write" has no writer. It lands with the
   account deleter (`bulletin_board.py` drops `dismissed[account_id]`).
+- **`Session.pipeline_schema` holds two facts** (w7-res2): the read's parse before
+  `bind_resolution`, and the chain as run after. Root: a `Session` holds its read, and the resolution
+  owns the schema. **Re-test:** `Session` has no `pipeline_schema`.
+- **A third reader of a cycle's draw raises its own error** (w7-res2):
+  `bench/resume_and_fork/fork_siblings.py` raises a `ConflictError` of its own beside
+  `session.py::drawn_partition`. Root: it calls `drawn_partition`. **Re-test:** one reader of a draw.
+- **`select_optimizer(self.config.optimization)` is spelled three times** (w7-res2):
+  `pipeline_resolve.py::_Merge.optimizer`, `RunResolution.optimizer` and `DraftPipeline.optimizer`.
+  Root: a draft's merge is a `RunResolution`. **Re-test:** one site.
+- **`open_cell` resolves a whole dataset to compile its scorer** (w7-res,
+  `measurement_log.py::open_cell`): it only compiles the scorer and refuses an unknown name. Root: the
+  archive carries its dataset's config. **Re-test:** `open_cell` resolves no dataset.
 - **`MeteredSpend` is banked, so its words cannot be served** (w7-web): the stop record holds
   `StopSpend.spent: MeteredSpend` (`run_records.py`), so `spend.ts::spendHeadline`,
   `meteredBucketsLine`, `replayShareLine` and `ratePricedText` stay browser composers. Root: the stop

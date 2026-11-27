@@ -202,7 +202,7 @@ def _bind_observers(
     readout = projecting.add(readout)
     projecting.add(CycleIndexProjection(cycle_dir))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
-    projecting.add(ExportProjection(session, campaign_config))
+    projecting.add(ExportProjection(session.store, session.at, session.dataset))
     return RunObservers(
         store=session.store,
         hop=session.hop,

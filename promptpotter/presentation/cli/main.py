@@ -264,7 +264,7 @@ def said_text(row: Said) -> str:
     return text if row.detail is None else f"{text} — {row.detail}"
 
 
-# The grammar `launch.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
+# The pair `launch.py::_pairs` splits: a `--set`, and each knob of an `--arm` after its optimizer.
 SET_GRAMMAR = "PATH=VALUE"
 ARM_GRAMMAR = f"KEY=OPTIMIZER[,{SET_GRAMMAR}…]"
 

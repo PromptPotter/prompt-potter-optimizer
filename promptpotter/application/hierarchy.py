@@ -12,6 +12,7 @@ from promptpotter.application.pipeline_resolve import (
     RootRunsWith,
     campaign_runs_with,
     line_config,
+    resolved,
 )
 from promptpotter.application.runner.bench import cycle_bench, cycle_curve, cycle_verify
 from promptpotter.application.runner.inner.tasks import is_self_optimization
@@ -461,8 +462,9 @@ def campaign_entry(
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
     if moment is None and held_line.config is not None:
         try:
-            bench = cycle_bench(stores, live_at, held_line.config)
-            curve = cycle_curve(stores, live_at, held_line.config)
+            under = resolved(stores, live_at)
+            bench = cycle_bench(stores, live_at, under)
+            curve = cycle_curve(stores, live_at, under)
         except ScoringFormulaError as exc:
             held_line = LineConfig(None, str(exc))
     cycles: dict[str, HierarchyCycle] = {}

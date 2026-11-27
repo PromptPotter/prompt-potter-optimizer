@@ -19,6 +19,8 @@ class PartitionRecord(CycleRecord):
 
     record_type: Literal["bank_partition"] = "bank_partition"
     dataset_hash: str
+    # `sample.py::Bank.verifier_graded` at the draw: what every reader compiles its scorer under.
+    verifier_graded: bool
     # `paired_reading.py::instrument_of` at the draw: its cells' identity is filed, never a point's.
     instrument_id: str
     # The whole identity its cells were graded under: a resume or an arm under a moved one refuses.
@@ -37,11 +39,13 @@ class PartitionRecord(CycleRecord):
         partition: BankPartition,
         *,
         dataset_hash: str,
+        verifier_graded: bool,
         instrument_id: str,
         cell_identity: CellIdentity,
     ) -> PartitionRecord:
         return cls(
             dataset_hash=dataset_hash,
+            verifier_graded=verifier_graded,
             instrument_id=instrument_id,
             cell_identity=cell_identity,
             split=partition.split,

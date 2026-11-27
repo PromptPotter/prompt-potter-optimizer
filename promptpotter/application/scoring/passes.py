@@ -616,7 +616,7 @@ async def _grade(stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
             dashboard = projecting.add(dashboard)
             readout.open_readout(hop)
             projecting.add(readout)
-            projecting.add(ExportProjection(session, config))
+            projecting.add(ExportProjection(stores, at, session.dataset))
             try:
                 try:
                     banked = await bench_origin(

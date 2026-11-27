@@ -184,6 +184,7 @@ from promptpotter.application.pipeline_resolve import (
     JUDGE_INSTRUMENT_KEY,
     DraftPipeline,
     ParamLayers,
+    Resolution,
     ServedPipeline,
     campaign_admits,
     campaign_config_map,
@@ -200,7 +201,6 @@ from promptpotter.application.pipeline_resolve import (
     laid_config,
     laid_session,
     permitted_narrowing,
-    recorded_read,
     resolve_pipeline_at,
     resolved_output_schemas,
 )
@@ -2526,7 +2526,9 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    recorded = recorded_read(stores, root.hop).knob_layers["l1_generate"]
+    read = scan_resolved_run(stores.campaigns.chain(root.hop)).read
+    assert read is not None
+    recorded = read.knob_layers["l1_generate"]
     sources = {
         knob.path.rsplit(".", 1)[-1]: knob.source
         for group in campaign_config_map(stores, root.campaign.campaign_id).groups
@@ -3329,7 +3331,9 @@ def test_the_served_bench_offers_no_grade_on_a_moved_connector(
         stores, CampaignCycle(held_campaign, holder.cycle_id)
     ).config.model_copy(update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}})
     bench_read = cycle_bench(
-        stores, CampaignCycle(held_campaign, holder.cycle_id), bench_config
+        stores,
+        CampaignCycle(held_campaign, holder.cycle_id),
+        Resolution(bench_config, verifier_graded=False),
     ).status
     assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
@@ -4392,7 +4396,7 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
     back = PartitionRecord.of(
-        cell_drawn, dataset_hash="d", cell_identity={}, instrument_id="d"
+        cell_drawn, dataset_hash="d", verifier_graded=False, cell_identity={}, instrument_id="d"
     ).restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"

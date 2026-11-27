@@ -23,15 +23,16 @@ from promptpotter.application.free_tier import (
     refuse_outside_free_tier,
 )
 from promptpotter.application.jobs.launcher.admission import paid_call
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
+    bind_resolution,
     campaign_admits,
-    configure_and_apply_pipeline,
     cycle_config,
     defaults_drift,
     laid_session,
     mint_facts,
+    run_resolution,
 )
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
@@ -272,9 +273,10 @@ def _planned(
 ) -> CyclePlan:
     """What *cycle* RUNS, as the configure lays it."""
     schema = session.pipeline_schema
-    configured = configure_and_apply_pipeline(session, cycle)
+    res = run_resolution(session, cycle)
+    configured = bind_resolution(session, res)
     pipeline_params = configured.pipeline_params
-    selected = select_optimizer(cycle.config.optimization)
+    selected = res.optimizer
     partition = refuse_unrunnable(
         cycle.config,
         selected,
@@ -303,6 +305,7 @@ def _planned(
         drawn=PartitionRecord.of(
             partition,
             dataset_hash=session.bank.dataset_hash,
+            verifier_graded=session.bank.verifier_graded,
             instrument_id=configured.instrument_id,
             cell_identity=configured.cell_identity,
         ),

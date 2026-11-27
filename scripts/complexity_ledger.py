@@ -305,7 +305,11 @@ BASELINE = {
     # w7-rows5 (+2): a fork's failed withdraw names the stub it kept, as a note on the refusal it rides.
     # w7-rows4 link 3 backed out (+5): the stamp subject read off the path by name is unsound (a dataset
     # named `jobs` takes its workspace's stamps), so `stamped_subject` declares each root again.
-    "package_lines": 113651,
+    # w7-res (+43): one `pipeline_resolve.py::Resolution` compiles the scorer off the bank's recorded
+    # `PartitionRecord.verifier_graded`, and the `--set` grammar moves to `application/path_patch.py`.
+    # w7-res2 (+17): one `RunResolution` is the fold the read and the run call; it replaces
+    # `configure_and_apply_pipeline`, `ParamLayers.of_cycle`, `recorded_schema` and `_CampaignMerge`.
+    "package_lines": 113711,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

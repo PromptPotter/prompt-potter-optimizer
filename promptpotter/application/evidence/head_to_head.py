@@ -6,11 +6,11 @@ from typing import NamedTuple
 
 from pydantic import Field, computed_field
 
-from promptpotter.application.datasets.authored import defaults_config, scorer_of
+from promptpotter.application.datasets.authored import defaults_config
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, resolved
 from promptpotter.application.runner.bench import (
     bench_line,
     bench_members,
@@ -399,10 +399,7 @@ def _declared(campaigns: list[tuple[Stores, Campaign]]) -> HeadToHeadRecord | No
 def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
     graders = {
         scorer.id: scorer
-        for scorer in (
-            scorer_of(cycle_config(stores, c.root_cycle).config, verifier_graded=False)
-            for stores, c in campaigns
-        )
+        for scorer in (resolved(stores, c.root_cycle).scorer for stores, c in campaigns)
     }
     if len(graders) > 1:
         raise BadRequestError(

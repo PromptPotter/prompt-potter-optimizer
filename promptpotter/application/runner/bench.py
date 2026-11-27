@@ -8,9 +8,8 @@ from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.jobs.launcher.admission import campaign_refusal
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import Resolution, resolved
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
@@ -848,27 +847,27 @@ def line_passes(stores: Stores, campaign: Campaign) -> BenchPasses | None:
     return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
 
 
-def cycle_curve(stores: Stores, at: CampaignCycle, config: CampaignConfig) -> BenchCurve | None:
+def cycle_curve(stores: Stores, at: CampaignCycle, under: Resolution) -> BenchCurve | None:
     passes = line_passes(stores, at.campaign)
     if passes is None:
         return None
-    scorer = scorer_of(config, verifier_graded=False)
+    scorer = under.scorer
     spans = line_spans(stores, scorer, at.hop)
-    budget = line_round_budget(spans, config.optimization.budget.rounds)
+    budget = line_round_budget(spans, under.config.optimization.budget.rounds)
     return read_curve(stores, passes, scorer, spans, budget=budget)
 
 
 def read_cycle_bench(stores: Stores, at: CampaignCycle) -> BenchScore:
-    return cycle_bench(stores, at, cycle_config(stores, at).config)
+    return cycle_bench(stores, at, resolved(stores, at))
 
 
-def cycle_bench(stores: Stores, at: CampaignCycle, config: CampaignConfig) -> BenchScore:
+def cycle_bench(stores: Stores, at: CampaignCycle, under: Resolution) -> BenchScore:
     return bench_under(
         stores,
         at,
         line_passes(stores, at.campaign),
-        config,
-        scorer_of(config, verifier_graded=False),
+        under.config,
+        under.scorer,
         run=live_cycle_run(stores, at.hop),
     )
 
@@ -932,7 +931,7 @@ def declare_line_bench(
     ending: StopReason | None,
 ) -> BenchScore:
     stores, at = session.store, session.at
-    scorer = scorer_of(config, verifier_graded=False)
+    scorer = Resolution(config, session.bank.verifier_graded).scorer
     # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
     run = live_cycle_run(stores, at.hop)._replace(selecting=selecting, ending=ending)
     held = passes if passes is not None else line_passes(stores, at.campaign)

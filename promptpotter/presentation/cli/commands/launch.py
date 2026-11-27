@@ -13,12 +13,8 @@ import shlex
 import signal
 import sys
 from collections.abc import Callable, Coroutine, Iterator, Sequence
-from enum import StrEnum
 from pathlib import Path
-from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
-
-from pydantic import BaseModel
+from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.account import local_stores
@@ -42,6 +38,7 @@ from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.machine_status import served_machine_status
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.origin_listing import no_dataset_hint
+from promptpotter.application.path_patch import path_patch
 from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.application.views.render.phase import acts_line, render_completion
 from promptpotter.config.logging import setup_logging
@@ -69,7 +66,6 @@ from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
-from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.phases import stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import LaunchAnswer
@@ -266,64 +262,20 @@ def _checkin_line(step: str, detail: str) -> None:
     logger.info("✓ %-13s — %s", step, detail)
 
 
-def _words(member: object) -> tuple[object, ...]:
-    if isinstance(member, type) and issubclass(member, StrEnum):
-        return tuple(member)
-    return get_args(member) if get_origin(member) is Literal else ()
-
-
-def _laid(into: object, annotation: object, rest: list[str], raw: str, path: str) -> Any:
-    """*raw* laid at *rest* under a field typed *annotation*: a model by its fields, a mapping by
-    any key, ``Any`` as it comes; at the leaf text, or a closed set naming the word, keeps it."""
-    split = get_origin(annotation) in (Union, UnionType)
-    members = [m for m in get_args(annotation) if m is not type(None)] if split else [annotation]
-    if not rest:
-        words = [w for m in members for w in _words(m)]
-        try:
-            return raw if raw in words else wire_value(raw, text=str in members)
-        except ValueError as exc:
-            said = f"{raw!r} is none of {', '.join(map(str, words))}" if words else exc
-            raise PayloadInvalidError(f"--set {path}: {said}") from None
-    for member in members:
-        if isinstance(member, type) and issubclass(member, BaseModel):
-            return _lay(into if isinstance(into, dict) else {}, member, rest, raw, path)
-        if get_origin(member) is dict or member is Any:
-            value_type = get_args(member)[1] if member is not Any else Any
-            key, *more = rest
-            out = into if isinstance(into, dict) else {}
-            out[key] = _laid(out.get(key), value_type, more, raw, path)
-            return out
-    raise PayloadInvalidError(f"{path!r} reaches past a field that takes a value.")
-
-
-def _lay(
-    body: dict[str, Any], model: type[BaseModel], path: list[str], raw: str, whole: str
-) -> Any:
-    head, *rest = path
-    info = model.model_fields.get(head)
-    if info is None and model.model_config.get("extra") != "allow":
-        raise PayloadInvalidError(
-            f"{whole!r} names no field of {model.__name__}: {head!r} is not one of "
-            f"{', '.join(model.model_fields)}."
-        )
-    body[head] = _laid(body.get(head), Any if info is None else info.annotation, rest, raw, whole)
-    return body
-
-
-def _set_body(model: type[BaseModel], sets: Sequence[str]) -> dict[str, Any]:
-    """Each ``PATH=VALUE`` laid by *model*'s own dotted paths; every bound is the model's."""
-    body: dict[str, Any] = {}
+def _pairs(sets: Sequence[str]) -> list[tuple[str, str]]:
+    """Each ``PATH=VALUE`` as its pair; the path's grammar is `path_patch.py::path_patch`'s."""
+    pairs = []
     for item in sets:
         path, sep, raw = item.partition("=")
         if not sep:
             raise PayloadInvalidError(f"expected {SET_GRAMMAR}, got {item!r}.")
-        _lay(body, model, path.strip().split("."), raw.strip(), path.strip())
-    return body
+        pairs.append((path.strip(), raw.strip()))
+    return pairs
 
 
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
     """Shape only: every bound is the patch model's and ``plan_draft_patch``'s, as for the browser."""
-    return PayloadInvalidError.validating(EditDraftPatch, _set_body(EditDraftPatch, sets))
+    return PayloadInvalidError.validating(EditDraftPatch, path_patch(EditDraftPatch, _pairs(sets)))
 
 
 def _set_knobs(sets: list[str]) -> dict[str, Any]:
@@ -531,7 +483,9 @@ def _arm_request(raw: str) -> dict[str, Any]:
     optimizer, *knobs = _KNOB_COMMA.split(spec)
     return {
         "arm_key": arm_key,
-        "optimization": _set_body(OptimizationOverrides, [f"optimizer={optimizer}", *knobs]),
+        "optimization": path_patch(
+            OptimizationOverrides, _pairs([f"optimizer={optimizer}", *knobs])
+        ),
     }
 
 

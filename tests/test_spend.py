@@ -131,7 +131,12 @@ from promptpotter.application.maintenance.archive_maintenance import purge_cold_
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
+from promptpotter.application.pipeline_resolve import (
+    Resolution,
+    cycle_config,
+    laid_config,
+    laid_session,
+)
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
@@ -5228,7 +5233,11 @@ def test_a_campaign_a_delete_tore_admits_no_pass_and_serves_its_bench_as_not_act
     )
     torn_read = stores.campaigns.load_campaign(root_hop.campaign_id)
     assert torn_read is not None
-    served = cycle_bench(stores, CampaignCycle(torn_read, root_hop.cycle_id), graded_under).status
+    served = cycle_bench(
+        stores,
+        CampaignCycle(torn_read, root_hop.cycle_id),
+        Resolution(graded_under, verifier_graded=False),
+    ).status
     assert (served.can_run, served.refusal) == (False, PassRefusal.NOT_ACTIVE), (
         "the served bench offers a grade the pass's admission refuses"
     )

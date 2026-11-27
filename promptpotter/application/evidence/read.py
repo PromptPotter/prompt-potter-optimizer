@@ -64,9 +64,8 @@ from promptpotter.application.evidence.subjects import (
 from promptpotter.application.hierarchy import campaign_short_label
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, resolved
 from promptpotter.application.scoring.closed_rounds import (
-    campaign_scorer,
     cycle_bank,
     walked_rows,
 )
@@ -340,7 +339,7 @@ class _Cycle(NamedTuple):
 def _graded_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | None:
     if (campaign := stores.campaigns.load_campaign(campaign_id)) is None:
         return None
-    graded_under = campaign_scorer(stores, campaign)
+    graded_under = resolved(stores, campaign.root_cycle).scorer
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
     chain = stores.campaigns.chain(hop)
     return _Cycle(stores, hop, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
