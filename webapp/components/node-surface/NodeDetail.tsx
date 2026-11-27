@@ -100,7 +100,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   ];
 
   const active = dash?.active ?? null;
-  const isLiveNow = active !== null && active.scope === scope && active.node === id;
+  const isLiveNow = active !== null && isOptimizer && active.node === id;
 
   return (
     <div className={cx("bnode", "box-full", isOptimizer && "bnode-wide")}>

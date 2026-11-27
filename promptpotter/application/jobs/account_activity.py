@@ -62,11 +62,6 @@ class ActivityResponse(StrictModel):
     """Time-bucketed spend / requests / tokens over the requested window."""
 
     window: ActivityWindow
-    group_by: ActivityGroupBy = Field(
-        description="The colour axis: `model` is the exact model id, `api_key` the key that "
-        "paid: the provider that billed the call, and whether the host's key under the coupon "
-        "or the account's own sent it (`Bill.key_source`)."
-    )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
         description="Every series in the window, in first-seen order — one colour per label, "
@@ -137,7 +132,6 @@ def account_activity(
     priced = rate_priced_text(sum(rate_priced), priced=calls_rate_priced(sum(rate_priced)))
     return ActivityResponse(
         window=window,
-        group_by=group_by,
         buckets=[
             ActivityBucket(
                 series_spend=spend[i], series_tokens=tokens[i], series_requests=requests[i]

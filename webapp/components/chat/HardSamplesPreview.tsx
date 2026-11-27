@@ -19,11 +19,11 @@ export function HardSamplesPreview() {
   const body = shownData(read);
   const items = useMemo(() => body?.samples ?? NO_SAMPLES, [body]);
   const measured = body?.measured_samples ?? 0;
-  const { dash, isLive } = useViewedDashboard();
+  const { dash } = useViewedDashboard();
   const { open } = useWorkspace();
   const ranked = useMemo(() => items.map((it) => it.position), [items]);
 
-  const walk = isLive ? (dash?.walk ?? null) : null;
+  const walk = dash?.walk ?? null;
   const running = walk != null && walk.ids.length > 0;
   const ids = running ? walk.ids : ranked;
   const cursor = running ? walk.cursor : -1;

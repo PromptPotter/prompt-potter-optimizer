@@ -4,7 +4,6 @@ import { useRound } from "@/lib/hooks/useRound";
 import { ARM_END_INFO, type ServedArm } from "@/lib/api/types";
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { useViewedDashboard } from "@/lib/state/poll";
-import type { CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { fmtUnit, unitPlural } from "@/lib/format";
 import {
@@ -36,7 +35,6 @@ export function MeasurementRun({
     read: roundRead,
     arms: candidates,
     start,
-    verdicts,
   } = useRound(viewedPath, round);
 
   const [candFilter, setCandFilter] = useState<string>("all");
@@ -86,7 +84,7 @@ export function MeasurementRun({
           <SegmentedControl<string>
             options={[
               { value: "all", label: `ALL (${candidates.length})` },
-              ...candidates.map((c) => segmentFor(c, verdicts.get(c.reading.arm.key))),
+              ...candidates.map(segmentFor),
             ]}
             value={candFilter}
             onChange={setCandFilter}
@@ -105,7 +103,9 @@ export function MeasurementRun({
           const fitness = reading.own?.fitness?.value ?? null;
           const isCandSelected = pick?.round === arm.round && pick.arm === arm.key;
           const { cached, cached_share: cachedShare } = reading.samples;
-          const verdict = verdicts.get(arm.key);
+          // Served on the arm: `""` when absent, never a placeholder read as the optimizer's words.
+          const changes = reading.changes_description;
+          const failures = c.validation_failures;
           return (
             <section
               key={arm.key}
@@ -153,14 +153,14 @@ export function MeasurementRun({
                   )}
                 </span>
               </button>
-              {verdict && (verdict.changes !== "" || verdict.failures.length > 0) && (
+              {(changes !== "" || failures.length > 0) && (
                 <div className="rsv-why">
-                  {verdict.changes !== "" && (
-                    <p className="rsv-changes" title={verdict.changes}>
-                      {verdict.changes}
+                  {changes !== "" && (
+                    <p className="rsv-changes" title={changes}>
+                      {changes}
                     </p>
                   )}
-                  {verdict.failures.map((f, i) => (
+                  {failures.map((f, i) => (
                     <p
                       key={`${f.reason}-${i}`}
                       className="rsv-reject-reason"
@@ -215,10 +215,10 @@ function Region({ children }: { children: ReactNode }) {
 }
 
 // `rejected`, never `0%`: an invalid arm holds no level.
-function segmentFor(c: ServedArm, verdict: CandidateVerdict | undefined): Segment<string> {
+function segmentFor(c: ServedArm): Segment<string> {
   const { arm, own } = c.reading;
   if (c.reading.end === "invalid") {
-    const reason = verdict?.failures[0]?.value;
+    const reason = c.validation_failures[0]?.value;
     return {
       value: arm.key,
       label: (

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, ClassVar, Literal, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -205,9 +205,8 @@ class WaitingOn(StrictModel):
 
 
 class ActiveNode(StrictModel):
-    """The node running now, in the layer whose ids name it: under pp-self both layers share ids."""
+    """The optimizer's node running now: a target's calls land on its own ledger, never this one."""
 
-    scope: Literal["optimizer", "target"]
     node: str
 
 
@@ -754,7 +753,7 @@ class LiveDashboardProjection(Projection):
     def _active_node(self) -> ActiveNode | None:
         """Every node on this ledger is the optimizer's: a target's calls land on its own ledger."""
         held = [*self._open_calls.values()] or [*self._open_phases.values()]
-        return ActiveNode(scope="optimizer", node=held[-1]) if held else None
+        return ActiveNode(node=held[-1]) if held else None
 
     def _current_round_nodes(self) -> dict[str, NodeBlock]:
         return {

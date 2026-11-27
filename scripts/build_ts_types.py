@@ -5,6 +5,7 @@ import enum
 import hashlib
 import inspect
 import json
+import re
 import sys
 import textwrap
 import types
@@ -201,6 +202,31 @@ def _emit_lifecycle_filter() -> str:
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
     note = "`GET /hierarchy?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
     return f"// {note}\nexport type LifecycleFilter = {members};"
+
+
+def _emit_read_queries() -> str:
+    """Each GET read's query: its model's fields the route does not fill (a POST's ride the body)."""
+    rows = []
+    for kind, model in sorted(PARAMS_FOR_READ.items(), key=lambda kv: kv[0].value):
+        if model.method != "GET":
+            continue
+        slots = set(re.findall(r"\{(\w+)", model.route))
+        hints = typing.get_type_hints(model, include_extras=True)
+        fields = [
+            _emit_field(
+                name, info, hints.get(name, info.annotation), omittable=not info.is_required()
+            )
+            for name, info in _wire_fields(model)
+            if name not in slots
+        ]
+        if fields:
+            body = textwrap.indent("\n".join(fields), "  ")
+            rows.append(f"  {json.dumps(kind.value)}: {{\n{body}\n  }};")
+    return (
+        "// Each GET read's query (application/read_params.py::ReadParams): its fields the route "
+        "does not fill.\n"
+        "export interface ReadQueries {\n" + "\n".join(rows) + "\n}"
+    )
 
 
 def _emit_read_routes() -> str:
@@ -659,6 +685,7 @@ def main() -> int:
     blocks.append(_emit_command_kinds())
     blocks.append(command_contract)
     blocks.append(_emit_read_routes())
+    blocks.append(_emit_read_queries())
     blocks.append(word_tables)
     blocks.append(_emit_served_words())
     blocks.append(_emit_live_windows())

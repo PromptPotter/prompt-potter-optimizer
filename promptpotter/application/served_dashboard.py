@@ -92,7 +92,6 @@ class WarmingDashboard(StrictModel):
     and no other cycle is without one. The run phase is served here as everywhere — a body with none is
     what lets a browser invent one."""
 
-    warming_up: Literal[True] = True
     campaign_id: str
     cycle_id: str
     run_phase: RunPhase
@@ -372,7 +371,8 @@ class ServedDashboard(DashboardFacts):
     )
     campaign_id: str
     cycle_id: str
-    backpressure: ServedBackpressure | None
+    # The served hold reads the banked one's clocks at the response; nothing assigns through it.
+    backpressure: ServedBackpressure | None  # type: ignore[assignment]
 
     run_phase: RunPhase = Field(
         description="The cycle's phase, derived at the read (`derive_run_state`) — never the "
@@ -433,6 +433,10 @@ class ServedDashboard(DashboardFacts):
     )
     fork_remainder: ForkRemainder | None = Field(
         description="What an offshoot of this cycle starts under; null on a replay."
+    )
+    live: bool = Field(
+        description="Whether a producer is appending to the cycle now; false on a replay at a "
+        "moment (`at`). The one liveness: `active`, `walk` and `round_axis.live` follow it."
     )
     active: ActiveNode | None = Field(
         description="The node running now: the newest open call's, else the newest open phase's; "
@@ -930,15 +934,9 @@ def _serve(
         else standing.caps,
         overshot=None if standing is None else standing.overshot,
         fork_remainder=None if standing is None else standing.fork_remainder,
+        live=live,
         active=state.active if live else None,
-        successor=None
-        if run.runs_on is None
-        else Said(
-            key="superseded",
-            tone="attention",
-            label=f"Its line runs on in fork {run.runs_on}",
-            value=run.runs_on,
-        ),
+        successor=run.successor,
         series_version=version,
         series_held=elided,
         line=[

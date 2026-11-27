@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Sequence
 from enum import StrEnum
-from typing import NamedTuple, Self
+from typing import NamedTuple
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, computed_field
 
 from promptpotter.application.datasets.authored import defaults_config, scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
@@ -351,8 +351,7 @@ class HeadToHead(StrictModel):
     covers_selection: bool
     guard: PairGuard
     headline: BenchColumn
-    verdict: bool | None
-    verdict_absent: ReadingState | None
+    verdict: bool | None = Field(description="Null where it gives none: `verdict_line` says why")
     contrasts: list[ArmContrast] = Field(
         description="The arm-by-arm matrix: every two treatments whose selections the bench "
         "graded, oldest arm as `a`."
@@ -360,12 +359,6 @@ class HeadToHead(StrictModel):
     ratio_reference: str | None
     verdict_line: str
     notes: list[str]
-
-    @model_validator(mode="after")
-    def _verdict_or_why_not(self) -> Self:
-        if (self.verdict is None) is (self.verdict_absent is None):
-            raise ValueError("a head-to-head gives its verdict, or says why it gives none")
-        return self
 
 
 class HeadToHeadEntry(NamedTuple):
@@ -477,7 +470,6 @@ def head_to_head(
         guard=guard,
         headline=BENCH_HEADLINE,
         verdict=verdict,
-        verdict_absent=verdict_absent,
         contrasts=_contrasts(graded, record, scorer),
         ratio_reference=None if base is None else base.campaign_id,
         verdict_line=_verdict_line(guard, verdict_absent, len(graded), ungraded_arms),

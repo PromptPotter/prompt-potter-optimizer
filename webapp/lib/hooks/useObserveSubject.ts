@@ -5,11 +5,11 @@ import { useViewedDashboard } from "@/lib/state/poll";
 import { useSelection } from "@/lib/state/selection";
 
 export function useObserveSubject(): ObserveSubject {
-  const { dash, isLive } = useViewedDashboard();
+  const { dash } = useViewedDashboard();
   const standing = useViewedCycle()?.facts.standing ?? null;
   const { round, observe } = useSelection();
   return useMemo(
-    () => resolveObserveSubject(dash, standing, isLive, { round, observe }),
-    [dash, standing, isLive, round, observe],
+    () => resolveObserveSubject(dash, standing, { round, observe }),
+    [dash, standing, round, observe],
   );
 }

@@ -127,7 +127,7 @@ interface Mark {
 
 function PipelineBox({ view, layer, compact }: BoxProps) {
   const { active, reach: reachByNode, scope, nestsNode } = layer;
-  const lit = (id: string) => active !== null && active.scope === scope && active.node === id;
+  const lit = (id: string) => active !== null && scope === "optimizer" && active.node === id;
   const selected = useViewedNode();
   const { open, close } = useWorkspace();
   const served = shownData(useConnector());

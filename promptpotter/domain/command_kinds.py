@@ -1314,12 +1314,11 @@ class RevokeDelegationPayload(CommandPayload, kind=CommandKind.REVOKE_DELEGATION
 
 
 class SetCouponPayload(CommandPayload, kind=CommandKind.SET_COUPON):
-    """Set an account's coupon face: dollars and tokens, `-` leaving a unit unbounded; `afresh` starts its draw now. Only the host may."""
+    """Set an account's coupon face: dollars and tokens, `unbounded` leaving a unit unbounded; `afresh` starts its draw now. Only the host may."""
 
     cli_spellings: ClassVar[Mapping[str, str]] = {"afresh": "--afresh"}
     user_id: str = Field(min_length=1, max_length=128)
-    usd: str = Field(min_length=1, max_length=32)
-    tokens: str = Field(min_length=1, max_length=32)
+    budget: Budget
     afresh: bool = False
 
 

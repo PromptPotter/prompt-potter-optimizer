@@ -4,10 +4,8 @@ import { roundRead } from "../api";
 import {
   armObserveConfig,
   armSearchPoint,
-  armVerdicts,
   servedArm,
   type CandidateSearchPoint,
-  type CandidateVerdict,
   type ObserveConfig,
 } from "../derivations";
 import type { CyclePath } from "../ids";
@@ -23,7 +21,6 @@ interface Round {
   cfg: (key: string | null, display: string, nodeId?: string | null) => ObserveConfig | null;
   start: (key: string) => CandidateSearchPoint | null;
   reading: (key: string | null) => ArmReading | null;
-  verdicts: Map<string, CandidateVerdict>;
 }
 
 const NO_ARMS: ServedArm[] = [];
@@ -36,14 +33,13 @@ export function useRound(path: CyclePath | null, round: number | null): Round {
   const arms = doc?.candidates ?? NO_ARMS;
   const unfiled = doc?.unfiled ?? false;
 
-  const answers = useMemo<Pick<Round, "cfg" | "start" | "reading" | "verdicts">>(() => {
+  const answers = useMemo<Pick<Round, "cfg" | "start" | "reading">>(() => {
     // One start per arm per answer: an editor seeded off it keeps its rows across renders.
     const starts = new Map(arms.map((arm) => [arm.reading.arm.key, armSearchPoint(arm)]));
     return {
       cfg: (key, display, nodeId) => armObserveConfig(servedArm(arms, key), display, nodeId),
       start: (key) => starts.get(key) ?? null,
       reading: (key) => servedArm(arms, key)?.reading ?? null,
-      verdicts: armVerdicts(arms),
     };
   }, [arms]);
   return useMemo(() => ({ unfiled, read, arms, ...answers }), [unfiled, read, arms, answers]);

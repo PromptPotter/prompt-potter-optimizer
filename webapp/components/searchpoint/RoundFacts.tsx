@@ -1,15 +1,15 @@
-import type { RoundReading } from "@/lib/derivations";
+import type { ServedRound } from "@/lib/api/types";
 import { HoverCard } from "@/components/ui";
 
-export function RoundFacts({ reading }: { reading: RoundReading | null }) {
-  if (!reading || reading.facts.length === 0) return null;
+export function RoundFacts({ reading }: { reading: ServedRound | null }) {
+  if (!reading || reading.optimizer_facts.length === 0) return null;
   return (
     <div
       className="subject-facts"
       aria-label={`Round ${reading.round}, in the optimizer's words`}
     >
       <span>round {reading.round}</span>
-      {reading.facts.map((f) =>
+      {reading.optimizer_facts.map((f) =>
         f.kind === "stat" ? (
           <span key={f.key}>
             {f.label} {f.text}
@@ -24,12 +24,12 @@ export function RoundFacts({ reading }: { reading: RoundReading | null }) {
   );
 }
 
-export function RoundVerdict({ reading }: { reading: RoundReading | null }) {
-  if (!reading || reading.ending === null || reading.ending === "crowned" || !reading.verdictReason)
+export function RoundVerdict({ reading }: { reading: ServedRound | null }) {
+  if (!reading || reading.ending === null || reading.ending === "crowned" || !reading.verdict_reason)
     return null;
   return (
-    <span className="subject-diff-verdict" title={reading.verdictReason}>
-      round {reading.round}: {reading.verdictReason}
+    <span className="subject-diff-verdict" title={reading.verdict_reason}>
+      round {reading.round}: {reading.verdict_reason}
     </span>
   );
 }
