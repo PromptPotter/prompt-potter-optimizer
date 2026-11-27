@@ -232,7 +232,6 @@ async def _session(
         yield Session(
             store=stores,
             backend_client=client,
-            pipeline_schema=pipeline_schema,
             pipeline_read=PipelineRead(
                 declaration=declaration,
                 dataset_overlay=pipeline_node_overlay(definition.pipeline),

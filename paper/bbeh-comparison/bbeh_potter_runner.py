@@ -124,7 +124,7 @@ async def run_bbeh_campaign(
     # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
     # than default: a results file naming the wrong model is worse than no results file.
     models = {
-        pipeline_params.node(node.name).model for node in configured.pipeline_schema.prompt_nodes()
+        pipeline_params.node(node.name).model for node in configured.bound_resolution.chain.prompt_nodes()
     }
     if len(models) != 1 or None in models:
         raise RuntimeError(
@@ -155,7 +155,7 @@ async def run_bbeh_campaign(
         bound = await cell_bound(verifying, result_pipeline_params)
         calls = result_pipeline_params.nodes
         billed = cell_billing(
-            verifying.pipeline_schema,
+            verifying.pipeline_read.declared_schema(),
             priced_pairs(verifying, calls),
             await attempt_bounds(verifying, calls),
         )

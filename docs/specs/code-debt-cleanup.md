@@ -64,7 +64,7 @@ row it closes.
   `pipeline_resolve.py`, `datasets/draft_patch.py` and `jobs/launcher/` (`checkin.py`,
   `head_to_head.py`, `mint_and_start.py`) pass `.name` and `free_fence` looks it up again;
   `UploadBasis.connector` (`pipeline_resolve.py`) is a name every read resolves. Action: they take
-  the `Connector`, and the campaign-name sites (`_campaign_merge`, `jobs/mint.py`, `mask/load.py`,
+  the `Connector`, and the campaign-name sites (`resolve_pipeline_for_campaign`, `jobs/mint.py`, `mask/load.py`,
   `hierarchy.py`'s `is_self_optimization` call) look it up once. **Rides with:** after load-2 (it shares
   `admission.py` and `pipeline_resolve.py`). **Re-test:** `git grep -n "connector\.name" --
   promptpotter/application/pipeline_resolve.py promptpotter/application/datasets promptpotter/application/jobs` → 0.
@@ -697,8 +697,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   w7-res2 the one fold (`pipeline_resolve.py::RunResolution`, read off records by `resolved`, off a
   launch's read by `run_resolution`) and the export off records (`runner/output.py::ExportProjection`).
   Open: `run_observers.py::_bind_observers` still hands `ReadoutProjection` (`views/readout.py`) a live
-  `Session`, and `Session.pipeline_schema` holds two facts: its read's parse before
-  `bind_resolution`, the chain as run after (`RunResolution.parsed` carries the first). Root: a
+  `Session` (its schema is now its bound resolution's, `Session.bound_resolution`). Root: a
   `Session` binds the value to a live client and builds none of it. **Closes:**
   **A check-in's cycle plan selects beside its landing's refusal**, **A per-cell criterion naming a term no cell carries compiles**,
   **A connector's two-valued term reaches no scorer**; adjacent: **The node document is typed two ways**,
@@ -1014,18 +1013,23 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A bulletin dismissal has no account deleter to ride** (w7-host): no code deletes an account, so
   "an account's deletion drops its dismissals in the same write" has no writer. It lands with the
   account deleter (`bulletin_board.py` drops `dismissed[account_id]`).
-- **`Session.pipeline_schema` holds two facts** (w7-res2): the read's parse before
-  `bind_resolution`, and the chain as run after. Root: a `Session` holds its read, and the resolution
-  owns the schema. **Re-test:** `Session` has no `pipeline_schema`.
-- **A third reader of a cycle's draw raises its own error** (w7-res2):
-  `bench/resume_and_fork/fork_siblings.py` raises a `ConflictError` of its own beside
-  `session.py::drawn_partition`. Root: it calls `drawn_partition`. **Re-test:** one reader of a draw.
-- **`select_optimizer(self.config.optimization)` is spelled three times** (w7-res2):
-  `pipeline_resolve.py::_Merge.optimizer`, `RunResolution.optimizer` and `DraftPipeline.optimizer`.
-  Root: a draft's merge is a `RunResolution`. **Re-test:** one site.
 - **`open_cell` resolves a whole dataset to compile its scorer** (w7-res,
   `measurement_log.py::open_cell`): it only compiles the scorer and refuses an unknown name. Root: the
-  archive carries its dataset's config. **Re-test:** `open_cell` resolves no dataset.
+  archive carries its dataset's config. **Design pick (w7-res3 stopped):** which record carries it
+  (`ArchiveEntry`, `FiledAnswer`, or the bank's record), what it carries (the scoring block or the
+  whole `CampaignConfig`), and whether a cell is graded under the config as filed or as it is today.
+  `domain/sample.py::ArchiveConfig` says it holds "nothing any dataset or answer says of it". Every choice is a
+  run-data wipe, and none touches a survivor. **Re-test:** `open_cell` resolves no dataset.
+- **A dataset read is a third resolution** (w7-res3; confirmed by w7-rows6): `pipeline_resolve.py::
+  resolve_pipeline_for_dataset` repeats `RunResolution`'s parse (`parse_pipeline_response` of a served
+  declaration) and its narrowing (`_resolve_active_schema` with `exclude_nodes` and
+  `optimizer_narrowing`). Root: it is a `RunResolution` with no read and no cycle. **Design pick
+  (w7-rows6 stopped):** `RunResolution` requires `recorded`, `cycle` and `verifier_graded`, and it
+  computes its schema through `layers`, which reads `read`. Three choices are open: a schema-only
+  base (config, declared, menu) that `RunResolution` extends, or optional fields; what
+  `verifier_graded` means with no bank; and whether a dataset read keeps the dataset file's own
+  config (`load_dataset_campaign_config`) or the laid one `merge_outside_run` uses. **Re-test:** one
+  schema parse in `pipeline_resolve.py`.
 - **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
   `npm test` now queues behind the clone's lock (`scripts/queue_then.py`). **Re-test:** five looping
   builders plus one gate on the Windows desk reap none.
@@ -1039,11 +1043,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   landing. Root: a subject is matched relative to the configured data root (`layout.py` names each
   root under it), never by a name anywhere on the path. **Re-test:** `git grep -c "stamped_subject("
   -- promptpotter` is 0, and a write under `datasets/jobs/` moves its workspace's version.
-- **An exception's notes reach only the CLI's human door** (w7-rows5): `ForkCut.withdraw` names the
-  stub it kept as a note on the refusal it rides, and only `cli/main.py` prints `__notes__`.
-  `Refusal.of` drops them, so `--json`, the API and the webapp show nothing of the kept stub. Root: a
-  `Refusal` carries its notes, served by every door. **Re-test:** a fork whose withdraw fails names
-  its stub in the API's refusal body.
 - **Can a `promptpotter-self` panel seat run an optimizer other than potter?** (w7-tests3, open
   question): `panel.inner_campaign.optimization.nodes` (`adaptive_queue`, `l1_generate`, `escalation`)
   lays potter's nodes over each seat's inner campaign. w7-tests3's mixed test panel (a CAPO seat

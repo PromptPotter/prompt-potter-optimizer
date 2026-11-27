@@ -96,7 +96,7 @@ def declare_run_wiring(
             defaults_drift=defaults_drift(
                 campaign,
                 running=selected.treatment(
-                    campaign_admits(campaign_config, session.pipeline_schema),
+                    campaign_admits(campaign_config, session.bound_resolution.chain),
                     session.store.block_packs,
                 ),
             ),

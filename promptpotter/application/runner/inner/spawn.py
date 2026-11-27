@@ -231,7 +231,9 @@ def _laid_seat(
 ) -> tuple[Session, CampaignConfig]:
     """*cell*'s instrument with the arm's edits laid last: what its seat runs, and its key reads."""
     instrument = inner_instrument_config(
-        cell, cells.held(cell).campaign, solver=session.pipeline_schema.prompt_nodes()
+        cell,
+        cells.held(cell).campaign,
+        solver=session.pipeline_read.declared_schema().prompt_nodes(),
     )
     armed = instrument.overlaid(arm_layer(overrides))
     # The instrument stands in for the cell dataset's block: the outer campaign set every knob.

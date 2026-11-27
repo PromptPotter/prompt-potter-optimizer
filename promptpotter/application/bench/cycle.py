@@ -192,7 +192,7 @@ class Cycle:
             difficulty=DifficultyView.open(session, config, origin=origin.state.config_key),
             framing=framing,
         )
-        optimizer.refuse_pipeline(session.pipeline_schema)
+        optimizer.refuse_pipeline(session.bound_resolution.chain)
         cycle.seat_origin(origin, None)
         return cycle
 
@@ -277,7 +277,7 @@ class Cycle:
                     optimizer_state=optimizer_state,
                     elects_on=self.optimizer.elects_on,
                     scorer=self.session.state.scoring.scorer,
-                    schema=self.session.pipeline_schema,
+                    schema=self.session.bound_resolution.chain,
                 ),
                 *self._rounds[1:],
             ]
@@ -429,7 +429,7 @@ class Cycle:
             return None
         if self._axes is None:
             unit = self.session.state.scoring.scorer.fitness_unit
-            self._axes = AxisIndex(self.sample_index, self.session.pipeline_schema, unit)
+            self._axes = AxisIndex(self.sample_index, self.session.bound_resolution.chain, unit)
         self._axes.refresh(self.closed_rounds)
         return self._axes
 

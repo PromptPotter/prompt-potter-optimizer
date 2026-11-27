@@ -149,6 +149,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     served = await served_pipeline(
         stores, connector, endpoint=definition.endpoint, experiment=experiment
     )
+    bank, _ = await session_bank(stores, dataset, connector=connector, experiment=experiment)
     layers = ConfigLayers.of(dataset, None)
     # Each arm's as its mint lays it (`mint.py::arm_config`), in *heads*' order.
     merges = [
@@ -157,16 +158,16 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
             definition.pipeline,
             layers.over(head.head_to_head.declared_optimization(arm)),
             served,
+            verifier_graded=bank.verifier_graded,
         )
         for head in heads
         for arm in head.head_to_head.arms
     ]
-    configs = [merge.cfg for merge in merges]
+    configs = [merge.config for merge in merges]
     # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
     config = configs[0]
-    bank, _ = await session_bank(stores, dataset, connector=connector, experiment=experiment)
     partition = partition_bank(bank.samples, config.dataset_split, seed=config.run_seed)
-    cell = measured_cell_price(stores, bank.dataset_hash, merges[0].layers.fold().params)
+    cell = measured_cell_price(stores, bank.dataset_hash, merges[0].params)
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "

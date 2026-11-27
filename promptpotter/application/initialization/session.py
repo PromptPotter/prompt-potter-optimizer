@@ -12,7 +12,6 @@ from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize, Purp
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
@@ -33,7 +32,9 @@ from promptpotter.shared.errors import MINT_FRESH, ConflictError, FileKind, File
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
+    from promptpotter.application.pipeline_resolve import RunResolution
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 @dataclass(frozen=True)
@@ -83,9 +84,11 @@ class LaunchState:
         return self.clock
 
 
-def drawn_partition(stores: Stores, hop: CycleHop) -> PartitionRecord:
-    """THE read of what *hop*'s chain drew: its mint draws one and a fork stands on its parent's."""
-    drawn = stores.campaigns.last(hop, PartitionRecord)
+def drawn_partition(campaigns: CampaignStore, hop: CycleHop) -> PartitionRecord:
+    """THE read of what *hop*'s chain drew: its mint draws one and a fork stands on its parent's.
+    Never tolerant: the mint appends the draw before it writes the campaign, so a cycle a reader
+    can address has drawn, and one without its draw is a torn mint, refused as unreadable."""
+    drawn = campaigns.last(hop, PartitionRecord)
     if drawn is None:
         raise FileUnreadableError(
             FileKind.LEDGER,
@@ -99,7 +102,6 @@ def drawn_partition(stores: Stores, hop: CycleHop) -> PartitionRecord:
 class Session:
     store: Stores
     backend_client: BackendClient
-    pipeline_schema: PipelineSchema
     # Recorded whole by `record_resolved_run`, at the mint and at every `init_cycle`.
     pipeline_read: PipelineRead
     # What init read of the backend's revision; `None` where its connector checks none.
@@ -112,6 +114,8 @@ class Session:
     dataset_name: str | None = None
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
+    # What `pipeline_resolve.py::bind_resolution` bound: it owns the schema; `None` until then.
+    resolution: RunResolution | None = None
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
     cell_identity: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -132,7 +136,7 @@ class Session:
             self.hop,
             self.pipeline_read,
             experiment=self.backend_client.workload.experiment,
-            model_capabilities=self.pipeline_schema.model_capabilities,
+            model_capabilities=self.bound_resolution.chain.model_capabilities,
         )
 
     def act(self, act: ArmAct) -> None:
@@ -144,7 +148,7 @@ class Session:
         """The bank and partition are what *at*'s chain drew, and the mint's own layers of the read
         what its mint laid: an account leaving the tier moves no minted run."""
         hop = at.hop
-        drawn = drawn_partition(self.store, hop)
+        drawn = drawn_partition(self.store.campaigns, hop)
         bank = (
             self.bank
             if drawn.dataset_hash == self.bank.dataset_hash
@@ -184,6 +188,14 @@ class Session:
         return self.campaign
 
     @property
+    def bound_resolution(self) -> RunResolution:
+        if self.resolution is None:
+            raise RuntimeError(
+                "this session is bound to no resolution: `bind_resolution` binds one."
+            )
+        return self.resolution
+
+    @property
     def at(self) -> CampaignCycle:
         return CampaignCycle(self.bound_campaign, self.cycle_id)
 
@@ -211,7 +223,7 @@ class Session:
 
     def points(self, framing: TaskDecomposition) -> PointContext:
         return PointContext(
-            schema=self.pipeline_schema,
+            schema=self.bound_resolution.chain,
             framing=framing,
             demo=self.state.scoring.partition.demo,
         )

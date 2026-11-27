@@ -18,7 +18,7 @@ from promptpotter.application.initialization.scoring_scope import (
     open_diagnostic,
     verb_ledger,
 )
-from promptpotter.application.initialization.session import LaunchClock
+from promptpotter.application.initialization.session import LaunchClock, drawn_partition
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_phase_control import budget_stop
@@ -57,7 +57,6 @@ from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.held_out import PassGradedRecord
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import MAX_PASS_ROWS, ROW_GRADES, CellSheet, Scorer, WalkedCell
@@ -241,9 +240,7 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
             f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.arm.label} has "
             "no origin to be read over."
         )
-    drawn = stores.campaigns.last(hop, PartitionRecord)
-    assert drawn is not None, "a cycle that closed round 0 drew its bank"
-    instrument_id = drawn.instrument_id
+    instrument_id = drawn_partition(stores.campaigns, hop).instrument_id
     c0 = standing[0].close.origin
     origin = ArmName(key=ArmKey(c0.individual.id), round=0, label=c0.label)
     measured = banked.arm.key
@@ -300,7 +297,7 @@ async def verify_candidate(
 
     async with open_diagnostic(stores, at, acting=acting) as opened:
         session, campaign_config, campaign = opened.session, opened.config, at.campaign
-        schema = session.pipeline_schema
+        schema = session.bound_resolution.chain
         # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
         jsp = opened.points.measured(entry)
         sp_hash = jsp.sp_hash(schema)
@@ -487,7 +484,7 @@ async def measure_noise_floor(
         scorer.fitness_unit,
     )
     arm = ArmName(key=ArmKey(origin.individual.id), round=0, label=origin.label)
-    sp_hash = origin_sp.sp_hash(session.pipeline_schema)
+    sp_hash = origin_sp.sp_hash(session.bound_resolution.chain)
     cells: list[WalkedCell] = []
     composites: list[float] = []
     fitnesses: list[float] = []

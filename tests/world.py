@@ -52,10 +52,10 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.pipeline_resolve import laid_session
+from promptpotter.application.pipeline_resolve import bind_resolution, laid_session, run_resolution
 from promptpotter.config.paths import install_datasets_root, optimizer_manifest_path, user_data_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
@@ -344,15 +344,16 @@ class World:
     @asynccontextmanager
     async def opened(self, rows: int = 40) -> AsyncIterator[Session]:
         """A session on the world's dataset as every door opens one, scoring as a pass outside a
-        run does (`scoring_scope.py::arm_diagnostic_scoring`); its client closes as the block exits."""
+        run does (`scoring_scope.py::open_diagnostic`); its client closes as the block exits."""
         config = campaign_config("potter", 1, bench_trigger="at_end")
         self._lay(Script(config, rows, 0))
         async with init_services(
             DATASET, identity=self.stores.identity, stores=self.stores
         ) as session:
             laid, config = laid_session(session, ConfigLayers.stating(stated(config)))
-            with arm_diagnostic_scoring(laid, config):
-                yield laid
+            bound = bind_resolution(laid, run_resolution(laid, CycleConfig.laid(config, ())))
+            with arm_diagnostic_scoring(bound, config):
+                yield bound
 
 
 def shared_run[T](

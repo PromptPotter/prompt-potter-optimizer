@@ -311,7 +311,9 @@ BASELINE = {
     # `configure_and_apply_pipeline`, `ParamLayers.of_cycle`, `recorded_schema` and `_CampaignMerge`.
     # w7-spend (+20): `MeteredSpend.of` serves the spend words the browser composed (bill, rate-priced,
     # replay and buckets lines); the stop record banks `SpendRollup`, and four unread fields go.
-    "package_lines": 113731,
+    # w7-res3 (-7): a draft's merge is a `RunResolution`, and `Session.pipeline_schema` goes.
+    # w7-rows6 (-31): a Refusal carries its notes; every read of a cycle's draw is `drawn_partition`.
+    "package_lines": 113693,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

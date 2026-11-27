@@ -190,6 +190,7 @@ from promptpotter.application.pipeline_resolve import (
     ParamLayers,
     Resolution,
     ServedPipeline,
+    bind_resolution,
     campaign_admits,
     campaign_config_map,
     cycle_config,
@@ -207,6 +208,7 @@ from promptpotter.application.pipeline_resolve import (
     permitted_narrowing,
     resolve_pipeline_at,
     resolved_output_schemas,
+    run_resolution,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.preflight import refuse_off_contract
@@ -2633,7 +2635,7 @@ def decl(built_stores: Stores) -> _Declared:
     rows_30 = samples(30, "TRUE", query="claim ")
     _account_dataset(built_stores, "decl", rows_30)
     opened, door = _opened(built_stores, "decl")
-    (solve,) = opened.pipeline_schema.prompt_nodes()
+    (solve,) = opened.pipeline_read.declared_schema().prompt_nodes()
     return _Declared(opened, rows_30, solve, door, declaration_of(opened, door, Optimize()))
 
 
@@ -3022,7 +3024,10 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
     minted = asyncio.run(mint_framed_cycle(opened, door, rows_30, task_text=None))
     campaign = built_stores.campaigns.load_campaign(minted.hop.campaign_id)
     assert campaign is not None, "the mint stored no campaign"
-    bound = opened.bound(campaign.root_cycle)
+    root = opened.bound(campaign.root_cycle)
+    bound = bind_resolution(
+        root, run_resolution(root, cycle_config(built_stores, campaign.root_cycle))
+    )
     assert bound.drawn is not None, "the mint drew no partition"
     bound.state.scoring = scorer_setup(bound, door, partition=bound.drawn)
     return _Held(bound, campaign)
@@ -3085,7 +3090,8 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
     )
     running = select_optimizer(effective_config(declared.spec).optimization)
     runs_under = running.treatment(
-        campaign_admits(effective_config(declared.spec), opened.pipeline_schema), stores.block_packs
+        campaign_admits(effective_config(declared.spec), opened.pipeline_read.declared_schema()),
+        stores.block_packs,
     )
     drift = defaults_drift(stale, running=runs_under)
     assert drift is not None and drift.moved() == ["bench"], (
@@ -3154,7 +3160,10 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
         held_campaign.root_hop,
         opened.pipeline_read,
         experiment=None,
-        model_capabilities={**opened.pipeline_schema.model_capabilities, "": {"m": floored}},
+        model_capabilities={
+            **opened.pipeline_read.declared_schema().model_capabilities,
+            "": {"m": floored},
+        },
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])
@@ -3174,7 +3183,9 @@ def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming
 
     def regraded(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
         out = real(*args, **kwargs)
-        out.setdefault(opened.pipeline_schema.active_steps[-1], {})[JUDGE_INSTRUMENT_KEY] = "moved"
+        out.setdefault(opened.pipeline_read.declared_schema().active_steps[-1], {})[
+            JUDGE_INSTRUMENT_KEY
+        ] = "moved"
         return out
 
     with monkeypatch.context() as moved:
@@ -3182,7 +3193,7 @@ def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming
         with pytest.raises(ConfigDriftError) as refused:
             resolve_resume(opened, held_campaign, decl.rows_30)
     assert refused.value.details["identity_moved"] == [
-        f"{opened.pipeline_schema.active_steps[-1]}.{JUDGE_INSTRUMENT_KEY}"
+        f"{opened.pipeline_read.declared_schema().active_steps[-1]}.{JUDGE_INSTRUMENT_KEY}"
     ], "a resume under another grader than its cells were graded by ran, or named another leaf"
     ran = BackendRevision(expected="r1", reported="r1", unread=None)
     running = select_optimizer(effective_config(decl.declared.spec).optimization)
@@ -3377,7 +3388,9 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     steering = CycleStart(pipeline_overlay={"llm_only": NodeCall(temperature=0.3)})
     cycle_id = cut_operator_fork(stores, asked, steering).take(stores)
     opened, _ = _opened(stores, campaign.dataset_name)
-    steered_fork = opened.bound(CampaignCycle(campaign, cycle_id))
+    at = CampaignCycle(campaign, cycle_id)
+    bound = opened.bound(at)
+    steered_fork = bind_resolution(bound, run_resolution(bound, cycle_config(stores, at)))
     steered_fork.record_resolved_run()
     rows = opened.bank.samples
     resolve_resume(steered_fork, campaign, rows)
@@ -4570,7 +4583,7 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
         async with checkin_launch.open_checkin(
             built_stores, draft.draft_id, served, overlays=[]
         ) as opened:
-            return opened.session.pipeline_schema
+            return opened.session.pipeline_read.declared_schema()
 
     assert asyncio.run(opened_schema()) == draft_pipeline(built_stores, draft, served).declared, (
         "the run inits on another pipeline than the one its Start was checked against"
@@ -4927,7 +4940,7 @@ async def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_
     }
     assert severed_potter, "vacuous — no potter field the outer edits carries a placeholder"
     async with _l4_round(world.adopt(l4_outer)) as outer:
-        parent, schema = outer.cycle.parent, outer.cycle.session.pipeline_schema
+        parent, schema = outer.cycle.parent, outer.cycle.session.bound_resolution.chain
         proposing = NodeContext(outer, NODE_MEMBERS.get("l1_generate")).read(Children)
         children = [
             proposing.child([parent], prompt_loci=loci) for loci in (edit, severed, severed_potter)

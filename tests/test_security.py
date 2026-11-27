@@ -48,7 +48,6 @@ from factories import (
     minted_campaign,
     minted_dataset,
     on_jumping_clock,
-    pipeline_schema,
     run_wiring,
     samples,
     stored_campaign,
@@ -241,7 +240,7 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -3579,9 +3578,13 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
         {"pipeline": {"connector": "termnorm"}, "campaign": unframed},
     )
     rows = samples(30)
-    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
+    declaration = {"nodes": {"solve": {"prompt_info": PROMPT_INFO.model_dump(mode="json")}}}
     starting = loop_session(
-        stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
+        stores,
+        parse_pipeline_response(declaration),
+        rows,
+        dataset=resolve_dataset(stores, "acts"),
+        declaration=declaration,
     )
     declared = declaration_of(starting, defaulted_config(unframed), Optimize())
     plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)

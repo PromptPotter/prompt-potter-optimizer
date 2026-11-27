@@ -12,6 +12,7 @@ from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import held_bank
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.intelligence.hard_sample_sorter import (
     arm_thetas,
     build_hard_samples,
@@ -292,12 +293,8 @@ def cells_scope(
     return CellsScope(stores, art_store, name, scope, hop, at)
 
 
-def _drawn_rows(
-    cells: CellsScope, drawn: PartitionRecord | None, slots: list[int]
-) -> dict[int, Sample]:
+def _drawn_rows(cells: CellsScope, drawn: PartitionRecord, slots: list[int]) -> dict[int, Sample]:
     """A cycle reads the bank it DREW, by hash, and only the rows a page shows."""
-    if drawn is None:
-        return {}
     rows = cells.stores.tenant_datasets.rows(drawn.dataset_hash, slots)
     if rows is None:
         raise PayloadInvalidError(
@@ -434,13 +431,12 @@ def _leaderboard_page(
         ).scorer
         candidates, rows, headline = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
-        drawn = art_store.campaigns.last(hop, PartitionRecord)
+        drawn = drawn_partition(art_store.campaigns, hop)
         at = art_store.campaigns.campaign_cycle(hop)
         graded_under = resolved(art_store, at.campaign.root_cycle).scorer
         rounds = closed_rounds(art_store, hop, graded_under, moment=None)
         view = cycle_hard_samples(art_store, hop, rounds, cycle_config(art_store, at).config)
-        members = frozenset() if drawn is None else drawn.bank_ids
-        selected = _selected(view, members, max_unmeasured, limit)
+        selected = _selected(view, drawn.bank_ids, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
         candidates, rows, headline = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)

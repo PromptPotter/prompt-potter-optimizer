@@ -44,6 +44,7 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
+from promptpotter.application.pipeline_resolve import RunResolution
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.entry import launch_scope, open_line
@@ -96,7 +97,7 @@ from promptpotter.domain.bench import (
     bench_status,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose, RunDeclaration
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -566,7 +567,11 @@ def loop_session(
     hop: CycleHop | None = None,
     dataset: ResolvedDataset | None = None,
     dataset_name: str | None = None,
+    declaration: dict[str, Any] | None = None,
 ) -> Session:
+    """*declaration*: the wire *schema* parses from, for a fact whose plan re-reads it."""
+    read = PipelineRead(declaration=declaration or {}, dataset_overlay={})
+    config, bank = defaulted_config(), Bank.of(samples)
     session = Session(
         store=stores,
         backend_client=backend_client(
@@ -574,9 +579,17 @@ def loop_session(
         )
         if client is None
         else client,
-        pipeline_schema=schema,
-        pipeline_read=PipelineRead(declaration={}, dataset_overlay={}),
-        bank=Bank.of(samples),
+        pipeline_read=read,
+        resolution=RunResolution(
+            config,
+            bank.verifier_graded,
+            recorded=read,
+            cycle=CycleConfig.laid(config, ()),
+            workspace=stores.base_dir,
+            menu_at=None,
+            parsed=schema,
+        ),
+        bank=bank,
         dataset_name=(
             dataset_name if dataset_name is not None else "" if dataset is None else dataset.name
         ),

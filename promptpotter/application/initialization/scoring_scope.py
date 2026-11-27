@@ -63,7 +63,7 @@ def scorer_setup(
             campaign_config.judges,
             beside=(
                 connector_report_owner(connector.name, connector.cell_report_keys),
-                observation_owner(session.pipeline_schema.observation_keys),
+                observation_owner(session.bound_resolution.chain.observation_keys),
             ),
         ),
     )

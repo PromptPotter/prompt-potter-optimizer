@@ -62,6 +62,7 @@ from promptpotter.application.evidence.subjects import (
     scenario_said,
 )
 from promptpotter.application.hierarchy import campaign_short_label
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.pipeline_resolve import cycle_config, resolved
@@ -90,7 +91,6 @@ from promptpotter.domain.paired_reading import (
     level_text,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import (
     NO_CELLS,
@@ -821,10 +821,7 @@ def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
     spend_by_round = scan_ledger_spend_by_round(chain)
-    drawn = stores.campaigns.last(hop, PartitionRecord)
-    if drawn is None:
-        raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
-    instrument_id = drawn.instrument_id
+    instrument_id = drawn_partition(stores.campaigns, hop).instrument_id
     opt = cycle_config(stores, at).config.optimization
     scale = (
         None

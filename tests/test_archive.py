@@ -49,6 +49,7 @@ from factories import (
     sheet,
     workspace,
 )
+from fastapi import Request
 from offline_run import DATASET
 from offline_world import Router
 from world import Shared, World, shared_run
@@ -82,6 +83,7 @@ from promptpotter.application.hierarchy_subtree import (
     supersede_line,
     unplaced_reason,
 )
+from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import opening as launch_opening
 from promptpotter.application.jobs.launcher.admission import request_jobs
@@ -155,7 +157,6 @@ from promptpotter.domain.narration import Narration
 from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     ConfigOverrides,
@@ -223,6 +224,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.main import potter_error_handler
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -1766,31 +1768,33 @@ def test_a_fork_that_raises_past_its_cut_before_its_take_leaves_no_stub(
         )
 
 
-# A withdraw whose delete fails keeps the stub, and names it on the refusal it rides.
+# A withdraw whose delete fails keeps the stub, and the API's refusal body names it.
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_fork_whose_withdraw_fails_names_its_kept_stub_on_the_refusal(
+def test_a_fork_whose_withdraw_fails_names_its_kept_stub_in_the_served_refusal(
     monkeypatch: pytest.MonkeyPatch, world: World, line: Shared
 ) -> None:
     ran = world.adopt(line)
     stores, store, (hop, _) = ran.stores, ran.stores.campaigns, line.made
     cycles = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)}
 
-    def torn(*_args: object, **_kwargs: object) -> None:
-        raise OSError("the write tore")
+    def taken(*_args: object, **_kwargs: object) -> None:
+        raise ConflictError("the cycle is taken")
 
     def held(*_args: object, **_kwargs: object) -> None:
         raise OSError("the stub is held")
 
-    monkeypatch.setattr(launch_opening, "claim_cycle", torn)
+    monkeypatch.setattr(launch_opening, "claim_cycle", taken)
     monkeypatch.setattr(fork_siblings, "cleanup_stub_fork_if_empty", held)
     asked = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2)
-    with pytest.raises(OSError, match="tore") as refused:
+    with pytest.raises(ConflictError, match="taken") as refused:
         asyncio.run(
             CommandDispatcher(stores, inline=Inline()).dispatch(CommandCall(asked, door=Door.HOST))
         )
     (stub,) = {d.name for d in store.campaign_cycle_dirs(hop.campaign_id)} - cycles
-    assert any(stub in note for note in getattr(refused.value, "__notes__", ())), (
-        "the refusal does not name the stub its failed withdraw kept"
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    served = json.loads(bytes(asyncio.run(potter_error_handler(request, refused.value)).body))
+    assert any(stub in note for note in served["notes"]), (
+        f"the API's refusal body does not name the stub its failed withdraw kept: {served}"
     )
 
 
@@ -1807,7 +1811,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
     assert index.fork.issued_by.id == str(stores.identity.user_id), "the fork names no issuer"
-    assert store.last(applied, PartitionRecord) == store.last(hop, PartitionRecord), (
+    assert drawn_partition(store, applied) == drawn_partition(store, hop), (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
     for kind in (RunPhaseRecord, CycleShareRecord):

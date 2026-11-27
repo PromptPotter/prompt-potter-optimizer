@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
-from promptpotter.application.initialization.session import LaunchState
+from promptpotter.application.initialization.session import LaunchState, drawn_partition
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
@@ -50,8 +49,7 @@ def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> 
 
 
 def cycle_bank(stores: Stores, hop: CycleHop) -> Bank:
-    drawn = stores.campaigns.last(hop, PartitionRecord)
-    bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
+    bank = stores.tenant_datasets.bank(drawn_partition(stores.campaigns, hop).dataset_hash)
     if bank is None:
         raise NotFoundError(f"cycle {hop.cycle_id} names no bank still held")
     return bank

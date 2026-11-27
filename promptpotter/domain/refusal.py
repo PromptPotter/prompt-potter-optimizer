@@ -27,6 +27,11 @@ class Refusal(FrozenModel):
         description="The acts past it, as a stop's: each door spells one its own way (the "
         "terminal's verb and flag, the browser's control, the MCP tool its kind names).",
     )
+    notes: tuple[str, ...] = Field(
+        default=(),
+        description="What the refusal's path left past its sentence, each line as said (a fork "
+        "stub its withdrawal kept, the datasets a name could have been).",
+    )
 
     @classmethod
     def of(cls, refused: PotterError) -> Self:
@@ -35,4 +40,5 @@ class Refusal(FrozenModel):
             message=refusal_words(refused),
             details=refused.details,
             next_acts=refused.next_acts,
+            notes=tuple(getattr(refused, "__notes__", ())),
         )
