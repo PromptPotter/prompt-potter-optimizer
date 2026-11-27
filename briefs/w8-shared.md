@@ -3,7 +3,8 @@
 **BASE (overrides common.md's BASE FIRST):** `origin/release/next`, main's stand-in. Report
 `git log -1 origin/release/next`. It is not on main, so skip the is-ancestor check. Five chains run at
 once, one batch: batch 1 was w8-gate, w8-launch, w8-resolve, w8-spine and w8-doors (landed); batch 2
-is w8-store, w8-launch2, w8-resolve2, w8-web and w8-spine2. Each owns the paths its brief lists.
+is w8-store, w8-launch2, w8-resolve2, w8-web and w8-spine2; batch 3 runs beside it (w8-l4, w8-box,
+w8-tests2). Each owns the paths its brief lists.
 
 **The point of this wave is a falling filing ratio.** Each closed row used to file about 0.8 new
 ones. The order is central roots first, deletions next, features last. So:
