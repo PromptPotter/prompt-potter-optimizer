@@ -273,9 +273,9 @@ Each step is idempotent.
    on an installed box it will not re-run (its `REPO_URL` guard exits first), so set the same token
    by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side.
 4. **Restart BOTH services** — PromptPotter reads `TERMNORM_TOKEN` once at boot. Verify
-   `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe
-   (`connectors/termnorm.py::_termnorm_preflight`) is unauthenticated and fails only on a refused
-   connect.
+   `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's probe
+   (`connectors/termnorm.py::_termnorm_preflight`) sends the bearer to `GET /version` and refuses a
+   backend serving no route or another wire `contract`, so TermNorm's `xconn` must be deployed first.
 5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PP's source IP; a
    remote PP needs its IP added, or `/matches` dropped from `protected_paths`.
 6. **Never run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000`.

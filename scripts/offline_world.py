@@ -385,13 +385,13 @@ class FakeBackend:
             return fault
         match path:
             case "/pipeline":
-                answer = {
+                answer: dict[str, Any] = {
                     "status": "success",
                     "message": "Pipeline configuration",
                     "data": self.declared(),
                 }
-            case "/status":
-                answer = {"status": "ok"}
+            case "/version":
+                answer = {"revision": "offline", "contract": 1}
             case "/sessions":
                 answer = {"status": "success", "data": {"terms_count": 0}}
             case "/matches":

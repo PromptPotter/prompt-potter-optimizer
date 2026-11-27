@@ -619,14 +619,12 @@ selection explicit.
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
   `git grep -n "rewrite_field" -- promptpotter/connectors/termnorm.py` is empty.
-- **PromptPotter does not read TermNorm's served wire contract**: the probe reads `/status` while
-  TermNorm's `xconn` branch serves `GET /version` (`{revision, contract}`); `connectors/termnorm.py`
-  probes `/status` and `::_EXPECTED_REVISION` is `None`, so a co-owned backend fix replays stale results;
-  on the `xconn` branch `/status` loses its version word, so `_termnorm_version_check` reads None there.
-  Action: the probe reads `/version` and refuses another contract; the revision folds into TermNorm's
-  answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
-  launch against a backend one contract behind fails at the probe, naming both numbers;
-  `connectors/termnorm.py` probes `/version`.
+- **TermNorm's revision keys no answer**: `connectors/termnorm.py::_termnorm_preflight` refuses a
+  backend off `GET /version`'s `contract`, but the `revision` it serves beside it is read by nothing,
+  so a co-owned backend fix replays stale results. Action: the revision folds into TermNorm's answer
+  identity (`application/pipeline_resolve.py::identity_layer`, read once per launch). **Rides with:**
+  xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** two launches on backends reporting
+  two revisions bank two archive keys.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.

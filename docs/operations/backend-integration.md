@@ -4,13 +4,13 @@ PromptPotter optimizes any backend registered as a `Connector`; every axis is de
 
 ## The HTTP default — TermNorm's endpoints
 
-A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. `/status` is TermNorm's own declared probe; a connector that declares none probes nothing. The request body is each connector's `wire_adapter`; TermNorm's opens a session first (`POST /sessions {terms}`, re-sent on `no_session`).
+A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. `GET /version` is TermNorm's own declared probe; a connector that declares none probes nothing. The request body is each connector's `wire_adapter`; TermNorm's opens a session first (`POST /sessions {terms}`, re-sent on `no_session`).
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/matches` | POST | Run one query: TermNorm's body is `{query, steps?, node_config?}` (`termnorm.py::termnorm_wire_adapter`); returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
 | `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init and on every draft read. A node no sequence lists runs only where it names the sequence that fires it (`fired_on`). A node serving `accepts` bounds what is sent to it: its wire keys (`PipelineNode.wire_keys`, `config` ∪ `optimizer.param_keys` ∪ `accepts`) gate the `response_format` axis, and the mint refuses any other key (`preflight.py::refuse_off_contract`); one serving none bounds nothing. |
-| `/status` | GET | TermNorm's liveness and version probe; 200 when up. |
+| `/version` | GET | TermNorm's probe: `{revision, contract}`; a launch refuses a `contract` other than its connector's (`termnorm.py::_termnorm_preflight`). |
 
 Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
 

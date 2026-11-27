@@ -100,31 +100,26 @@ class TermNormSession:
         return f"{detail.get('error_code')}: {detail.get('message')}"
 
 
+# TermNorm's `WIRE_CONTRACT`, which its `GET /version` serves as `contract`.
+_WIRE_CONTRACT = 1
+
+
 async def _termnorm_preflight(backend_url: str) -> str | None:
+    """Reachability and the wire, not health: a 5xx past the connect surfaces on the ledger."""
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
+        timeout=httpx.Timeout(5.0, connect=3.0),
+        verify=tls_context(),
+        headers=CONNECTOR.credential_header(),
     ) as http:
-        # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
-        await http.get(f"{backend_url}/status")
-    return None
-
-
-async def _termnorm_version_check(
-    http: httpx.AsyncClient,
-    base_url: str,
-) -> str | None:
-    resp = await http.get(f"{base_url}/status")
-    resp.raise_for_status()
-    data: dict[str, Any] = resp.json()
-    for key in ("version", "revision", "git_sha"):
-        val = data.get(key)
-        if val:
-            return str(val)
-    return None
-
-
-# `None` opts out of the drift WARN until TermNorm's `GET /status` reports a stable revision.
-_EXPECTED_REVISION: str | None = None
+        reply = await http.get(f"{backend_url}/version")
+    try:
+        served = reply.json().get("contract") if reply.is_success else None
+    except (ValueError, AttributeError):
+        served = None
+    if served == _WIRE_CONTRACT:
+        return None
+    said = "serves no `GET /version`" if served is None else f"speaks wire contract {served}"
+    return f"termnorm at {backend_url} {said}; its connector speaks {_WIRE_CONTRACT}."
 
 
 def _termnorm_auth_token() -> str | None:
@@ -139,8 +134,6 @@ CONNECTOR = Connector(
     sent_spend_bound=None,
     cells_priced=True,
     session_factory=TermNormSession,
-    expected_revision=_EXPECTED_REVISION,
-    version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
     endpoint=Endpoint("TERMNORM_ENDPOINTS", lambda: settings.TERMNORM_ENDPOINTS),
     auth_token=_termnorm_auth_token,

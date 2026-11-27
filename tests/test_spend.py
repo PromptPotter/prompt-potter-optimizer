@@ -2794,7 +2794,7 @@ def _restarting_backend_faults() -> dict[str, list[Any]]:
         "data": {"step_tokens": None},
     }
     return {
-        "/status": [httpx.ConnectError("still restarting")],
+        "/version": [httpx.ConnectError("still restarting")],
         "/matches": [
             httpx.ConnectError("refused"),
             httpx.Response(500, json={"detail": "upstream", "data": billed_step}),

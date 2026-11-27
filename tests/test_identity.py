@@ -1164,15 +1164,31 @@ def test_a_fresh_embedded_launch_on_a_dead_backend_opens_no_session(
     built_stores: Stores, offline: Router
 ) -> None:
     launched_bank(built_stores, offline, samples(40, "TRUE", query="claim "))
-    offline.backend.faults["/status"] = [httpx.ConnectError("offline: the backend is dead")]
+    offline.backend.faults["/version"] = [httpx.ConnectError("offline: the backend is dead")]
     asked = len(offline.backend.asked)
     with pytest.raises(BackendUnreachableError):
         asyncio.run(
             run_campaign(LAUNCHED_DATASET, stores=built_stores, budget=Budget(), mode=RunMode())
         )
-    assert offline.backend.asked[asked:] == ["/status"], (
+    assert offline.backend.asked[asked:] == ["/version"], (
         "the refused launch opened a session on its backend before its probe"
     )
+
+
+def test_a_launch_on_a_backend_of_another_wire_contract_is_refused_at_its_probe(
+    built_stores: Stores, offline: Router
+) -> None:
+    launched_bank(built_stores, offline, samples(40, "TRUE", query="claim "))
+    offline.backend.faults["/version"] = [httpx.Response(200, json={"contract": 2})]
+    with pytest.raises(BackendUnreachableError) as refused:
+        asyncio.run(
+            run_campaign(LAUNCHED_DATASET, stores=built_stores, budget=Budget(), mode=RunMode())
+        )
+    said = str(refused.value)
+    assert "wire contract 2" in said and "speaks 1" in said, (
+        f"the refusal named no contract: {said}"
+    )
+    assert built_stores.campaigns.list_campaign_ids() == [], "the refused launch minted"
 
 
 def test_an_embedded_launch_is_filed_as_its_command(world: World) -> None:
