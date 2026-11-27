@@ -24,7 +24,7 @@ from promptpotter.shared.errors import MINT_FRESH, BadRequestError, NextAct, Not
 
 def latest_launch(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
     """The cycle the latest run held (a mint's, a fork's or a resume's: the pointer moves where
-    `run_observers.py::build_run_observers` holds it), and so what a verb naming no cycle acts on.
+    `runner/run_init.py::enter_cycle` holds it), and so what a verb naming no cycle acts on.
     ``None`` where nothing ran or the workspace was cleared — a steady state; a pointer outliving
     its cycle dir names nothing."""
     stores = descend_store(stores, inside)

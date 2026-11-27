@@ -49,7 +49,7 @@ def _stale_generation(
 
 def resume_with_divergence_check(cycle: Cycle, mode: RunMode) -> ForkCut | None:
     """The cycle opens on the standing the last close of the line it continues stated, a fork's
-    included; a fork is answered cut and untaken (`runner/mint.py::onto_fork` takes it)."""
+    included; a fork is answered cut and untaken (`runner/run_init.py::onto_fork` takes it)."""
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
     resumed_from_round = session.state.resumed_from_round

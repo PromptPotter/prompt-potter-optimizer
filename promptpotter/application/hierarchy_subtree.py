@@ -24,7 +24,6 @@ from promptpotter.application.hierarchy import (
     superseded_tag,
 )
 from promptpotter.application.jobs.launcher.admission import deletable_stubs
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.mask.tree_lens import lensed, read_samples
 from promptpotter.domain.arm_reading import (
     ARM_VERDICT_LABELS,
@@ -51,7 +50,6 @@ from promptpotter.domain.hierarchy import (
     SubtreeCycleEntryFacts,
     entries_under,
 )
-from promptpotter.domain.job import ScoringPass
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
@@ -607,13 +605,6 @@ class _Build:
                 )
             )
         hung = cycle.hangs_from
-        inherited = [
-            o.cycle.at_round(round_, key)
-            for round_, o in sorted(head.owner.candidates.items())
-            if o is not head
-            for ran_in, key in o.arms
-            if ran_in == round_
-        ]
         return SubtreeCycle(
             **_fields(cycle.entry)
             | {
@@ -624,7 +615,6 @@ class _Build:
                     from_candidate=None
                     if cycle.index.fork is None or hung is None
                     else hung.address,
-                    inherited=inherited,
                     lens_criterion=None,
                     lens_shift=None,
                 ),
@@ -785,17 +775,10 @@ def subtree_moment(
 
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
-    """Every store the TOP campaign's family spans: the body is built from all of them."""
+    """Every store the TOP campaign's family spans: the body is built from all of them, a scoring
+    pass on one among its live jobs (`store_version`)."""
     top = (stores.campaigns.campaign(Subject.parse_address(address).root_campaign_id).root_hop,)
-    held = [c.store for c in iter_family_cycles(stores, top)]
-    workspaces = {str(s.campaigns.workspace) for s in held}
-    passes = sorted(
-        (job.workspace, job.campaign_id, job.cycle_id)
-        for jobs_dir in {s.jobs_dir for s in held}
-        for job in JobRegistry.attach(jobs_dir).list_running()
-        if isinstance(job.holder, ScoringPass) and job.workspace in workspaces
-    )
-    return (*entries_version(held), *passes)
+    return entries_version([c.store for c in iter_family_cycles(stores, top)])
 
 
 def subtree_cycle(stores: Stores, path: CyclePath) -> SubtreeCycle:

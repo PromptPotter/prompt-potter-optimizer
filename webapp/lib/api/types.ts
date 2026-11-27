@@ -4,6 +4,7 @@ export * from "./types.generated";
 
 import type {
   ActivityResponse,
+  ReadQueries,
   CampaignPipelineResponse,
   CellsResponse,
   CommandPayloads,
@@ -46,7 +47,7 @@ export type MeasuredUnit = ServedDashboard["measured_unit"];
 export type Filable = SubtreeCampaign["facts"]["filable"][number];
 
 export type ActivityWindow = ActivityResponse["window"];
-export type ActivityGroupBy = ActivityResponse["group_by"];
+export type ActivityGroupBy = NonNullable<ReadQueries["activity"]["group_by"]>;
 
 // provider → model → capability; the provider key is the node's own `provider` value, "" for none.
 export type CapabilityMenu = CampaignPipelineResponse["model_capabilities"];

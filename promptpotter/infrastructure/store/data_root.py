@@ -34,6 +34,7 @@ from promptpotter.config.paths import (
     UNSWEPT_DIR,
 )
 from promptpotter.config.prompt_blocks import PACK_FILE
+from promptpotter.domain.bulletin import BulletinBoard
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
@@ -77,6 +78,7 @@ from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
+    STAMP_FILE,
     WORKSPACE_SHAPES,
     complete_lines,
     parse_yaml,
@@ -140,8 +142,9 @@ from promptpotter.shared.worded import Worded
 
 
 class Fate(Enum):
-    # Who an account is, what the install is configured with, what launched today, or who the host
-    # is: kept, and one that does not load refuses a landing until a migration rewrites it.
+    # Who an account is, what the install is configured with, what launched today, who the host is,
+    # or what it told the accounts: kept, and one that does not load refuses a landing until a
+    # migration rewrites it.
     SURVIVOR = "SURVIVOR"
     # Kept while it loads, and dropped by a landing once it does not, which says so: what is
     # content-keyed and paid for, or a sign-in its person makes again. A line file drops by the
@@ -284,6 +287,10 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("grants audit", _INSTALL, _IDENTITY.grants_audit.as_posix(), _SURVIVOR, _AUDIT),
     # Who an account is: its API tokens survive as its keys do.
     Kind("api tokens", _INSTALL, _IDENTITY.tokens.as_posix(), _SURVIVOR, TypeAdapter(TokensFile)),
+    # What the host told every account, and what each dismissed: a wipe it warns of must not take it.
+    Kind(
+        "bulletins", _INSTALL, _IDENTITY.bulletins.as_posix(), _SURVIVOR, TypeAdapter(BulletinBoard)
+    ),
     Kind(
         "session",
         _INSTALL,
@@ -629,6 +636,8 @@ _RETIRED = Parsed(_retired, None)
 
 KINDS: tuple[Kind, ...] = (
     ATOMIC_WRITE,
+    # A subject's version (`io.py::stamp`): its length moves with every write under it.
+    Kind("subject stamp", _INSTALL, f"**/{STAMP_FILE}", Fate.MACHINE, Opaque("one byte a write")),
     *INSTALL_KINDS,
     *ACCOUNT_KINDS,
     *WORKSPACE_KINDS,

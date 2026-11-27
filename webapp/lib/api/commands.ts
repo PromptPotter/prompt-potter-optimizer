@@ -71,6 +71,7 @@ export const commands = {
   "delete-campaign": json("delete-campaign"),
   "delete-cycle": json("delete-cycle"),
   "discard-draft": json("discard-draft"),
+  "dismiss-bulletin": json("dismiss-bulletin"),
   "edit-draft-campaign": json("edit-draft-campaign"),
   "fork-cycle": json("fork-cycle"),
   "held-out": json("held-out"),

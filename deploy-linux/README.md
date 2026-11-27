@@ -326,6 +326,7 @@ signed out, and the public site flags its visits `self`, so the morning briefing
 | `/coupon <user_id> <usd\|-> <tokens\|-> [afresh]` | Set that account's coupon (`-` leaves a unit unbounded); `afresh` starts its draw now, so nothing charged before counts. The bill is never moved. |
 | `/trail <email>` | What that account did, oldest first, across every workspace it owns or acts in; the terminal's `trail <email>` reads the same. |
 | `/spend` | Every account's spend and output. |
+| `/bulletin [popup] <text>` | Post a bulletin to every account; `popup` opens it on every page load until each account dismisses it. The terminal's `post-bulletin` files the same command. |
 
 With a passphrase set, prefix **every** message with it (`my-word /block alice@example.com`). A
 refused message and a lost one look identical in Telegram; `journalctl -u $APP_NAME-admin-bot`

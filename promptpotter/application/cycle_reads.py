@@ -11,7 +11,7 @@ from pydantic import Field
 from pydantic_core import to_json
 
 from promptpotter.application.caller import Caller
-from promptpotter.application.hierarchy import entries_version
+from promptpotter.application.hierarchy import account_version, store_version
 from promptpotter.application.hierarchy_subtree import subtree_cycle
 from promptpotter.application.jobs.machine_status import machine_version
 from promptpotter.application.jobs.registry import JobRegistry
@@ -52,7 +52,7 @@ from promptpotter.infrastructure.store.lineage_queries import (
     FamilyCycle,
     iter_family_cycles,
 )
-from promptpotter.infrastructure.store.read_model import Moment, file_sig
+from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
@@ -291,7 +291,7 @@ def _store_stats(stores: Stores, named: str) -> Iterator[tuple[str, tuple[object
     raise: the command whose ack walks it was already filed."""
     subject = f"{_STORE}{encode_cycle_path(stores.inside)}"
     try:
-        stats = entries_version([stores]) if subject.startswith(named) else None
+        stats = store_version(stores) if subject.startswith(named) else None
         hops = stores.campaigns.cycle_hops()
     except FileNotFoundError:
         return
@@ -336,15 +336,14 @@ _COUNTING = threading.Lock()
 
 def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[str, FeedVersion]:
     """Each subject *named* covers, by prefix (every one by default), at its version, counted from
-    stats, never a fold, per the kinds its reader files (`entries_version` serves them too)."""
+    its writers' stamps, never a walk, per the kinds its reader files."""
     owner, reader = str(stores.base_dir), filable(stores.identity)
     with _COUNTING:
         found: dict[str, tuple[object, ...]] = {}
         if named.startswith(_STORE) or _STORE.startswith(named):
             found |= dict(_store_stats(stores, named))
         if "account".startswith(named):
-            # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
-            found["account"] = (file_sig(stores.commands.path), stores.drafts.version())
+            found["account"] = account_version(stores)
         versions = _OWNED.setdefault(owner, _Owned()).counted(reader, named, found)
         if "machine".startswith(named):
             machine = {"machine": machine_version(stores, jobs)}
@@ -355,8 +354,17 @@ def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[st
 
 
 def feed_versions_said(stores: Stores, jobs: JobRegistry, named: str = "") -> str:
-    """What a read stands on, or a command's write produced (`read-cache.ts::reached`)."""
-    return to_json(feed_versions(stores, jobs, named)).decode()
+    """What a read stands on: each subject one of *named*'s `,`-joined prefixes covers."""
+    stood = {
+        s: v for prefix in named.split(",") for s, v in feed_versions(stores, jobs, prefix).items()
+    }
+    return to_json(stood).decode()
+
+
+def feed_moves_said(stores: Stores, jobs: JobRegistry, stood: dict[str, FeedVersion]) -> str:
+    """What a command's write moved past *stood*, its versions before it (`read-cache.ts::reached`)."""
+    moved = feed_versions(stores, jobs)
+    return to_json({s: v for s, v in moved.items() if stood.get(s) != v}).decode()
 
 
 async def feed_frames(caller: Caller) -> AsyncIterator[FeedFrame]:

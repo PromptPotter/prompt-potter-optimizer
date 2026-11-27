@@ -699,7 +699,7 @@ class Controller(NodeMember, Protocol):
 
 @runtime_checkable
 class Reviewer(NodeMember, Protocol):
-    """The member whose reading ``review.md`` prints; a roster holds at most one, and none says N/A."""
+    """The member whose reading the readout's review prints; a roster holds at most one, and none says N/A."""
 
     def review(
         self,

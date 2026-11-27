@@ -48,6 +48,7 @@ from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import (
@@ -76,8 +77,8 @@ from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
 )
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import Moment, derived, file_sig
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import Moment, derived
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope
@@ -256,32 +257,16 @@ class CellsScope:
     at: int | None
 
     def version(self) -> tuple[object, ...]:
-        """Stats only: what the log reads, so a client holding it is answered unread."""
-        art = self.art_store
-        read = (
+        """What the log reads, at its writers' stamps: the stores it reads (a fork's chain is the
+        leaf's store), and the authored definition, which no writer stamps."""
+        return (
             self.name,
             self.scope,
             self.hop,
             self.at,
             definition_version(self.stores, self.name),
-            art.archive.version(),
-        )
-        if self.hop is None:
-            return (
-                *read,
-                self.stores.tenant_datasets.held_version(self.name),
-                file_sig(art.ruler.path),
-            )
-        cycle_dir = cycle_dir_for(art.base_dir, self.hop)
-        campaign_id = self.hop.campaign_id
-        # Its campaign's ledgers name the line; a fork's chain may reach past them.
-        chain = art.campaigns.chain(self.hop) if cycle_dir.is_dir() else []
-        ledgers = {*art.campaigns.campaign_cycle_ledgers(campaign_id), *(p for p, _ in chain)}
-        return (
-            *read,
-            file_sig(CampaignLayout(art.campaigns.campaign_root_dir(campaign_id)).manifest),
-            file_sig(art.ruler.path),
-            *((str(path), file_sig(path)) for path in sorted(ledgers)),
+            *self.stores.stamps(),
+            *self.art_store.stamps(),
         )
 
 
@@ -321,14 +306,13 @@ def _drawn_rows(
 
 
 def cycle_hard_samples(
-    stores: Stores, hop: CycleHop, scorer: Scorer, config: CampaignConfig
+    stores: Stores, hop: CycleHop, rounds: list[RoundResult], config: CampaignConfig
 ) -> HardSamples:
     """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp,
-    re-fit. It resolves nothing: the caller hands the scorer and config it already holds."""
+    re-fit. It resolves nothing: the caller hands the closed rounds and config it already holds."""
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
     knobs = config.optimization
-    rounds = closed_rounds(stores, hop, scorer, moment=None)
     bank = cycle_bank(stores, hop) if rounds else Bank.of(())
     stamp = next((rr.election.ruler for rr in reversed(rounds) if rr.election is not None), None)
     judging = (
@@ -426,7 +410,7 @@ class _LeaderboardPage:
 def _selected(
     view: HardSamples, members: Collection[int], max_unmeasured: int | None, limit: int
 ) -> list[int]:
-    in_view = [view.positions[k] for k in view.sample_order if view.positions[k] in members]
+    in_view = [view.positions[k] for k in view.ranked_keys if view.positions[k] in members]
     selection = in_view + sorted(set(members).difference(in_view))
     return _trim_unmeasured(selection, set(in_view), max_unmeasured)[:limit]
 
@@ -448,7 +432,8 @@ def _leaderboard_page(
         drawn = art_store.campaigns.last(hop, PartitionRecord)
         at = art_store.campaigns.campaign_cycle(hop)
         graded_under = campaign_scorer(art_store, at.campaign)
-        view = cycle_hard_samples(art_store, hop, graded_under, cycle_config(art_store, at).config)
+        rounds = closed_rounds(art_store, hop, graded_under, moment=None)
+        view = cycle_hard_samples(art_store, hop, rounds, cycle_config(art_store, at).config)
         members = frozenset() if drawn is None else drawn.bank_ids
         selected = _selected(view, members, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)

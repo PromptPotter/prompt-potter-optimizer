@@ -65,7 +65,7 @@ class LaunchState:
     # Read once at `run_optimization`'s start; every cycle its line closes reads this one.
     clock: LaunchClock | None = None
     resumed_from_round: int = 1
-    # Seated once, before any cell is read: by run init (`runner/mint.py`) or a pass's opener.
+    # Seated once, before any cell is read: by run init (`runner/run_init.py`) or a pass's opener.
     scoring: ScorerSetup = field(init=False)
     # Seeded off the cycle's index at init; afterwards written only by `act`.
     human_intervened: bool = False
@@ -73,7 +73,7 @@ class LaunchState:
     flight: FlightGauge | None = None
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None
-    # The cycle lock and projections the launch holds: `build_run_observers` moves them onto a fork.
+    # The cycle lock and projections the launch holds: `enter_cycle` moves them onto a fork.
     observers: RunObservers | None = None
 
     def launch_clock(self) -> LaunchClock:

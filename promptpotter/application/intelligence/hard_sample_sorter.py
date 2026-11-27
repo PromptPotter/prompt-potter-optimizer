@@ -71,7 +71,7 @@ def build_hard_samples(
         candidate_order=candidate_order,
         theta={cid: arm_theta[cid] for cid in candidate_order if cid in arm_theta},
         positions={key: slots[key] for key in held},
-        sample_order=sorted(measured, key=rank),
+        ranked_keys=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},
         cells=[
             HardSampleCell(candidate=o.candidate_id, sample_key=o.key, fitness=o.response)

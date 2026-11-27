@@ -26,12 +26,12 @@ from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_kept_table
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
     ResolvedDataset,
@@ -60,7 +60,7 @@ def offered(stores: Stores, name: str) -> bool:
     return (
         offer is None
         or name in offer
-        or is_host(stores.identity)
+        or stores.identity.host
         or own_definition(stores, name) is not None
     )
 
@@ -87,12 +87,16 @@ def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
     return None if labelled_rows(samples) else StartBlock.EMPTY
 
 
-def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
-    """What every cell of the dataset imports beyond core."""
+def _connector(dataset: ResolvedDataset) -> Connector | None:
     try:
-        return runnable_definition(dataset).owner.extra
+        return runnable_definition(dataset).owner
     except DEFINITION_READ_ERRORS:
         return None
+
+
+def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
+    """What every cell of the dataset imports beyond core."""
+    return connector.extra if (connector := _connector(dataset)) is not None else None
 
 
 def dataset_extra(dataset: ResolvedDataset) -> Extra | None:
@@ -211,6 +215,13 @@ def _offer() -> dict[str, ResolvedDataset]:
 def offer_extras() -> set[Extra]:
     """What the deployment must install so every dataset it offers can run."""
     return {extra for dataset in _offer().values() if (extra := dataset_extra(dataset))}
+
+
+def offer_connectors() -> set[str] | None:
+    """The connectors the offer reaches; ``None`` where it is unset and every install dataset runs."""
+    if settings.dataset_offer is None:
+        return None
+    return {c.name for d in _offer().values() if (c := _connector(d)) is not None}
 
 
 def offer_faults() -> list[str]:

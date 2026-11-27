@@ -1,27 +1,37 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    cut_operator_fork,
+    fork_config,
+    operator_start,
+)
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
 from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.jobs.mint import (
+    CyclePlan,
     OpenedCycle,
+    mint,
     mint_framed_cycle,
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.domain.campaign import CampaignCycle
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign import Campaign, CampaignCycle
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.checkin_draft import DraftFile
-from promptpotter.domain.job import CampaignLaunch
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.command_kinds import ForkCyclePayload
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun
+from promptpotter.domain.records.run_records import CycleStart
+from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -33,6 +43,8 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.launcher.opening import Opening
     from promptpotter.application.pipeline_resolve import DraftPipeline
 
 
@@ -54,10 +66,63 @@ def assert_origin_ready(draft: DraftFile, pipeline: DraftPipeline) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
-@dataclass(frozen=True, slots=True)
-class FreshMint:
-    verb: ClassVar[str] = "mint"
+class LaunchRequest:
+    """What every launch kind states, and all `launch.py::hold` reads: a kind states only its data,
+    and the members it shares with the others are spelled here once. One with no ``at`` mints its
+    cycle at its `open`; the rest open the cycle ``at`` names, a fork the one its `stand` cut."""
 
+    __slots__ = ()
+    budget: Budget
+
+    @property
+    def at(self) -> CampaignCycle | None:
+        return None
+
+    @property
+    def step_rounds(self) -> int | None:
+        return None
+
+    @property
+    def campaign(self) -> Campaign | None:
+        """What it spends on: its cycle's campaign, none where its open mints one."""
+        return None if self.at is None else self.at.campaign
+
+    def armed_budget(self, stores: Stores) -> Budget:
+        """The axes an operator named: its campaign's money and its cycle's own."""
+        return Budget() if self.at is None else stores.campaigns.armed_budget(self.at)
+
+    @property
+    def dataset_name(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def holder(self) -> CampaignLaunch | EmbeddedRun | InnerRun:
+        """Slotted unless a kind runs where a host or an enclosing run schedules it."""
+        return CampaignLaunch(self.dataset_name)
+
+    def connector(self, stores: Stores) -> str:
+        return runnable_definition(resolve_dataset(stores, self.dataset_name)).connector
+
+    def endpoint(self, stores: Stores) -> str | None:
+        """The definition's, as the run's session reads it."""
+        return runnable_definition(resolve_dataset(stores, self.dataset_name)).endpoint
+
+    def declared_budget(self, stores: Stores) -> Budget:
+        raise NotImplementedError
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        raise NotImplementedError
+
+    def open(self, stores: Stores) -> AbstractAsyncContextManager[OpenedCycle]:
+        raise NotImplementedError
+
+    def stand(self, _opening: Opening, _held: HeldBudget) -> LaunchRequest:
+        """What it opens once admitted, under its admission's gate: itself, unless a kind cuts."""
+        return self
+
+
+@dataclass(frozen=True, slots=True)
+class FreshMint(LaunchRequest):
     # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
     dataset: ResolvedDataset
     budget: Budget
@@ -65,20 +130,8 @@ class FreshMint:
     task_text: str | None
 
     @property
-    def at(self) -> None:
-        return None
-
-    @property
-    def step_rounds(self) -> None:
-        return None
-
-    @property
     def dataset_name(self) -> str:
         return self.dataset.name
-
-    @property
-    def holder(self) -> CampaignLaunch:
-        return CampaignLaunch(self.dataset_name)
 
     def connector(self, _stores: Stores) -> str:
         return runnable_definition(self.dataset).connector
@@ -98,12 +151,15 @@ class FreshMint:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self.campaign_config(stores), self.connector(stores))
 
+    def session(self, stores: Stores) -> AbstractAsyncContextManager[Session]:
+        return init_services(
+            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
+        )
+
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
-        """The session, then the mint: a refused one writes nothing."""
-        async with init_services(
-            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
-        ) as session:
+        """The session, past the probe, then the mint: a refused one writes nothing."""
+        async with self.session(stores) as session:
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
                 session,
@@ -114,10 +170,8 @@ class FreshMint:
 
 
 @dataclass(frozen=True, slots=True)
-class ExistingCycle:
-    verb: ClassVar[str] = "start-run"
-
-    at: CampaignCycle
+class ExistingCycle(LaunchRequest):
+    at: CampaignCycle = field()  # a field: the shape's inherited `at` is no default
     budget: Budget
     step_rounds: int | None = None
 
@@ -125,16 +179,8 @@ class ExistingCycle:
     def dataset_name(self) -> str:
         return self.at.campaign.dataset_name
 
-    @property
-    def holder(self) -> CampaignLaunch:
-        return CampaignLaunch(self.dataset_name)
-
     def connector(self, _stores: Stores) -> str:
         return self.at.campaign.connector
-
-    def endpoint(self, stores: Stores) -> str | None:
-        """The definition's, as the resume's session reads it."""
-        return runnable_definition(resolve_dataset(stores, self.dataset_name)).endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
         return cycle_config(stores, self.at).config.optimization.budget
@@ -149,6 +195,123 @@ class ExistingCycle:
         async with bind_cycle_session(stores, self.at) as session:
             plan = resolve_resume(session, self.at.campaign, session.bank.samples)
             yield OpenedCycle(plan.cycle, plan.session, plan.optimizer)
+
+
+@dataclass(frozen=True, slots=True)
+class ForkLaunch(LaunchRequest):
+    """An operator's fork of *parent*, admitted on its parent's campaign before any cut: its
+    `stand` cuts the child, so a refused fork writes nothing."""
+
+    parent: CampaignCycle
+    payload: ForkCyclePayload
+    start: CycleStart  # as `parse_cycle_start` froze it; `operator_start` lays it for the cut
+    budget: Budget
+
+    @property
+    def dataset_name(self) -> str:
+        return self.parent.campaign.dataset_name
+
+    @property
+    def holder(self) -> CampaignLaunch:
+        return CampaignLaunch(self.dataset_name, campaign_id=self.parent.campaign.campaign_id)
+
+    @property
+    def campaign(self) -> Campaign:
+        return self.parent.campaign
+
+    def connector(self, _stores: Stores) -> str:
+        return self.parent.campaign.connector
+
+    def armed_budget(self, stores: Stores) -> Budget:
+        # A fork inherits no standing budget of its parent's cycle.
+        return stores.campaigns.read_campaign_ceiling(self.parent.campaign).budget
+
+    def _config(self, stores: Stores) -> CycleConfig:
+        return fork_config(stores, self.parent, operator_start(stores, self.payload, self.start))
+
+    def declared_budget(self, stores: Stores) -> Budget:
+        return self._config(stores).config.optimization.budget
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return sends_on(stores, self._config(stores).config, self.connector(stores))
+
+    def stand(self, opening: Opening, held: HeldBudget) -> ExistingCycle:
+        """Cut under its admission's gate, its share landed on the child: no sibling admitted after
+        it reads the campaign without that share, and a refusal before here cut nothing."""
+        cut = cut_operator_fork(opening.stores, self.payload, self.start)
+        opening.land_cut(cut, held)
+        return ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddedMint(FreshMint):
+    """A host's fresh campaign: no slot, its session on the host's *program*, its bank *rows*."""
+
+    program: object | None = None
+    rows: Sequence[Sample] | None = None
+    step_rounds: int | None = None
+
+    @property
+    def holder(self) -> EmbeddedRun:
+        return EmbeddedRun(self.dataset_name)
+
+    @asynccontextmanager
+    async def session(self, stores: Stores) -> AsyncIterator[Session]:
+        """*rows* replace the definition's bank, which the mint labels."""
+        async with init_services(
+            dataset_name=self.dataset_name,
+            identity=stores.identity,
+            stores=stores,
+            program=self.program,
+        ) as session:
+            if self.rows is None:
+                yield session
+                return
+            bank = Bank.of(self.rows)
+            stores.tenant_datasets.put_bank(bank)
+            yield replace(session, bank=bank)
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddedResume(ExistingCycle):
+    """A host's resume of a cycle: no slot."""
+
+    @property
+    def holder(self) -> EmbeddedRun:
+        return EmbeddedRun(self.dataset_name)
+
+
+@dataclass(frozen=True, slots=True)
+class InnerSeat(LaunchRequest):
+    """A seat's inner campaign, planned before its admission: minted at its open where *at* names
+    none, else resumed. A share of the enclosing run's book, never a slot."""
+
+    plan: CyclePlan
+    campaign_id: str
+    dataset_name: str = field()  # a field: the shape's inherited `dataset_name` is no default
+    at: CampaignCycle | None = field()
+    budget: Budget = field(default_factory=Budget)
+
+    @property
+    def holder(self) -> InnerRun:
+        return InnerRun(self.dataset_name)
+
+    def declared_budget(self, _stores: Stores) -> Budget:
+        return self.plan.cycle.config.optimization.budget
+
+    def sends(self, _stores: Stores) -> tuple[Send, ...]:
+        # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
+        return ()
+
+    @asynccontextmanager
+    async def open(self, _stores: Stores) -> AsyncIterator[OpenedCycle]:
+        plan = self.plan
+        session = (
+            plan.session
+            if self.at is not None
+            else mint(plan, campaign_id=self.campaign_id, adopting=None).session
+        )
+        yield OpenedCycle(plan.cycle, session, plan.optimizer)
 
 
 def commit_upload_definition(

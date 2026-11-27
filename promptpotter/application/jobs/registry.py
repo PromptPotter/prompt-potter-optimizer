@@ -39,7 +39,12 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.holders import in_flight, job_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
-from promptpotter.infrastructure.store.io import read_text_optional, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import (
+    read_text_optional,
+    stamped_subject,
+    unlink_robust,
+    write_json,
+)
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
@@ -85,6 +90,8 @@ class JobRegistry:
         staged: Mapping[Path, bytes] | None = None,
     ) -> None:
         self._dir = jobs_dir
+        # The `machine` subject: a job's move, the index and an unswept step stamp it.
+        stamped_subject(jobs_dir)
         self._staged = staged or {}
         # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
         # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.
@@ -300,7 +307,7 @@ class JobRegistry:
         self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
     ) -> Job | None:
         """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
-        (`admission.py::RunStart.release`): the `StopReason` its run returned (*stepped* where it
+        (`opening.py::Opening`'s exit): the `StopReason` its run returned (*stepped* where it
         paused at its round allowance); any raise in the queue withdrew it, one before its admission
         or a campaign's refusal at any point refused it, and an interrupt or a raise after it is the
         stop it reads as (`run_stop_reason`); nothing at all is a scoring pass that returned."""
@@ -450,7 +457,7 @@ class JobRegistry:
         return starts
 
     def reap_orphans(self) -> list[Job]:
-        """`quota.reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
+        """`shares.py::reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
         ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood. Its scans
         are off the gate, which takes each orphan alone, asked again: an adoption made it live."""

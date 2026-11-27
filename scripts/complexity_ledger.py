@@ -190,7 +190,7 @@ BASELINE = {
     # tests-x (+2): `build_stores` refuses a projects root off the data root io places a write from.
     # small-13 (−8): a merged sheet is standing by construction; the fit is keyed by `ArmKey`.
     # usage-2 (−2): `StepUsage` takes its parts from `TokenAccount`'s fields, never a hand list.
-    # rk-dec-3 link 1 (+21): `phase.py::render_noise_walk`, the round readout's μ0, τ and hold off
+    # rk-dec-3 link 1 (+21): `phase.py::render_round_block`, the round readout's μ0, τ and hold off
     # the round `served_rounds` serves the dashboard at that close. link 2 (+16): the cycle read
     # names its headline's column (`Election.ended_on`), the one an unfiltered spread reads.
     # store-4 (+7): `io.py::refuse_off_workspace` matches a store's workspace to `WORKSPACE_SHAPES`
@@ -276,7 +276,36 @@ BASELINE = {
     # rebase-line (+13): a fork's line served whole: the candidates its bars lead with below its
     # cut (`SubtreeCycleEntryFacts.inherited`), and its Spend figure billing its chain.
     # v0.8.21 (−134): the three migrations v0.8.20 landed on the box go, with the retired claim row.
-    "package_lines": 113698,
+    # w7-small (+12): health probes only the offer's connectors (`offer_connectors`), and a sandbox
+    # owner names its own hop (`SandboxOwner.hop`).
+    # w7-text (−807): `log.md` and `review.md` excised; one round block off `ServedRound`.
+    # w7-host (+239): the host's bulletins, a survivor beside the accounts: its board, its post and
+    # dismiss commands, the account's read at the API and the terminal, and the admin bot's `/bulletin`.
+    # w7-line (+19): the dashboard serves `active`, `successor` and `line`, and each line arm its
+    # open cells; `measuring_arm`, the race fold and the subtree's `inherited` go.
+    # w7-open (+59): one `opening.py::Opening` per run, the `LaunchRequest` shape its five kinds
+    # share (the embedded and inner doors among them), and `jobs/shares.py` beside quota.
+    # w7-gate (+6): `config/` gets its layering row, so first-run's `.env` write moves under
+    # `application/` (`first_run.py::keep_api_key`), its prompt to the CLI that asks it.
+    # w7-gate (+2): `health.py::webapp_bundle` hashes the worktree's `webapp/` in an index of its own.
+    # w7-web (+78): the words the browser composed are served (a lookahead's segments, a subject's
+    # cell means, the lifetime bill and its caveats, a sample movement's tone); 12 unread fields go.
+    # w7-ver2 (+85): a writer stamps its subject's version (`io.py::stamp`, `Stores.stamps`), each
+    # read compares stamps, and a held closed series is not re-sent; `remove_bare_dir` prunes a stamp.
+    # w7-rows (+160): five host-admin bot verbs become command kinds through the dispatcher
+    # (payloads, `operator_acts.py`, the served contract), and `claim_default` re-keys dismissals.
+    # w7-open2 (+93): a fork is a `ForkLaunch` request kind whose `open` cuts it, admitted before its
+    # cut on its campaign (`domain/job.py::launch_campaign`), which quota and shares read.
+    # w7-rows2 (+3): `SetCouponPayload.budget` is typed (unbounded included); `RunState.successor` is one Said.
+    # w7-web2 (−9): six unread served fields and two browser derivations go.
+    # w7-rows4 (+4): `CommandResult` in `shared/` (the MCP host door imports no `cli`); `JobRegistry` refuses a dir
+    # not named `jobs`, which, as a stamp subject read off the path, would stamp nothing; `_SUBJECTS` goes.
+    # w7-open3 (+3): one admission gate holds a fork's share and its cut (`LaunchRequest.stand`); the
+    # opening's exit is the cut's one withdraw (`_unfork` goes).
+    # w7-rows5 (+2): a fork's failed withdraw names the stub it kept, as a note on the refusal it rides.
+    # w7-rows4 link 3 backed out (+5): the stamp subject read off the path by name is unsound (a dataset
+    # named `jobs` takes its workspace's stamps), so `stamped_subject` declares each root again.
+    "package_lines": 113651,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -339,13 +368,19 @@ BASELINE = {
     # cfg-3 (+2): a campaign layer's nested partials (split, lives, judge, call target), served
     # where a door states a layer; three of their keys no surface reads by name yet.
     # vote (+3): `origin_panel_cells` on the three served campaign configs, which no surface edits yet.
-    "p_served": 210,
+    # w7-host (-1): the webapp's bulletins read every field they serve, and one more the account already did.
+    # w7-line, w7-web (−2): an unread served field each deleted.
+    # w7-rows2 (−1): `WarmingDashboard.warming_up`, a discriminator no door read.
+    # w7-web2 (−6): `ServedBackpressure`'s epochs and sender, `Evidence.generated_at`,
+    # `HeadToHead.verdict_absent`, `MeResponse.issuer`.
+    "p_served": 200,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 10,
+    # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
+    "p_command": 11,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,

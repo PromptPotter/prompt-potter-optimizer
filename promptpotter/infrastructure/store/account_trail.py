@@ -145,7 +145,7 @@ def workspace_lines(stores: Stores) -> Iterator[TrailLine]:
         owner = read_sandbox_owner(sandbox) if sandbox.is_dir() else None
         if owner is not None and owner.tenant_id == campaigns.workspace.name:
             inner_store = campaigns.in_sandbox(sandbox)
-            inside = (CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id),)
+            inside = (owner.hop,)
             for hop in inner_store.cycle_hops():
                 stops = _cycle_stops(hop, inner_store.ledger(hop))
                 yield from (_stop_line(inside, stop) for stop in stops)

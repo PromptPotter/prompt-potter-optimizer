@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
@@ -73,14 +75,19 @@ export function defines(brand: Brand): Record<string, string> {
   return { __BRAND__: JSON.stringify(brand) };
 }
 
-// The `webapp/` tree a build came from, which the server compares with its checkout's
-// (`application/health.py::webapp_bundle`); null outside git.
+// The `webapp/` bytes a build read, as a git tree of the worktree in an index of its own, which the
+// server compares with its checkout's (`application/health.py::webapp_bundle`); null outside git.
 const BUILD_SOURCE = "build-source.json";
 function webappTree(): string | null {
+  const scratch = mkdtempSync(path.join(tmpdir(), "pp-stamp-"));
+  const env = { ...process.env, GIT_INDEX_FILE: path.join(scratch, "index") };
   try {
-    return execFileSync("git", ["rev-parse", "HEAD:./"], { cwd: WEBAPP, encoding: "utf8" }).trim();
+    execFileSync("git", ["add", "-A", "--", "."], { cwd: WEBAPP, env });
+    return execFileSync("git", ["write-tree", "--prefix=webapp/"], { cwd: WEBAPP, env, encoding: "utf8" }).trim();
   } catch {
     return null;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
 

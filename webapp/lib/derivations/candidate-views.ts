@@ -1,7 +1,9 @@
 import {
-  type ArmReading,
+  type HierarchyCandidate,
   type HierarchyCycle,
+  type LineArm,
   type LineageNode,
+  type SubtreeCycle,
   type VerificationMark,
   DISPLAY_METRIC_INFO,
   type DisplayMetric,
@@ -11,7 +13,7 @@ import { fmtUnit } from "@/lib/format";
 import { tagValue } from "./hierarchy";
 import { metricLevel } from "./headline-stats";
 import { readPaired } from "./paired-reading";
-import { barNodes, childNodes, splitRetired, type LineageIndex } from "./lineage-candidates";
+import { candidateAt, childNodes, splitRetired, type LineageIndex } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
 function cycleLevel(node: HierarchyCycle): number | null {
@@ -38,10 +40,13 @@ export function barsAreCycles(viewedNode: LineageNode | undefined): boolean {
   return viewedNode?.entry_kind === "candidate" && childNodes(viewedNode).length > 0;
 }
 
+type Row = { node: SubtreeCycle; arm: null } | { node: HierarchyCandidate; arm: LineArm };
+
 interface CandidateBarsInput {
   index: LineageIndex;
   viewedNode: LineageNode | undefined;
-  inflightByKey: ReadonlyMap<string, ArmReading>;
+  // served: `dash.line`, the viewed cycle's line across its fork chain; a bar is a mask over it.
+  line: readonly LineArm[];
   sampleSet: number[] | null;
   marks: readonly VerificationMark[];
   // Off, a held round reads as its leading arm, the one its election is read off; a round not yet
@@ -52,25 +57,38 @@ interface CandidateBarsInput {
 export function candidateBars({
   index,
   viewedNode,
-  inflightByKey,
+  line,
   sampleSet,
   marks,
   every,
 }: CandidateBarsInput): CandidateBar[] {
   const markOf = (kind: VerificationMark["kind"], key: string) =>
     marks.find((m) => m.kind === kind && m.arm.key === key) ?? null;
-  // Live side of each supersede cut only — retired tails double a round.
-  const nodes: readonly LineageNode[] = viewedNode ? barNodes(index, viewedNode) : [];
-  const shown = splitRetired(nodes).live.filter(
-    (node) =>
-      every ||
-      node.entry_kind !== "candidate" ||
-      !node.facts.reading.election.held ||
-      node.facts.reading.election.leading,
+  // A cycle's bars are its served line, each arm keyed into the tree by address, then the inner
+  // runs it holds unplaced; a candidate's are its inner cycles.
+  const cycles = (viewedNode ? childNodes(viewedNode) : []).flatMap<Row>((node) =>
+    node.entry_kind === "cycle" ? [{ node, arm: null }] : [],
   );
-  return shown.map<CandidateBar>((node, idx) => {
+  const rows: Row[] =
+    viewedNode?.entry_kind === "cycle"
+      ? [
+          ...line.flatMap<Row>((arm) => {
+            const node = candidateAt(index, arm.address);
+            return node ? [{ node, arm }] : [];
+          }),
+          ...cycles,
+        ]
+      : cycles;
+  // Live side of each supersede cut only — retired tails double a round.
+  const live = new Set<LineageNode>(splitRetired(rows.map((r) => r.node)).live);
+  const shown = rows.filter(
+    ({ node, arm }) =>
+      live.has(node) &&
+      (every || !arm || !arm.reading.election.held || arm.reading.election.leading),
+  );
+  return shown.map<CandidateBar>(({ node, arm }, idx) => {
     const key = node.address;
-    if (node.entry_kind === "cycle") {
+    if (arm === null) {
       return {
         key,
         idx,
@@ -79,10 +97,7 @@ export function candidateBars({
         reading: null,
       };
     }
-    const { reading } = node.facts;
-    // ONE half per bar: the subtree serves `proposed`/`measuring` until the arm's walk is decided on the ledger.
-    const decided = reading.state === "cut" || reading.state === "measured";
-    const live = decided ? undefined : inflightByKey.get(reading.arm.key);
+    const { reading } = arm;
     // Both are served null short of the WHOLE basis: a rate over a shorter denominator sat another exam.
     const onLine = reading.on_origin_panel;
     const { sample_set_fitness: rate, sample_set_n: n } = node.facts;
@@ -97,8 +112,8 @@ export function candidateBars({
       idx,
       label: node.label,
       node,
-      reading: live ?? reading,
-      source: live ? "inflight" : "history",
+      reading,
+      openCells: arm.open_cells,
       overlap,
       verify: markOf("verify", reading.arm.key),
       bench: markOf("bench", reading.arm.key),

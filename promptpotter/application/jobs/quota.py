@@ -4,7 +4,6 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
@@ -16,11 +15,10 @@ from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign import Campaign, CampaignCycle, ceiling_meter
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
-    UNRESOLVED_HOP,
     CampaignLaunch,
     EmbeddedRun,
     InnerRun,
@@ -28,24 +26,14 @@ from promptpotter.domain.job import (
     JobHolder,
     PaidCall,
     ScoringPass,
+    launch_campaign,
 )
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
-from promptpotter.domain.records.run_records import (
-    CampaignCeilingRecord,
-    CycleShareRecord,
-    Hold,
-    Release,
-    StandingBudgetRecord,
-)
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import (
-    CEILING_METER_LABELS,
-    CYCLE_AXES,
     MONEY_AXES,
-    NOTHING_METERED,
     ZERO_SPEND,
     Budget,
-    CeilingMeter,
     KeySource,
     LifetimeSpend,
     MoneyAxis,
@@ -55,7 +43,6 @@ from promptpotter.domain.spend import (
     money_text,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.wallet import (
@@ -72,7 +59,7 @@ from promptpotter.infrastructure.llm.wallet import (
 )
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
 from promptpotter.infrastructure.store.read_model import money_on
-from promptpotter.infrastructure.store.stores import Stores, tenant_stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
     BudgetUnenforceableError,
@@ -133,14 +120,15 @@ class _Meter(NamedTuple):
     refusal: str
 
 
-def _new_campaign(stores: Stores, hop: CycleHop) -> bool:
-    """A stranger's fresh mint, a check-in's Start included (it names no cycle yet): what the
-    launch rate (per server process) and the daily ceiling (per home) meter. The host is exempt: they bound a stranger on its key."""
-    return not is_host(stores.identity) and hop == UNRESOLVED_HOP
+def _new_campaign(stores: Stores, holder: JobHolder, hop: CycleHop) -> bool:
+    """A stranger's fresh mint, a check-in's Start included (it names no cycle yet), never a fork
+    (it names its campaign): what the launch rate (per server process) and the daily ceiling (per
+    home) meter. The host is exempt: they bound a stranger on its key."""
+    return not stores.identity.host and launch_campaign(holder, hop) is None
 
 
 def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
-    if is_host(stores.identity):
+    if stores.identity.host:
         return None
     return _Meter(
         f"{verb}:{stores.identity.user_id}",
@@ -151,7 +139,7 @@ def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
 def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | None:
     match holder:
         case CampaignLaunch():
-            if not _new_campaign(stores, hop):
+            if not _new_campaign(stores, holder, hop):
                 return None
             return _Meter(
                 f"launch:{stores.identity.user_id}",
@@ -161,7 +149,7 @@ def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | No
             return _verb_meter(stores, pass_kind)
         case PaidCall(bucket=bucket):
             return _verb_meter(stores, bucket)
-        # Neither asks the slot door: an embedded run is a declared exemption (`admit_slotless`).
+        # Neither asks the slot door: an embedded run is a declared exemption (`admission.py::slotless_opening`).
         case EmbeddedRun() | InnerRun():
             return None
         case _:
@@ -231,7 +219,7 @@ def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
     """A read is what a poll repeats, so it has the wider bucket; a write is every other request, a
     free verb's included. The host is exempt, as from every bucket that meters a stranger. Each
     bucket is this server process's (`_rate_buckets`): N servers over one home grant N times the rate."""
-    if is_host(identity):
+    if identity.host:
         return
     principal = acting_principal(identity).id
     if read and not _consume_rate_token(f"read:{principal}", burst=_READ_BURST, per_s=_READ_PER_S):
@@ -249,7 +237,13 @@ def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
 
 
 def check_launch_quotas(
-    *, user: User, stores: Stores, job_registry: JobRegistry, hop: CycleHop, launches: int
+    *,
+    user: User,
+    stores: Stores,
+    job_registry: JobRegistry,
+    holder: CampaignLaunch,
+    hop: CycleHop,
+    launches: int,
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, then the
     *launches* asked together — a head-to-head's arms, all admitted or none."""
@@ -268,7 +262,7 @@ def check_launch_quotas(
             ),
         )
 
-    if _new_campaign(stores, hop):
+    if _new_campaign(stores, holder, hop):
         today = campaigns_today(stores, job_registry, user.user_id)
         if today + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
@@ -289,11 +283,10 @@ def campaigns_today(stores: Stores, job_registry: JobRegistry, user_id: str) -> 
     for job in job_registry.list_launched_today(user_id=user_id):
         if not (job.admitted or job_registry.in_flight(job)):
             continue
-        campaign = (
-            None if job.hop == UNRESOLVED_HOP else stores.campaigns.load_campaign(job.campaign_id)
-        )
+        on = launch_campaign(job.holder, job.hop)
+        campaign = None if on is None else stores.campaigns.load_campaign(on)
         if campaign is None or campaign.created_at[:10] == job.created_at[:10]:
-            minted.add(job.job_id if campaign is None else job.campaign_id)
+            minted.add(job.job_id if campaign is None else campaign.campaign_id)
     return len(minted)
 
 
@@ -510,7 +503,7 @@ def admit_launch(
     stores: Stores,
     job_registry: JobRegistry,
     job_id: str,
-    hop: CycleHop | None,
+    campaign_id: str | None,
     sends: tuple[Send, ...],
 ) -> tuple[Budget, Budget]:
     """Refused WHOLE, never clamped. The admitted budget, then what the coupon reserves for it.
@@ -522,7 +515,7 @@ def admit_launch(
         stores=stores,
         job_registry=job_registry,
         excluding_job_id=job_id,
-        excluding_campaign=None if hop is None else hop.campaign_id,
+        excluding_campaign=campaign_id,
     )
     refusal = launch_refusal(
         wallet, declared, sends, stores=stores, refusing=job_registry.get(job_id)
@@ -533,7 +526,7 @@ def admit_launch(
     if not sends_draw_coupon(sends):
         return admitted, _nothing_on(wallet.coupon.face)
     if wallet.contended:
-        raise _contended("what this account has left")
+        raise launch_contended("what this account has left")
     return admitted, _reserve(admitted, wallet.coupon_room)
 
 
@@ -605,168 +598,6 @@ def launch_refusal(
     return None
 
 
-def share_campaign_ceiling(
-    ceiling: Budget,
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    job: Job,
-    hop: CycleHop | None,
-    meter: CeilingMeter,
-) -> Budget:
-    """Other live cycles' holds count as spent, so a fork's parent holds its share until its pause is recorded."""
-    money = Budget(usd=ceiling.usd, tokens=ceiling.tokens)
-    if hop is None:
-        return money
-    _refuse_unshared(stores, job_registry, money, hop=hop, job=job)
-    beside = _held_by_siblings(stores, job_registry, hop, meter)
-    spent = stores.campaigns.metered_spend(hop.campaign_id, meter)
-    left = money.less(spent, beside)
-    if left.run_out:
-        held = (
-            f" and {money_text(beside, on=money)} held by its other live cycles. Pause one, or "
-            "raise"
-            if beside != NOTHING_METERED
-            else ". Raise"
-        )
-        raise QuotaExceededError(
-            code="campaign_ceiling_held",
-            message=(
-                f"This campaign's ceiling ({money_text(money)}) is used up: "
-                f"{money_text(spent, on=money)} {CEILING_METER_LABELS[meter]}{held} the campaign's "
-                "ceiling."
-            ),
-            next_acts=(NextAct(kind="set-limits"),),
-        )
-    return left.bound_over(stores.campaigns.cycle_metered(hop, meter))
-
-
-def cycle_share(stores: Stores, job: Job) -> Budget:
-    """A live job's share, off its cycle: admission lands it there before the job is on the campaign."""
-    record = stores.campaigns.last(job.hop, CycleShareRecord)
-    if record is None:
-        raise RuntimeError(f"job {job.job_id} holds spend on {job.hop} with no share landed there")
-    return record.allotment
-
-
-def _held(share: Budget, own: Budget) -> Budget:
-    """A sibling's share less what its cycle has metered, which the campaign's spend counts."""
-    usd, tokens = share.usd, share.tokens
-    return Budget.amount(
-        0.0 if usd is None else max(0.0, usd - own.usd_amount),
-        0 if tokens is None else max(0, tokens - own.token_amount),
-    )
-
-
-def _held_by_siblings(
-    stores: Stores, job_registry: JobRegistry, hop: CycleHop, meter: CeilingMeter
-) -> Budget:
-    held = NOTHING_METERED
-    for job in _live_on(stores, job_registry, hop.campaign_id):
-        if job.hop != hop:
-            own = stores.campaigns.cycle_metered(job.hop, meter)
-            held = held.plus(_held(cycle_share(stores, job), own))
-    return held
-
-
-def _live_on(stores: Stores, job_registry: JobRegistry, campaign_id: str) -> list[Job]:
-    """Launches, embedded and inner runs and scoring passes alike: each spends on the campaign."""
-    return [
-        job
-        for job in job_registry.list_holding_spend(user_id=str(stores.identity.user_id))
-        if job.on_campaign(stores.campaigns.workspace, campaign_id) and job.admitted
-    ]
-
-
-def _admitting_before(other: Job, mine: Job | None) -> bool:
-    """*other* is still at its gate, its hold unwritten: only one EARLIER than *mine* blocks, or two
-    simultaneous launches refuse each other."""
-    return not other.admitted and (
-        mine is None or (other.created_at, other.job_id) < (mine.created_at, mine.job_id)
-    )
-
-
-def _refuse_unshared(
-    stores: Stores, job_registry: JobRegistry, money: Budget, *, hop: CycleHop, job: Job
-) -> None:
-    for other in job_registry.list_holding_spend(user_id=job.user_id):
-        if (
-            other.job_id == job.job_id
-            or not other.on_campaign(stores.campaigns.workspace, hop.campaign_id)
-            or other.hop == hop
-        ):
-            continue
-        if _admitting_before(other, job):
-            raise _contended("this campaign's ceiling")
-        if not other.admitted:
-            continue
-        held = cycle_share(stores, other)
-        for axis in sorted(MONEY_AXES):
-            ours, theirs = getattr(money, axis), getattr(held, axis)
-            if (ours is None) != (theirs is None):
-                unbounded = f"cycle {other.cycle_id}" if theirs is None else "this launch"
-                raise QuotaExceededError(
-                    code="campaign_ceiling_unshared",
-                    message=(
-                        f"Only one of this launch and cycle {other.cycle_id} holds a {axis} "
-                        f"ceiling ({unbounded} runs with none), and a campaign's {axis} ceiling "
-                        "binds every live cycle or none. Pause the other one, or move the "
-                        "campaign's ceiling."
-                    ),
-                    next_acts=(NextAct(kind="set-limits", field=f"budget.{axis}"),),
-                )
-
-
-def _reshare_campaign_ceiling(
-    moved: Budget, *, stores: Stores, job_registry: JobRegistry, campaign: Campaign
-) -> None:
-    """Oldest first, each live cycle from what the rest hold; never refuses, a share running short."""
-    jobs = _live_on(stores, job_registry, campaign.campaign_id)
-    if not jobs or not moved.named:
-        return
-    meter = ceiling_meter(campaign.declaration.purpose)
-    spent = stores.campaigns.metered_spend(campaign.campaign_id, meter)
-    own = {job.job_id: stores.campaigns.cycle_metered(job.hop, meter) for job in jobs}
-    # Read before any moves: each cycle is re-shared from what the rest held going in.
-    held = {job.job_id: cycle_share(stores, job) for job in jobs}
-    for job in jobs:
-        beside = NOTHING_METERED
-        for other in jobs:
-            if other.job_id != job.job_id:
-                beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
-        share = moved.less(spent, beside).bound_over(own[job.job_id])
-        hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
-
-
-def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
-    """THE move of a cycle's share: its record is the one store, which its running book reads live."""
-    held = stores.campaigns.last(hop, CycleShareRecord)
-    if held is not None and held.allotment == allotment:
-        return
-    stores.campaigns.append(hop, CycleShareRecord(allotment=allotment))
-
-
-def move_campaign_money(
-    money: Budget, *, asked: Budget, stores: Stores, job_registry: JobRegistry, campaign: Campaign
-) -> None:
-    """THE move of a campaign's ceiling: stored as armed (``None`` lifts) beside what was *asked*
-    of the axes it moves, then re-shared."""
-    money = money.only(MONEY_AXES)
-    if not money.named:
-        return
-    with job_registry.admission_gate():
-        prior = stores.campaigns.read_campaign_ceiling(campaign)
-        standing = CampaignCeilingRecord(
-            budget=prior.budget.over(money), asked=prior.asked.over(asked.only(money.named))
-        )
-        if (standing.budget, standing.asked) == (prior.budget, prior.asked):
-            return
-        stores.campaigns.append(campaign.root_hop, standing)
-        _reshare_campaign_ceiling(
-            money, stores=stores, job_registry=job_registry, campaign=campaign
-        )
-
-
 def call_book(
     stores: Stores, provider: str, *, job_registry: JobRegistry, hold_id: str
 ) -> SpendBook:
@@ -783,7 +614,7 @@ def call_book(
             excluding_job_id=hold_id,
         )
         if wallet.contended:
-            raise _contended("what this account has left")
+            raise launch_contended("what this account has left")
         if not wallet.coupon.unmetered:
             reserve = wallet.headroom
     return SpendBook(
@@ -799,67 +630,23 @@ def call_book(
 
 
 def declare_run_budget(
-    declared: Budget,
-    *,
-    stores: Stores,
-    at: CampaignCycle | None,
-    requested: Budget,
+    declared: Budget, *, armed: Budget, requested: Budget
 ) -> tuple[Budget, Budget]:
     """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
-    second, the axes an operator named (campaign, cycle, *requested*)."""
-    asked = Budget() if at is None else stores.campaigns.armed_budget(at)
-    asked = asked.over(requested)
+    second, the axes an operator named (*armed*: its campaign's and its cycle's, then
+    *requested*)."""
+    asked = armed.over(requested)
     return declared.over(asked), asked
 
 
 def next_launch_budget(config: CampaignConfig, *, stores: Stores, at: CampaignCycle) -> Budget:
     declared, _ = declare_run_budget(
-        config.optimization.budget, stores=stores, at=at, requested=Budget()
+        config.optimization.budget, armed=stores.campaigns.armed_budget(at), requested=Budget()
     )
     return declared
 
 
-def change_budget(
-    requested: Budget,
-    *,
-    overshoot: bool | None = None,
-    stores: Stores,
-    job_registry: JobRegistry,
-    at: CampaignCycle,
-    sends: tuple[Send, ...],
-) -> bool:
-    """Set-limits is an admission of the changed ceiling: the wallet read, the clamp, the reserve
-    and the hold run under the one gate a launch admits under, so no admission between them goes
-    unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
-    first. Whether the ceiling *at*'s cycle runs under, or its overshoot, moved: a change
-    restating them moves nothing."""
-    campaigns, campaign, hop = stores.campaigns, at.campaign, at.hop
-    armed = campaigns.armed_budget(at)
-    change = requested
-    with job_registry.admission_gate():
-        job = None if (held := campaigns.holder(hop)) is None else held.run
-        # Rounds and a clock are no money: a change naming neither money axis reads no wallet.
-        if requested.named & MONEY_AXES:
-            change, reserve = _clamped(
-                requested, stores=stores, job_registry=job_registry, job=job, hop=hop, sends=sends
-            )
-            if job is not None:
-                hold = money_on(stores.charges.path).holds[job.job_id]
-                hold_run(stores, job.job_id, hold.bound.over(reserve), parent=hold.parent)
-        move_campaign_money(
-            change, asked=requested, stores=stores, job_registry=job_registry, campaign=campaign
-        )
-    cycle = change.only(CYCLE_AXES)
-    if overshoot == campaigns.read_standing_budget(hop).overshoot:
-        overshoot = None
-    if overshoot is not None:
-        campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=overshoot))
-    elif cycle.named:
-        campaigns.append(hop, StandingBudgetRecord(budget=cycle))
-    return overshoot is not None or campaigns.armed_budget(at) != armed
-
-
-def _clamped(
+def clamped_change(
     requested: Budget,
     *,
     stores: Stores,
@@ -879,7 +666,7 @@ def _clamped(
     )
     # Refuse rather than clamp: a contended wallet's zero would write a $0 ceiling on a funded run.
     if wallet.contended:
-        raise _contended("this campaign's ceiling")
+        raise launch_contended("this campaign's ceiling")
     bound = _admitted(stores, Budget(), sends).usd
     room = wallet.headroom
     # A dollar ceiling its cells cannot be held to is refused as a launch under it is.
@@ -922,7 +709,7 @@ def _reserve(budget: Budget, headroom: Budget) -> Budget:
     return Budget.model_validate(held)
 
 
-def _contended(subject: str) -> RateLimitedError:
+def launch_contended(subject: str) -> RateLimitedError:
     """The ``request_slot``→ADMIT window: retryable, as an exhausted ceiling is not."""
     return RateLimitedError(
         f"Another launch on this account is still being admitted, so {subject} cannot be "
@@ -936,33 +723,12 @@ def _contended(subject: str) -> RateLimitedError:
 _ADMISSION_WINDOW_S = 1.0
 
 
-def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None) -> None:
-    """THE run's hold on its account, opened at admission and restated by a set-limits: the
-    coupon's reserve for it, which its book and every other launch's wallet read."""
-    stores.charges.append(
-        Hold(
-            hold_id=hold_id,
-            parent=parent,
-            key_source="host",
-            bound=bound,
-            resource=None,
-            node=None,
-            ledger=None,
-        )
+def admitting_before(other: Job, mine: Job | None) -> bool:
+    """*other* is still at its gate, its hold unwritten: only one EARLIER than *mine* blocks, or two
+    simultaneous launches refuse each other."""
+    return not other.admitted and (
+        mine is None or (other.created_at, other.job_id) < (mine.created_at, mine.job_id)
     )
-
-
-def release_run(stores: Stores, hold_id: str) -> None:
-    """The run's hold closes with its job: by its release, or `reap_dead_runs` for a dead producer."""
-    stores.charges.append(Release(hold_id=hold_id))
-
-
-def reap_dead_runs(projects_root: Path, job_registry: JobRegistry) -> None:
-    """Releases each job whose producer is gone and closes its hold; an inner run's closes with
-    the enclosing run's, whose producer it shared."""
-    for job in job_registry.reap_orphans():
-        if not isinstance(job.holder, InnerRun):
-            release_run(tenant_stores(projects_root, WorkspaceDir(Path(job.workspace))), job.job_id)
 
 
 def _live_holds(
@@ -972,7 +738,7 @@ def _live_holds(
     an unstamped sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
-    if any(_admitting_before(job, own) for job in running if job.job_id != excluding_job_id):
+    if any(admitting_before(job, own) for job in running if job.job_id != excluding_job_id):
         return None
     return money_on(stores.charges.path).held_back(excluding_job_id)
 
@@ -990,7 +756,7 @@ def _lowest(*values: float | None) -> float | None:
 
 
 def concurrent_cycles_writable(stores: Stores) -> bool:
-    return is_host(stores.identity) and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
+    return stores.identity.host and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
 
 
 def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:

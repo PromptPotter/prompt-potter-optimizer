@@ -129,7 +129,7 @@ const asked = (observe: ObserveSelection["observe"]): ObserveSelection => ({ ...
 
 describe("resolveObserveSubject — best", () => {
   const best = (snap: ServedDashboard | null, stood: RunStanding | null) =>
-    resolveObserveSubject(snap, stood, false, asked("best"));
+    resolveObserveSubject(snap, stood, asked("best"));
 
   it("takes the served winner, not the newest crown it could find itself", () => {
     const s = best(
@@ -149,7 +149,7 @@ describe("resolveObserveSubject — best", () => {
 
   it("has no point before anything is measured", () => {
     for (const snap of [null, dash({}), dash({ rounds: [summaryRound({ round: 0 })] })]) {
-      const s = resolveObserveSubject(snap, null, false, NO_PICK);
+      const s = resolveObserveSubject(snap, null, NO_PICK);
       expect(s.point).toBeNull();
       expect(s.reading).toBeNull();
       expect(s.round).toBeNull();
@@ -196,7 +196,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   const keyOf = (s: ObserveSubject) => s.point?.key;
 
   it("best: the last crown, with ITS round's reading while a later round held", () => {
-    const s = resolveObserveSubject(closed, stood, false, NO_PICK);
+    const s = resolveObserveSubject(closed, stood, NO_PICK);
     expect(s.state).toBe("best");
     expect(s.point).toMatchObject({ round: 1, label: "C1.2", title: "best · C1.2" });
     expect(keyOf(s)).toBe("r1c1");
@@ -207,7 +207,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   });
 
   it("latest at rest: the served observed arm, and that round's verdict", () => {
-    const s = resolveObserveSubject(closed, stood, false, asked("latest"));
+    const s = resolveObserveSubject(closed, stood, asked("latest"));
     expect(s.point).toMatchObject({ round: 2, label: "C2.3", title: "latest · C2.3" });
     expect(keyOf(s)).toBe("r2c2");
     expect(s.reading).toMatchObject({ round: 2, ending: "held" });
@@ -215,7 +215,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   });
 
   it("latest while live: the in-flight arm, and no closed reading", () => {
-    const s = resolveObserveSubject(running, stood, true, NO_PICK);
+    const s = resolveObserveSubject(running, stood, NO_PICK);
     expect(s.state).toBe("latest");
     expect(s.point).toMatchObject({ round: 3, label: "C3.2", title: "live — C3.2" });
     expect(keyOf(s)).toBe("C3.2");
@@ -229,7 +229,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
       ...running,
       observed: { round: 3, label: "C3.1", key: "C3.1" },
     });
-    expect(resolveObserveSubject(measuring, stood, true, NO_PICK).point).toMatchObject({
+    expect(resolveObserveSubject(measuring, stood, NO_PICK).point).toMatchObject({
       round: 3,
       label: "C3.1",
       title: "live — C3.1",
@@ -237,25 +237,25 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   });
 
   it("round:the arm the picked round's reading is taken off — its crown, else the served leader", () => {
-    const one = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 1 });
+    const one = resolveObserveSubject(closed, stood, { ...NO_PICK, round: 1 });
     expect(one.state).toBe("round");
     expect(one.point).toMatchObject({ round: 1, label: "C1.2", title: "round 1 · C1.2" });
     expect(keyOf(one)).toBe("r1c1");
-    const held = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 2 });
+    const held = resolveObserveSubject(closed, stood, { ...NO_PICK, round: 2 });
     expect(held.point).toMatchObject({ round: 2, label: "C2.2" });
     expect(keyOf(held)).toBe("r2c1");
     expect(held.reading?.round).toBe(2);
     expect(held.verdict).toBe(held.reading);
-    const zero = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 0 });
+    const zero = resolveObserveSubject(closed, stood, { ...NO_PICK, round: 0 });
     expect(zero.point).toMatchObject({ round: 0, label: "C0", title: "round 0 · C0" });
     expect(keyOf(zero)).toBe("r0c0");
   });
 
   it("an asked-for state wins while it has a target, and is dropped when it has none", () => {
-    expect(resolveObserveSubject(running, stood, true, asked("best")).point?.label).toBe("C1.2");
-    expect(resolveObserveSubject(closed, stood, false, asked("round")).state).toBe("best");
+    expect(resolveObserveSubject(running, stood, asked("best")).point?.label).toBe("C1.2");
+    expect(resolveObserveSubject(closed, stood, asked("round")).state).toBe("best");
     expect(
-      resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 2, observe: "best" }).point,
+      resolveObserveSubject(closed, stood, { ...NO_PICK, round: 2, observe: "best" }).point,
     ).toMatchObject({ round: 1, label: "C1.2" });
   });
 
@@ -265,17 +265,21 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
       current_round: currentRound({ round: 3 }),
       round_axis: { completed: [0, 1, 2], live: 3, position: 3, unfiled: 3 },
     });
-    const s = resolveObserveSubject(generating, stood, true, NO_PICK);
+    const s = resolveObserveSubject(generating, stood, NO_PICK);
     expect(s.state).toBe("best");
     expect(s.point?.round).toBe(1);
     expect(s.reading?.round).toBe(1);
     expect(s.round).toBe(3);
     expect(s.live).toBe(true);
-    expect(resolveObserveSubject(generating, stood, true, asked("best")).round).toBe(1);
+    expect(resolveObserveSubject(generating, stood, asked("best")).round).toBe(1);
   });
 
-  it("ignores `current_round` rows that linger after a stop", () => {
-    const s = resolveObserveSubject(running, stood, false, NO_PICK);
+  it("ignores `current_round` rows that linger after a stop: served `round_axis.live` is null", () => {
+    const stopped = dash({
+      ...running,
+      round_axis: { completed: [0, 1, 2], live: null, position: 2, unfiled: 3 },
+    });
+    const s = resolveObserveSubject(stopped, stood, NO_PICK);
     expect(s.state).toBe("best");
     expect(s.live).toBe(false);
   });

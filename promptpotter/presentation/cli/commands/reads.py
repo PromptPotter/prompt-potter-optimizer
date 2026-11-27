@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application import health, notices
 from promptpotter.application.account import local_stores, tenant_trail, trail_by_email
+from promptpotter.application.bulletins import AccountBulletins
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading
 from promptpotter.application.commands.loop_commands import read_payload_file
@@ -43,7 +44,8 @@ from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle, Hie
 from promptpotter.domain.phases import RUN_PHASE_INFO
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.launch import head_to_head_command
-from promptpotter.presentation.cli.main import VERB_PACKAGE, VERBS, CommandResult, said_text
+from promptpotter.presentation.cli.main import VERB_PACKAGE, VERBS, said_text
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.named_rows import imported
 
@@ -71,6 +73,17 @@ def _unread_flags() -> list[str]:
 
 if unread := _unread_flags():
     raise TypeError(f"read verb flags no row field or renderer takes: {', '.join(unread)}")
+
+
+def bulletins_human(
+    _params: ReadParams, read: AccountBulletins, _args: argparse.Namespace, _caller: Caller
+) -> CommandResult:
+    lines = [
+        f"{b.posted_at} {b.id}{' (pops up)' if b.pops_up and not b.dismissed else ''}"
+        f"{' (dismissed)' if b.dismissed else ''}: {b.text}"
+        for b in read.bulletins
+    ]
+    return CommandResult(data=read.model_dump(mode="json"), human="\n".join(lines) or "none")
 
 
 def command_human(

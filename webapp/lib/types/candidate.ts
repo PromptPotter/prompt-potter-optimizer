@@ -6,8 +6,6 @@ import type {
   VerificationMark,
 } from "@/lib/api/types";
 
-type CandidateSource = "history" | "inflight";
-
 export type ThetaCaveat = NonNullable<ArmAbility["caveat"]>;
 
 interface BarBase {
@@ -21,9 +19,10 @@ interface BarBase {
 // everything an arm measured or decided is read off `reading`, the half chosen for this row.
 export interface ArmBar extends BarBase {
   node: HierarchyCandidate;
-  // `node.facts.reading` once its walk is decided, else the live row — WHOLE, never field by field.
+  // served: its `dash.line` row's — a closed round's or the live one's, WHOLE, never field by field.
   reading: ArmReading;
-  source: CandidateSource;
+  // served: `LineArm.open_cells`, the positions of its cells out now.
+  openCells: readonly number[];
   // Null unless this bar answered the WHOLE shared basis.
   overlap: { rate: number | null; n: number } | null;
   // served: `dash.verification`, this cycle's own passes on the arm.

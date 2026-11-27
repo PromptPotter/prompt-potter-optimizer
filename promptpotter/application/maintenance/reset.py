@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from promptpotter.infrastructure.store.io import (
     iter_files,
     probe_lock,
     prune_empty_dirs,
+    remove_bare_dir,
     unlink_robust,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -198,8 +198,7 @@ def resetting(plan: ResetPlan, registry: JobRegistry) -> Iterator[None]:
         prune_empty_dirs(root)
         # A sandbox goes whole; a tenant's own directory stays.
         if in_inner_sandbox(root):
-            with contextlib.suppress(OSError):
-                root.rmdir()
+            remove_bare_dir(root)
 
 
 def apply_reset(plan: ResetPlan) -> None:

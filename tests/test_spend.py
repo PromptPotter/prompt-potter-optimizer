@@ -98,15 +98,16 @@ from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
+    admit_and_hold,
     admit_and_share,
-    admit_slotless,
-    claim_cycle,
-    open_spend_book,
     paid_call,
     paid_pass,
     request_jobs,
+    slotless_opening,
 )
+from promptpotter.application.jobs.launcher.launch import Inline, admit
+from promptpotter.application.jobs.launcher.mint_and_start import ForkLaunch
+from promptpotter.application.jobs.launcher.opening import Opening, claim_cycle, open_spend_book
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
@@ -114,14 +115,18 @@ from promptpotter.application.jobs.quota import (
     RateLimitedError,
     account_wallet,
     admit_launch,
-    change_budget,
     coupon_status,
-    cycle_share,
-    hold_moved,
-    hold_run,
+    declare_run_budget,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import (
+    change_budget,
+    cycle_share,
+    hold_moved,
+    hold_run,
+    stand_held_budget,
+)
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
@@ -133,7 +138,6 @@ from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
-from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -263,7 +267,6 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
@@ -1000,7 +1003,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     held_job = spawned.get(held.job_id)
     assert held_job is not None
     launched = HeldRun(
-        start=RunStart(stores, spawned, held_job),
+        opening=Opening(stores, spawned, held_job),
         session=_minted(stores, offline),
         cycle=CycleConfig.laid(launched_config, []),
         budget=held,
@@ -1021,7 +1024,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         install_datasets_root=spec.install_datasets_root,
         shared_root=spec.shared_root,
     )
-    assert is_host(rebuilt.identity) is is_host(stores.identity) is False, (
+    assert rebuilt.identity.host is stores.identity.host is False, (
         "a signup's run, rebuilt in its own process, spent the host's own key"
     )
     assert rebuilt.base_dir == stores.base_dir, "the spawned run billed another tenant's tree"
@@ -1204,12 +1207,12 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
     )
     opened: list[object] = []
-    monkeypatch.setattr(run_job_mod, "build_run_observers", lambda **kw: opened.append(kw))
+    monkeypatch.setattr(run_job_mod, "enter_cycle", lambda *a, **_kw: opened.append(a))
 
     def _refused(*_a: object, **_kw: object) -> NoReturn:
         raise MachineBusyError(holding="", holder_user="", started_at=None)
 
-    monkeypatch.setattr(spawn, "admit_slotless", _refused)
+    monkeypatch.setattr(spawn, "admit", _refused)
     with (
         scoped(account=built_stores),
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -1582,7 +1585,7 @@ def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(moved))).append(
         billed_call(0.10, input_tokens=210_000)
     )
-    registry = JobRegistry(tmp_path / "jobs-4", capacity=lambda _live: 1)
+    registry = JobRegistry(tmp_path / "4" / "jobs", capacity=lambda _live: 1)
     job = registry.request_slot(
         user_id="default",
         principal_id="default",
@@ -1674,7 +1677,8 @@ def shared_ceiling(built_stores: Stores) -> _SharedCeiling:
                 stores=built_stores,
                 job_registry=shared,
                 job=job,
-                at=_at(built_stores, fork),
+                campaign=_at(built_stores, fork).campaign,
+                hop=fork,
                 step_rounds=None,
                 sends=_CELLS,
             )
@@ -1739,6 +1743,22 @@ def test_a_third_fork_is_refused_while_its_siblings_hold_the_ceiling_whole(
         shared_ceiling.launch(fork_c, 1.0)
 
 
+def test_an_admitted_fork_holds_its_share_against_a_sibling_admitted_before_its_run_opens(
+    built_stores: Stores, world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
+) -> None:
+    shared, launch, share, bill = shared_ceiling
+    root, fork_a = _line(world, 1, ran_24)
+    bill(root, 0.25)
+    asked = ForkCyclePayload(campaign_id=root.campaign_id, cycle_id=root.cycle_id)
+    request = ForkLaunch(_at(built_stores, root), asked, CycleStart(), Budget(usd=0.5))
+    forking = admit(request, RunMode(), stores=built_stores, job_registry=shared, inline=Inline())
+    held, _ = asyncio.run(admit_and_hold(request, forking.opening))
+    _, sibling = launch(fork_a, 1.0)
+    assert share(sibling) == pytest.approx(1.0 - 0.25 - held.share.usd_amount), (
+        "a sibling admitted after a fork's admission spends the fork's share: two cycles, two ceilings"
+    )
+
+
 def test_a_fork_arms_its_campaigns_ceiling_which_the_launch_that_moved_it_wrote_on_the_root(
     built_stores: Stores, world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
 ) -> None:
@@ -1769,19 +1789,33 @@ def test_an_embedded_run_holds_a_share_at_admission_and_gives_it_back_at_its_exi
         )
         return None, cycle_result([], None, [])
 
-    async def embedded() -> None:
-        start, held = await asyncio.to_thread(
-            admit_slotless,
-            _budgeted(Budget(usd=1.0)),
-            stores=built_stores,
-            holder=EmbeddedRun("ds1"),
-            at=_at(built_stores, fork_c),
+    def admit_embedded(opening: Opening) -> HeldBudget:
+        at = _at(built_stores, fork_c)
+        declared, asked = declare_run_budget(
+            _budgeted(Budget(usd=1.0)).optimization.budget,
+            armed=built_stores.campaigns.armed_budget(at),
             requested=Budget(),
+        )
+        return admit_and_share(
+            declared,
+            asked,
+            stores=built_stores,
+            job_registry=opening.job_registry,
+            job=opening.job,
+            campaign=at.campaign,
+            hop=at.hop,
             step_rounds=None,
             sends=_CELLS,
         )
-        _, ended = await held_embedded(held)
-        await asyncio.to_thread(start.release, ended)
+
+    async def embedded() -> None:
+        opening = await asyncio.to_thread(
+            slotless_opening, built_stores, shared, EmbeddedRun("ds1"), fork_c
+        )
+        async with contextlib.AsyncExitStack() as closing:
+            closing.push_async_exit(opening)
+            held = await asyncio.to_thread(admit_embedded, opening)
+            _, opening.ended = await held_embedded(held)
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
@@ -2025,7 +2059,8 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
         stores=delegate,
         job_registry=shared,
         job=claim,
-        at=_at(delegate, claimed),
+        campaign=_at(delegate, claimed).campaign,
+        hop=claimed,
         step_rounds=None,
         sends=_CELLS,
     )
@@ -3627,7 +3662,7 @@ def _launch(
         stores=stores,
         job_registry=registry,
         job_id="job-a",
-        hop=None,
+        campaign_id=None,
         sends=_CELLS if door.sends is None else door.sends,
     )
 
@@ -3740,7 +3775,7 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
         "the coupon read another remainder than the box's keys left it"
     )
     status = coupon_status(spent_out)
-    assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"
+    assert status.own_key_spend.bill == "$5.00", "the own key's spend went unread"
     payers = {route.provider: route.payer for route in status.routes}
     assert (payers["openrouter"], payers["openai"]) == ("user", "host"), (
         "the served payer of a provider is not the one its sends go out on"
@@ -4084,7 +4119,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
                 stores=passing,
                 job_registry=slots,
                 job_id=launch.job_id,
-                hop=None,
+                campaign_id=None,
                 sends=_CELLS,
             )[1]
         finally:
@@ -4220,7 +4255,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
         stores=forker,
         job_registry=registry,
         job_id=job.job_id,
-        hop=fork,
+        campaign_id=fork.campaign_id,
         sends=_CELLS,
     )
     assert caps.usd == pytest.approx(1.0), (
@@ -4367,7 +4402,7 @@ def _two_admitted_runs(
     """Two runs admitted at $0 reserve on one $0.30 coupon: the account, its registry, their hops."""
     racer = _web_account("sub-8")
     racer.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
-    racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
+    racing = JobRegistry(tmp_path / "8" / "jobs", capacity=lambda _live: 2)
     raced = [_minted(racer, offline).hop for _ in range(2)]
     for racing_hop in raced:
         held_job = racing.request_slot(
@@ -4443,7 +4478,7 @@ def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign
     hop = _minted(stores, offline).hop
     at = _at(stores, hop)
     stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
-    registry = JobRegistry(tmp_path / "jobs-g", capacity=lambda _live: 1)
+    registry = JobRegistry(tmp_path / "g" / "jobs", capacity=lambda _live: 1)
     with pytest.raises(NotFoundError):
         change_budget(Budget(usd=0.2), stores=stores, job_registry=registry, at=at, sends=_CELLS)
     assert not stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (
@@ -4551,7 +4586,7 @@ def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_s
         stores=resumer,
         job_registry=registry,
         job_id=job.job_id,
-        hop=at,
+        campaign_id=at.campaign_id,
         sends=_CELLS,
     )
     assert reserve.usd == pytest.approx(0.4), (
@@ -4641,7 +4676,8 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
     )
     stamped = billing.get(live.job_id)
     assert stamped is not None
-    RunStart(biller, billing, stamped).release(RuntimeError("the run raised"))
+    with pytest.raises(RuntimeError), Opening(biller, billing, stamped):
+        raise RuntimeError("the run raised")
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.15), (
         "an ended run kept its reserve, or the send it left open went unread"
     )
@@ -4716,7 +4752,10 @@ def duel(monkeypatch: pytest.MonkeyPatch) -> _Duel:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec()
         detached.append(spec)
-        await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.TARGET_HIT)
+        await asyncio.to_thread(
+            held.opening.job_registry.release, spec.job_id, StopReason.TARGET_HIT
+        )
+        held.opening.hand_off()
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
@@ -5410,7 +5449,8 @@ def test_a_reset_over_a_reshaped_ledger_drops_it_and_the_accounts_charges_with_i
     with pytest.raises(FileUnreadableError):
         billed_spend([reshaped])
     activity = account_activity(stores, window="1d", group_by="model")
-    assert activity.total_spend_usd == pytest.approx(framed_total + 0.13), (
+    billed = sum(sum(b.series_spend.values()) for b in activity.buckets)
+    assert billed == pytest.approx(framed_total + 0.13), (
         "the Activity pane read another bill than the account's charges"
     )
     assert activity.total_tokens == tokens_before + 2_800 + 400 + 700 + 2 * 15, (

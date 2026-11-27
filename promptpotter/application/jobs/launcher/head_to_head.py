@@ -12,13 +12,10 @@ from typing import assert_never
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
-    admit_arms,
-    refuse_unreachable,
-)
+from promptpotter.application.jobs.launcher.admission import admit_arms, refuse_unreachable
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
 from promptpotter.application.jobs.launcher.launch import LaunchOutcome
+from promptpotter.application.jobs.launcher.opening import Opening
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     CyclePlan,
@@ -32,7 +29,7 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import ServedPipeline
 from promptpotter.domain.command_kinds import HeadToHeadRequest
-from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun
 from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget, HeldBudget
@@ -127,21 +124,13 @@ class HeldArm:
 
 
 async def run_each[T](arms: list[HeldArm], act: Callable[[HeldArm], Awaitable[T]]) -> list[T]:
-    """*act* on each minted arm in order; a raise releases every arm after it, whose share no other
-    process would ever hand back."""
-    done: list[T] = []
-    for i, arm in enumerate(arms):
-        try:
-            done.append(await act(arm))
-        except BaseException as exc:
-            await asyncio.to_thread(_release_rest, arms[i + 1 :], exc)
-            raise
-    return done
-
-
-def _release_rest(rest: list[HeldArm], exc: BaseException) -> None:
-    for arm in rest:
-        arm.held.start.release(exc, stamps=arm.held.session.hop)
+    """*act* on each minted arm in order, each closing its own arm (`HeldRun.closing`); a raise
+    closes every arm after it, whose share no other process would ever hand back."""
+    async with AsyncExitStack() as unrun:
+        for arm in arms:
+            # One *act* closed is empty here: the stack closes only the arms it never reached.
+            unrun.push_async_exit(arm.held.closing)
+        return [await act(arm) for arm in arms]
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,51 +140,46 @@ class AdmittedHeadToHead(LaunchOutcome):
     source: ArmSource
     request: HeadToHeadRequest
     plans: list[CyclePlan]
-    admitted: list[tuple[Job, HeldBudget]]
-    job_registry: JobRegistry
+    admitted: list[tuple[Opening, HeldBudget]]
 
     def as_launches(self) -> list[LaunchedJob]:
-        return [LaunchedJob.of(job) for job, _ in self.admitted]
-
-    @property
-    def starts(self) -> list[RunStart]:
-        stores = self.plans[0].session.store
-        return [RunStart(stores, self.job_registry, job) for job, _ in self.admitted]
+        return [LaunchedJob.of(opening.job) for opening, _ in self.admitted]
 
     async def withdraw(self, exc: BaseException) -> None:
         """Every arm's slot given back and the source closed, where the act that admitted them
         raised before any minted."""
         async with self.source.closing:
-            for start in self.starts:
-                await asyncio.to_thread(start.release, exc)
+            for opening, _ in self.admitted:
+                await opening.abandon(exc)
 
     async def minted(self) -> list[HeldArm]:
-        """All arms minted, each job landed on its cycle; a failure stamps every minted cycle."""
-        minted: list[OpenedCycle] = []
+        """All arms minted, each job landed on its cycle, each arm's opening riding its own
+        `HeldRun.closing`; a failure closes every arm, stamping every minted cycle."""
+        closings = [AsyncExitStack() for _ in self.admitted]
         try:
-            minted = await _mint(self.source, self.plans)
-            await asyncio.to_thread(self._land, minted)
-        except BaseException as exc:
-            await asyncio.to_thread(self._unmint, minted, exc)
-            raise
+            async with AsyncExitStack() as every:
+                for closing, (opening, _) in zip(closings, self.admitted, strict=True):
+                    closing.push_async_exit(opening)
+                    every.push_async_exit(closing)
+                minted = await _mint(self.source, self.plans)
+                for (opening, _), cycle in zip(self.admitted, minted, strict=True):
+                    opening.owns(cycle.hop)
+                await asyncio.to_thread(self._land, minted)
+                every.pop_all()
         finally:
             if isinstance(self.source, CheckinArms):
                 self.source.claim.release()
         # Each arm's session is the source's, which `launched` closes past every hand-off.
         return [
-            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held, AsyncExitStack(), RunMode()))
-            for arm, start, (_, held), cycle in zip(
-                self.request.arms, self.starts, self.admitted, minted, strict=True
+            HeldArm(arm.arm_key, HeldRun.of(opening, cycle, held, closing, RunMode()))
+            for arm, (opening, held), cycle, closing in zip(
+                self.request.arms, self.admitted, minted, closings, strict=True
             )
         ]
 
     def _land(self, minted: list[OpenedCycle]) -> None:
-        for start, (_, held), cycle in zip(self.starts, self.admitted, minted, strict=True):
-            start.land(cycle.hop, held)
-
-    def _unmint(self, minted: list[OpenedCycle], exc: BaseException) -> None:
-        for i, start in enumerate(self.starts):
-            start.release(exc, stamps=minted[i].hop if minted else None)
+        for (opening, held), cycle in zip(self.admitted, minted, strict=True):
+            opening.land(cycle.hop, held)
 
     async def launched(self) -> HeadToHeadLaunched:
         """Each arm in its own process, as every server launch."""
@@ -203,8 +187,8 @@ class AdmittedHeadToHead(LaunchOutcome):
             arms = await self.minted()
             exits = await run_each(arms, lambda arm: arm.held.detach())
         launches = [
-            LaunchedJob.of(job, arm.held.session.hop)
-            for (job, _), arm in zip(self.admitted, arms, strict=True)
+            LaunchedJob.of(opening.job, arm.held.session.hop)
+            for (opening, _), arm in zip(self.admitted, arms, strict=True)
         ]
         return head_to_head_answer(self.request, launches, exits)
 
@@ -232,7 +216,7 @@ async def admit_head_to_head(
     ]
     # Off the loop, once: the sweep and the admission wait on the gate and scan every ledger.
     admitted = await asyncio.to_thread(_admit, asks, session.store, job_registry, holder)
-    return AdmittedHeadToHead(source, request, plans, admitted, job_registry)
+    return AdmittedHeadToHead(source, request, plans, admitted)
 
 
 def _admit(
@@ -240,7 +224,7 @@ def _admit(
     stores: Stores,
     job_registry: JobRegistry,
     holder: CampaignLaunch | EmbeddedRun,
-) -> list[tuple[Job, HeldBudget]]:
+) -> list[tuple[Opening, HeldBudget]]:
     sweep(stores.projects_root)
     return admit_arms(asks, stores=stores, job_registry=job_registry, holder=holder)
 

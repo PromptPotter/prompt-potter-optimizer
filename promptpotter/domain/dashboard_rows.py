@@ -23,7 +23,7 @@ from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
 from promptpotter.domain.ruler import AbilityReading, LevelSeries
-from promptpotter.domain.said import Said
+from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import (
     CAP_AXIS_INFO,
@@ -73,6 +73,16 @@ SAMPLE_MOVEMENT_LABELS: Worded[SampleMovement, str] = Worded(
     }
 )
 assert SAMPLE_MOVEMENT_LABELS.keys() == set(get_args(SampleMovement))
+#: The ink a movement is drawn in; a re-added sample reads as new.
+SAMPLE_MOVEMENT_TONE: Worded[SampleMovement, Tone] = Worded(
+    {
+        "new": "attention",
+        "readded": "attention",
+        "gained": "success",
+        "lost": "warn",
+        "kept": "quiet",
+    }
+)
 
 
 def sample_status(facts: MeasuredCell, grade: Grade) -> SampleStatus:
@@ -177,6 +187,11 @@ class LiveCandidate(ServedArm):
 
     pipeline_overlay: dict[str, dict[str, Any]] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
+    open_cells: list[int] = Field(
+        default_factory=list,
+        description="The positions of this arm's cells out now, oldest first: arms walking "
+        "abreast each carry their own; empty between its walks.",
+    )
 
     @classmethod
     def in_flight(
@@ -185,13 +200,24 @@ class LiveCandidate(ServedArm):
         arm: ArmState,
         *,
         samples: list[DashboardSample],
+        open_cells: list[int],
     ) -> LiveCandidate:
         """The arm as `ServedArm.of` serves it, its overlay and tape beside it."""
         return cls(
             **dict(ServedArm.of(reading, arm)),
             pipeline_overlay=arm.overlay,
             samples=samples,
+            open_cells=open_cells,
         )
+
+
+class LineArm(DashboardCandidate):
+    """One arm of a cycle's served line, a closed row and a live one in one shape."""
+
+    address: str = Field(description="The candidate's address on the cycle that ran it.")
+    open_cells: list[int] = Field(
+        default_factory=list, description="`LiveCandidate.open_cells`; empty on a closed round."
+    )
 
 
 class OptimizerLimit(FrozenModel):

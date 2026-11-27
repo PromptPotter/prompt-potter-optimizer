@@ -116,6 +116,24 @@
         "title": "AcceptTermsPayload",
         "type": "object"
       },
+      "AccountBulletins": {
+        "additionalProperties": false,
+        "properties": {
+          "bulletins": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ServedBulletin"
+            },
+            "title": "Bulletins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bulletins"
+        ],
+        "title": "AccountBulletins",
+        "type": "object"
+      },
       "AccountKey": {
         "additionalProperties": false,
         "properties": {
@@ -184,6 +202,21 @@
           }
         ]
       },
+      "ActiveNode": {
+        "additionalProperties": false,
+        "description": "The optimizer's node running now: a target's calls land on its own ledger, never this one.",
+        "properties": {
+          "node": {
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "title": "ActiveNode",
+        "type": "object"
+      },
       "ActiveSessionResponse": {
         "additionalProperties": false,
         "description": "The run to follow (`followed_cycle`), and the line saying whose it is where it is not the\ncaller's own (`key` ``exhibit``), or why there is none.",
@@ -233,7 +266,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either sets the response's `bill_is_floor`.",
+            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either marks the response's `bill` a floor.",
             "title": "Series Spend",
             "type": "object"
           },
@@ -304,10 +337,10 @@
         "additionalProperties": false,
         "description": "Time-bucketed spend / requests / tokens over the requested window.",
         "properties": {
-          "bill_is_floor": {
-            "description": "The two totals understate: a call in the window carries neither a bill nor a rate's price.",
-            "title": "Bill Is Floor",
-            "type": "boolean"
+          "bill": {
+            "description": "What providers reported they billed in the window, `≥` where a call carries neither a bill nor a rate's price, then what our rate table prices the calls no provider billed: never spent, and in no series.",
+            "title": "Bill",
+            "type": "string"
           },
           "buckets": {
             "items": {
@@ -315,20 +348,6 @@
             },
             "title": "Buckets",
             "type": "array"
-          },
-          "calls_rate_priced": {
-            "description": "Some call in the window was priced at our rate, so there is a `total_rate_priced_usd` to show beside the bill.",
-            "title": "Calls Rate Priced",
-            "type": "boolean"
-          },
-          "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Bill.key_source`).",
-            "enum": [
-              "model",
-              "api_key"
-            ],
-            "title": "Group By",
-            "type": "string"
           },
           "peak_requests": {
             "anyOf": [
@@ -374,19 +393,9 @@
             "title": "Series Labels",
             "type": "array"
           },
-          "total_rate_priced_usd": {
-            "description": "What our rate table prices the window's calls no provider billed. Never spent, and in no series.",
-            "title": "Total Rate Priced Usd",
-            "type": "number"
-          },
           "total_requests": {
             "title": "Total Requests",
             "type": "integer"
-          },
-          "total_spend_usd": {
-            "description": "What providers reported they billed.",
-            "title": "Total Spend Usd",
-            "type": "number"
           },
           "total_tokens": {
             "title": "Total Tokens",
@@ -410,13 +419,9 @@
         },
         "required": [
           "window",
-          "group_by",
           "buckets",
           "series_labels",
-          "total_spend_usd",
-          "total_rate_priced_usd",
-          "calls_rate_priced",
-          "bill_is_floor",
+          "bill",
           "total_tokens",
           "total_requests",
           "peak_spend_usd",
@@ -2214,6 +2219,23 @@
         "title": "BenchStatus",
         "type": "object"
       },
+      "BlockEmailPayload": {
+        "additionalProperties": false,
+        "description": "Refuse every sign-in of an email on this box; only its host may.",
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "BlockEmailPayload",
+        "type": "object"
+      },
       "Body_ingest_upload_api_v1_commands_ingest_upload_post": {
         "properties": {
           "file": {
@@ -2382,7 +2404,7 @@
             "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
-            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
+            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
             "enum": [
               "info_gain",
               "difficulty"
@@ -2560,8 +2582,19 @@
       },
       "CampaignLaunch": {
         "additionalProperties": false,
-        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
+        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
         "properties": {
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
@@ -2674,7 +2707,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
+            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
             "title": "Hard Sample Order"
           },
           "judges": {
@@ -3618,6 +3651,44 @@
         "title": "CellCandidate",
         "type": "object"
       },
+      "CellMean": {
+        "additionalProperties": false,
+        "description": "One side channel's mean over a point's cells, worded once for every reader.",
+        "properties": {
+          "key": {
+            "description": "The channel, for code to pair two points' means on.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lead": {
+            "description": "Shown in the lead row, above the rest.",
+            "title": "Lead",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "`value` in the channel's unit.",
+            "title": "Text",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "text",
+          "lead"
+        ],
+        "title": "CellMean",
+        "type": "object"
+      },
       "CellPrice": {
         "additionalProperties": false,
         "description": "What one cell of a bank cost on its models, as the archive measured it.",
@@ -4271,6 +4342,13 @@
           "open-origin-draft",
           "set-user-settings",
           "accept-terms",
+          "post-bulletin",
+          "dismiss-bulletin",
+          "block-email",
+          "unblock-email",
+          "grant-delegation",
+          "revoke-delegation",
+          "set-coupon",
           "set-api-key",
           "remove-api-key",
           "mint-api-token",
@@ -4615,7 +4693,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
+            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
             "title": "Hard Sample Order"
           },
           "judges": {
@@ -5187,17 +5265,6 @@
         "additionalProperties": false,
         "description": "The round in flight, rebuilt whole on every persist.",
         "properties": {
-          "active_node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Node"
-          },
           "candidates": {
             "items": {
               "$ref": "#/components/schemas/LiveCandidate"
@@ -5227,16 +5294,6 @@
             },
             "title": "Nodes",
             "type": "object"
-          },
-          "racing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RacingBlock"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "round": {
             "default": 0,
@@ -6110,6 +6167,23 @@
           "draft_id"
         ],
         "title": "DiscardDraftPayload",
+        "type": "object"
+      },
+      "DismissBulletinPayload": {
+        "additionalProperties": false,
+        "description": "Dismiss one bulletin for the caller's account: it pops up no more, and the list marks it.",
+        "properties": {
+          "bulletin_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Bulletin Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bulletin_id"
+        ],
+        "title": "DismissBulletinPayload",
         "type": "object"
       },
       "DisplayMetric": {
@@ -7068,10 +7142,6 @@
             "title": "Factors",
             "type": "array"
           },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
           "grid": {
             "anyOf": [
               {
@@ -7183,7 +7253,6 @@
           }
         },
         "required": [
-          "generated_at",
           "scorer_id",
           "subjects",
           "subjects_read",
@@ -8061,6 +8130,30 @@
         "title": "GeneSource",
         "type": "object"
       },
+      "GrantDelegationPayload": {
+        "additionalProperties": false,
+        "description": "Delegate capabilities, named by a comma-separated list, from the host's account to another; only its host may.",
+        "properties": {
+          "capabilities": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Capabilities",
+            "type": "string"
+          },
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "capabilities"
+        ],
+        "title": "GrantDelegationPayload",
+        "type": "object"
+      },
       "GuardDifference": {
         "description": "One thing two bench headlines can differ on. The first seven are ``BenchSet``'s fields.",
         "enum": [
@@ -8151,17 +8244,8 @@
                 "type": "null"
               }
             ],
+            "description": "Null where it gives none: `verdict_line` says why",
             "title": "Verdict"
-          },
-          "verdict_absent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReadingState"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "verdict_line": {
             "title": "Verdict Line",
@@ -8174,7 +8258,6 @@
           "guard",
           "headline",
           "verdict",
-          "verdict_absent",
           "contrasts",
           "ratio_reference",
           "verdict_line",
@@ -8685,10 +8768,6 @@
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
-          "service": {
-            "title": "Service",
-            "type": "string"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -8716,7 +8795,6 @@
         },
         "required": [
           "status",
-          "service",
           "timestamp",
           "version"
         ],
@@ -9877,56 +9955,29 @@
         "additionalProperties": false,
         "description": "What an account, or one campaign's share of it, was billed over its whole life.",
         "properties": {
-          "bill_is_floor": {
-            "description": "`billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost; the token ceiling is then the binding one.",
-            "title": "Bill Is Floor",
-            "type": "boolean"
+          "bill": {
+            "description": "What the providers REPORTED they billed, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked, as a person reads it: `≥` where a token no rate prices makes it a floor. Never an estimate: a call priced off our rate table and a send whose bill never came are `caveats`.",
+            "title": "Bill",
+            "type": "string"
           },
           "billed_tokens": {
             "description": "Every token the sends billed, priced or not: what a token allowance counts.",
             "title": "Billed Tokens",
             "type": "integer"
           },
-          "billed_usd": {
-            "description": "What the providers REPORTED they billed, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`.",
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "calls_rate_priced": {
-            "description": "Some call was priced at our rate, so there is a `rate_priced_usd` to show beside the bill.",
-            "title": "Calls Rate Priced",
-            "type": "boolean"
-          },
-          "rate_priced_usd": {
-            "description": "What our rate table prices the calls no provider reported a cost for. Not spent — an estimate, shown beside `billed_usd` and never added into it. It binds the ceiling beside `billed_usd`.",
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "sends_unreported": {
-            "description": "Some send ended with no bill, so up to `unreported_usd` more may have left the account than `billed_usd` says.",
-            "title": "Sends Unreported",
-            "type": "boolean"
-          },
-          "unpriced_tokens": {
-            "description": "Tokens no provider billed and no rate on file prices.",
-            "title": "Unpriced Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `billed_usd`.",
-            "title": "Unreported Usd",
-            "type": "number"
+          "caveats": {
+            "description": "What the allowance draws beyond the bill, a line each: the unpriced tokens, the rate-priced calls, the unreported sends; empty where the bill is the whole story.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Caveats",
+            "type": "array"
           }
         },
         "required": [
-          "billed_usd",
-          "rate_priced_usd",
-          "calls_rate_priced",
-          "bill_is_floor",
-          "unpriced_tokens",
+          "bill",
           "billed_tokens",
-          "sends_unreported",
-          "unreported_usd"
+          "caveats"
         ],
         "title": "LifetimeSpend",
         "type": "object"
@@ -10030,6 +10081,34 @@
         "title": "LiftProfile",
         "type": "object"
       },
+      "LineArm": {
+        "additionalProperties": false,
+        "description": "One arm of a cycle's served line, a closed row and a live one in one shape.",
+        "properties": {
+          "address": {
+            "description": "The candidate's address on the cycle that ran it.",
+            "title": "Address",
+            "type": "string"
+          },
+          "open_cells": {
+            "description": "`LiveCandidate.open_cells`; empty on a closed round.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Open Cells",
+            "type": "array"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/ArmReading"
+          }
+        },
+        "required": [
+          "reading",
+          "address"
+        ],
+        "title": "LineArm",
+        "type": "object"
+      },
       "LineRate": {
         "additionalProperties": false,
         "description": "One member of the best-so-far line as an overlap reading holds it.",
@@ -10114,6 +10193,14 @@
                 "type": "null"
               }
             ]
+          },
+          "open_cells": {
+            "description": "The positions of this arm's cells out now, oldest first: arms walking abreast each carry their own; empty between its walks.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Open Cells",
+            "type": "array"
           },
           "pipeline_overlay": {
             "anyOf": [
@@ -10252,6 +10339,16 @@
           "abreast": {
             "$ref": "#/components/schemas/LookaheadAbreast"
           },
+          "hint": {
+            "description": "What a press of it sends, a hover away.",
+            "title": "Hint",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its segment's words: one after another, the count, or All.",
+            "title": "Label",
+            "type": "string"
+          },
           "pickable": {
             "description": "Whether a press of this count is admitted now: the control applies and the run admits `set-sample-lookahead`.",
             "title": "Pickable",
@@ -10260,7 +10357,9 @@
         },
         "required": [
           "abreast",
-          "pickable"
+          "pickable",
+          "label",
+          "hint"
         ],
         "title": "LookaheadAbreastStep",
         "type": "object"
@@ -10300,6 +10399,16 @@
             "description": "`full` where that many calls are out now, `part` where the gauge allows that many; null past both.",
             "title": "Fill"
           },
+          "hint": {
+            "description": "What a press of it holds, a hover away.",
+            "title": "Hint",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its segment's words: one at a time, the count, or Max.",
+            "title": "Label",
+            "type": "string"
+          },
           "pickable": {
             "description": "Whether a press of this depth is admitted now: the control applies, the run admits `set-sample-lookahead` and the next walk can take that many.",
             "title": "Pickable",
@@ -10309,7 +10418,9 @@
         "required": [
           "cells",
           "fill",
-          "pickable"
+          "pickable",
+          "label",
+          "hint"
         ],
         "title": "LookaheadDepth",
         "type": "object"
@@ -10760,17 +10871,6 @@
             "title": "Filable",
             "type": "array"
           },
-          "issuer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issuer"
-          },
           "name": {
             "anyOf": [
               {
@@ -10820,7 +10920,6 @@
         "required": [
           "user_id",
           "tenant_id",
-          "issuer",
           "email",
           "name",
           "provider",
@@ -14401,6 +14500,29 @@
         "title": "PoolSource",
         "type": "string"
       },
+      "PostBulletinPayload": {
+        "additionalProperties": false,
+        "description": "Post a bulletin to every account on this box; only its host may.",
+        "properties": {
+          "pops_up": {
+            "default": false,
+            "description": "Open it at sign-in and on each page load until the account dismisses it.",
+            "title": "Pops Up",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "PostBulletinPayload",
+        "type": "object"
+      },
       "PrefixReading": {
         "additionalProperties": false,
         "description": "A provider's prefix-cache discount as every surface reads it, served whole.",
@@ -14667,35 +14789,6 @@
           "max_campaigns_per_day"
         ],
         "title": "QuotaStatus",
-        "type": "object"
-      },
-      "RacingBlock": {
-        "additionalProperties": false,
-        "description": "The round's standing in its eliminator ``member``'s race.",
-        "properties": {
-          "member": {
-            "title": "Member",
-            "type": "string"
-          },
-          "n_samples": {
-            "title": "N Samples",
-            "type": "integer"
-          },
-          "top": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Top",
-            "type": "array"
-          }
-        },
-        "required": [
-          "member",
-          "n_samples",
-          "top"
-        ],
-        "title": "RacingBlock",
         "type": "object"
       },
       "RaisedCommand": {
@@ -15033,6 +15126,23 @@
           "token_id"
         ],
         "title": "RevokeApiTokenPayload",
+        "type": "object"
+      },
+      "RevokeDelegationPayload": {
+        "additionalProperties": false,
+        "description": "Take back an account's delegation; only the host may.",
+        "properties": {
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "RevokeDelegationPayload",
         "type": "object"
       },
       "RoleScope": {
@@ -15846,13 +15956,13 @@
           "affordable": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "How many more cells the spend limits admit, where money and not the armed depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not.",
+            "description": "How many more cells the spend limits admit, worded, where money and not the armed depth holds the walk; null where it does not.",
             "title": "Affordable"
           },
           "allowed": {
@@ -15941,6 +16051,18 @@
             "$ref": "#/components/schemas/LookaheadCells",
             "description": "The depth the control shows pressed: `max` where the ceiling is armed by name, else `depth`."
           },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the depth in force holds and until when; null where the auto-arm switch is shut (`auto_refusal` says why).",
+            "title": "Scope"
+          },
           "scoring_now": {
             "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
             "title": "Scoring Now",
@@ -15949,21 +16071,13 @@
           "shallow": {
             "anyOf": [
               {
-                "enum": [
-                  "one_at_a_time",
-                  "settled",
-                  "followed",
-                  "no_run",
-                  "past_money",
-                  "past_most"
-                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
+            "description": "Why no deeper press than `depth` is admitted now, worded: the backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
             "title": "Shallow"
           }
         },
@@ -15985,6 +16099,7 @@
           "depths",
           "abreasts",
           "shallow",
+          "scope",
           "flight"
         ],
         "title": "SampleLookahead",
@@ -16121,7 +16236,7 @@
       },
       "ServedBackpressure": {
         "additionalProperties": false,
-        "description": "A provider hold as served: the banked reading with both clocks read at the response.",
+        "description": "A provider hold as served: the banked reading's clocks read at the response, never its epochs.",
         "properties": {
           "at_once": {
             "anyOf": [
@@ -16152,18 +16267,6 @@
             "description": "Seconds the provider has been throttling.",
             "title": "Held For S"
           },
-          "resumes_at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Epoch seconds the episode's cooldown ends; past it, one send probes.",
-            "title": "Resumes At"
-          },
           "resumes_in_s": {
             "anyOf": [
               {
@@ -16175,29 +16278,10 @@
             ],
             "description": "Seconds until the cooldown ends; 0 once it has, where one send probes.",
             "title": "Resumes In S"
-          },
-          "sender": {
-            "title": "Sender",
-            "type": "string"
-          },
-          "since": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Epoch seconds the provider began throttling; None once it answers again and only the cap, climbing back, still holds sends.",
-            "title": "Since"
           }
         },
         "required": [
-          "sender",
           "at_once",
-          "since",
-          "resumes_at",
           "detail",
           "held_for_s",
           "resumes_in_s"
@@ -16205,10 +16289,57 @@
         "title": "ServedBackpressure",
         "type": "object"
       },
+      "ServedBulletin": {
+        "additionalProperties": false,
+        "properties": {
+          "dismissed": {
+            "description": "This account dismissed it.",
+            "title": "Dismissed",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "pops_up": {
+            "description": "Opens on its own until the account dismisses it.",
+            "title": "Pops Up",
+            "type": "boolean"
+          },
+          "posted_at": {
+            "title": "Posted At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "posted_at",
+          "text",
+          "pops_up",
+          "dismissed"
+        ],
+        "title": "ServedBulletin",
+        "type": "object"
+      },
       "ServedDashboard": {
         "additionalProperties": false,
         "description": "A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the\nserving seam can say — the run phase and its producer, the controls armed now, the campaign's\nown meter, and every reading a surface would otherwise decide for itself. Nothing here reaches\ndisk, and every field is required: one builder (``_serve``) states them all, for the head and\nfor a replay alike. What the banked state holds as an INPUT to one of those readings\n(``LiveDashboardState``'s own fields) is not served beside it.",
         "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveNode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node running now: the newest open call's, else the newest open phase's; null unless the cycle is appending."
+          },
           "admission": {
             "$ref": "#/components/schemas/RunAdmission",
             "description": "The verb the run control offers now, its campaign's refusal joined (`admission.py::admitted`), or the sentence where it offers none."
@@ -16216,11 +16347,6 @@
           "at_offset": {
             "default": -1,
             "title": "At Offset",
-            "type": "integer"
-          },
-          "backend_retry_count": {
-            "default": 0,
-            "title": "Backend Retry Count",
             "type": "integer"
           },
           "backend_revision": {
@@ -16337,18 +16463,8 @@
             ],
             "description": "Set where the bench defaults or the treatment the campaign's declaration is a delta over moved since it was declared, under an unchanged origin: this launch runs today's values."
           },
-          "degraded_count": {
-            "default": 0,
-            "title": "Degraded Count",
-            "type": "integer"
-          },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric"
-          },
-          "error_count": {
-            "default": 0,
-            "title": "Error Count",
-            "type": "integer"
           },
           "fork_remainder": {
             "anyOf": [
@@ -16372,6 +16488,19 @@
             ],
             "description": "The call holding the walk and for how long (`held_call`); null until a call has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown."
           },
+          "line": {
+            "description": "The cycle's candidate line, read across its fork chain: every closed round's arms in round order, then the round in flight's while no round file holds it. The bars, the tree strip and the chart are views of it.",
+            "items": {
+              "$ref": "#/components/schemas/LineArm"
+            },
+            "title": "Line",
+            "type": "array"
+          },
+          "live": {
+            "description": "Whether a producer is appending to the cycle now; false on a replay at a moment (`at`). The one liveness: `active`, `walk` and `round_axis.live` follow it.",
+            "title": "Live",
+            "type": "boolean"
+          },
           "lookahead": {
             "$ref": "#/components/schemas/SampleLookahead"
           },
@@ -16382,16 +16511,6 @@
             ],
             "title": "Measured Unit",
             "type": "string"
-          },
-          "measuring_arm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmName"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "metered_line": {
             "description": "This cycle's spend in the campaign's meter, capped or not, a replay included — `domain/spend.py::metered_line`, the CLI's stop line.",
@@ -16507,6 +16626,16 @@
           "sample_coverage": {
             "$ref": "#/components/schemas/SampleCoverage"
           },
+          "series_held": {
+            "description": "The asker named this `series_version` as the one it holds: `rounds` is empty and `line` holds the round in flight's arms alone, so no frame re-sends a closed round.",
+            "title": "Series Held",
+            "type": "boolean"
+          },
+          "series_version": {
+            "description": "The closed series' version: `rounds` and their arms of `line`, as served.",
+            "title": "Series Version",
+            "type": "string"
+          },
           "skip_refusal": {
             "description": "Why `skip-searchpoint` is refused, off the run (`RunState`), which no campaign moves, and its reader (`command_kinds.py::filable`); empty where it is admitted.",
             "title": "Skip Refusal",
@@ -16549,10 +16678,16 @@
               }
             ]
           },
-          "total_backend_calls": {
-            "default": 0,
-            "title": "Total Backend Calls",
-            "type": "integer"
+          "successor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fork a supersede moved this cycle's line to, its cycle id the `value`: what runs now runs there. Null where the line is its own."
           },
           "verification": {
             "description": "Each arm's latest verify and held-out bench pass on this cycle's ledger, in flight or ended; its rows are no round's cells.",
@@ -16602,6 +16737,12 @@
           "caps",
           "overshot",
           "fork_remainder",
+          "live",
+          "active",
+          "successor",
+          "line",
+          "series_version",
+          "series_held",
           "observed",
           "walk",
           "round_axis",
@@ -16831,6 +16972,32 @@
           "max_concurrent_cycles"
         ],
         "title": "SetConcurrentCyclesPayload",
+        "type": "object"
+      },
+      "SetCouponPayload": {
+        "additionalProperties": false,
+        "description": "Set an account's coupon face: dollars and tokens, `unbounded` leaving a unit unbounded; `afresh` starts its draw now. Only the host may.",
+        "properties": {
+          "afresh": {
+            "default": false,
+            "title": "Afresh",
+            "type": "boolean"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "user_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "budget"
+        ],
+        "title": "SetCouponPayload",
         "type": "object"
       },
       "SetSampleLookaheadPayload": {
@@ -17652,11 +17819,12 @@
             "type": "string"
           },
           "cell_means": {
-            "additionalProperties": {
-              "type": "number"
+            "description": "Each side channel's mean over the point's own cells, in display order; a channel none of its cells carries is absent, never 0.",
+            "items": {
+              "$ref": "#/components/schemas/CellMean"
             },
             "title": "Cell Means",
-            "type": "object"
+            "type": "array"
           },
           "comparable": {
             "anyOf": [
@@ -18340,14 +18508,6 @@
             "description": "The address of the candidate a fork hangs from: the arm its mint record names, on the cycle of its parent's line that ran it. Null on a root.",
             "title": "From Candidate"
           },
-          "inherited": {
-            "description": "The addresses of the candidates of each round its line holds from below its fork's cut, round then slot order, on the cycle that ran each: what its bars lead with. Empty on a root.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Inherited",
-            "type": "array"
-          },
           "lens_criterion": {
             "anyOf": [
               {
@@ -18456,8 +18616,7 @@
           "lens_criterion",
           "lens_shift",
           "origin",
-          "from_candidate",
-          "inherited"
+          "from_candidate"
         ],
         "title": "SubtreeCycleEntryFacts",
         "type": "object"
@@ -18755,6 +18914,23 @@
           "campaign_id"
         ],
         "title": "UnarchiveCampaignPayload",
+        "type": "object"
+      },
+      "UnblockEmailPayload": {
+        "additionalProperties": false,
+        "description": "Lift an email's block on this box; only its host may.",
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "UnblockEmailPayload",
         "type": "object"
       },
       "UnstartedCampaign": {
@@ -19401,12 +19577,6 @@
                 "type": "null"
               }
             ]
-          },
-          "warming_up": {
-            "const": true,
-            "default": true,
-            "title": "Warming Up",
-            "type": "boolean"
           }
         },
         "required": [
@@ -19756,6 +19926,38 @@
           }
         },
         "summary": "Activity",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
+    "/api/v1/auth/bulletins": {
+      "get": {
+        "description": "What the host posted to every account, newest first, each marked if this account dismissed it.",
+        "operationId": "bulletins_api_v1_auth_bulletins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBulletins"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Bulletins",
         "tags": [
           "Reads"
         ]
@@ -20189,6 +20391,24 @@
               ],
               "description": "A line of the leaf cycle's own ledger",
               "title": "At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `series_version` of the closed series the asker holds: matching, the answer does not re-send it (`series_held`)",
+              "title": "Series"
             }
           }
         ],
@@ -21116,6 +21336,79 @@
         ]
       }
     },
+    "/api/v1/commands/block-email": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "block_email_api_v1_commands_block_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockEmailPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Block-Email",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -21627,6 +21920,79 @@
         ]
       }
     },
+    "/api/v1/commands/dismiss-bulletin": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "dismiss_bulletin_api_v1_commands_dismiss_bulletin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissBulletinPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Dismiss-Bulletin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -21768,6 +22134,79 @@
           }
         },
         "summary": "Fork-Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/grant-delegation": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "grant_delegation_api_v1_commands_grant_delegation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantDelegationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Grant-Delegation",
         "tags": [
           "Commands"
         ]
@@ -22412,6 +22851,79 @@
         ]
       }
     },
+    "/api/v1/commands/post-bulletin": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "post_bulletin_api_v1_commands_post_bulletin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostBulletinPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Post-Bulletin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/remove-api-key": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -22704,6 +23216,79 @@
         ]
       }
     },
+    "/api/v1/commands/revoke-delegation": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "revoke_delegation_api_v1_commands_revoke_delegation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeDelegationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Revoke-Delegation",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/set-api-key": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -22845,6 +23430,79 @@
           }
         },
         "summary": "Set-Concurrent-Cycles",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-coupon": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "set_coupon_api_v1_commands_set_coupon_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCouponPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set-Coupon",
         "tags": [
           "Commands"
         ]
@@ -23429,6 +24087,79 @@
           }
         },
         "summary": "Unarchive-Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/unblock-email": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "unblock_email_api_v1_commands_unblock_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockEmailPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Unblock-Email",
         "tags": [
           "Commands"
         ]

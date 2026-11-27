@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -10,16 +11,12 @@ import httpx
 
 from promptpotter.application import health, notices
 from promptpotter.application.account import (
-    block_email,
     blocked_emails,
-    grant,
     grants,
-    host_user_id,
-    revoke_grant,
-    set_coupon,
+    local_stores,
     trail_by_email,
-    unblock_email,
 )
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.application.maintenance.landing import land_at_entry
@@ -28,10 +25,20 @@ from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
+from promptpotter.domain.command_kinds import (
+    BlockEmailPayload,
+    CommandPayload,
+    Door,
+    GrantDelegationPayload,
+    PostBulletinPayload,
+    RevokeDelegationPayload,
+    SetCouponPayload,
+    UnblockEmailPayload,
+)
 from promptpotter.domain.layer_fold import UNBOUNDED
-from promptpotter.domain.spend import RATE_PRICED_LABEL, Budget, money_text, usd_text
+from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
-from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
@@ -39,10 +46,11 @@ logger = logging.getLogger(__name__)
 _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _COUPON_USAGE = "/coupon <user_id> <usd|-> <tokens|-> [afresh]"
+_BULLETIN_USAGE = "/bulletin [popup] <text>"
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
     "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
-    f"{_COUPON_USAGE}\n/spend\n/trail <email>"
+    f"{_COUPON_USAGE}\n/spend\n/trail <email>\n{_BULLETIN_USAGE}"
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
@@ -66,29 +74,44 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
     return command, argument
 
 
-def handle_command(command: str, argument: str, actor: str) -> str:
+def handle_command(command: str, argument: str) -> str:
     if command == "blocked":
         emails = blocked_emails()
         return "Blocked:\n" + ("\n".join(emails) if emails else "(nobody)")
     if command in ("block", "unblock"):
         if not argument:
             return f"Usage: /{command} <email>"
-        if command == "block":
-            emails = block_email(argument, actor=actor)
-            verb = "Blocked"
-        else:
-            emails = unblock_email(argument, actor=actor)
-            verb = "Unblocked"
-        return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
+        kind = BlockEmailPayload if command == "block" else UnblockEmailPayload
+        _file(kind, {"email": argument.strip()})
+        return f"{'Blocked' if command == 'block' else 'Unblocked'} {argument.strip().lower()}."
     if command in ("grant", "revoke", "grants"):
-        return _handle_grant_command(command, argument, actor)
+        return _handle_grant_command(command, argument)
     if command == "coupon":
         return _set_coupon(argument)
     if command == "spend":
         return _render_install_spend()
     if command == "trail":
         return _render_trail(argument)
+    if command == "bulletin":
+        return _post_bulletin(argument)
     return _USAGE
+
+
+def _file(model: type[CommandPayload], fields: dict[str, object]) -> None:
+    """A host-admin act, filed at the terminal door as its CLI verb is."""
+    call = CommandCall(PayloadInvalidError.validating(model, fields), door=Door.TERMINAL)
+    asyncio.run(CommandDispatcher(local_stores(tenant=None)).dispatch(call))
+
+
+def _post_bulletin(argument: str) -> str:
+    """The host's word to every account, filed as the terminal's `post-bulletin` is."""
+    first, _, rest = argument.strip().partition(" ")
+    pops_up = first.lower() == "popup"
+    text = (rest if pops_up else argument).strip()
+    if not text:
+        return f"Usage: {_BULLETIN_USAGE}"
+    _file(PostBulletinPayload, {"text": text, "pops_up": pops_up})
+    return f"Posted to every account{', popping up' if pops_up else ''}: {text}"
 
 
 def _render_trail(argument: str) -> str:
@@ -159,13 +182,18 @@ def _set_coupon(argument: str) -> str:
     parts = argument.split()
     if len(parts) not in (3, 4) or parts[3:] not in ([], ["afresh"]):
         return f"Usage: {_COUPON_USAGE}"
-    usd, tokens = (UNBOUNDED if v == "-" else v for v in parts[1:3])
-    face = Budget.model_validate({"usd": usd, "tokens": tokens})
-    grant = set_coupon(default_projects_root(), parts[0], face, afresh=len(parts) == 4)
-    return f"Coupon for {parts[0]}: {money_text(face)}, drawing from {grant.granted_at}."
+    try:
+        budget = {
+            "usd": UNBOUNDED if parts[1] == "-" else float(parts[1]),
+            "tokens": UNBOUNDED if parts[2] == "-" else int(parts[2]),
+        }
+    except ValueError:
+        return f"Usage: {_COUPON_USAGE}"
+    _file(SetCouponPayload, {"user_id": parts[0], "budget": budget, "afresh": len(parts) == 4})
+    return f"Coupon for {parts[0]} set to {parts[1]} usd / {parts[2]} tokens."
 
 
-def _handle_grant_command(command: str, argument: str, actor: str) -> str:
+def _handle_grant_command(command: str, argument: str) -> str:
     if command == "grants":
         held = grants()
         if not held:
@@ -178,22 +206,13 @@ def _handle_grant_command(command: str, argument: str, actor: str) -> str:
     if command == "revoke":
         if not argument:
             return "Usage: /revoke <sub_user_id>"
-        removed = revoke_grant(argument.strip(), actor=actor)
-        return (
-            f"Revoked {argument.strip()}." if removed else f"No delegation for {argument.strip()}."
-        )
+        _file(RevokeDelegationPayload, {"user_id": argument.strip()})
+        return f"Revoked {argument.strip()}."
     parts = argument.split(maxsplit=1)
     if len(parts) < 2:
         return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
-    sub_user_id, caps_csv = parts[0].strip(), parts[1]
-    delegator = host_user_id()
-    if delegator is None:
-        return "Cannot grant: no host account to delegate from (sign in once first)."
-    caps = capabilities_from_names(caps_csv.split(","))
-    if not caps:
-        return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."
-    grant(sub_user_id, delegator=delegator, capabilities=caps, actor=actor)
-    return f"Granted {sub_user_id} [{', '.join(sorted(caps))}] as delegate of {delegator}."
+    _file(GrantDelegationPayload, {"user_id": parts[0].strip(), "capabilities": parts[1]})
+    return f"Granted {parts[0].strip()} [{parts[1]}]."
 
 
 class _Duties:
@@ -249,7 +268,7 @@ def _process_update(update: dict[str, Any], chat_id: str, passphrase: str | None
         return
     command, argument = parsed
     try:
-        reply = handle_command(command, argument, actor=f"telegram:{chat_id}")
+        reply = handle_command(command, argument)
     except Exception as exc:
         # The refusal is the reply: an invalid identity file, a bad argument, a crash alike.
         logger.exception("admin command /%s failed", command)

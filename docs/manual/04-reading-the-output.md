@@ -77,7 +77,7 @@ You don't need to do anything — the optimizer has already handled it. These li
 Each run is a cycle under `.promptpotter/`. When it finishes:
 
 - `export.json` — the winning prompt and configuration, with its provenance
-- `log.md` — a per-round digest
+- `readout.log` — every round's block, and at the stop the spend per node, the optimizer's review and the hard samples
 - `python -m promptpotter held-out` — scores the winner on held-out samples, the headline number
 - `python -m promptpotter export --tier package` — the winner as a folder another agent opens
 

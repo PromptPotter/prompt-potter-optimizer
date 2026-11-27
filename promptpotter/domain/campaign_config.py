@@ -367,7 +367,7 @@ class CampaignConfig(StrictModel):
     )
     hard_sample_order: Annotated[HardSampleOrder, Knob(Estimand.DISPLAY)] = Field(
         description="Which key ranks the hard-sample leaderboard — the heatmap, the table "
-        "and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the "
+        "and the `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts by the "
         "queue mechanism's acquisition score (`pick_value`: decision-information gain + δ "
         "learning gain) read on the cycle's ruler at the frontier's stamped ability, "
         "contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, "

@@ -63,13 +63,9 @@ def _fork_sibling_setup(
     campaign_store = stores.campaigns
     campaign = campaign_store.campaign(child.campaign_id)
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
-    babysat = CycleConfig.laid(
-        declared_config(stores, campaign).config,
-        [
-            *cycle_config(stores, CampaignCycle(campaign, parent.cycle_id)).spans,
-            LaidSpan(start=start, scoring_lock=None),
-        ],
-    ).steers_outside(permitted_narrowing(stores, campaign))
+    babysat = fork_config(stores, CampaignCycle(campaign, parent.cycle_id), start).steers_outside(
+        permitted_narrowing(stores, campaign)
+    )
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
@@ -93,6 +89,15 @@ def _fork_sibling_setup(
             start=start,
             babysat=babysat,
         ),
+    )
+
+
+def fork_config(stores: Stores, parent: CampaignCycle, start: CycleStart | None) -> CycleConfig:
+    """What a fork of *parent* under *start* runs, read before its cut: the declaration under its
+    parent's line and its own start."""
+    return CycleConfig.laid(
+        declared_config(stores, parent.campaign).config,
+        [*cycle_config(stores, parent).spans, LaidSpan(start=start, scoring_lock=None)],
     )
 
 
@@ -160,14 +165,16 @@ class ForkCut:
             stores.mark_superseded(self.parent, self.child.cycle_id)
         return self.child.cycle_id
 
-    def withdraw(self, stores: Stores, job_registry: JobRegistry) -> None:
-        # A cleanup fault never masks the refusal its caller re-raises; a cut it keeps lists.
+    def withdraw(self, stores: Stores, job_registry: JobRegistry, refusal: BaseException) -> None:
+        # A cleanup fault never masks *refusal*, which its caller re-raises: it rides it as a note.
         child = self.child
         try:
             with destroying(stores, job_registry, child.campaign_id, cycle_id=child.cycle_id):
                 cleanup_stub_fork_if_empty(campaign_store=stores.campaigns, hop=child)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as fault:  # noqa: BLE001
+            refusal.add_note(
+                f"the fork's stub cycle {child.cycle_id} was kept: its withdrawal failed ({fault!r})"
+            )
 
 
 def cut_fork(
@@ -276,7 +283,7 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         stores,
         hop,
         at if keep else 0,
-        trigger=ForkTrigger.OPERATOR_REWIND if keep else ForkTrigger.OPERATOR_STEERED,
+        trigger=operator_trigger(payload),
         reason=payload.reason
         or (
             f"operator-applied from round {at} of {hop.cycle_id}"
@@ -287,6 +294,10 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         named=_named(payload),
         start=operator_start(stores, payload, start),
     )
+
+
+def operator_trigger(payload: ForkCyclePayload) -> ForkTrigger:
+    return ForkTrigger.OPERATOR_REWIND if payload.keep_rounds else ForkTrigger.OPERATOR_STEERED
 
 
 def _named(payload: ForkCyclePayload) -> RoundArm | None:

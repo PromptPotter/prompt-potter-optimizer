@@ -4,7 +4,6 @@ import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
 import { useWorkspace } from "@/lib/state/workspace";
 import {
-  MOVEMENT_CLASS,
   orderAtStep,
   sameSampleSet,
   seedFromOrder,
@@ -13,7 +12,7 @@ import {
   unionFirstAppearance,
 } from "@/lib/derivations";
 import { fmtSampleTag } from "@/lib/format";
-import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types";
+import { SAMPLE_MOVEMENT_LABELS, SAMPLE_MOVEMENT_TONE } from "@/lib/api/types";
 
 interface Step {
   round: number;
@@ -73,7 +72,7 @@ export function SeriesView({
                   return (
                     <HoverCard key={sid} className="st-hover" content={<StepOrderCard step={step} />}>
                       <span
-                        className={cx("st-sq", MOVEMENT_CLASS[kind], "st-series-cell")}
+                        className={cx("st-sq", `tone-${SAMPLE_MOVEMENT_TONE[kind]}`, "st-series-cell")}
                         aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
                         {...pressable(() =>
                           setViewKeys({ samples: seedFromOrder(orderAtStep(r.selection, sid, p), selectMode) }),
@@ -139,7 +138,7 @@ function Legend() {
   return (
     <div className="st-legend">
       {swatch("st-sq new", `${SAMPLE_MOVEMENT_LABELS.new} / ${SAMPLE_MOVEMENT_LABELS.readded}`)}
-      {swatch(cx("st-sq", MOVEMENT_CLASS.gained), SAMPLE_MOVEMENT_LABELS.gained)}
+      {swatch(cx("st-sq", `tone-${SAMPLE_MOVEMENT_TONE.gained}`),SAMPLE_MOVEMENT_LABELS.gained)}
       {swatch("st-sq lost", SAMPLE_MOVEMENT_LABELS.lost)}
       {swatch("st-sq kept", SAMPLE_MOVEMENT_LABELS.kept)}
       {swatch("st-sq absent", "not in bank")}

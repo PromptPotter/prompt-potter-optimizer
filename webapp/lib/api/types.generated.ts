@@ -38,7 +38,6 @@ export interface NextAct {
 
 export interface HealthResponse {
   status: string;
-  service: string;
   timestamp: string;
   /** `APP_VERSION` — the browser's one source of it */
   version: string;
@@ -64,7 +63,6 @@ export interface Said {
 export interface MeResponse {
   user_id: string;
   tenant_id: string;
-  issuer: string | null;
   email: string | null;
   name: string | null;
   provider: string | null;
@@ -73,7 +71,7 @@ export interface MeResponse {
   capabilities: string[];
   /** The kinds this account may file (`command_kinds.py::filable`): what an act on
    * the account (its campaigns' lifecycle, its usage, its keys) is drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
   access_state: 'active' | 'blocked';
   terms_version: string;
   terms_accepted_version: string | null;
@@ -83,6 +81,21 @@ export interface MeResponse {
 export interface ConnectedAccount {
   provider: string;
   email: string | null;
+}
+
+export interface AccountBulletins {
+  /** Newest first. */
+  bulletins: ServedBulletin[];
+}
+
+export interface ServedBulletin {
+  id: string;
+  posted_at: string;
+  text: string;
+  /** Opens on its own until the account dismisses it. */
+  pops_up: boolean;
+  /** This account dismissed it. */
+  dismissed: boolean;
 }
 
 /** The caller's per-user preferences. */
@@ -131,31 +144,16 @@ export interface CouponStatus {
  * life. */
 export interface LifetimeSpend {
   /** What the providers REPORTED they billed, over every cycle, fork and forwarded
-   * inner run, plus what a deleted cycle banked. Never an estimate: a call
-   * priced off our rate table is `rate_priced_usd`, a send whose bill never
-   * came `unreported_usd`. */
-  billed_usd: number;
-  /** What our rate table prices the calls no provider reported a cost for. Not
-   * spent — an estimate, shown beside `billed_usd` and never added into it.
-   * It binds the ceiling beside `billed_usd`. */
-  rate_priced_usd: number;
-  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
-   * beside the bill. */
-  calls_rate_priced: boolean;
-  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
-   * the token ceiling is then the binding one. */
-  bill_is_floor: boolean;
-  /** Tokens no provider billed and no rate on file prices. */
-  unpriced_tokens: number;
+   * inner run, plus what a deleted cycle banked, as a person reads it: `≥`
+   * where a token no rate prices makes it a floor. Never an estimate: a call
+   * priced off our rate table and a send whose bill never came are `caveats`. */
+  bill: string;
   /** Every token the sends billed, priced or not: what a token allowance counts. */
   billed_tokens: number;
-  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
-   * account than `billed_usd` says. */
-  sends_unreported: boolean;
-  /** The most that sends which ended with no bill (cancelled, timed out, killed
-   * with a run) may have cost, at the bounds they were admitted on. Not spent
-   * — unknown. It binds the ceiling beside `billed_usd`. */
-  unreported_usd: number;
+  /** What the allowance draws beyond the bill, a line each: the unpriced tokens,
+   * the rate-priced calls, the unreported sends; empty where the bill is the
+   * whole story. */
+  caveats: string[];
 }
 
 /** Who pays this account's sends on one provider. */
@@ -178,25 +176,14 @@ export interface AccountKey {
 /** Time-bucketed spend / requests / tokens over the requested window. */
 export interface ActivityResponse {
   window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
-  /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
-   * the provider that billed the call, and whether the host's key under the
-   * coupon or the account's own sent it (`Bill.key_source`). */
-  group_by: 'model' | 'api_key';
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable
    * across the buckets. A call outside the optimizer's own carries its kind. */
   series_labels: string[];
-  /** What providers reported they billed. */
-  total_spend_usd: number;
-  /** What our rate table prices the window's calls no provider billed. Never spent,
-   * and in no series. */
-  total_rate_priced_usd: number;
-  /** Some call in the window was priced at our rate, so there is a
-   * `total_rate_priced_usd` to show beside the bill. */
-  calls_rate_priced: boolean;
-  /** The two totals understate: a call in the window carries neither a bill nor a
-   * rate's price. */
-  bill_is_floor: boolean;
+  /** What providers reported they billed in the window, `≥` where a call carries
+   * neither a bill nor a rate's price, then what our rate table prices the
+   * calls no provider billed: never spent, and in no series. */
+  bill: string;
   total_tokens: number;
   total_requests: number;
   /** The tallest bucket's billed USD — the scale the spend bars are drawn against.
@@ -211,8 +198,8 @@ export interface ActivityResponse {
 /** One time bucket of the Activity pane's three stacked bar charts. */
 export interface ActivityBucket {
   /** Billed USD per `series_labels` entry. A call no provider billed adds nothing
-   * here and still counts in the other two; one no rate prices either sets
-   * the response's `bill_is_floor`. */
+   * here and still counts in the other two; one no rate prices either marks
+   * the response's `bill` a floor. */
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
@@ -313,10 +300,12 @@ export interface MachineSlot {
   started_at: string | null;
 }
 
-/** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
+/** A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names
+ * the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
   draft_id: string | null;
+  campaign_id: string | null;
   kind: 'campaign_launch';
 }
 
@@ -1286,7 +1275,7 @@ export interface SubtreeCampaignFacts {
   /** The kinds this read's reader may file (`command_kinds.py::filable`): what an
    * act no read offers (limits, look-ahead, a fork, a scenario, a bank) is
    * drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
 }
 
 /** A cycle as the subtree read serves it: its rounds under it. */
@@ -1367,10 +1356,6 @@ export interface SubtreeCycleEntryFacts {
   /** The address of the candidate a fork hangs from: the arm its mint record names,
    * on the cycle of its parent's line that ran it. Null on a root. */
   from_candidate: string | null;
-  /** The addresses of the candidates of each round its line holds from below its
-   * fork's cut, round then slot order, on the cycle that ran each: what its
-   * bars lead with. Empty on a root. */
-  inherited: string[];
 }
 
 /** What the request's lens did to one cycle's candidate ordering. */
@@ -1717,18 +1702,13 @@ export interface ServedDashboard {
   optimizer_step: string | null;
   stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
-  measuring_arm: ArmName | null;
   rounds: ServedRound[];
   /** Each arm's latest verify and held-out bench pass on this cycle's ledger, in
    * flight or ended; its rows are no round's cells. */
   verification: VerificationMark[];
   composite_fitness_formula: string | null;
   display_metric: 'fitness' | 'composite' | 'ability';
-  degraded_count: number;
-  error_count: number;
-  backend_retry_count: number;
   recent_backend_warnings: BackendWarning[];
-  total_backend_calls: number;
   current_query_payload: string | null;
   backpressure: ServedBackpressure | null;
   measured_unit: 'sample' | 'cell';
@@ -1798,6 +1778,26 @@ export interface ServedDashboard {
   overshot: Overshoot | null;
   /** What an offshoot of this cycle starts under; null on a replay. */
   fork_remainder: ForkRemainder | null;
+  /** Whether a producer is appending to the cycle now; false on a replay at a
+   * moment (`at`). The one liveness: `active`, `walk` and `round_axis.live`
+   * follow it. */
+  live: boolean;
+  /** The node running now: the newest open call's, else the newest open phase's;
+   * null unless the cycle is appending. */
+  active: ActiveNode | null;
+  /** The fork a supersede moved this cycle's line to, its cycle id the `value`:
+   * what runs now runs there. Null where the line is its own. */
+  successor: Said | null;
+  /** The cycle's candidate line, read across its fork chain: every closed round's
+   * arms in round order, then the round in flight's while no round file holds
+   * it. The bars, the tree strip and the chart are views of it. */
+  line: LineArm[];
+  /** The closed series' version: `rounds` and their arms of `line`, as served. */
+  series_version: string;
+  /** The asker named this `series_version` as the one it holds: `rounds` is empty
+   * and `line` holds the round in flight's arms alone, so no frame re-sends a
+   * closed round. */
+  series_held: boolean;
   /** The arm a surface following the run shows (`_observed`); null before any arm
    * exists. */
   observed: ArmName | null;
@@ -2009,17 +2009,11 @@ export interface BackendWarning {
   detail: string | null;
 }
 
-/** A provider hold as served: the banked reading with both clocks read at the
- * response. */
+/** A provider hold as served: the banked reading's clocks read at the response,
+ * never its epochs. */
 export interface ServedBackpressure {
-  sender: string;
   /** Sends that may be out at once; None: uncapped. */
   at_once: number | null;
-  /** Epoch seconds the provider began throttling; None once it answers again and
-   * only the cap, climbing back, still holds sends. */
-  since: number | null;
-  /** Epoch seconds the episode's cooldown ends; past it, one send probes. */
-  resumes_at: number | null;
   /** The provider's own words, from the throttle that opened it. */
   detail: string;
   /** Seconds the provider has been throttling. */
@@ -2074,7 +2068,6 @@ export interface CatchUpLogEntry {
 /** The round in flight, rebuilt whole on every persist. */
 export interface CurrentRound {
   round: number;
-  active_node: string | null;
   /** The optimizer node every scoring pass of the run runs as — origin, round,
    * bench and verify alike — as its wiring declares it. */
   measurement_node: string;
@@ -2083,7 +2076,6 @@ export interface CurrentRound {
   inner: CycleHop | null;
   candidates: LiveCandidate[];
   nodes: Record<string, NodeBlock>;
-  racing: RacingBlock | null;
 }
 
 /** A candidate of the round in flight, with its sample tape beside its served
@@ -2098,6 +2090,9 @@ export interface LiveCandidate {
   evidence_grounding: EvidenceGrounding | null;
   pipeline_overlay: Record<string, Record<string, unknown>> | null;
   samples: DashboardSample[];
+  /** The positions of this arm's cells out now, oldest first: arms walking abreast
+   * each carry their own; empty between its walks. */
+  open_cells: number[];
 }
 
 /** One prompt node's loci: its fields by name and its shots, both written only
@@ -2243,13 +2238,6 @@ export interface RepairAttempt {
   broke: string;
 }
 
-/** The round's standing in its eliminator ``member``'s race. */
-export interface RacingBlock {
-  member: string;
-  n_samples: number;
-  top: Record<string, unknown>[];
-}
-
 /** Every sample a closed round measured, in id order: the set a sample-set picker
  * offers. */
 export interface SampleCoverage {
@@ -2352,9 +2340,9 @@ export interface SampleLookahead {
   scoring_now: boolean;
   /** The deepest press the next walk can take. */
   pick_max: number;
-  /** How many more cells the spend limits admit, where money and not the armed
-   * depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not. */
-  affordable: number | null;
+  /** How many more cells the spend limits admit, worded, where money and not the
+   * armed depth holds the walk; null where it does not. */
+  affordable: string | null;
   /** What each call out holds of the ceiling; null where no book binds. */
   cell_reserve_usd: number | null;
   /** Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead
@@ -2369,11 +2357,13 @@ export interface SampleLookahead {
   /** Each count of candidates at once the control draws, 1 to `ceiling`, then `all`
    * where `ceiling` exceeds 1. */
   abreasts: LookaheadAbreastStep[];
-  /** Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the
-   * backend's ceiling, the cycle settled, an enclosing run's Max speed, no
-   * run to hold calls for, money, or the stop rules; null where a deeper one
-   * is. */
-  shallow: 'one_at_a_time' | 'settled' | 'followed' | 'no_run' | 'past_money' | 'past_most' | null;
+  /** Why no deeper press than `depth` is admitted now, worded: the backend's
+   * ceiling, the cycle settled, an enclosing run's Max speed, no run to hold
+   * calls for, money, or the stop rules; null where a deeper one is. */
+  shallow: string | null;
+  /** What the depth in force holds and until when; null where the auto-arm switch
+   * is shut (`auto_refusal` says why). */
+  scope: string | null;
   /** The look-ahead now in one line: calls out, both axes in force and their scope,
    * the calls cut so far. */
   flight: string;
@@ -2389,6 +2379,10 @@ export interface LookaheadDepth {
   /** Whether a press of this depth is admitted now: the control applies, the run
    * admits `set-sample-lookahead` and the next walk can take that many. */
   pickable: boolean;
+  /** Its segment's words: one at a time, the count, or Max. */
+  label: string;
+  /** What a press of it holds, a hover away. */
+  hint: string;
 }
 
 /** One count of candidates sending at once the look-ahead control offers. */
@@ -2397,6 +2391,10 @@ export interface LookaheadAbreastStep {
   /** Whether a press of this count is admitted now: the control applies and the run
    * admits `set-sample-lookahead`. */
   pickable: boolean;
+  /** Its segment's words: one after another, the count, or All. */
+  label: string;
+  /** What a press of it sends, a hover away. */
+  hint: string;
 }
 
 /** Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's,
@@ -2464,6 +2462,21 @@ export interface ForkRemainder {
   rounds: number | null;
 }
 
+/** The optimizer's node running now: a target's calls land on its own ledger,
+ * never this one. */
+export interface ActiveNode {
+  node: string;
+}
+
+/** One arm of a cycle's served line, a closed row and a live one in one shape. */
+export interface LineArm {
+  reading: ArmReading;
+  /** The candidate's address on the cycle that ran it. */
+  address: string;
+  /** `LiveCandidate.open_cells`; empty on a closed round. */
+  open_cells: number[];
+}
+
 /** The scoring walk of the arm being measured, on its own order, plus a cursor.
  * Its cells taken lead, so a race that re-chooses its rows at a decision
  * never moves a taken cell; past the cursor is chosen, never promised — an
@@ -2501,7 +2514,6 @@ export interface RoundAxis {
  * cycle is without one. The run phase is served here as everywhere — a body
  * with none is what lets a browser invent one. */
 export interface WarmingDashboard {
-  warming_up: true;
   campaign_id: string;
   cycle_id: string;
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
@@ -2703,7 +2715,6 @@ export interface FileContentResponse {
 
 /** The whole read for one selection of subjects — recomputed on every fetch. */
 export interface Evidence {
-  generated_at: string;
   scorer_id: string;
   subjects: SubjectReading[];
   /** How many of `subjects` the selected metric reads on at least one cell. */
@@ -2777,7 +2788,9 @@ export interface SubjectReading {
   cycle_spend_usd: number | null;
   cycle_rounds_scored: number;
   spend_to_round: Record<string, number>;
-  cell_means: Record<string, number>;
+  /** Each side channel's mean over the point's own cells, in display order; a
+   * channel none of its cells carries is absent, never 0. */
+  cell_means: CellMean[];
   values: Record<string, number>;
   /** The subject's values on the cells it was graded on HELD OUT — its bench pass,
    * which only a round's selection has — keyed like `values` and never pooled
@@ -2809,6 +2822,18 @@ export interface WinnerChainPoint {
   n_cells: number;
 }
 
+/** One side channel's mean over a point's cells, worded once for every reader. */
+export interface CellMean {
+  /** The channel, for code to pair two points' means on. */
+  key: string;
+  label: string;
+  value: number;
+  /** `value` in the channel's unit. */
+  text: string;
+  /** Shown in the lead row, above the rest. */
+  lead: boolean;
+}
+
 /** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways
  * to fail and a reader must be able to tell them apart. */
 export interface Comparability {
@@ -2826,8 +2851,8 @@ export interface HeadToHead {
   covers_selection: boolean;
   guard: PairGuard;
   headline: 'fitness' | 'composite';
+  /** Null where it gives none: `verdict_line` says why */
   verdict: boolean | null;
-  verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
   /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
    * oldest arm as `a`. */
   contrasts: ArmContrast[];
@@ -3566,8 +3591,8 @@ export interface CampaignConfig {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability';
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -4296,8 +4321,8 @@ export interface ConfigEdit {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -4976,6 +5001,11 @@ export interface BankSnippetPayload {
   experiment: string;
 }
 
+/** Refuse every sign-in of an email on this box; only its host may. */
+export interface BlockEmailPayload {
+  email: string;
+}
+
 /** Stop a command still acting, by its id: a verify or bench pass stops at its
  * next cell and answers over what it measured. One that ended is left as it
  * ended. */
@@ -5037,6 +5067,12 @@ export interface DeleteCyclePayload {
  * workspace. */
 export interface DiscardDraftPayload {
   draft_id: string;
+}
+
+/** Dismiss one bulletin for the caller's account: it pops up no more, and the
+ * list marks it. */
+export interface DismissBulletinPayload {
+  bulletin_id: string;
 }
 
 /** The cut, and the shape of the fork's first run (``mode``) — one act, so one
@@ -5110,6 +5146,13 @@ export interface ConfigOverrides {
   budget: Budget;
   nodes: Record<string, ManifestNodeOverlay>;
   scoring: string | Record<string, string> | null;
+}
+
+/** Delegate capabilities, named by a comma-separated list, from the host's
+ * account to another; only its host may. */
+export interface GrantDelegationPayload {
+  user_id: string;
+  capabilities: string;
 }
 
 /** Grade the campaign's origin and its selection on the held-out bench rows. */
@@ -5230,8 +5273,8 @@ export interface CampaignLayer {
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts
+   * by the queue mechanism's acquisition score (`pick_value`: decision-
    * information gain + δ learning gain) read on the cycle's ruler at the
    * frontier's stamped ability, contested-at-the-frontier samples first;
    * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
@@ -5424,6 +5467,13 @@ export interface PauseCyclePayload {
   reason: string;
 }
 
+/** Post a bulletin to every account on this box; only its host may. */
+export interface PostBulletinPayload {
+  text: string;
+  /** Open it at sign-in and on each page load until the account dismisses it. */
+  pops_up: boolean;
+}
+
 /** Drop the caller's key for a provider; its next send there draws the coupon
  * again. */
 export interface RemoveApiKeyPayload {
@@ -5457,6 +5507,11 @@ export interface RevokeApiTokenPayload {
   token_id: string;
 }
 
+/** Take back an account's delegation; only the host may. */
+export interface RevokeDelegationPayload {
+  user_id: string;
+}
+
 /** Hold the caller's own key for a provider: its sends there go out on it, past
  * the coupon. Never served back, and recorded masked. */
 export interface SetApiKeyPayload {
@@ -5469,6 +5524,14 @@ export interface SetApiKeyPayload {
 export interface SetConcurrentCyclesPayload {
   /** The new limit. */
   max_concurrent_cycles: number;
+}
+
+/** Set an account's coupon face: dollars and tokens, `unbounded` leaving a unit
+ * unbounded; `afresh` starts its draw now. Only the host may. */
+export interface SetCouponPayload {
+  user_id: string;
+  budget: Budget;
+  afresh: boolean;
 }
 
 /** Raise or lower an existing cycle's spend, token, round or wall-clock bound, or
@@ -5593,6 +5656,11 @@ export interface UnarchiveCampaignPayload {
   reason: string;
 }
 
+/** Lift an email's block on this box; only its host may. */
+export interface UnblockEmailPayload {
+  email: string;
+}
+
 /** ``samples`` omitted is the ANSWER, not an absence: the count is derived from
  * the per-candidate round budget and the rounds run since this cycle's last
  * verification. A larger explicit count is refused, naming the budget — which
@@ -5627,10 +5695,10 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Every command kind, in its table's order (domain/command_kinds.py::CommandKind).
-export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
+export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "post-bulletin", "dismiss-bulletin", "block-email", "unblock-email", "grant-delegation", "revoke-delegation", "set-coupon", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "dismiss-bulletin" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5643,6 +5711,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
+  "block-email": CommandSent<BlockEmailPayload, "email">;
   "cancel": CommandSent<CancelPayload, "command_id">;
   "cancel-queued": CommandSent<CancelQueuedRunPayload, "job_id">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -5650,8 +5719,10 @@ export interface CommandPayloads {
   "delete-campaign": CommandSent<DeleteCampaignPayload, "campaign_id">;
   "delete-cycle": CommandSent<DeleteCyclePayload, "campaign_id" | "cycle_id">;
   "discard-draft": CommandSent<DiscardDraftPayload, "draft_id">;
+  "dismiss-bulletin": CommandSent<DismissBulletinPayload, "bulletin_id">;
   "edit-draft-campaign": CommandSent<EditDraftCampaignPayload, "draft_id" | "patch">;
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
+  "grant-delegation": CommandSent<GrantDelegationPayload, "user_id" | "capabilities">;
   "head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "held-out": CommandSent<HeldOutPayload, "campaign_id">;
   "list-api-tokens": CommandSent<ListApiTokensPayload, never>;
@@ -5660,12 +5731,15 @@ export interface CommandPayloads {
   "open-dataset-draft": CommandSent<OpenDatasetDraftPayload, "dataset_name">;
   "open-origin-draft": CommandSent<OpenOriginDraftPayload, "origin_id">;
   "pause": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
+  "post-bulletin": CommandSent<PostBulletinPayload, "text">;
   "remove-api-key": CommandSent<RemoveApiKeyPayload, "provider">;
   "rename-campaign": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
   "revoke-api-token": CommandSent<RevokeApiTokenPayload, "token_id">;
+  "revoke-delegation": CommandSent<RevokeDelegationPayload, "user_id">;
   "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
+  "set-coupon": CommandSent<SetCouponPayload, "user_id" | "budget">;
   "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id">;
   "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
   "set-user-settings": CommandSent<SetUserSettingsPayload, "demo_mode_enabled">;
@@ -5674,6 +5748,7 @@ export interface CommandPayloads {
   "start-run": CommandSent<StartRunPayload, "campaign_id" | "cycle_id">;
   "submit-arms": CommandSent<SubmitArmsPayload, "campaign_id" | "cycle_id">;
   "unarchive-campaign": CommandSent<UnarchiveCampaignPayload, "campaign_id">;
+  "unblock-email": CommandSent<UnblockEmailPayload, "email">;
   "verify-candidate": CommandSent<VerifyCandidatePayload, "campaign_id" | "cycle_id" | "candidate_id">;
 }
 
@@ -5682,6 +5757,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
+  "block-email": CommandAcceptedBody;
   "cancel": CommandAcceptedBody;
   "cancel-queued": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;
@@ -5689,8 +5765,10 @@ export interface CommandResponses {
   "delete-campaign": CommandAcceptedBody;
   "delete-cycle": CommandAcceptedBody;
   "discard-draft": CommandAcceptedBody;
+  "dismiss-bulletin": CommandAcceptedBody;
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": LaunchAnswer;
+  "grant-delegation": CommandAcceptedBody;
   "head-to-head": LaunchAnswer;
   "held-out": BenchScore;
   "ingest-upload": DraftCampaignWire;
@@ -5700,12 +5778,15 @@ export interface CommandResponses {
   "open-dataset-draft": DraftCampaignWire;
   "open-origin-draft": DraftCampaignWire;
   "pause": CommandAcceptedBody;
+  "post-bulletin": CommandAcceptedBody;
   "remove-api-key": CommandAcceptedBody;
   "rename-campaign": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
   "revoke-api-token": CommandAcceptedBody;
+  "revoke-delegation": CommandAcceptedBody;
   "set-api-key": AccountKey;
   "set-concurrent-cycles": CommandAcceptedBody;
+  "set-coupon": CommandAcceptedBody;
   "set-limits": ArmedCaps;
   "set-sample-lookahead": CommandAcceptedBody;
   "set-user-settings": UserSettings;
@@ -5714,6 +5795,7 @@ export interface CommandResponses {
   "start-run": LaunchAnswer;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
+  "unblock-email": CommandAcceptedBody;
   "verify-candidate": PassGradedRecord | VerifySaturated;
 }
 
@@ -5724,6 +5806,7 @@ export const READ_ROUTES = {
   "archive-datasets": "/workspace/archive/datasets",
   "backend-health": "/backends/{backend_id}/health",
   "backends": "/backends",
+  "bulletins": "/auth/bulletins",
   "campaign-pipeline": "/campaigns/{campaign_id}/pipeline",
   "campaign-storage": "/campaigns/{campaign_id}/storage",
   "command": "/commands/{command_id}",
@@ -5764,7 +5847,197 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "d0cd12733ded8080";
+export const SERVED_CONTRACT = "dc7ad283e12ee81e";
+
+// Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
+export interface ReadQueries {
+  "activity": {
+    window?: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
+    /** `model` (the exact model string) or `api_key` (the provider that billed the
+     * call, and whether the host's key or the caller's own sent it). */
+    group_by?: 'model' | 'api_key';
+  };
+  "campaign-pipeline": {
+    /** Searchpoint subject (`Subject.parse` grammar); defaults to the campaign root */
+    at?: string;
+  };
+  "cycle-dashboard": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+    /** A line of the leaf cycle's own ledger */
+    at?: number | null;
+    /** The `series_version` of the closed series the asker holds: matching, the
+     * answer does not re-send it (`series_held`) */
+    series?: string | null;
+  };
+  "cycle-events": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+  };
+  "cycle-export": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+    tier: 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
+  };
+  "cycle-file": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+    scope: 'cycle' | 'campaign';
+    /** Relative path under the chosen scope root */
+    path: string;
+  };
+  "cycle-files": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+  };
+  "cycle-round": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+    /** A line of the leaf cycle's own ledger */
+    at?: number | null;
+  };
+  "cycle-round-audit": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+  };
+  "dataset-cell": {
+    /** The answer's address in the log */
+    answer: string;
+  };
+  "dataset-cells": {
+    /** Samples per page. */
+    limit?: number;
+    /** Cap on unmeasured samples kept in the ranking; None = no trim. */
+    max_unmeasured?: number | null;
+    /** dataset=cross-campaign; campaign=the cycle holding the campaign's line (needs
+     * campaign_id); cycle=one cycle (needs both ids). */
+    scope?: 'cycle' | 'campaign' | 'dataset';
+    /** Required when scope is campaign or cycle. */
+    campaign_id?: string | null;
+    /** Required when scope=cycle. */
+    cycle_id?: string | null;
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. Present, every scope is read
+     * from the inner sandbox; needs campaign_id + cycle_id (the root hop) to
+     * walk from. */
+    descend?: string | null;
+    /** Override the ranking key for this read; unset, the dataset's
+     * `CampaignConfig.hard_sample_order`. The resolved value comes back on
+     * `order`. */
+    order?: 'info_gain' | 'difficulty' | null;
+    /** Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's
+     * candidates carry one; a dataset-scope column does not, so there it keeps
+     * nothing. */
+    candidate_id?: string | null;
+    /** Keep only this round's cells. A dataset-scope column carries no round, so
+     * there it keeps nothing. */
+    round?: number | null;
+    /** Keep only cells with this mark. */
+    status?: 'HIT' | 'MISS' | 'ERR' | 'UNSC' | null;
+    /** Replay scope=cycle to this line of the cycle's own ledger — the dashboard
+     * route's `at`: the candidates named and the cells walked by then. Refused
+     * on any other scope, which no single ledger offset addresses. */
+    at?: number | null;
+  };
+  "evidence": {
+    /** Subjects to pool, one per repetition of the parameter:
+     * `campaign:<campaign_id>` (its root origin),
+     * `cycle:<campaign_id>/<cycle_id>` (one branch, read at its last elected
+     * winner) or `candidate:<campaign_id>/<cycle_id>/r<round>/<candidate_id>`
+     * (one searchpoint, at its round). May span campaigns and datasets, which
+     * the comparability verdict then reports on.  An L4 inner run is addressed
+     * like any other, plus the sandbox chain it lives in:
+     * `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as
+     * `?descend=` because it is the same question. A sandbox is structurally an
+     * ordinary projects tree, so every kind above resolves inside one
+     * unchanged.  A MASK rides the address, `;`-separated, so the record and
+     * the counterfactual can be two channels of one read: `;samples=3,7,11`
+     * restricts every value to those samples, and `;lens=score:<formula>`
+     * (cycles only) re-decides the branch's elections under another criterion
+     * and reads it at the winner that would have stood. The response carries
+     * what that changed in `subjects[].scenario`, worded once as
+     * `scenario.said`, its caveat the said's detail. */
+    subject?: string[];
+    /** Expand to one `campaign:` subject per campaign measuring the bank this dataset
+     * name labels now, in addition to any named by `subject`. Matched on the
+     * bank hash each manifest declares, so it catches an A/B arm, a fork and a
+     * rename, and two banks under one name never pool. */
+    dataset?: string;
+    /** Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects
+     * against its own campaign's origin, keyed on `sp_hash` so a prompt-only
+     * edit ranks like a config one. Rows pool within ONE campaign and never
+     * across two — they share no anchor to be compared through. OFF by default
+     * because it is the widest walk here: the roster half reads one document
+     * per subject, while this opens EVERY round of every campaign selected.
+     * Scored on the SELECTED metric, in its units. */
+    ranking?: boolean;
+    /** Also serve the branch standing behind each cycle / candidate subject — the
+     * winner chain from its origin to its head, each point read on its own
+     * cells. OFF by default for the same reason as `ranking`: every point past
+     * the origin opens a round file. A campaign subject serves none, having no
+     * branch. */
+    winner_chain?: boolean;
+    /** Also serve WHAT each searchpoint is — one flat `key -> value` map over its
+     * RESOLVED node config plus its prompt fields, which is what lines two of
+     * them up against each other. OFF by default because a prompt field is the
+     * largest thing this read puts on the wire and a four-channel comparison
+     * carries four. */
+    config?: boolean;
+    /** Which number to compare on: a key from the catalogue the response echoes back,
+     * or `expr:<formula>` composed over `metric.namespace`. Both are resolved
+     * against THIS selection: a metric no selected subject carries is not
+     * offered, and `measurand` is the seed's own lift where the cells carry one
+     * and the cell's own fitness where a cell is a sample. */
+    metric?: string;
+    /** Cross two of the factors in `factors` and serve the POOLED value at each
+     * coordinate — `dataset,llm_only.model`. Answers 'which combination', where
+     * the factor marginals answer 'which level on average'. Every other factor
+     * is marginalised into the cells and named in `grid.marginalised`; to hold
+     * one fixed, narrow `subject` to its level instead, so the server pools
+     * over what is actually being looked at. Requested rather than served for
+     * all pairs because a roster varying on fifteen keys has 105 of them. Two
+     * axes at any number of factors. */
+    grid?: string;
+  };
+  "hierarchy": {
+    /** The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop,
+     * the hierarchy address's `inside` byte-exact. */
+    descend?: string | null;
+    /** Filter to one dataset */
+    dataset?: string | null;
+    /** 'active' (default), 'archived' or 'deleted' — the visibility intent;
+     * 'unstarted' — the open check-ins; or 'all' */
+    lifecycle?: 'unstarted' | 'active' | 'archived' | 'deleted' | 'all';
+    /** Filter to one campaign id */
+    campaign?: string | null;
+    /** Keep only the cycles a producer holds */
+    attached?: boolean;
+    /** 0 serves campaigns alone, 1 their cycles */
+    depth?: number;
+  };
+  "hierarchy-steps": {
+    limit?: number;
+    /** A prior window's `cursor_prev` */
+    before?: string | null;
+  };
+  "hierarchy-subtree": {
+    /** `score:<formula>`, `dials:<term=weight,…>` or `abort:<variant>` */
+    lens?: string | null;
+    /** A comma-separated sample-id mask */
+    samples?: string | null;
+    /** A line of `at_cycle`'s own ledger */
+    at?: number | null;
+    /** A whole cycle path, root hop included; absent, the root's */
+    at_cycle?: string | null;
+  };
+}
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -6322,6 +6595,15 @@ export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost
   "kept": "kept position",
 };
 
+// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_TONE, in display order.
+export const SAMPLE_MOVEMENT_TONE: Record<'new' | 'readded' | 'gained' | 'lost' | 'kept', Tone> = {
+  "new": "attention",
+  "readded": "attention",
+  "gained": "success",
+  "lost": "warn",
+  "kept": "quiet",
+};
+
 // Mirror of domain/dataset_start.py::START_BLOCK_WORDS, in display order.
 export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "verifier_graded": "Each sample is graded by running a verifier rather than by a labelled answer, so it is launched from the command line, not from here.",
@@ -6427,7 +6709,7 @@ export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
 
 // Mirror of domain/phases.py::STOP_REASON_INFO, in display order.
 export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
-  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.rounds", value: "more", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }, { kind: "", field: "", value: "", reads: "review.md" }] },
+  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.rounds", value: "more", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }, { kind: "", field: "", value: "", reads: "readout.log" }] },
   "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
@@ -6646,6 +6928,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
+  [SAMPLE_MOVEMENT_TONE, ["new", "readded", "gained", "lost", "kept"]],
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],

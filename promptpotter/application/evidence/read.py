@@ -54,6 +54,7 @@ from promptpotter.application.evidence.metric_catalogue import (
     resolve_metric,
 )
 from promptpotter.application.evidence.subjects import (
+    CellMean,
     SubjectMask,
     SubjectReading,
     WinnerChainPoint,
@@ -84,8 +85,10 @@ from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
     Measurand,
+    MeasurandUnit,
     MemberAddress,
     PairedReading,
+    level_text,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.records.partition import PartitionRecord
@@ -110,13 +113,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import (
-    CampaignLayout,
-    CycleLayout,
     campaign_cycles_dir,
 )
-from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, descend_store
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import sample_sd
@@ -201,7 +201,6 @@ class ConfigKeys(StrictModel):
 class Evidence(StrictModel):
     """The whole read for one selection of subjects — recomputed on every fetch."""
 
-    generated_at: str
     scorer_id: str
     subjects: list[SubjectReading]
     subjects_read: int = Field(
@@ -483,7 +482,6 @@ def subject_evidence(
         spec_metric, rows, available, members=members, measurand=measurand, scorer=grader.scorer
     )
     return Evidence(
-        generated_at=utcnow_iso(),
         scorer_id=grader.scorer.id,
         subjects=rows,
         subjects_read=sum(1 for r in rows if r.n_cells),
@@ -557,9 +555,8 @@ def _at(stores: Stores, spec: Subject) -> _Located | None:
 
 
 def _files_read(at: _Located) -> Hashable:
-    """A fork's inherited prefix is unsigned on purpose: nothing before a cut is rewritten."""
-    signed = (CampaignLayout(at.campaign_dir).manifest, CycleLayout(at.cycle_dir).ledger)
-    return (at.stores.archive.signature(), *(file_sig(path) for path in signed))
+    """Its store's stamps: the archive, the manifest and the ledger it reads are its writers'."""
+    return at.stores.stamps()
 
 
 def _answers(at: _Located, spec: Subject) -> bool:
@@ -778,15 +775,32 @@ def _score_cells(
     return (values, sorted(missed))
 
 
-SIDE_CHANNELS: tuple[str, ...] = ("cost", "latency", "tokens", "target_prompt_chars")
+class _SideChannel(NamedTuple):
+    label: str
+    # `None` reads in characters, a unit no measurand takes.
+    unit: MeasurandUnit | None
+    lead: bool
 
 
-def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
-    means: dict[str, float] = {}
-    for channel in SIDE_CHANNELS:
+# In display order.
+SIDE_CHANNELS: dict[str, _SideChannel] = {
+    "target_prompt_chars": _SideChannel("prompt length", None, lead=True),
+    "latency": _SideChannel("avg time / cell", "seconds", lead=True),
+    "cost": _SideChannel("avg cost / cell", "usd", lead=False),
+    "tokens": _SideChannel("avg tokens / cell", "tokens", lead=False),
+}
+
+
+def _cell_means(channels: dict[str, dict[str, float]]) -> list[CellMean]:
+    means: list[CellMean] = []
+    for channel, side in SIDE_CHANNELS.items():
         carried = [cell[channel] for cell in channels.values() if channel in cell]
         if carried:
-            means[channel] = sum(carried) / len(carried)
+            mean = sum(carried) / len(carried)
+            text = f"{round(mean):,} chars" if side.unit is None else level_text(mean, side.unit)
+            means.append(
+                CellMean(key=channel, label=side.label, value=mean, text=text, lead=side.lead)
+            )
     return means
 
 

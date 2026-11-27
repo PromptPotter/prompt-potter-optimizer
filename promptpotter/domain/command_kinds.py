@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 
+from promptpotter.domain.bulletin import BULLETIN_TEXT_CHARS
 from promptpotter.domain.campaign import ArmName, ArmSeat
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
@@ -97,6 +98,7 @@ class Door(StrEnum):
 
 
 _MINTS_THROUGH_CHECKIN = "the browser mints through a check-in"
+_HOST_ADMINISTERS = "the host administers from its terminal or its bot"
 
 # How a door answers a kind: inline with its applied answer, or as a task its door tracks.
 type Answering = Literal["inline", "task"]
@@ -381,6 +383,55 @@ class CommandKind(StrEnum):
         "workspace_edits:accept_terms",
         ACCOUNT_SELF_CAP,
         person("accept-terms"),
+    )
+    # The host's word to every account: its terminal and its admin bot post (`bulletins.py::post_bulletin`).
+    POST_BULLETIN = (
+        "post-bulletin",
+        "bulletin_acts:post_bulletin",
+        ACCOUNT_SELF_CAP,
+        Press(
+            "post-bulletin", host=False, no_browser="the host posts from its terminal or its bot"
+        ),
+    )
+    # Its account's own act: a host never dismisses one for its person.
+    DISMISS_BULLETIN = (
+        "dismiss-bulletin",
+        "bulletin_acts:dismiss_bulletin",
+        ACCOUNT_SELF_CAP,
+        person("dismiss-bulletin"),
+    )
+    # The host's administration of who may sign in and what each account holds: its terminal and its
+    # admin bot file them, refused to any other (`account.py::require_host`), decisions § 0004.
+    BLOCK_EMAIL = (
+        "block-email",
+        "operator_acts:block_email",
+        ACCOUNT_SELF_CAP,
+        Press("block-email", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    UNBLOCK_EMAIL = (
+        "unblock-email",
+        "operator_acts:unblock_email",
+        ACCOUNT_SELF_CAP,
+        Press("unblock-email", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    GRANT_DELEGATION = (
+        "grant-delegation",
+        "operator_acts:grant_delegation",
+        ACCOUNT_SELF_CAP,
+        Press("grant-delegation", host=False, no_browser=_HOST_ADMINISTERS),
+    )
+    REVOKE_DELEGATION = (
+        "revoke-delegation",
+        "operator_acts:revoke_delegation",
+        ACCOUNT_SELF_CAP,
+        Press("revoke-delegation", host=False, no_browser=_HOST_ADMINISTERS),
+        True,
+    )
+    SET_COUPON = (
+        "set-coupon",
+        "operator_acts:set_coupon",
+        ACCOUNT_SELF_CAP,
+        Press("set-coupon", host=False, no_browser=_HOST_ADMINISTERS),
     )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
@@ -1221,6 +1272,56 @@ class AcceptTermsPayload(CommandPayload, kind=CommandKind.ACCEPT_TERMS):
     version: str = Field(min_length=1, max_length=64)
 
 
+class PostBulletinPayload(CommandPayload, kind=CommandKind.POST_BULLETIN):
+    """Post a bulletin to every account on this box; only its host may."""
+
+    text: str = Field(min_length=1, max_length=BULLETIN_TEXT_CHARS)
+    pops_up: bool = Field(
+        default=False,
+        description="Open it at sign-in and on each page load until the account dismisses it.",
+    )
+
+
+class DismissBulletinPayload(CommandPayload, kind=CommandKind.DISMISS_BULLETIN):
+    """Dismiss one bulletin for the caller's account: it pops up no more, and the list marks it."""
+
+    bulletin_id: str = Field(min_length=1, max_length=64)
+
+
+class BlockEmailPayload(CommandPayload, kind=CommandKind.BLOCK_EMAIL):
+    """Refuse every sign-in of an email on this box; only its host may."""
+
+    email: str = Field(min_length=1, max_length=320)
+
+
+class UnblockEmailPayload(CommandPayload, kind=CommandKind.UNBLOCK_EMAIL):
+    """Lift an email's block on this box; only its host may."""
+
+    email: str = Field(min_length=1, max_length=320)
+
+
+class GrantDelegationPayload(CommandPayload, kind=CommandKind.GRANT_DELEGATION):
+    """Delegate capabilities, named by a comma-separated list, from the host's account to another; only its host may."""
+
+    user_id: str = Field(min_length=1, max_length=128)
+    capabilities: str = Field(min_length=1, max_length=512)
+
+
+class RevokeDelegationPayload(CommandPayload, kind=CommandKind.REVOKE_DELEGATION):
+    """Take back an account's delegation; only the host may."""
+
+    user_id: str = Field(min_length=1, max_length=128)
+
+
+class SetCouponPayload(CommandPayload, kind=CommandKind.SET_COUPON):
+    """Set an account's coupon face: dollars and tokens, `unbounded` leaving a unit unbounded; `afresh` starts its draw now. Only the host may."""
+
+    cli_spellings: ClassVar[Mapping[str, str]] = {"afresh": "--afresh"}
+    user_id: str = Field(min_length=1, max_length=128)
+    budget: Budget
+    afresh: bool = False
+
+
 class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):
     """Hold the caller's own key for a provider: its sends there go out on it, past the coupon.
     Never served back, and recorded masked."""
@@ -1342,6 +1443,7 @@ class ReadKind(StrEnum):
     """The read catalogue beside `CommandKind`: a row's wire inputs and answer are its `ReadParams` model."""
 
     ME = "me"
+    BULLETINS = "bulletins"
     USER_SETTINGS = "user-settings"
     QUOTA_STATUS = "quota-status"
     COUPON = "coupon"

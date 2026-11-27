@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, assert_never
+from typing import Any, ClassVar, NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -58,7 +58,6 @@ from promptpotter.domain.records.run_records import (
     ProviderEasedRecord,
     ProviderHoldRecord,
     RaceCatchUpRecord,
-    RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundRestatedRecord,
@@ -71,7 +70,7 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.results import Election
-from promptpotter.domain.results_health import is_degraded, terminal_node
+from promptpotter.domain.results_health import terminal_node
 from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
@@ -135,6 +134,7 @@ def build_candidate_rows(
     round_num: int,
     samples: dict[ArmKey, list[WalkedSample]],
     election: Election | None,
+    open_cells: dict[ArmKey, list[int]],
 ) -> list[LiveCandidate]:
     """The narration's live round: each arm it announced at *round_num*, with the cells it walked."""
     arms = [
@@ -161,23 +161,13 @@ def build_candidate_rows(
         )
         rows.append(
             LiveCandidate.in_flight(
-                reading, arm, samples=[sample_row(s) for s in samples.get(key, ())]
+                reading,
+                arm,
+                samples=[sample_row(s) for s in samples.get(key, ())],
+                open_cells=open_cells.get(key, []),
             )
         )
     return rows
-
-
-def build_racing_block(
-    race: RaceStandingRecord | None, standings: dict[str, float]
-) -> RacingBlock | None:
-    if race is None:
-        return None
-    ranked = sorted(standings.items(), key=lambda kv: -kv[1])
-    return RacingBlock(
-        member=race.member,
-        n_samples=race.n_samples,
-        top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
-    )
 
 
 class CatchUpLogEntry(StrictModel):
@@ -214,19 +204,16 @@ class WaitingOn(StrictModel):
     position: int
 
 
-class RacingBlock(StrictModel):
-    """The round's standing in its eliminator ``member``'s race."""
+class ActiveNode(StrictModel):
+    """The optimizer's node running now: a target's calls land on its own ledger, never this one."""
 
-    member: str
-    n_samples: int
-    top: list[dict[str, Any]]
+    node: str
 
 
 class CurrentRound(StrictModel):
     """The round in flight, rebuilt whole on every persist."""
 
     round: int = 0
-    active_node: str | None = None
     measurement_node: str = Field(
         description="The optimizer node every scoring pass of the run runs as — origin, round, "
         "bench and verify alike — as its wiring declares it."
@@ -238,7 +225,6 @@ class CurrentRound(StrictModel):
     )
     candidates: list[LiveCandidate] = Field(default_factory=list)
     nodes: dict[str, NodeBlock] = Field(default_factory=dict)
-    racing: RacingBlock | None = None
 
 
 class DashboardFacts(StrictModel):
@@ -253,8 +239,6 @@ class DashboardFacts(StrictModel):
     stop_reason: StopReason | None = None
 
     round: int = 0
-    # The arm the oldest open cell is walked for; ``None`` between walks and on a pass of no arm.
-    measuring_arm: ArmName | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
@@ -266,13 +250,7 @@ class DashboardFacts(StrictModel):
     composite_fitness_formula: str | None = None
     display_metric: DisplayMetric
 
-    degraded_count: int = 0
-    error_count: int = 0
-
-    backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
-
-    total_backend_calls: int = 0
 
     current_query_payload: str | None = None
 
@@ -306,10 +284,11 @@ class LiveDashboardState(DashboardFacts):
     # The cycle entry serves both (`CycleEntryFacts.standing` / `elects_on`); the file keeps them.
     run_standing: RunStanding | None = None
     elects_on: DisplayMetric
+    # Served only as `ServedDashboard.active`, where the cycle is appending.
+    active: ActiveNode | None = None
     # The cell the open call holds; served only as `ServedDashboard.held_call`.
     waiting_on: WaitingOn | None = None
 
-    current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.
     level_series: LevelSeries | None = None
     # Each walking arm's rows through its budget as its last turn filed them, those taken leading:
@@ -371,11 +350,8 @@ class LiveDashboardState(DashboardFacts):
             "backend_revision": wiring.backend_revision,
             "state": DashboardState.INIT,
             "optimizer_step": None,
-            "measuring_arm": None,
             "stop_reason": None,
             "error": None,
-            "current_query_payload": None,
-            "current_position": None,
         }
 
 
@@ -408,6 +384,10 @@ _AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
 )
 
 
+_MEASURING_PHASES = frozenset(
+    {CampaignPhase.ORIGIN, CampaignPhase.MEASURE, CampaignPhase.BENCH, CampaignPhase.VERIFY}
+)
+
 # MEASURE, BENCH and optimizer steps are absent on purpose: sample records, a bracket and the step's act drive them.
 _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
@@ -439,22 +419,20 @@ class LiveDashboardProjection(Projection):
         self._live = 0
         self._samples: dict[ArmKey, list[WalkedSample]] = {}
         self._election: Election | None = None
-        self._race: RaceStandingRecord | None = None
-        self._race_standings: dict[str, float] = {}
         # By (individual, position): each open cell's query, arm, and whether it went out armed.
         self._open_samples: dict[tuple[str, int], tuple[str, ArmKey | None, bool]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
-        self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
+        self._around_bench: tuple[DashboardState, str | None] | None = None
         # Between a bench or verify bracket: its cells move no run state.
         self._in_pass = False
         self._flight: tuple[int, int, int] = (0, 0, 0)
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
         self._waiting: FlightWaiting | None = None
-        self._in_flight: tuple[str, str] | None = None
+        # Each open call's node by call id, and each open phase's node by phase, oldest first.
+        self._open_calls: dict[str, str] = {}
+        self._open_phases: dict[str, str] = {}
         self._inner: CycleHop | None = None
-        self._proposer_node: str | None = None
-        self._step_node: str | None = None
 
     def value(self) -> LiveDashboardState | None:
         """`None`: no `RunWiringRecord` yet (a check-in still authoring its origin)."""
@@ -493,13 +471,11 @@ class LiveDashboardProjection(Projection):
         if isinstance(record.state, Ended):
             self.state.stop_reason = record.state.stop_reason
             self._set_state(DashboardState.STOPPED)
-            self.state.measuring_arm = None
         else:
             # A run declared again is past its failed stop, as `ledger_scan.py::CycleFacts` folds it.
             self.state.error = None
 
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None:
-        self.state.backend_retry_count += 1
         warning = BackendWarning(
             ts=record.timestamp,
             kind=record.kind,
@@ -541,8 +517,6 @@ class LiveDashboardProjection(Projection):
         self._live = round_num
         self._samples = {}
         self._election = None
-        self._race = None
-        self._race_standings = {}
 
     def _stand(self) -> None:
         """The run stands where its LATEST round's last statement says, whichever round was stated last."""
@@ -576,7 +550,7 @@ class LiveDashboardProjection(Projection):
         act = record.act
         if record.phase == CampaignPhase.BENCH and record.step == "enter":
             # Stopped included: `held-out` opens a pass outside any run, and its exit hands the state back.
-            self._around_bench = (s.state, s.optimizer_step, s.measuring_arm)
+            self._around_bench = (s.state, s.optimizer_step)
             self._set_state(DashboardState.BENCH)
         elif record.step == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(record.phase)
@@ -587,13 +561,12 @@ class LiveDashboardProjection(Projection):
         match act:
             case InitOpened() | InitClosed():
                 s.composite_fitness_formula = act.formula.formula
-            case ProposeOpened():
-                self._proposer_node = act.node
-            case StepOpened():
-                self._step_node = act.node
             case PassOpened():
                 self._in_pass = True
                 self._mark(_opened(act.verification, act.arm, act.rows))
+        self._open_phases.pop(record.phase, None)
+        if record.step == "enter" and (node := self._phase_node(record)) is not None:
+            self._open_phases[record.phase] = node
         if record.step == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
             self._in_pass = False
         if record.phase == CampaignPhase.VERIFY and record.step == "exit":
@@ -605,8 +578,7 @@ class LiveDashboardProjection(Projection):
             and (around := self._around_bench) is not None
         ):
             self._around_bench = None
-            state, step, s.measuring_arm = around
-            self._set_state(state, step=step)
+            self._set_state(around[0], step=around[1])
 
     def _handle_bench_scored(self, record: BenchScoredRecord) -> None:
         for reading in (record.bench.origin, record.bench.selected):
@@ -680,7 +652,6 @@ class LiveDashboardProjection(Projection):
             record.arm,
             record.sample_lookahead > 1 or record.sample_abreast != 1,
         )
-        self._refresh_open_sample_markers()
         if not self._in_pass:
             self._set_state(DashboardState.SCORING)
 
@@ -689,7 +660,12 @@ class LiveDashboardProjection(Projection):
         self._open_samples.pop((record.individual_id, record.position), None)
         # A beat names no cell: an inner run still open names itself again on its next beat.
         self._inner = None
-        self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
+        if not self._in_pass:
+            self._set_state(
+                DashboardState.BETWEEN_CANDIDATES
+                if qi + 1 >= qt
+                else DashboardState.BETWEEN_SAMPLES
+            )
         # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
         if (arm := self._narration.take(record)) is not None:
             if record.round == self._live:
@@ -709,10 +685,6 @@ class LiveDashboardProjection(Projection):
                 self._mark(held.scored_one(running))
                 return
 
-    def _handle_race_standing(self, record: RaceStandingRecord) -> None:
-        self._race = record
-        self._race_standings[record.current] = record.p_best
-
     def _handle_flight(self, record: FlightRecord) -> None:
         self._flight = (record.out, record.allowed, record.most)
         self._affordable = record.affordable
@@ -731,17 +703,6 @@ class LiveDashboardProjection(Projection):
             )
         )
 
-    def _refresh_open_sample_markers(self) -> None:
-        s = self.state
-        if not self._open_samples:
-            s.current_query_payload = None
-            s.current_position = None
-            return
-        (_, sid), (query_text, arm, _ahead) = next(iter(self._open_samples.items()))
-        s.current_query_payload = query_text
-        s.current_position = sid
-        s.measuring_arm = None if arm is None else self._name(arm)
-
     def _name(self, key: ArmKey) -> ArmName | None:
         if key not in self._narration.announced(self._live):
             return None
@@ -749,26 +710,6 @@ class LiveDashboardProjection(Projection):
 
     def _label(self, key: ArmKey) -> str:
         return "" if (name := self._name(key)) is None else name.label
-
-    def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
-        s = self.state
-
-        # The second arm is not redundant: `pipeline.error` is the BACKEND faulting a row PP classified clean.
-        if facts.errored or facts.pipeline.error:
-            s.error_count += 1
-
-        if not facts.cached:
-            s.total_backend_calls += 1
-            if is_degraded(facts):
-                s.degraded_count += 1
-
-        self._refresh_open_sample_markers()
-        if not self._in_pass:
-            self._set_state(
-                DashboardState.BETWEEN_CANDIDATES
-                if last_in_candidate
-                else DashboardState.BETWEEN_SAMPLES
-            )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         # Assigned, never banked in place: a snapshot `value` served holds the rollups as they were.
@@ -782,7 +723,7 @@ class LiveDashboardProjection(Projection):
         return MeteredSpend.of(self.state.spend, meters)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        self._in_flight = (record.call_id, record.node)
+        self._open_calls[record.call_id] = record.node
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         if record.inner is not None:
@@ -794,8 +735,7 @@ class LiveDashboardProjection(Projection):
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         self._sticky_llm_calls[record.node] = (self.state.round, build_node_block(record))
-        if self._in_flight is not None and record.call_id and self._in_flight[0] == record.call_id:
-            self._in_flight = None
+        self._open_calls.pop(record.call_id, None)
 
     def _handle_error(self, record: ErrorRecord) -> None:
         self.state.error = record
@@ -803,27 +743,17 @@ class LiveDashboardProjection(Projection):
     def _append_catch_up(self, entry: CatchUpLogEntry) -> None:
         self.state.catch_up_log = [*self.state.catch_up_log, entry][-256:]
 
-    def _active_node(self) -> str | None:
-        if self._in_flight is not None:
-            return self._in_flight[1]
-        state = self.state.state
-        match state:
-            case DashboardState.PROPOSING:
-                return self._proposer_node
-            case (
-                DashboardState.ORIGIN
-                | DashboardState.SCORING
-                | DashboardState.BETWEEN_SAMPLES
-                | DashboardState.BETWEEN_CANDIDATES
-                | DashboardState.BENCH
-            ):
-                return self._measurement_node
-            case DashboardState.OPTIMIZER_STEP:
-                return self._step_node
-            case DashboardState.INIT | DashboardState.STOPPED:
-                return None
-            case _:
-                assert_never(state)
+    def _phase_node(self, record: PhaseRecord) -> str | None:
+        """The node a phase runs as it opens: its act's, or the measurement node for a scoring pass."""
+        match record.act:
+            case ProposeOpened(node=node) | StepOpened(node=node):
+                return node
+        return self._measurement_node if record.phase in _MEASURING_PHASES else None
+
+    def _active_node(self) -> ActiveNode | None:
+        """Every node on this ledger is the optimizer's: a target's calls land on its own ledger."""
+        held = [*self._open_calls.values()] or [*self._open_phases.values()]
+        return ActiveNode(node=held[-1]) if held else None
 
     def _current_round_nodes(self) -> dict[str, NodeBlock]:
         return {
@@ -849,23 +779,26 @@ class LiveDashboardProjection(Projection):
             waiting_on = WaitingOn(label=label, position=w.position)
             waiting_since = w.since
         active = self._active_node()
-        measuring = active == self._measurement_node
+        oldest = next(iter(self._open_samples.values()), None)
+        open_cells: dict[ArmKey, list[int]] = {}
+        for (_, position), (_, arm, _) in self._open_samples.items():
+            if arm is not None:
+                open_cells.setdefault(arm, []).append(position)
         current = CurrentRound(
             round=s.round,
-            active_node=active,
             measurement_node=self._measurement_node,
             inner=self._inner,
             candidates=build_candidate_rows(
-                self._narration, self._live, self._samples, self._election
+                self._narration, self._live, self._samples, self._election, open_cells
             ),
             nodes=self._current_round_nodes(),
-            racing=build_racing_block(self._race, self._race_standings),
         )
         return s.model_copy(
             update={
                 "at_offset": self.at_offset,
                 "current_round": current,
-                "measuring_arm": s.measuring_arm if measuring else None,
+                "active": active,
+                "current_query_payload": oldest[0] if oldest else None,
                 "walk_orders": {
                     key: walking.sample_order
                     for key in self._narration.announced(self._live)

@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from typing import Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    ForkCut,
-    cut_operator_fork,
-)
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
@@ -42,6 +40,7 @@ from promptpotter.application.jobs.launcher.launch import (
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
+    ForkLaunch,
     FreshMint,
     assert_origin_ready,
 )
@@ -217,12 +216,10 @@ async def _held_at_depth(
     pressed = SetSampleLookaheadPayload.model_validate(
         {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, **press.model_dump()}
     )
-    try:
+    async with AsyncExitStack() as pressing:
+        pressing.push_async_exit(held.closing)
         await dispatcher.dispatch(CommandCall(pressed, door=door))
-    except BaseException as exc:
-        await asyncio.to_thread(held.start.release, exc)
-        await held.closing.aclose()
-        raise
+        pressing.pop_all()
     return held
 
 
@@ -327,60 +324,40 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
     start = parse_cycle_start(payload.start, stores, at)
 
     async def _apply_fork() -> Launched:
-        cut = cut_operator_fork(stores, payload, start)
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
-        child = ExistingCycle(at._replace(cycle_id=cut.child.cycle_id), payload.budget)
-        return await _launch_fork(dispatched, cut, child, payload.mode)
+        admitted = await asyncio.to_thread(
+            admit,
+            ForkLaunch(at, payload, start, payload.budget),
+            payload.mode,
+            stores=stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
+        )
+        held = _held_fork(dispatched, admitted)
+        return await admitted.hand_over(
+            _held_at_depth(dispatcher, dispatched.door, payload.lookahead, held)
+        )
 
     return _launch_applier(dispatcher, _apply_fork)
 
 
-async def _launch_fork(
-    dispatched: Dispatched[ForkCyclePayload], cut: ForkCut, request: ExistingCycle, mode: RunMode
-) -> Launched:
-    """Its parent untouched until the fork's run is held: a refused fork deletes its cut and
-    leaves its parent's line, inbox, pointer and comparison as they stood. A held fork then leaves
-    its parent and the comparison, BEFORE the cut is taken, so a fork that fails names no parent
-    superseded."""
+async def _held_fork(dispatched: Dispatched[ForkCyclePayload], admitted: Admitted) -> HeldRun:
+    """Its parent untouched until the fork's run is held: a refused fork cut nothing, and leaves
+    its parent's line, inbox, pointer and comparison as they stood. A held fork then leaves its
+    parent and the comparison, BEFORE the cut is taken, so a fork that fails names no parent
+    superseded; its opening's exit withdraws the cut."""
     dispatcher = dispatched.dispatcher
-    stores, job_registry = dispatcher.stores, dispatcher.job_registry
-    try:
-        admitted = await asyncio.to_thread(
-            admit, request, mode, stores=stores, job_registry=job_registry, inline=dispatcher.inline
-        )
-    except BaseException:
-        await asyncio.to_thread(cut.withdraw, stores, job_registry)
-        raise
-
-    async def _held_fork() -> HeldRun:
-        held: HeldRun | None = None
-        try:
-            held = await admitted.held()
-            # It spends the arm's ceiling and moves its parent, so the campaign leaves.
-            stores.campaigns.act(cut.parent, ArmAct.FORK)
-            await _leave_parent(dispatcher, cut, dispatched.door)
-            await asyncio.to_thread(cut.take, stores)
-        except BaseException as exc:
-            await asyncio.to_thread(_unfork, held, cut, stores, job_registry, exc)
-            raise
-        return held
-
-    press = dispatched.payload.lookahead
-    return await admitted.hand_over(
-        _held_at_depth(dispatcher, dispatched.door, press, _held_fork())
-    )
-
-
-def _unfork(
-    held: HeldRun | None,
-    cut: ForkCut,
-    stores: Stores,
-    job_registry: JobRegistry,
-    exc: BaseException,
-) -> None:
-    if held is not None:
-        held.start.release(exc)
-    cut.withdraw(stores, job_registry)
+    held = await admitted.held()
+    cut = held.opening.cut
+    assert cut is not None, "a fork's admission cut it"
+    async with AsyncExitStack() as closing:
+        closing.push_async_exit(held.closing)
+        # It spends the arm's ceiling and moves its parent, so the campaign leaves.
+        dispatcher.stores.campaigns.act(cut.parent, ArmAct.FORK)
+        await _leave_parent(dispatcher, cut, dispatched.door)
+        await asyncio.to_thread(held.opening.take_cut)
+        closing.pop_all()
+    return held
 
 
 async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut, door: Door) -> None:

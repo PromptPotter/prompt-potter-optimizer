@@ -7,7 +7,13 @@ from typing import Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.records.run_records import Bill
-from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_rate_priced
+from promptpotter.domain.spend import (
+    KEY_SOURCE_LABELS,
+    bill_is_floor,
+    bill_text,
+    calls_rate_priced,
+    rate_priced_text,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import account_usage
 from promptpotter.infrastructure.store.stores import Stores
@@ -45,8 +51,8 @@ class ActivityBucket(StrictModel):
 
     series_spend: dict[str, float] = Field(
         description="Billed USD per `series_labels` entry. A call no provider billed adds nothing "
-        "here and still counts in the other two; one no rate prices either sets the response's "
-        "`bill_is_floor`."
+        "here and still counts in the other two; one no rate prices either marks the response's "
+        "`bill` a floor."
     )
     series_tokens: dict[str, int]
     series_requests: dict[str, int]
@@ -56,28 +62,15 @@ class ActivityResponse(StrictModel):
     """Time-bucketed spend / requests / tokens over the requested window."""
 
     window: ActivityWindow
-    group_by: ActivityGroupBy = Field(
-        description="The colour axis: `model` is the exact model id, `api_key` the key that "
-        "paid: the provider that billed the call, and whether the host's key under the coupon "
-        "or the account's own sent it (`Bill.key_source`)."
-    )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
         description="Every series in the window, in first-seen order — one colour per label, "
         "stable across the buckets. A call outside the optimizer's own carries its kind."
     )
-    total_spend_usd: float = Field(description="What providers reported they billed.")
-    total_rate_priced_usd: float = Field(
-        description="What our rate table prices the window's calls no provider billed. Never "
-        "spent, and in no series."
-    )
-    calls_rate_priced: bool = Field(
-        description="Some call in the window was priced at our rate, so there is a "
-        "`total_rate_priced_usd` to show beside the bill."
-    )
-    bill_is_floor: bool = Field(
-        description="The two totals understate: a call in the window carries neither a bill nor "
-        "a rate's price."
+    bill: str = Field(
+        description="What providers reported they billed in the window, `≥` where a call "
+        "carries neither a bill nor a rate's price, then what our rate table prices the calls no "
+        "provider billed: never spent, and in no series."
     )
     total_tokens: int
     total_requests: int
@@ -136,9 +129,9 @@ def account_activity(
     spent = [sum(s.values()) for s in spend]
     used = [sum(t.values()) for t in tokens]
     asked = [sum(r.values()) for r in requests]
+    priced = rate_priced_text(sum(rate_priced), priced=calls_rate_priced(sum(rate_priced)))
     return ActivityResponse(
         window=window,
-        group_by=group_by,
         buckets=[
             ActivityBucket(
                 series_spend=spend[i], series_tokens=tokens[i], series_requests=requests[i]
@@ -146,10 +139,8 @@ def account_activity(
             for i in range(_N_BUCKETS)
         ],
         series_labels=list(labels),
-        total_spend_usd=round(sum(spent), 6),
-        total_rate_priced_usd=round(sum(rate_priced), 6),
-        calls_rate_priced=calls_rate_priced(sum(rate_priced)),
-        bill_is_floor=bill_is_floor(sum(unpriced)),
+        bill=bill_text(sum(spent), floor=bill_is_floor(sum(unpriced)))
+        + ("" if priced is None else f" + {priced}"),
         total_tokens=sum(used),
         total_requests=sum(asked),
         peak_spend_usd=_peak(spent),

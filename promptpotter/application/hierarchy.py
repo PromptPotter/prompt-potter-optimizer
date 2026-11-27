@@ -64,8 +64,17 @@ from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, withheld
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
-from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
+from promptpotter.domain.spend import (
+    LifetimeSpend,
+    MeteredSpend,
+    UserSpend,
+    bill_text,
+    calls_rate_priced,
+    rate_priced_text,
+    usd_text,
+)
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
+from promptpotter.infrastructure.run_state import producer_stamps
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     campaign_spend,
@@ -73,7 +82,8 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
-from promptpotter.infrastructure.store.read_model import Moment, file_sig
+from promptpotter.infrastructure.store.io import stamp_of
+from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
 
@@ -121,24 +131,25 @@ def _state_row(status: RunStatus) -> Figure:
     )
 
 
-def _spend_row(
-    key: FigureKey, label: str, spent: MeteredSpend | LifetimeSpend, unreported: float | None
-) -> Figure:
+def _spend_row(spent: MeteredSpend) -> Figure:
     return _figure(
-        key,
-        label,
-        f"{'≥' if spent.bill_is_floor else ''}{usd_text(spent.billed_usd)}",
-        f"up to {usd_text(unreported)} more unreported"
-        if unreported is not None
-        else f"{usd_text(spent.rate_priced_usd)} {RATE_PRICED_LABEL}"
-        if spent.calls_rate_priced
-        else None,
+        "spend",
+        "Spend",
+        bill_text(spent.billed_usd, floor=spent.bill_is_floor),
+        rate_priced_text(spent.rate_priced_usd, priced=spent.calls_rate_priced),
     )
 
 
-def _lifetime_row(spent: LifetimeSpend) -> Figure:
-    return _spend_row(
-        "spend_lifetime", "Spent", spent, spent.unreported_usd if spent.sends_unreported else None
+def _lifetime_row(spent: UserSpend) -> Figure:
+    return _figure(
+        "spend_lifetime",
+        "Spent",
+        LifetimeSpend.of(spent).bill,
+        f"up to {usd_text(spent.unreported_usd)} more unreported"
+        if spent.sends_unreported
+        else rate_priced_text(
+            spent.rate_priced_usd, priced=calls_rate_priced(spent.rate_priced_usd)
+        ),
     )
 
 
@@ -203,7 +214,7 @@ def _cycle_figures(
     if runs_with is not None:
         models = [model for vendor in runs_with.vendors for model in vendor.models]
         rows.append(_figure("optimizer", "Optimizer", runs_with.optimizer, " · ".join(models)))
-    rows.append(_spend_row("spend", "Spend", facts.spend, None))
+    rows.append(_spend_row(facts.spend))
     if not on_live_cycle:
         rows.append(_bench_row(ReadingState.HELD_ELSEWHERE, None))
     elif bench is not None:
@@ -486,7 +497,7 @@ def campaign_entry(
     else:
         state = live.state
     spent = campaign_spend(stores.campaigns, stores.charges, campaign.campaign_id)
-    lifetime = LifetimeSpend.of(spent.total)
+    lifetime = spent.total
     return HierarchyCampaign(
         address=Subject(campaign.campaign_id, inside=inside).address,
         parent=Subject.of(inside).address if inside else None,
@@ -531,7 +542,7 @@ def unstarted_entry(
     """An open check-in as a campaign: its spend is what the check-in cost."""
     ledger = stores.drafts.ledger(draft.draft_id)
     billed = billed_spend([ledger] if ledger.is_file() else [])
-    spent = LifetimeSpend.of(billed.plus(unreported_under(stores.charges, ledger)).total)
+    spent = billed.plus(unreported_under(stores.charges, ledger)).total
     dataset = draft.dataset_name
     lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(
@@ -548,34 +559,41 @@ def unstarted_entry(
     )
 
 
-def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
-    """Stats only: every input an entry reads in *held* — its reader's kinds (the acts it is
-    offered), run state, the archive rows its bench and lens grade, the ruler, the command log, each
-    dataset's scorer — so a client holding it is answered unread."""
-    stores = {s.base_dir: s for s in held}.values()
-    archives = {s.archive.base_dir: s.archive for s in stores}.values()
-    rulers = sorted({s.ruler.path for s in stores})
-    definitions = sorted(
-        {
-            (s.base_dir, c.dataset_name): s
-            for s in stores
-            for c in s.campaigns.list_campaigns(lifecycle="all")
-        }.items(),
-        key=lambda item: (str(item[0][0]), item[0][1]),
+def store_version(stores: Stores) -> tuple[object, ...]:
+    """The `store:` subject's version: the stamps its writers left (its campaigns and ledgers, and
+    the account's ruler, datasets, charges and archive it reads), and each producer it holds, whose
+    liveness and beat no write marks, and each definition its campaigns name, which no writer
+    stamps (`dataset_access.py::definition_version`)."""
+    jobs = JobRegistry.attach(stores.jobs_dir)
+    return (
+        *stores.stamps(),
+        *(definition_version(stores, name) for name in stores.campaigns.dataset_names()),
+        *(
+            (job.job_id, *producer_stamps(stores.campaigns.cycle_dir(job.hop), stores.jobs_dir))
+            for job in jobs.list_holding_spend()
+            if job.workspace == str(stores.base_dir)
+        ),
     )
+
+
+def account_version(stores: Stores) -> tuple[object, ...]:
+    """The `account` subject's: what the account filed (its command log and workspace state, a
+    grant) and its drafts. A run's appends move neither."""
+    return (stamp_of(stores.account_state_dir), stamp_of(stores.account_drafts_dir))
+
+
+def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
+    """Every subject an entry in *held* reads, at its version, and its reader's kinds (the acts it
+    is offered), so a client holding it is answered unread."""
+    stores = {s.base_dir: s for s in held}.values()
     return (
         *{str(s.identity.user_id) for s in stores},
         # A grant or a token's scope moves no store, yet every offer the body serves.
         *{filable(s.identity) for s in stores},
-        *(s.campaigns.version() for s in stores),
-        *(s.drafts.version() for s in stores),
+        *(store_version(s) for s in stores),
+        *{account_version(s) for s in stores},
         # A Start's stage moves no draft file: its own fact, read only where a draft could be held.
         *(sorted(draft_starts(s).items()) for s in stores if s.drafts.draft_ids()),
-        *(archive.version() for archive in archives),
-        *(file_sig(path) for path in rulers),
-        # The run state an entry serves reads its inbox, which every command filed moves.
-        *(file_sig(path) for path in sorted({s.commands.path for s in stores})),
-        *(definition_version(s, name) for (_, name), s in definitions),
     )
 
 

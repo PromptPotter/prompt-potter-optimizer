@@ -15,7 +15,6 @@ from promptpotter.domain.sample import FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.holders import holder_of
-from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,
@@ -450,7 +449,7 @@ def _compacted(
 
 
 def _refuse_unowned_home(stores: Stores) -> None:
-    if stores.archive_home.owner == "install" and not is_host(stores.identity):
+    if stores.archive_home.owner == "install" and not stores.identity.host:
         raise PayloadInvalidError(
             "This archive is the install's, shared by every account: only whoever runs this box "
             "compacts, restores or purges it.",

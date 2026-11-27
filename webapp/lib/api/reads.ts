@@ -18,6 +18,7 @@ import {
   type NodeConfigParam,
   type NodeReach,
   type PipelineView,
+  type AccountBulletins,
   type ActiveSessionResponse,
   type ArchiveDatasets,
   type ActivityResponse,
@@ -105,12 +106,14 @@ function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
   };
 }
 
-// The feed's subjects (`StampedFeedFrame.subject`), matched by prefix: what the account filed (`account`),
-// a store's campaigns, cycles and ledgers (`store:` and the hops above it; bare, every store), the
-// machine's slots. A read naming none reads once. `ACCOUNT` is also an account-level command's scope.
+// The feed's subjects (`StampedFeedFrame.subject`), matched by prefix: what the account filed (`account`:
+// its commands, drafts and workspace state), a store's campaigns, cycles and ledgers (`store:` and the
+// hops above it; bare, every store), the machine's slots. A read naming none reads once; one standing on
+// both names both. `ACCOUNT` is also an account-level command's scope.
 export const ACCOUNT = "account";
 const STORES = "store:";
 const MACHINE = "machine";
+const STORES_AND_ACCOUNT = [STORES, ACCOUNT];
 
 // The store holding the path's leaf cycle: an inner run's moves are its sandbox's.
 function storeOf(path: CyclePath): string {
@@ -119,7 +122,7 @@ function storeOf(path: CyclePath): string {
 
 // The run to follow, by the server's one rule (`cycle_addressing.py::followed_cycle`).
 export function activeRead(): ReadDescriptor<ActiveSessionResponse> {
-  return { ...once("active", readUrl("active-session", {})), auth: true, subject: STORES };
+  return { ...once("active", readUrl("active-session", {})), auth: true, subject: STORES_AND_ACCOUNT };
 }
 
 export function healthRead(): ReadDescriptor<HealthResponse> {
@@ -128,6 +131,11 @@ export function healthRead(): ReadDescriptor<HealthResponse> {
 
 export function meRead(): ReadDescriptor<MeResponse> {
   return { ...once<MeResponse>("me", readUrl("me", {})), subject: ACCOUNT };
+}
+
+// The host's word to every account; this account's dismissals move it.
+export function bulletinsRead(): ReadDescriptor<AccountBulletins> {
+  return { ...once<AccountBulletins>("bulletins", readUrl("bulletins", {})), auth: true, subject: ACCOUNT };
 }
 
 export function userSettingsRead(): ReadDescriptor<UserSettings> {
@@ -144,15 +152,15 @@ export function couponRead(): ReadDescriptor<CouponStatus> {
   return { ...byEtag<CouponStatus>("coupon", readUrl("coupon", {})), auth: true, subject: STORES };
 }
 
-// Start's refusal tracks the wallet, which every ledger moves.
+// Its own draft, and Start's refusal tracks the wallet, which every ledger moves.
 export function draftRead(draftId: string): ReadDescriptor<DraftReopenResponse> {
-  return { ...once<DraftReopenResponse>("draft", readUrl("draft", { draft_id: draftId })), subject: STORES };
+  return { ...once<DraftReopenResponse>("draft", readUrl("draft", { draft_id: draftId })), subject: STORES_AND_ACCOUNT };
 }
 
 // A command as every door reads it: a queued launch's job names its cycle once a slot mints it, and
 // the minted run's appends move its store.
 export function commandRead(commandId: string): ReadDescriptor<CommandReading> {
-  return { ...once<CommandReading>("command", readUrl("command", { command_id: commandId })), auth: true, subject: STORES };
+  return { ...once<CommandReading>("command", readUrl("command", { command_id: commandId })), auth: true, subject: STORES_AND_ACCOUNT };
 }
 
 export function activityRead(
@@ -161,7 +169,7 @@ export function activityRead(
 ): ReadDescriptor<ActivityResponse> {
   return {
     ...once<ActivityResponse>("activity", readUrl("activity", {}, new URLSearchParams({ window, group_by: groupBy }))),
-    subject: STORES,
+    subject: STORES_AND_ACCOUNT,
   };
 }
 
@@ -170,7 +178,7 @@ export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
 }
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
-  return { ...once<OriginListResponse>("origins", readUrl("origins", {})), auth: true, subject: STORES };
+  return { ...once<OriginListResponse>("origins", readUrl("origins", {})), auth: true, subject: STORES_AND_ACCOUNT };
 }
 
 export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
@@ -404,17 +412,51 @@ export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
 
 type DashboardBody = ServedDashboard | WarmingDashboard;
 
+interface ClosedSeries {
+  version: string;
+  rounds: ServedDashboard["rounds"];
+  line: ServedDashboard["line"];
+}
+
+// Each dashboard's closed series as its last whole answer served it, kept until its version moves:
+// a frame naming it held re-sends no closed round (`ServedDashboard.series_held`).
+const heldSeries = new Map<string, ClosedSeries>();
+const HELD_SERIES_MAX = 16;
+
+async function loadDashboard(url: string, etag: string | null, signal: AbortSignal, subject?: string) {
+  const held = heldSeries.get(url);
+  const asked = held ? `${url}${url.includes("?") ? "&" : "?"}series=${enc(held.version)}` : url;
+  const res = await jgetIfNoneMatch<DashboardBody>(asked, etag, signal, subject);
+  if (res.kind !== "ok" || !("series_version" in res.data)) return res;
+  const dash = res.data;
+  if (!dash.series_held) {
+    const closed = new Set(dash.rounds.map((r) => r.round));
+    heldSeries.delete(url);
+    heldSeries.set(url, { version: dash.series_version, rounds: dash.rounds, line: dash.line.filter((a) => closed.has(a.reading.arm.round)) });
+    for (const stale of [...heldSeries.keys()].slice(0, Math.max(0, heldSeries.size - HELD_SERIES_MAX))) heldSeries.delete(stale);
+    return res;
+  }
+  // Held is the version the frame was asked with; one dropped meanwhile is asked whole again.
+  if (held?.version !== dash.series_version) {
+    heldSeries.delete(url);
+    return jgetIfNoneMatch<DashboardBody>(url, null, signal, subject);
+  }
+  return { ...res, data: { ...dash, rounds: held.rounds, line: [...held.line, ...dash.line] } };
+}
+
 // `at` is a leaf-cycle ledger offset (`StepFacts.offset`).
 export function dashboardRead(path: CyclePath, at: number | null): ReadDescriptor<ServedDashboard, DashboardBody> {
   const url = cyclePathUrl("cycle-dashboard", path, {}, at == null ? {} : { at: String(at) });
   return {
     ...byEtag<DashboardBody>("dashboard", url),
+    load: (signal, etag, subject) => loadDashboard(url, etag, signal, subject),
     auth: true,
     // A warming cycle has no dashboard yet.
-    accept: (body): body is ServedDashboard => !("warming_up" in body),
+    accept: (body): body is ServedDashboard => "series_version" in body,
     // Moving the viewed moment keeps the unit's last snapshot rather than blanking the page.
     keep: `dashboard${SEP}${encodeCyclePath(path)}`,
-    subject: storeOf(path),
+    // Its run state reads the account's inbox (a pause asked).
+    subject: [storeOf(path), ACCOUNT],
   };
 }
 
@@ -423,7 +465,7 @@ export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
   return {
     ...byEtag<HierarchyResponse>("hierarchy", readUrl("hierarchy", {}, new URLSearchParams({ depth: "1", lifecycle: "all" }))),
     auth: true,
-    subject: STORES,
+    subject: STORES_AND_ACCOUNT,
   };
 }
 
@@ -608,8 +650,8 @@ export function subtreeRead(
     auth: true,
     // A mask or moment re-keys the read; the campaign's last tree stands meanwhile.
     keep,
-    // Its family spans the inner stores under it.
-    subject: STORES,
+    // Its family spans the inner stores under it; its run states read the account's inbox.
+    subject: STORES_AND_ACCOUNT,
     load: async (signal, validator, subject) => {
       const res = await entry.load(signal, validator, subject);
       if (res.kind === "not_modified") return res;

@@ -4,8 +4,7 @@ of its ceiling and no machine slot."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -14,28 +13,18 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import (
-    admit_slotless,
-    refuse_campaign,
-    refuse_unreachable,
-)
+from promptpotter.application.jobs.launcher.admission import refuse_campaign
 from promptpotter.application.jobs.launcher.head_to_head import (
-    DatasetArms,
     HeldArm,
     admit_head_to_head,
+    dataset_arms,
     run_each,
 )
-from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
-from promptpotter.application.jobs.launcher.run_job import run_held_job
-from promptpotter.application.jobs.mint import (
-    mint_framed_cycle,
-)
-from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.launcher.launch import admit
+from promptpotter.application.jobs.launcher.mint_and_start import EmbeddedMint, EmbeddedResume
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
-from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
@@ -45,10 +34,10 @@ from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -106,29 +95,6 @@ class HostDefinition:
     origin: dict[str, dict[str, Any]]
 
 
-@asynccontextmanager
-async def _dataset_session(
-    stores: Stores,
-    dataset_name: str,
-    *,
-    program: object | None,
-    rows: Sequence[Sample] | None,
-) -> AsyncIterator[Session]:
-    """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank,
-    which the mint labels."""
-    definition = runnable_definition(resolve_dataset(stores, dataset_name))
-    await refuse_unreachable(stores, dataset_name, definition.connector, definition.endpoint)
-    async with init_services(
-        dataset_name=dataset_name, identity=stores.identity, stores=stores, program=program
-    ) as session:
-        if rows is None:
-            yield session
-            return
-        bank = Bank.of(rows)
-        stores.tenant_datasets.put_bank(bank)
-        yield replace(session, bank=bank)
-
-
 async def run_campaign(
     target: str | CycleHop | HostDefinition,
     campaign_config: CampaignLayer | None = None,
@@ -150,65 +116,33 @@ async def run_campaign(
     if isinstance(target, HostDefinition):
         stores.write_own_definition(**vars(target))
         target = target.slug
-    resuming: ExistingCycle | None = None
-    async with AsyncExitStack() as clients:
-        if isinstance(target, CycleHop):
-            if campaign_config is not None or rows is not None:
-                raise PayloadInvalidError(
-                    f"{target.cycle_id} resumes under its campaign's declaration and bank: pass "
-                    "no config and no rows to resume it",
-                    code="resume_declared",
-                )
-            refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(target)).campaign)
-            resuming = ExistingCycle(at, budget)
-            config = cycle_config(stores, at).config
-            connector, measured = at.campaign.connector, at.campaign.dataset_name
-        else:
-            session = await clients.enter_async_context(
-                _dataset_session(stores, target, program=program, rows=rows)
+    request: EmbeddedMint | EmbeddedResume
+    if isinstance(target, CycleHop):
+        if campaign_config is not None or rows is not None:
+            raise PayloadInvalidError(
+                f"{target.cycle_id} resumes under its campaign's declaration and bank: pass "
+                "no config and no rows to resume it",
+                code="resume_declared",
             )
-            assert session.dataset is not None, "a dataset session resolved its dataset"
-            connector = runnable_definition(session.dataset).connector
-            # The config the mint declares runs as laid (`authored.py::effective_config`).
-            session, config = laid_session(
-                session, ConfigLayers.of(session.dataset, campaign_config)
-            )
-            measured = session.measured_dataset
-
-        # Admitted BEFORE the mint's paid framing and a resume's bind: a refusal writes nothing.
-        start, held = await asyncio.to_thread(
-            admit_slotless,
-            config,
-            stores=stores,
-            holder=EmbeddedRun(measured),
-            at=None if resuming is None else resuming.at,
-            requested=budget,
-            step_rounds=step_rounds,
-            sends=sends_on(stores, config, connector),
-        )
-        # Then held as a head-to-head's arm is: its cycle opened, a mint's landed on.
-        stamps: CycleHop | None = None
-        try:
-            if resuming is not None:
-                running = await clients.enter_async_context(resuming.open(stores))
-            else:
-                running = await mint_framed_cycle(
-                    session, config, session.bank.samples, task_text=None
-                )
-                stamps = running.hop
-                await asyncio.to_thread(start.land, running.hop, held)
-        except BaseException as exc:
-            await asyncio.to_thread(start.release, exc, stamps=stamps)
-            raise
-        return await run_held_job(
-            start,
-            running.session,
-            running.cycle,
-            mode=mode,
-            budget=held,
-            optimizer=running.optimizer,
-            readout_sink=readout_sink,
-        )
+        refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(target)).campaign)
+        request = EmbeddedResume(at, budget, step_rounds)
+    else:
+        dataset = resolve_dataset(stores, target)
+        # The config the mint declares runs as laid (`authored.py::effective_config`).
+        layers = ConfigLayers.of(dataset, campaign_config)
+        request = EmbeddedMint(dataset, budget, layers, None, program, rows, step_rounds)
+    # Admitted and probed BEFORE the session, the mint's paid framing and a resume's bind: a
+    # refusal opens and writes nothing.
+    admitted = await asyncio.to_thread(
+        admit,
+        request,
+        mode,
+        stores=stores,
+        job_registry=JobRegistry.attach(stores.jobs_dir),
+        inline=None,
+    )
+    held = await admitted.held()
+    return await held.run(readout_sink=readout_sink)
 
 
 async def run_head_to_head(
@@ -229,26 +163,15 @@ async def run_head_to_head(
     stores = await enter(stores)
 
     async def _run(arm: HeldArm) -> tuple[str, Session, CycleResult]:
-        held = arm.held
-        ended, result = await run_held_job(
-            held.start,
-            held.session,
-            held.cycle,
-            mode=mode,
-            budget=held.budget,
-            optimizer=held.optimizer,
-            readout_sink=readout_sink,
-        )
+        ended, result = await replace(arm.held, mode=mode).run(readout_sink=readout_sink)
         return arm.arm_key, ended, result
 
-    async with (
-        _dataset_session(stores, dataset_name, program=None, rows=None) as session,
-        AsyncExitStack() as closing,
-    ):
+    arms = await dataset_arms(stores, resolve_dataset(stores, dataset_name))
+    async with arms.closing:
         admitted = await admit_head_to_head(
-            DatasetArms(session, ConfigLayers.stating(campaign_config), closing),
+            replace(arms, layers=ConfigLayers.stating(campaign_config)),
             request,
             job_registry=JobRegistry.attach(stores.jobs_dir),
-            holder=EmbeddedRun(session.measured_dataset),
+            holder=EmbeddedRun(arms.session.measured_dataset),
         )
         return await run_each(await admitted.minted(), _run)

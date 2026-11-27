@@ -30,6 +30,11 @@ def dataset_id_prefix(name: str) -> str:
     return validate_dataset_name(name).replace("/", ".")
 
 
+def dataset_of_campaign_id(campaign_id: str) -> str:
+    """The dataset a campaign id names: its `dataset_id_prefix`, then ``__`` and its own suffix."""
+    return campaign_id.rpartition("__")[0].replace(".", "/")
+
+
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 
@@ -144,6 +149,10 @@ class SandboxOwner(FrozenModel):
     campaign_id: PathComponent
     cycle_id: PathComponent
 
+    @property
+    def hop(self) -> CycleHop:
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
+
 
 def read_sandbox_owner(sandbox_dir: Path) -> SandboxOwner | None:
     """``None`` = nothing names the owner of this hash-named dir: a caller KEEPS such a sandbox."""
@@ -183,14 +192,6 @@ class CycleLayout:
     @property
     def dashboard(self) -> Path:
         return self.cycle_dir / "dashboard.json"
-
-    @property
-    def log_md(self) -> Path:
-        return self.cycle_dir / "log.md"
-
-    @property
-    def review_md(self) -> Path:
-        return self.cycle_dir / "review.md"
 
     @property
     def export(self) -> Path:
@@ -246,10 +247,6 @@ class CampaignLayout:
     @property
     def manifest(self) -> Path:
         return self.campaign_dir / "campaign.json"
-
-    @property
-    def log_md(self) -> Path:
-        return self.campaign_dir / "log.md"
 
     def files(self) -> list[Path]:
         return declared_files(self, self.campaign_dir)

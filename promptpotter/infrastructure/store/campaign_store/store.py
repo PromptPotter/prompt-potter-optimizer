@@ -51,7 +51,6 @@ from promptpotter.infrastructure.projections.live_dashboard import (
     run_limits_at,
 )
 from promptpotter.infrastructure.run_scope import run_scope
-from promptpotter.infrastructure.run_state import run_state_stamps
 from promptpotter.infrastructure.store.account_spend import workspace_bank
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -83,12 +82,14 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
+    SandboxOwner,
     campaign_cycles_dir,
     campaign_root_dir_for,
     campaigns_root_dir_for,
     cycle_dir_for,
     cycle_ledgers,
     dataset_id_prefix,
+    dataset_of_campaign_id,
     head_to_head_path,
     read_sandbox_owner,
 )
@@ -96,13 +97,11 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
     Moment,
-    file_sig,
     money_on,
     read_file,
     scan_last,
 )
 from promptpotter.infrastructure.store.session_pointer import (
-    active_pointer_path,
     clear_active_pointer,
     read_active_pointer,
 )
@@ -240,27 +239,6 @@ class CampaignStore:
         ids = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
         return [hop for campaign_id in ids for hop in self.campaign_cycle_hops(campaign_id)]
 
-    def version(self) -> tuple[object, ...]:
-        """Stats only: what a read over this store's campaigns, cycles and run states stands on."""
-        root = self._campaigns_root()
-        return (
-            str(self._base_dir),
-            file_sig(root),
-            file_sig(active_pointer_path(self._base_dir)),
-            file_sig(CycleEventLog.workspace_path(self._base_dir)),
-            *(
-                (
-                    campaign.name,
-                    file_sig(CampaignLayout(campaign).manifest),
-                    *(
-                        (cycle.name, *run_state_stamps(cycle, self._jobs_dir))
-                        for cycle in sorted(campaign_cycles_dir(campaign).glob("*"))
-                    ),
-                )
-                for campaign in (sorted(root.iterdir()) if root.is_dir() else ())
-            ),
-        )
-
     def iter_campaign_dirs(self) -> list[Path]:
         """Archived included: archiving must not free daily spend-cap budget."""
         root = self._campaigns_root()
@@ -362,6 +340,10 @@ class CampaignStore:
 
     def list_campaign_ids(self) -> list[str]:
         return sorted(p.name for p in self.iter_campaign_dirs())
+
+    def dataset_names(self) -> list[str]:
+        """Each dataset a campaign here names, read off the ids: no manifest is loaded."""
+        return sorted({dataset_of_campaign_id(cid) for cid in self.list_campaign_ids()})
 
     @staticmethod
     def _ids_matching(ids: list[str], needle: str) -> list[str]:
@@ -477,15 +459,14 @@ class CampaignStore:
                     self._base_dir.name,
                     campaign_id,
                 ):
-                    owner_hop = CycleHop(campaign_id=campaign_id, cycle_id=owner.cycle_id)
-                    self.delete_inner_sandbox(sandbox, owner=owner_hop)
+                    self.delete_inner_sandbox(sandbox, owner=owner)
         if keepsake:
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
         return True
 
-    def delete_inner_sandbox(self, sandbox: Path, *, owner: CycleHop) -> None:
+    def delete_inner_sandbox(self, sandbox: Path, *, owner: SandboxOwner) -> None:
         """Each inner campaign banked inside *owner*, the cycle whose sandbox it is: inner ids are
         content-addressed and repeat across sandboxes. Metered nothing of the outer ceiling: the
         outer ledger carries every inner call."""
@@ -496,7 +477,7 @@ class CampaignStore:
             self._bank(
                 inner,
                 list(hops),
-                subject=Subject(campaign_id, inside=(owner,)),
+                subject=Subject(campaign_id, inside=(owner.hop,)),
                 metered=_ledger_meters([]),
             )
         rmtree_robust(sandbox)
@@ -553,7 +534,7 @@ class CampaignStore:
         self.append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        """`runner/output.py::RunArtifacts` writes it off the ledger as the run drains."""
+        """`runner/output.py::ExportProjection` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:

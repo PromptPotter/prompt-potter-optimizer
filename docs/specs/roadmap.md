@@ -266,39 +266,20 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   the edge tail. A cold verify is timed live.
 - **v0.8.21** is cut here (operator, 2026-11-26), on main `c7c867197`: W1, the measuring loop inside
   the round and the offline test world landed.
-- **First after v0.8.21: one served answer for what runs now** (operator, 2026-11-26: for months the
-  sidebar is the one reliable running mark; the optimizer box lights the wrong node or none, the C0
-  bar flickers mid-run). Patched twice at the symptom (382beddce, 54f5b679e); three roots:
-  - **Which node is active** is a scalar inferred from the last record
-    (`live_dashboard.py::_active_node`): one `_in_flight` slot that concurrent calls overwrite and
-    the first close clears, and a last-entered-phase map no exit resets. The client then re-gates it
-    (`OptimizerCard`'s `isLive && viewingLive`, `NodeDetail`), hands the optimizer scope's node to
-    the target layer unscoped (`PipelineStack.tsx`, so ids collide under pp-self), and the one-node
-    layout ignores it. Root: the fold serves one `active: {scope, node}` from the set of open calls
-    and phases, null unless appending, and the client reads it as served.
-  - **Which arm is in flight** is a scalar over a set of open cells
-    (`_refresh_open_sample_markers`: the oldest open sample's arm, never cleared), so it flips while
-    arms race abreast and a verify pass can name C0. Root: each arm's own row (`ArmReading`) carries
-    its in-flight fact.
-  - **Running is answered per viewed cycle**, the sidebar per line. v0.8.21 closes the door half (a
-    superseded cycle refuses a start, naming its fork; the campaign row opens its live cycle); the
-    superseded cycle's dashboard still names no successor, and `OptimizerCard` mixes two predicates
-    (`phaseWalks` for its class, `isLive` for the glow).
+- **Wave 7 after v0.8.21** (2026-11-27): one served answer for what runs now (the
+  dashboard serves `active`, each line arm its open cells and a superseded cycle its successor) with
+  one served candidate line the bars mask; the host's bulletins; one round block, the markdown
+  artifacts excised.
 - **Then: what makes a gate and a CI run take a quarter hour** (operator, 2026-11-26: "that sounds
   like unnecessary stale stuff"). Measured on the v0.8.21 release (`CI=1 gate.py`, 16 cores): 737 s
   wall, 1334 s of checks; playwright 337 s, pytest 315 s, offline-run 300 s, offline-run-controlled
   102 s, optimizer-plugin 78 s, walk-world 45 s (the world playwright serves), surface-ledger 29 s.
-  Playwright, pytest and the two offline legs are most of it: what one walks that another already
-  walked goes first. Then the slowest facts by `pytest --durations`, each against
-  [`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Budget per test: one over it shares its run or goes;
-  then each check that re-reads the whole tree answers from what changed. CI's own wall is measured
-  beside it.
-- **Host messages, before the next deploy that wipes run data** (operator, 2026-11-26: the v0.8.21
-  landing deleted a new account's first result while it was being read): the host posts a message to
-  every account; one marked to pop up opens at sign-in until dismissed, the rest wait in a list. One
-  survivor list beside the accounts, each account's dismissals with it; posted from the CLI and the
-  admin bot, read and dismissed at every door. The release skill posts the wipe's warning before
-  `update.sh` and the release note after.
+  The schedule half is done (w7-gate): measured slots start playwright, the critical path, at 28 s
+  instead of 115 s (`CI=1 gate.py` on 4 cores, 381 s → 277 s warm). Sharing potter's L4 run with
+  playwright's world was refuted, because it moves the estimator key. What is left is in the ledger:
+  the three tests over [`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Budget per test, CI's unread
+  `walk-world` in `check`, and the gate metering CPU itself; then each check that re-reads the whole
+  tree answers from what changed. CI's own wall is measured beside it.
 - **θ off the round's statement, before an L4 campaign banks a result** (operator, 2026-11-26: a
   re-key or a run-data wipe voids paid L4 runs; a de novo review of the round decision): v0.8.21
   decides a round on pairings (`PairedReading`), yet θ still rides every round's envelope (the
@@ -307,10 +288,6 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   and row choice) and L4's level series; the round carries its pairings alone. It reshapes run data,
   so it lands before L4 spends; [`../architecture.md`](../architecture.md) §0.5's case for the δ
   ruler is restated first.
-- **Then: one text digest of a round.** `review.md`, `log.md` (`views/view_models.py::RoundDigestView`)
-  and the readout each re-derive a round off `RoundResult`, where `ServedRound` already serves it:
-  one round block rendered from it, `review.md` keeping its checks, variants and critique. The
-  folder's text only, so no re-key.
 
 The re-keys end at the behaviour-key switch.
 
@@ -399,7 +376,7 @@ each ends as a rule built or a closed note.
 A visitor uploads and previews a dataset before sign-in, and nothing paid runs before it; an
 unauthenticated write door, so [`../operations/access-model.md`](../operations/access-model.md) first and
 a security review. Its own issuer sentinel, `is_anonymous` asked before the operator arm
-(`identity/accounts.py::is_host` reads a missing issuer as the box operator) · no capability but upload and
+(`shared/identity.py::IdentityContext.host` reads a missing issuer as the box operator) · no capability but upload and
 preview · one shared quarantine tenant, the upload held under an unguessable claim token that sign-in
 claims · a global daily pool and size and row caps · no trustworthy origin signal ⇒ refused.
 

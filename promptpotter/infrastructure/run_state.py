@@ -27,7 +27,7 @@ from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.store.command_log import Controls, PauseAsk
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, file_sig, scan_last
+from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, scan_last
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import FileKind
 
@@ -185,18 +185,13 @@ def derive_run_state(
     )
 
 
-def run_state_stamps(cycle_dir: Path, jobs_dir: Path) -> tuple[object, ...]:
-    """What moves `derive_run_state`: the files it reads, both locks' liveness (a producer's death
-    unlinks nothing) and the beat's edge, which no write marks."""
-    layout = CycleLayout(cycle_dir)
-    edge = _beat_stale_after(cycle_dir)
+def producer_stamps(cycle_dir: Path, jobs_dir: Path) -> tuple[object, ...]:
+    """What moves `derive_run_state` that no write stamps: both locks' liveness (a producer's death
+    unlinks nothing), the beat's edge (a pass that dies writes nothing) and its claim, which ends
+    with its job's producer."""
     return (
-        file_sig(layout.cycle_dir),
-        file_sig(layout.ledger),
         cycle_held(cycle_dir),
         pass_held(cycle_dir),
-        # A pass that dies writes nothing: past this edge its served mark reads its process gone.
-        None if edge is None or time.time() < edge else int(edge * 1e9),
-        # A live claim ends with its job's producer, which no write marks: it never 304s.
-        time.time_ns() if _claimed(cycle_dir, jobs_dir) is not None else None,
+        _beating(cycle_dir),
+        _claimed(cycle_dir, jobs_dir),
     )

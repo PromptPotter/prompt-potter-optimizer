@@ -70,7 +70,7 @@ Four roots, owned by `promptpotter/config/paths.py`; the resolution rules are st
 
 ## 5. CLI flags — `new` and `resume`
 
-The loop-mint verbs. The flag set is `presentation/cli/main.py::VERBS` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/mint.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
+The loop-mint verbs. The flag set is `presentation/cli/main.py::VERBS` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`jobs/mint.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
 
 ## 5b. Embedded launch entry (Python)
 
@@ -87,7 +87,7 @@ Nothing on this path imports a server: `pip install promptpotter` is the engine,
 
 ## 5c. The export artifact
 
-`cycles/{id}/export.json` answers *what the run found, and how good it is*, for a reader that never opens the campaign tree; written by `runner/output.py::RunArtifacts` as the run drains, off the ledger that stamps `index.json::final`, so both are projections of one ledger.
+`cycles/{id}/export.json` answers *what the run found, and how good it is*, for a reader that never opens the campaign tree; written by `runner/output.py::ExportProjection` as the run drains, off the ledger that stamps `index.json::final`, so both are projections of one ledger.
 
 ```python
 from promptpotter.domain.export import parse_prompt_export
@@ -118,7 +118,7 @@ Every frame carries `activity` whole — `status`, `notices`, and `decision` wit
 
 ## 7. Per-cycle artifact paths
 
-What each file holds is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. v1 promises only: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c). Everything under `.runtime/` may change shape between minor versions — §6 promises the record family, not the file layout. Sibling cycles (forks) live flat under `cycles/`, each with its own `dashboard.json`, seeded from the parent at the cut.
+What each file holds is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. v1 promises only: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, **`rounds/round_NNNN.json` + `index.json` + `readout.log`**, and `export.json` (§5c). Everything under `.runtime/` may change shape between minor versions — §6 promises the record family, not the file layout. Sibling cycles (forks) live flat under `cycles/`, each with its own `dashboard.json`, seeded from the parent at the cut.
 
 ## 7b. A program's door: an API token
 

@@ -43,6 +43,7 @@ from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import VerifyStrategy
+from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import NextAct, PayloadInvalidError, PotterError
 from promptpotter.shared.named_rows import imported
 
@@ -261,14 +262,6 @@ def said_text(row: Said) -> str:
     text = row.label if row.value is None else f"{row.label} {row.value}"
     text = text if row.sub is None else f"{text} ({row.sub})"
     return text if row.detail is None else f"{text} — {row.detail}"
-
-
-@dataclasses.dataclass
-class CommandResult:
-    data: dict[str, Any] | None = None
-    human: str | None = None
-    # What the process exits: all a shell, a deploy script or a spawning server reads.
-    exit_code: int = 0
 
 
 # The grammar `launch.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
@@ -836,6 +829,13 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         help="Where one command you sent stands, by the id its door answered: running, done, "
         "refused, or each job a launch launched. Read-only, zero spend.",
         args=(Arg("command_id", help="The command's id, as `--json` or its door answered it."),),
+    ),
+    _read_verb(
+        "bulletins",
+        ReadKind.BULLETINS,
+        "cli.commands.reads:bulletins_human",
+        help="What the host posted to every account, newest first, each marked once you dismissed "
+        "it (`dismiss-bulletin`). Read-only, zero spend.",
     ),
     _read_verb(
         "machine-status",

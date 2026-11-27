@@ -1,4 +1,3 @@
-import { roundOf } from "./live-candidates";
 import type {
   ServedDashboard,
   ArmName,
@@ -8,9 +7,9 @@ import type {
   NodePrompt,
   RunStanding,
   ServedArm,
+  ServedRound,
 } from "@/lib/api/types";
 import { OBSERVE_STATES, type ObserveState } from "@/lib/address";
-import { roundReading, type RoundReading } from "./round-reading";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
   best: "Best",
@@ -136,8 +135,9 @@ export interface ObserveSubject {
   state: ObserveState;
   options: { value: ObserveState; label: string }[];
   point: ObservePoint | null;
-  reading: RoundReading | null;
-  verdict: RoundReading | null;
+  // The round as served; null for the one no file holds yet (`round_axis.unfiled`).
+  reading: ServedRound | null;
+  verdict: ServedRound | null;
   round: number | null;
   live: boolean;
 }
@@ -153,16 +153,20 @@ function subjectTitle(state: ObserveState, target: ObserveTarget, inFlight: bool
   }
 }
 
+function closedRound(dash: ServedDashboard | null, round: number): ServedRound | null {
+  if (!dash || round === dash.round_axis.unfiled) return null;
+  return dash.rounds.find((x) => x.round === round) ?? null;
+}
+
 export function resolveObserveSubject(
   dash: ServedDashboard | null,
   standing: RunStanding | null,
-  isLive: boolean,
   selection: ObserveSelection,
 ): ObserveSubject {
-  // In flight only while the run is live: `current_round` lingers in `dashboard.json` after a stop.
-  const observed = dash?.observed ?? null;
-  const latest = observed;
-  const inFlight = isLive && latest?.round === roundOf(dash);
+  // Served `round_axis.live` is the round in flight: null once no producer appends or it closed.
+  const latest = dash?.observed ?? null;
+  const liveRound = dash?.round_axis.live ?? null;
+  const inFlight = latest !== null && latest.round === liveRound;
   const targets: Record<ObserveState, ObserveTarget | null> = {
     best: standing?.selection ?? null,
     latest,
@@ -173,9 +177,8 @@ export function resolveObserveSubject(
   const state: ObserveState =
     asked ?? (targets.round ? "round" : inFlight ? "latest" : targets.best ? "best" : "latest");
   const target = targets[state];
-  const liveRound = isLive ? (dash?.round_axis.live ?? null) : null;
   const round = followsLive && liveRound != null ? liveRound : (target?.round ?? null);
-  const reading = target ? roundReading(dash, target.round) : null;
+  const reading = target ? closedRound(dash, target.round) : null;
   const newestClosed = dash?.round_axis.completed.at(-1);
   return {
     state,
@@ -196,7 +199,7 @@ export function resolveObserveSubject(
         ? null
         : state === "best"
           ? newestClosed != null
-            ? roundReading(dash, newestClosed)
+            ? closedRound(dash, newestClosed)
             : null
           : reading,
     round,

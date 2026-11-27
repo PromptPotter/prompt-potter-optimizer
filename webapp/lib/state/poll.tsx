@@ -88,7 +88,7 @@ export function useDashboard(path: CyclePath | null): DashboardPoll {
   );
   const gone = read.status === "failed" && read.failure.kind === "gone";
   const dash = gone ? null : shownData(read);
-  const isLive = at === null && read.status !== "failed" && dash?.producer.appending === true;
+  const isLive = dash?.live === true;
   return useMemo(() => ({ read, dash, isLive }), [read, dash, isLive]);
 }
 

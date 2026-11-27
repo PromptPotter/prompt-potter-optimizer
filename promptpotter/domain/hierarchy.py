@@ -303,11 +303,6 @@ class SubtreeCycleEntryFacts(CycleEntryFacts):
         description="The address of the candidate a fork hangs from: the arm its mint record "
         "names, on the cycle of its parent's line that ran it. Null on a root."
     )
-    inherited: list[str] = Field(
-        description="The addresses of the candidates of each round its line holds from below "
-        "its fork's cut, round then slot order, on the cycle that ran each: what its bars lead "
-        "with. Empty on a root."
-    )
 
 
 class LensShift(FrozenModel):

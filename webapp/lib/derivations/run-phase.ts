@@ -1,20 +1,15 @@
 import {
   type DashboardState,
   type HierarchyState,
-  type LookaheadAbreastStep,
-  type LookaheadDepth,
   type NextAct,
   type Refusal,
   type RunPhase,
-  type SampleLookahead,
   type StopReading,
   type StopReason,
   DASHBOARD_STATE_PAUSE_WORDS,
-  LOOKAHEAD_WORDS,
   RUN_PHASE_INFO,
   STOP_REASON_INFO,
 } from "@/lib/api/types";
-import { filled } from "@/lib/format";
 
 // served: `RUN_PHASE_INFO` is `domain/phases.py`
 export function phaseWalks(runPhase: RunPhase | null | undefined): boolean {
@@ -72,46 +67,6 @@ export function stopNote(stop: StopReading, acts: readonly NextAct[]): string {
 /** What the run's stop said and what the operator does now; empty where it has not stopped. */
 export function runNextStep(state: HierarchyState): string {
   return state.stop === null ? "" : stopNote(state.stop, state.admission.stop_acts);
-}
-
-/** How many more cells the spend limits admit, where money holds the walk. */
-export function affordableText(affordable: number): string {
-  return affordable <= 0
-    ? LOOKAHEAD_WORDS.no_further_cell
-    : `${affordable} ${LOOKAHEAD_WORDS.more_affordable}`;
-}
-
-/** What the depth in force holds and until when; null where the switch is shut (its own note says why). */
-export function lookaheadScope(la: SampleLookahead): string | null {
-  if (la.auto_refusal !== null) return null;
-  return filled(la.auto ? LOOKAHEAD_WORDS.holds_every_round : LOOKAHEAD_WORDS.holds_this_round, la);
-}
-
-/** Why no deeper press is admitted now, where the control is drawn; null where one is. */
-export function lookaheadShallow(la: SampleLookahead): string | null {
-  return la.shallow === null ? null : filled(LOOKAHEAD_WORDS[la.shallow], la);
-}
-
-/** A depth segment's label: words for one at a time and for Max, the count between. */
-export function lookaheadDepthLabel(d: LookaheadDepth, la: SampleLookahead): string {
-  if (d.cells === "max") return filled(LOOKAHEAD_WORDS.depth_max, la);
-  return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : String(d.cells);
-}
-
-export function lookaheadDepthHint(d: LookaheadDepth, la: SampleLookahead): string {
-  if (d.cells === "max") return filled(LOOKAHEAD_WORDS.depth_max_hint, la);
-  return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : filled(LOOKAHEAD_WORDS.depth_many, d);
-}
-
-/** A candidates-at-once segment's label: words for one after another and for all, the count between. */
-export function lookaheadAbreastLabel(s: LookaheadAbreastStep): string {
-  if (s.abreast === "all") return LOOKAHEAD_WORDS.abreast_all;
-  return s.abreast === 1 ? LOOKAHEAD_WORDS.abreast_one : String(s.abreast);
-}
-
-export function lookaheadAbreastHint(s: LookaheadAbreastStep): string {
-  if (s.abreast === "all") return LOOKAHEAD_WORDS.abreast_all_hint;
-  return s.abreast === 1 ? LOOKAHEAD_WORDS.abreast_one_hint : filled(LOOKAHEAD_WORDS.abreast_many, s);
 }
 
 export function phasePauseLabel(state: DashboardState, optimizerStep: string | null): string {

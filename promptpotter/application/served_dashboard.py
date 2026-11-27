@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import reduce
 from typing import Any, Literal, NamedTuple
 
@@ -24,6 +24,7 @@ from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     ArmedCaps,
     CapReading,
+    LineArm,
     RoundHealth,
     RunLimits,
     SampleCoverage,
@@ -32,7 +33,7 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.hierarchy import READ_ONLY, RunAdmission
 from promptpotter.domain.origin_panel import overlap_line
-from promptpotter.domain.paired_reading import ArmName
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import (
     LOOKAHEAD_NO_RUN,
     PRODUCER_STATE_INFO,
@@ -65,6 +66,7 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.projections.live_dashboard import (
+    ActiveNode,
     DashboardFacts,
     LiveDashboardState,
     WaitingOn,
@@ -79,6 +81,7 @@ from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words, epoch_seconds
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 
@@ -89,7 +92,6 @@ class WarmingDashboard(StrictModel):
     and no other cycle is without one. The run phase is served here as everywhere — a body with none is
     what lets a browser invent one."""
 
-    warming_up: Literal[True] = True
     campaign_id: str
     cycle_id: str
     run_phase: RunPhase
@@ -201,6 +203,8 @@ class LookaheadDepth(StrictModel):
         description="Whether a press of this depth is admitted now: the control applies, the run "
         "admits `set-sample-lookahead` and the next walk can take that many."
     )
+    label: str = Field(description="Its segment's words: one at a time, the count, or Max.")
+    hint: str = Field(description="What a press of it holds, a hover away.")
 
 
 class LookaheadAbreastStep(StrictModel):
@@ -211,6 +215,8 @@ class LookaheadAbreastStep(StrictModel):
         description="Whether a press of this count is admitted now: the control applies and the "
         "run admits `set-sample-lookahead`."
     )
+    label: str = Field(description="Its segment's words: one after another, the count, or All.")
+    hint: str = Field(description="What a press of it sends, a hover away.")
 
 
 class SampleLookahead(StrictModel):
@@ -253,9 +259,9 @@ class SampleLookahead(StrictModel):
         "next round alone."
     )
     pick_max: int = Field(description="The deepest press the next walk can take.")
-    affordable: int | None = Field(
-        description="How many more cells the spend limits admit, where money and not the armed "
-        "depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not."
+    affordable: str | None = Field(
+        description="How many more cells the spend limits admit, worded, where money and not the "
+        "armed depth holds the walk; null where it does not."
     )
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
@@ -274,10 +280,14 @@ class SampleLookahead(StrictModel):
         description="Each count of candidates at once the control draws, 1 to `ceiling`, then "
         "`all` where `ceiling` exceeds 1."
     )
-    shallow: LookaheadShallow | None = Field(
-        description="Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the "
-        "backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls "
-        "for, money, or the stop rules; null where a deeper one is."
+    shallow: str | None = Field(
+        description="Why no deeper press than `depth` is admitted now, worded: the backend's "
+        "ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, "
+        "money, or the stop rules; null where a deeper one is."
+    )
+    scope: str | None = Field(
+        description="What the depth in force holds and until when; null where the auto-arm "
+        "switch is shut (`auto_refusal` says why)."
     )
     flight: str = Field(
         description="The look-ahead now in one line: calls out, both axes in force and their "
@@ -286,9 +296,7 @@ class SampleLookahead(StrictModel):
 
     def lines(self) -> list[str]:
         """The panel's rows as text, for a door that prints them: one wording, `LOOKAHEAD_WORDS`."""
-        if self.shallow is None:
-            return [self.flight]
-        return [self.flight, LOOKAHEAD_WORDS[self.shallow].format_map(self.model_dump())]
+        return [self.flight] if self.shallow is None else [self.flight, self.shallow]
 
 
 class RoundAxis(StrictModel):
@@ -326,24 +334,24 @@ def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
 def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
     current = state.current_round
     if live and (rows := current.candidates):
-        named = [c for c in rows if c.reading.arm == state.measuring_arm]
-        return (named or rows)[-1].reading.arm
+        return ([c for c in rows if c.open_cells] or rows)[-1].reading.arm
     closed = [r for r in state.rounds if r.candidates]
     return closed[-1].candidates[-1].reading.arm if closed else None
 
 
 def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk | None:
-    """The measuring arm's walk on its own order; ``None`` where no arm walks: `current_round`
-    rows linger after a stop."""
-    arm, current = state.measuring_arm, state.current_round
-    if not live or state.round_closed() or arm is None:
+    """The newest arm with a cell out, on its own order; ``None`` where no arm walks:
+    `current_round` rows linger after a stop."""
+    current = state.current_round
+    walking = [c for c in current.candidates if c.open_cells]
+    if not live or state.round_closed() or not walking:
         return None
-    if not (ids := state.walk_orders.get(arm.key)):
+    row = walking[-1]
+    if not (ids := state.walk_orders.get(key := row.reading.arm.key)):
         return None
-    taken = sum(len(c.samples) for c in current.candidates if c.reading.arm == arm)
-    in_flight = state.current_position
-    cursor = ids.index(in_flight) if in_flight in ids else min(taken, len(ids) - 1)
-    return SampleWalk(ids=ids, cursor=cursor, key=f"{hop.cycle_id}:{current.round}:{arm.key}")
+    out = row.open_cells[0]
+    cursor = ids.index(out) if out in ids else min(len(row.samples), len(ids) - 1)
+    return SampleWalk(ids=ids, cursor=cursor, key=f"{hop.cycle_id}:{current.round}:{key}")
 
 
 class ServedDashboard(DashboardFacts):
@@ -363,7 +371,8 @@ class ServedDashboard(DashboardFacts):
     )
     campaign_id: str
     cycle_id: str
-    backpressure: ServedBackpressure | None
+    # The served hold reads the banked one's clocks at the response; nothing assigns through it.
+    backpressure: ServedBackpressure | None  # type: ignore[assignment]
 
     run_phase: RunPhase = Field(
         description="The cycle's phase, derived at the read (`derive_run_state`) — never the "
@@ -424,6 +433,30 @@ class ServedDashboard(DashboardFacts):
     )
     fork_remainder: ForkRemainder | None = Field(
         description="What an offshoot of this cycle starts under; null on a replay."
+    )
+    live: bool = Field(
+        description="Whether a producer is appending to the cycle now; false on a replay at a "
+        "moment (`at`). The one liveness: `active`, `walk` and `round_axis.live` follow it."
+    )
+    active: ActiveNode | None = Field(
+        description="The node running now: the newest open call's, else the newest open phase's; "
+        "null unless the cycle is appending."
+    )
+    successor: Said | None = Field(
+        description="The fork a supersede moved this cycle's line to, its cycle id the `value`: "
+        "what runs now runs there. Null where the line is its own."
+    )
+    line: list[LineArm] = Field(
+        description="The cycle's candidate line, read across its fork chain: every closed round's "
+        "arms in round order, then the round in flight's while no round file holds it. The bars, "
+        "the tree strip and the chart are views of it."
+    )
+    series_version: str = Field(
+        description="The closed series' version: `rounds` and their arms of `line`, as served."
+    )
+    series_held: bool = Field(
+        description="The asker named this `series_version` as the one it holds: `rounds` is empty "
+        "and `line` holds the round in flight's arms alone, so no frame re-sends a closed round."
     )
     observed: ArmName | None = Field(
         description="The arm a surface following the run shows (`_observed`); null before any "
@@ -500,6 +533,24 @@ def run_said(
             )
         )
     return pinned(rows)
+
+
+type _Addresser = Callable[[int, ArmKey], str]
+
+
+def _addresser(stores: Stores, hop: CycleHop) -> _Addresser:
+    """A round's arm by its address on the cycle of *hop*'s fork chain that ran it: a fork its
+    rounds from its cut, its parent's below."""
+    chain: list[tuple[int, CycleHop]] = []
+    while (index := stores.campaigns.load(hop, moment=None)) and (up := index.parent_cycle_id):
+        chain.append((index.cut_round or 0, hop))
+        hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=up)
+    chain.append((0, hop))
+    return lambda r, arm: (
+        stores.subject(next(h for cut, h in chain if r >= cut))
+        ._replace(round=r, candidate_id=arm)
+        .address
+    )
 
 
 class _Present(NamedTuple):
@@ -665,6 +716,18 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     return _remainder(stores, hop, binding_run_limits(stores, at, config, stores.run_state(hop)))
 
 
+def _abreast_step(abreast: LookaheadAbreast, *, pickable: bool) -> LookaheadAbreastStep:
+    words = LOOKAHEAD_WORDS
+    label, hint = (
+        (words["abreast_all"], words["abreast_all_hint"])
+        if abreast == "all"
+        else (words["abreast_one"], words["abreast_one_hint"])
+        if abreast == 1
+        else (str(abreast), words["abreast_many"].format(abreast=abreast))
+    )
+    return LookaheadAbreastStep(abreast=abreast, pickable=pickable, label=label, hint=hint)
+
+
 def _lookahead(
     state: LiveDashboardState,
     *,
@@ -701,13 +764,14 @@ def _lookahead(
         else None
     )
     pressable = ceiling > 1 and run.lookahead_refusal == "" and not held.followed
-    shallow: LookaheadShallow | None = (
+    why: LookaheadShallow | None = (
         auto_refusal
         or ("no_run" if not pressable else None)
         or ("past_money" if held_by_money is not None else None)
         or ("past_most" if depth >= pick_max and pick_max < ceiling else None)
     )
-    shown = LOOKAHEAD_WORDS["depth_max"].format(ceiling=ceiling) if pressed == "max" else depth
+    said = {"affordable": held_by_money, "pick_max": pick_max, "ceiling": ceiling}
+    shown = LOOKAHEAD_WORDS["depth_max"].format_map(said) if pressed == "max" else depth
     offered: list[LookaheadAbreast] = list(range(1, ceiling + 1))
     if ceiling > 1:
         offered.append("all")
@@ -723,7 +787,11 @@ def _lookahead(
         most=most,
         scoring_now=in_flight > 0 or allowed > 0,
         pick_max=pick_max,
-        affordable=held_by_money,
+        affordable=None
+        if held_by_money is None
+        else LOOKAHEAD_WORDS["no_further_cell"]
+        if held_by_money <= 0
+        else f"{held_by_money} {LOOKAHEAD_WORDS['more_affordable']}",
         cell_reserve_usd=state.cell_reserve_usd,
         auto_refusal=auto_refusal,
         depths=[
@@ -731,12 +799,29 @@ def _lookahead(
                 cells=n,
                 fill="full" if n <= in_flight else "part" if n <= allowed else None,
                 pickable=pressable and n <= pick_max,
+                label=LOOKAHEAD_WORDS["depth_one"] if n == 1 else str(n),
+                hint=LOOKAHEAD_WORDS["depth_one" if n == 1 else "depth_many"].format(cells=n),
             )
             for n in range(1, ceiling + 1)
         ]
-        + ([LookaheadDepth(cells="max", fill=None, pickable=pressable)] if ceiling > 1 else []),
-        abreasts=[LookaheadAbreastStep(abreast=n, pickable=pressable) for n in offered],
-        shallow=shallow,
+        + (
+            [
+                LookaheadDepth(
+                    cells="max",
+                    fill=None,
+                    pickable=pressable,
+                    label=LOOKAHEAD_WORDS["depth_max"].format_map(said),
+                    hint=LOOKAHEAD_WORDS["depth_max_hint"].format_map(said),
+                )
+            ]
+            if ceiling > 1
+            else []
+        ),
+        abreasts=[_abreast_step(n, pickable=pressable) for n in offered],
+        shallow=None if why is None else LOOKAHEAD_WORDS[why].format_map(said),
+        scope=None
+        if auto_refusal is not None
+        else LOOKAHEAD_WORDS["holds_every_round" if auto else "holds_this_round"].format_map(said),
         flight=LOOKAHEAD_WORDS["flight"].format(
             in_flight=in_flight,
             most=most,
@@ -757,8 +842,11 @@ def _serve(
     meter: CeilingMeter,
     run_limits: RunLimits,
     standing: _Present | None,
+    owners: _Addresser,
+    held_series: str | None,
 ) -> ServedDashboard:
-    """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since."""
+    """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since;
+    *held_series* is the closed series' version its asker holds, which is not re-sent."""
     banked: dict[str, Any] = {name: getattr(state, name) for name in DashboardFacts.model_fields}
     in_flight, allowed = state.in_flight, state.lookahead_allowed
     # A hold is read against the clock: a past moment has none, and a dead producer holds nothing.
@@ -782,8 +870,18 @@ def _serve(
     live = standing is not None and run.producer.appending
     line_round = next((r for r in reversed(rounds) if overlap_line(r.overlap)), None)
     axis = _round_axis(state, live=live)
+    closed_line = [
+        LineArm(address=owners(r.round, c.reading.arm.key), reading=c.reading)
+        for r in rounds
+        for c in r.candidates
+    ]
+    version = stable_hash(
+        [r.model_dump(mode="json") for r in rounds]
+        + [a.model_dump(mode="json") for a in closed_line]
+    )
+    elided = version == held_series
     return ServedDashboard(
-        **banked | {"rounds": rounds},
+        **banked | {"rounds": [] if elided else rounds},
         sample_coverage=SampleCoverage.of(rounds),
         run_limits=run_limits,
         campaign_id=hop.campaign_id,
@@ -836,6 +934,23 @@ def _serve(
         else standing.caps,
         overshot=None if standing is None else standing.overshot,
         fork_remainder=None if standing is None else standing.fork_remainder,
+        live=live,
+        active=state.active if live else None,
+        successor=run.successor,
+        series_version=version,
+        series_held=elided,
+        line=[
+            *([] if elided else closed_line),
+            *(
+                LineArm(
+                    address=owners(state.current_round.round, c.reading.arm.key),
+                    reading=c.reading,
+                    open_cells=c.open_cells,
+                )
+                for c in state.current_round.candidates
+                if state.unfiled() is not None
+            ),
+        ],
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
         round_axis=axis,
@@ -850,9 +965,10 @@ def _serve(
 
 
 def served_dashboard(
-    stores: Stores, hop: CycleHop, *, at: int | None = None
+    stores: Stores, hop: CycleHop, *, at: int | None = None, series: str | None = None
 ) -> ServedDashboard | WarmingDashboard:
-    """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
+    """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed;
+    ``series`` is the closed series' version the asker holds (`ServedDashboard.series_held`)."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = stores.run_state(hop)
     seat = stores.campaigns.campaign_cycle(hop)
@@ -885,6 +1001,8 @@ def served_dashboard(
             meter=meter,
             run_limits=folded,
             standing=None,
+            owners=_addresser(stores, hop),
+            held_series=series,
         )
     config = cycle_config(stores, seat).config
     limits = _binding(stores, seat, config, run, folded)
@@ -914,4 +1032,6 @@ def served_dashboard(
             ),
             at=time.time(),
         ),
+        owners=_addresser(stores, hop),
+        held_series=series,
     )

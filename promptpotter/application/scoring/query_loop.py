@@ -498,15 +498,16 @@ class Walk:
 
         # Before the snapshot below, which names the cell by its answer's address.
         taken = ctx.recorder.take(acq.result)
-        self.results.append(taken)
-        running = ctx.running(self.results)
-
         # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
         category = taken.facts.error_category
-        if category is not None and (stop := ERROR_CATEGORY_INFO[category].stops) is not None:
-            raise StopLoop(
-                stop, unmeasured=n - len(self.results) + 1, detail=taken.facts.error or ""
-            )
+        stop = ERROR_CATEGORY_INFO[category].stops if category is not None else None
+        if stop in _BUDGET_STOPS:
+            # A refusal is never a row: the ceiling refused the cell, it measured nothing.
+            raise StopLoop(stop, unmeasured=n - idx, detail=taken.facts.error or "")
+        self.results.append(taken)
+        running = ctx.running(self.results)
+        if stop is not None:
+            raise StopLoop(stop, unmeasured=n - idx, detail=taken.facts.error or "")
 
         if acq.fresh:
             if taken.facts.errored:
@@ -1202,13 +1203,7 @@ class _ScoringPhase[K: Hashable]:
             if i not in self.handed:
                 self.hand(i)
             if walk is not None:
-                # The cell the ceiling refused was taken as a row before it stopped the phase.
-                kept = [
-                    cell
-                    for cell in walk.results
-                    if _budget_refusal(cell.facts.error_category) is None
-                ]
-                walk.end(QueryLoopResult(kept, ended_on=WalkEnd.BUDGET), cancel=True)
+                walk.end(QueryLoopResult(walk.results, ended_on=WalkEnd.BUDGET), cancel=True)
             self.conclude(i)
 
     def discard(self) -> None:
