@@ -393,6 +393,17 @@ class CommandKind(StrEnum):
             "post-bulletin", host=False, no_browser="the host posts from its terminal or its bot"
         ),
     )
+    # The host's word taken back, from the doors that posted it; its dismissals go with it.
+    WITHDRAW_BULLETIN = (
+        "withdraw-bulletin",
+        "bulletin_acts:withdraw_bulletin",
+        ACCOUNT_SELF_CAP,
+        Press(
+            "withdraw-bulletin",
+            host=False,
+            no_browser="the host withdraws from its terminal or its bot",
+        ),
+    )
     # Its account's own act: a host never dismisses one for its person.
     DISMISS_BULLETIN = (
         "dismiss-bulletin",
@@ -1280,6 +1291,12 @@ class PostBulletinPayload(CommandPayload, kind=CommandKind.POST_BULLETIN):
         default=False,
         description="Open it at sign-in and on each page load until the account dismisses it.",
     )
+
+
+class WithdrawBulletinPayload(CommandPayload, kind=CommandKind.WITHDRAW_BULLETIN):
+    """Take a bulletin back from every account on this box; only its host may."""
+
+    bulletin_id: str = Field(min_length=1, max_length=64)
 
 
 class DismissBulletinPayload(CommandPayload, kind=CommandKind.DISMISS_BULLETIN):

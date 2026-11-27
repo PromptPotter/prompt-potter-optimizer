@@ -4343,6 +4343,7 @@
           "set-user-settings",
           "accept-terms",
           "post-bulletin",
+          "withdraw-bulletin",
           "dismiss-bulletin",
           "block-email",
           "unblock-email",
@@ -19655,6 +19656,23 @@
         "title": "WinnerChainPoint",
         "type": "object"
       },
+      "WithdrawBulletinPayload": {
+        "additionalProperties": false,
+        "description": "Take a bulletin back from every account on this box; only its host may.",
+        "properties": {
+          "bulletin_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Bulletin Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bulletin_id"
+        ],
+        "title": "WithdrawBulletinPayload",
+        "type": "object"
+      },
       "WorkspaceStorageEntry": {
         "additionalProperties": false,
         "properties": {
@@ -24265,6 +24283,79 @@
           }
         },
         "summary": "Verify-Candidate",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/withdraw-bulletin": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "withdraw_bulletin_api_v1_commands_withdraw_bulletin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawBulletinPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Withdraw-Bulletin",
         "tags": [
           "Commands"
         ]

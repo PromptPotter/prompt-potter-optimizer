@@ -313,7 +313,9 @@ BASELINE = {
     # replay and buckets lines); the stop record banks `SpendRollup`, and four unread fields go.
     # w7-res3 (-7): a draft's merge is a `RunResolution`, and `Session.pipeline_schema` goes.
     # w7-rows6 (-31): a Refusal carries its notes; every read of a cycle's draw is `drawn_partition`.
-    "package_lines": 113693,
+    # withdraw-bulletin (+69): the host takes a bulletin back at its terminal and its bot,
+    # its dismissals with it; without it, a posted word stood forever.
+    "package_lines": 113762,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -389,7 +391,9 @@ BASELINE = {
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     # w7-rows (+1): `commands/operator_acts.py`, the one handler module of the five host-admin kinds.
-    "p_command": 11,
+    # withdraw-bulletin (+1): `commands/bulletin_acts.py`, the one handler module of the three bulletin
+    # kinds (post, withdraw, dismiss).
+    "p_command": 12,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,

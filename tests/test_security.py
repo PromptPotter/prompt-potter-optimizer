@@ -207,6 +207,7 @@ from promptpotter.domain.command_kinds import (
     StartRunPayload,
     UnblockEmailPayload,
     VerifyCandidatePayload,
+    WithdrawBulletinPayload,
 )
 from promptpotter.domain.cycle_paths import (
     CycleDir,
@@ -4966,6 +4967,15 @@ async def test_only_the_host_posts_a_bulletin_and_a_dismissal_is_its_accounts_al
     }
     assert read == {"host": [(True, False)], "ada": [(True, True)], "bo": [(True, False)]}, read
     assert read_board(board).dismissed == {"ada": (posted.id,)}, "a dismissal was kept twice"
+    # Withdrawn by the host alone, the bulletin leaves every account and takes its dismissals.
+    withdrawn = WithdrawBulletinPayload(bulletin_id=posted.id)
+    with pytest.raises(PayloadInvalidError):
+        await _filed(ada, withdrawn)
+    with pytest.raises(NotFoundError):
+        await _filed(host, WithdrawBulletinPayload(bulletin_id="never-posted"), Door.TERMINAL)
+    await _filed(host, withdrawn, Door.TERMINAL)
+    assert not bulletins.account_bulletins(bo).bulletins, "a withdrawn bulletin still stands"
+    assert read_board(board).dismissed == {}, "a withdrawn bulletin's dismissal was kept"
 
 
 @pytest.mark.usefixtures("offline")

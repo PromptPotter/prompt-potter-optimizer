@@ -33,6 +33,22 @@ def post(path: Path, *, text: str, pops_up: bool) -> Bulletin:
     return bulletin
 
 
+def withdraw(path: Path, *, bulletin_id: str) -> bool:
+    """Whether *bulletin_id* named a bulletin. Its dismissals go with it."""
+    with write_lock(path):
+        board = read_board(path)
+        kept = tuple(b for b in board.bulletins if b.id != bulletin_id)
+        if len(kept) == len(board.bulletins):
+            return False
+        dismissed = {
+            account: rest
+            for account, held in board.dismissed.items()
+            if (rest := tuple(i for i in held if i != bulletin_id))
+        }
+        _write(path, BulletinBoard(bulletins=kept, dismissed=dismissed))
+    return True
+
+
 def rekey(path: Path, *, old_id: str, new_id: str) -> None:
     """An account's dismissals follow its id (`accounts.py::claim_default`)."""
     with write_lock(path):

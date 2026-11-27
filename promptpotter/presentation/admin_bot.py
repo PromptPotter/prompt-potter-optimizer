@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application import health, notices
+from promptpotter.application import bulletins, health, notices
 from promptpotter.application.account import (
     blocked_emails,
     grants,
@@ -34,6 +34,7 @@ from promptpotter.domain.command_kinds import (
     RevokeDelegationPayload,
     SetCouponPayload,
     UnblockEmailPayload,
+    WithdrawBulletinPayload,
 )
 from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
@@ -47,10 +48,11 @@ _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _COUPON_USAGE = "/coupon <user_id> <usd|-> <tokens|-> [afresh]"
 _BULLETIN_USAGE = "/bulletin [popup] <text>"
+_WITHDRAW_USAGE = "/withdraw [bulletin_id]"
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
     "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
-    f"{_COUPON_USAGE}\n/spend\n/trail <email>\n{_BULLETIN_USAGE}"
+    f"{_COUPON_USAGE}\n/spend\n/trail <email>\n{_BULLETIN_USAGE}\n{_WITHDRAW_USAGE}"
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
@@ -94,6 +96,8 @@ def handle_command(command: str, argument: str) -> str:
         return _render_trail(argument)
     if command == "bulletin":
         return _post_bulletin(argument)
+    if command == "withdraw":
+        return _withdraw_bulletin(argument)
     return _USAGE
 
 
@@ -112,6 +116,17 @@ def _post_bulletin(argument: str) -> str:
         return f"Usage: {_BULLETIN_USAGE}"
     _file(PostBulletinPayload, {"text": text, "pops_up": pops_up})
     return f"Posted to every account{', popping up' if pops_up else ''}: {text}"
+
+
+def _withdraw_bulletin(argument: str) -> str:
+    """Bare, it lists what stands with each id; with an id, it takes that bulletin back."""
+    bulletin_id = argument.strip()
+    if not bulletin_id:
+        standing = bulletins.account_bulletins(local_stores(tenant=None)).bulletins
+        lines = [f"{b.id}: {b.text}" for b in standing]
+        return "\n".join(lines) if lines else "No bulletin is posted."
+    _file(WithdrawBulletinPayload, {"bulletin_id": bulletin_id})
+    return f"Withdrew {bulletin_id} from every account."
 
 
 def _render_trail(argument: str) -> str:

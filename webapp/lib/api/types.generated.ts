@@ -74,7 +74,7 @@ export interface MeResponse {
   capabilities: string[];
   /** The kinds this account may file (`command_kinds.py::filable`): what an act on
    * the account (its campaigns' lifecycle, its usage, its keys) is drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'withdraw-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
   access_state: 'active' | 'blocked';
   terms_version: string;
   terms_accepted_version: string | null;
@@ -1286,7 +1286,7 @@ export interface SubtreeCampaignFacts {
   /** The kinds this read's reader may file (`command_kinds.py::filable`): what an
    * act no read offers (limits, look-ahead, a fork, a scenario, a bank) is
    * drawn by. */
-  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'withdraw-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
 }
 
 /** A cycle as the subtree read serves it: its rounds under it. */
@@ -5688,6 +5688,11 @@ export interface VerifyCandidatePayload {
   seed: number | null;
 }
 
+/** Take a bulletin back from every account on this box; only its host may. */
+export interface WithdrawBulletinPayload {
+  bulletin_id: string;
+}
+
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
 
@@ -5705,7 +5710,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Every command kind, in its table's order (domain/command_kinds.py::CommandKind).
-export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "post-bulletin", "dismiss-bulletin", "block-email", "unblock-email", "grant-delegation", "revoke-delegation", "set-coupon", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
+export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "post-bulletin", "withdraw-bulletin", "dismiss-bulletin", "block-email", "unblock-email", "grant-delegation", "revoke-delegation", "set-coupon", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
 export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "dismiss-bulletin" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
@@ -5760,6 +5765,7 @@ export interface CommandPayloads {
   "unarchive-campaign": CommandSent<UnarchiveCampaignPayload, "campaign_id">;
   "unblock-email": CommandSent<UnblockEmailPayload, "email">;
   "verify-candidate": CommandSent<VerifyCandidatePayload, "campaign_id" | "cycle_id" | "candidate_id">;
+  "withdraw-bulletin": CommandSent<WithdrawBulletinPayload, "bulletin_id">;
 }
 
 // What each kind answers: its route's `response_model` (presentation/api/routers/commands.py).
@@ -5807,6 +5813,7 @@ export interface CommandResponses {
   "unarchive-campaign": CommandAcceptedBody;
   "unblock-email": CommandAcceptedBody;
   "verify-candidate": PassGradedRecord | VerifySaturated;
+  "withdraw-bulletin": CommandAcceptedBody;
 }
 
 // Each read's route (application/read_params.py::ReadParams.route): a URL fills it, never spells it.
@@ -5857,7 +5864,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "1aefc37254a88169";
+export const SERVED_CONTRACT = "5e827843108bdf3c";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
