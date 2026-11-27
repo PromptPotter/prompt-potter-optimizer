@@ -1,4 +1,5 @@
 import { test, expect, open, ready, campaigns, showSidebar } from "../harness";
+import { DESKTOP } from "../world";
 
 test.describe("app shell", () => {
   test("boots to the shell, not to a crash", async ({ page }) => {
@@ -43,8 +44,8 @@ test.describe("app shell", () => {
     await expect(page.getByRole("group", { name: "Filter campaigns" })).toBeVisible();
   });
 
-  test("the sidebar collapses and expands", async ({ page, isMobile }) => {
-    test.skip(isMobile, "a phone's sidebar is the list screen, with no collapse (responsive.spec)");
+  // A phone's sidebar is the list screen, with no collapse (responsive.spec).
+  test("the sidebar collapses and expands", DESKTOP, async ({ page }) => {
     await open(page);
     const collapse = page.getByRole("button", { name: "Collapse sidebar" });
     await expect(collapse).toHaveAttribute("aria-expanded", "true");

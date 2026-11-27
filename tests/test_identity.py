@@ -2436,12 +2436,12 @@ class _Steered(NamedTuple):
 @pytest.fixture(scope="module")
 def steered_line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     # A root and its fork, each on the menu the backend served it: the fork's carries one rung more
-    # and one model less.
-    # Run once for the module (~2.7 s), ~25 ms a fact.
+    # and one model less. The facts read menus, so the root runs no round past its origin.
+    # Run once for the module (~1.7 s), ~25 ms a fact.
     async def act(world: World) -> tuple[CampaignCycle, CampaignCycle]:
         with pytest.MonkeyPatch.context() as served:
             served.setitem(_SERVED, "model", _MODELS)
-            root = await world.campaign()
+            root = await world.campaign(rounds=0)
             served.setitem(_SERVED, "reasoning_effort", [*_SERVED["reasoning_effort"], "xhigh"])
             served.setitem(_SERVED, "model", _MODELS[:1])
             fork = await world.fork(root.hop, 0)

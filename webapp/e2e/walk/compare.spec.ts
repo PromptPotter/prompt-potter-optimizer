@@ -1,6 +1,7 @@
 import type { APIRequestContext, Page } from "@playwright/test";
 import type { HierarchyCandidate, HierarchyEntry, HierarchyResponse } from "@/lib/api/types";
 import { test, expect, open } from "../harness";
+import { DESKTOP } from "../world";
 
 // Every candidate of every campaign's served tree, inner runs included: discovered, never named.
 async function candidates(request: APIRequestContext): Promise<HierarchyCandidate[]> {
@@ -29,8 +30,8 @@ async function compare(page: Page, c: HierarchyCandidate) {
   return page.locator("#view-compare .cmp-channel").first();
 }
 
-test.describe("compare", () => {
-  test.skip(({ isMobile }) => isMobile, "a phone shows one column: Compare opens over the card");
+// A phone shows one column: Compare opens over the card.
+test.describe("compare", DESKTOP, () => {
 
   test("a candidate re-measured in a later round compares at the round it was picked in", async ({
     page,

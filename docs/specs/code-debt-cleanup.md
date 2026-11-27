@@ -484,6 +484,21 @@ bill.
   is filed (one write, or a job without a share reads as zero) — **Rides with:** `area 05's chain` —
   **Re-test:** a sibling admitted on the campaign during a mint window reads a share, never raises.
   (items 68, 134)
+- **A launch refused after admission counts toward the day's campaigns** (w11-walk, 11-27):
+  `promptpotter/application/jobs/quota.py::campaigns_today` keeps a job that was admitted, so a Start
+  released refused (no campaign minted) counts its job id, against the function's own "a refused launch
+  spent nothing". Route: a signed-in account on the offline world (`serve.mjs --auth=on`), dataset
+  email-tagging, Start (refused 422 `not_on_free_tier`), then Account → Usage & limits. Expected
+  "Campaigns today 0 of 1000" (Storage: 0 campaigns); seen "1 of 1000". Root: the count reads the
+  release's refusal (`promptpotter/application/jobs/registry.py::JobRegistry`, its `refusal`) as no
+  mint. **Rides with:** `area 05's chain` — **Re-test:** after a refused Start, `GET
+  /auth/quota-status` serves `campaigns_today` 0.
+- **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
+  `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
+  `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with
+  no unit and no empty-state line. Expected one served state ("nothing billed: unmetered") on all
+  three; seen three. Root: one served spend headline the surfaces render, an empty series said, not
+  drawn. **Rides with:** `area 05's chain` — **Re-test:** on the walk world the three name one state.
 
 ## 06 · Jobs, launch, commands
 
@@ -528,6 +543,30 @@ written under the gate.
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
+- **A refusal Start meets is not the refusal the read serves** (w11-walk, 11-27): a run act is offered
+  and refused only at the press. (1) Walk world, `justlogic.d234` campaign: "Start run", "Run one
+  round, then pause" and Steer & fork's "Confirm steered fork" are enabled; each press answers 422
+  `no_api_key`, while a check-in draft on the same world serves it as `launch_refusal` and disables
+  Start ("No key for a provider"). (2) A signed-in free-tier account, dataset email-tagging with its own
+  openrouter key: the draft serves `launch_refusal` null and an enabled Start, the press answers 422
+  `not_on_free_tier` ("the task model openai/gpt-oss-20b is not part of the free tier yet", the
+  dataset's own default). Expected (I3): every refusal the launch will meet is served on the read that
+  offers the act, the cycle's `state.admission` as the draft's. Root: the key check and
+  `promptpotter/application/free_tier.py::outside_free_tier` run at the press alone; one admission
+  preflight serves both reads. **Rides with:** `area 06's chain` — **Re-test:** on the walk world with
+  no key, the cycle's `state.admission.refusal` is `no_api_key` and the dock's Start is disabled.
+- **A launch released refused reads as Detached, Start still offered** (w11-walk, 11-27): Start on
+  the auth-off offline world (key added) mints the cycle, its job is released refused
+  (`jobs/refused/<id>.json`: `backend_unreachable`), and `GET /hierarchy/<campaign>::<cycle>` serves
+  `run_phase` detached, `stop` null, `admission.refusal` null, offers `start`; the masthead says
+  "Detached · 0 of 5 · pending — The pass this reading waits on has not finished". On the walk world
+  "Run one round, then pause" shows "Starting" then falls back to "Rounds budget reached" with no word
+  of the same refusal. Expected: the cycle says how its launch ended. Root: the cycle's run state
+  (`promptpotter/domain/phases.py::ProducerReading`) reads the release's refusal as
+  `promptpotter/application/command_reading.py::job_status` does; a state the system enters but does not
+  report. One line with **A queued launch's ending files where an unasked one does**, whose root (a
+  launch's ending is its command's) serves it. **Rides with:** `area 06's chain` — **Re-test:** after
+  a refused launch the cycle's served state names the refusal's code.
 
 ## 07 · Config, pipeline, datasets
 
@@ -598,6 +637,19 @@ sole route for a backend tunable.
   (items 631) — the model dump honours `include`/`exclude` like every other model, so no caller reads
   by attribute to dodge it — **Rides with:** `area 07's chain` — **Re-test:** `NodeCall(...).model_dump(include={"model"})`
   returns only `model`.
+- **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
+  field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
+  (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch
+  runs" (`promptpotter/domain/spend.py`). Expected operator words in the unit the field asks for; seen
+  RST backticks and a seconds/minutes contradiction. Root: a served field's operator line is its own
+  served text, never the model's docstring. **Rides with:** `area 07's chain` — **Re-test:** no served field
+  `description` the Run bounds form renders holds a double backtick or names a unit its label does not.
+- **Picking a dataset twice opens two identical check-ins** (w11-walk, 11-27): each press of a dataset
+  in `webapp/components/ingest/DatasetPickList.tsx::DatasetPickList` files `open-dataset-draft`, so a
+  second press mints a second draft; the pick list shows two "email-tagging · just now" rows and the
+  sidebar two "email-tagging unstarted" campaigns, nothing telling them apart. Expected: a dataset with
+  an open check-in reopens it (or the rows say what differs). **Rides with:** `area 07's chain` —
+  **Re-test:** two presses of one dataset leave one open check-in.
 
 ## 08 · Connectors, backends, LLM clients
 
@@ -671,6 +723,10 @@ selection explicit.
 - **The sweep unlinks a dead producer's lock before the reaper reads it** (w7-small, not re-tested):
   `docker_host.py::reap_dead_producers` then never reaps that producer's containers. **Rides with:**
   area 08's chain. **Re-test:** a producer killed mid-run leaves no container after one sweep.
+- **A draft serves every optimizer model twice, once under an empty provider** (w11-walk, 11-27):
+  `GET /drafts/{id}`'s `draft.pipeline.optimizer_setup.model_capabilities` carries each model under
+  `openrouter` and again under the empty string. Expected one entry per (provider, model). **Rides with:**
+  `area 08's chain` — **Re-test:** no `model_capabilities` key is the empty string.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 
@@ -748,6 +804,14 @@ modules outside `optimizers/` import it.
   (crowned, moved, held), so each reads its own arm — **Rides with:** `area 09's chain` —
   **Re-test:** `_verdict_reason` has a `case RoundEnding.HELD` and `RoundDecision.ending` excludes
   `ADOPTED`.
+- **A coupling note is developer prose on every potter campaign** (w11-walk, 11-27):
+  `promptpotter/application/optimizers/potter/couplings.py`'s `per_round_resubset` text ("ONE anchored
+  δ ruler in θ — the stall replayer, c0_ok and PoBB elimination all via fit_theta on
+  cycle.difficulty …") is served through `promptpotter/domain/phase_acts.py` as a "config coupling"
+  info line naming the two knobs' dotted keys, above every potter
+  campaign's chat. Expected: an info a run keeps is no news (`KnobClashes.tsx`'s own rule), or one
+  operator sentence. **Rides with:** `area 09's chain` — **Re-test:** the walk world's campaign chat
+  shows no coupling the config keeps.
 
 ## 10 · L4
 
@@ -995,6 +1059,73 @@ the served contract is generated and the browser derives nothing; mobile first.
   check-in — the editor's host names the subject an edit is written in, never a fallback by order —
   **Rides with:** `area 12's chain` — **Re-test:** follow the exhibit, open a check-in, edit a
   snippet; it banks into the check-in.
+- **The login page promises a grant no read serves** (w11-walk, 11-27):
+  `webapp/components/login/AuthCore.tsx::AuthCore` hard-codes "10 optimization runs on your own data,
+  up to 10 rounds each, on my key"; the served grant is "$0.0000 of $0.3000" (`/auth/coupon`), 1000
+  campaigns a day (`/auth/quota-status`) and a check-in's "up to 5 rounds". Root: the grant's words are
+  served. **Rides with:** `area 12's chain` — **Re-test:**
+  `git grep -c "10 optimization runs" -- webapp` is 0.
+- **A phone clips the run's masthead and three rows** (w11-walk, 11-27), at 390×844, each fine at
+  1440: `webapp/components/shell/masthead/RunMasthead.tsx` cuts the stat strip ("BEN…", "10(") and
+  the Follow button, over a ~100px empty band; `webapp/components/account/ApiTokens.tsx`'s scope chips
+  run off the card ("step" at x=399); `webapp/components/pipeline/KnobClashes.tsx` lays a dotted key in
+  a ~50px column, one to three letters a line; the Account view opens under an empty ~150px band
+  below its CHAT/ACCOUNT tabs. No page scrolls sideways, so `noSidewaysScroll` passes all four.
+  Root: a row of unwrapped items owns its overflow at column width. **Rides with:** `area 12's chain`
+  — **Re-test:** at 390px every element of these four lies inside its card.
+- **A reopened check-in tells itself as the dataset's whole task file** (w11-walk, 11-27):
+  `webapp/lib/hooks/useIngestFlow.ts` (`retell`) echoes `draft.raw_task_description` as the user's
+  message: the dataset's markdown task, newlines collapsed into one block, pushing the draft card off
+  the first screen; a fresh pick echoes "Use dataset “Email Tagging”". Expected one telling of a
+  draft, the same fresh or reopened. **Rides with:** `area 12's chain` — **Re-test:** reopen a
+  dataset check-in; the thread holds no line the operator did not type.
+- **A campaign's served address opens nothing and draws another campaign** (w11-walk, 11-27): a deep
+  link to `#/justlogic.d234__3ddd32`, the walk world's hierarchy `address` for that campaign, shows
+  `webapp/lib/state/poll.tsx`'s "This link opens nothing" over promptpotter-self/e2e's masthead and
+  pipeline. Expected: a campaign address opens its line cycle, or the gone state alone, never
+  another run beneath it. **Rides with:** `area 12's chain` — **Re-test:** each `/hierarchy` entry's
+  `#/<address>` opens that entry.
+- **The Leader card heads one round with another's line** (w11-walk, 11-27): on the walk world's
+  `justlogic.d234` (desktop and phone), Best reads "round 1 Critique · best · C1.1" over "round 4: no
+  arm cleared the parent; the line moves on to C4.1, uncrowned …"
+  (`webapp/components/searchpoint/WinnerStanding.tsx`'s card). Expected the line of the round it
+  heads. **Rides with:** `area 12's chain` — **Re-test:** the card's round label and its line name one
+  round.
+- **The Candidates chart's lift names no floor** (w11-walk, 11-27):
+  `webapp/components/candidates/FitnessChart.tsx` captions "+80.0 pts" beside the crown, drawn over
+  the crown glyph and the interval cap, while the masthead serves "+71.4 pts [+44.4, +98.5]" on the
+  origin panel. Expected (I8) the caption names its floor and panel, legible. **Rides with:**
+  `area 12's chain` — **Re-test:** the caption reads its floor and overlaps no mark.
+- **Lineage counts "0 descendants" over a drawn tree** (w11-walk, 11-27): the freed tree of 13
+  candidates is headed "0 descendants", `webapp/lib/hooks/useCampaignForest.ts`'s `cycles.length - 1`,
+  a browser count of forked cycles under a candidate tree. Expected a served count of what is drawn,
+  named for it. **Rides with:** `area 12's chain` — **Re-test:** the header's count names the drawn
+  nodes' kind and matches them.
+- **Compare promises a read it refuses** (w11-walk, 11-27): `webapp/components/compare/ComparePane.tsx`
+  says subjects "may come from different datasets — the read says what that costs rather than refusing
+  it"; ticking the walk world's two campaigns answers 400 "Could not read the selection … graded under
+  2 scorers". Expected the empty state names the one-scorer rule, or the second tick says it before
+  the read. **Rides with:** `area 12's chain` — **Re-test:** the help text and the refusal agree.
+- **Uncap is refused, in the validator's own words** (w11-walk, 11-27):
+  `webapp/components/shell/remote/RunLimitsControl.tsx`'s Uncap sends `{budget: {rounds: null}}`, but
+  `promptpotter/domain/command_kinds.py::ChangeRunLimitsPayload` lifts an axis on `unbounded` and
+  reads null as unnamed, so every Uncap answers 422 and shows "a budget naming at least one of usd /
+  tokens / rounds / wall_clock_s, or `overshoot`, is required". Route: walk world campaign → Job
+  status and configuration → Rounds → Uncap. Root: one spelling of a lift, the generated payload type
+  refusing null. **Rides with:** `area 12's chain` — **Re-test:** Uncap on a capped axis applies.
+- **A signed-out phone lands on an empty pane that offers an upload** (w11-walk, 11-27): `/` at 390px
+  without a session draws a blank pane over "Drop a dataset file…" with the attach control; sign-in
+  sits only behind the "<" sidebar. An account deleted by the host drops to the same with no word.
+  Expected (I4) anon shows anon chrome and its sign-in CTA on the first screen. **Rides with:**
+  `area 12's chain` — **Re-test:** a cookieless phone load of `/` shows a sign-in link and no
+  attach control.
+- **Account controls render disabled with no reason** (w11-walk, 11-27):
+  `webapp/components/account/AccountProfileTab.tsx` shows "Update profile" and the sole sign-in's
+  "Remove" disabled with no `aria-describedby`; Permissions lists `account.keys` beside bare
+  `babysit`, `budget` … (the `campaign.` prefix dropped for one family only); `DatasetPickList.tsx`'s
+  Discard is a native unstyled button on its own line. Expected (I3) a control no read offers is not
+  drawn, or says why; one word per capability. **Rides with:** `area 12's chain` — **Re-test:** every
+  disabled control on Account → Profile carries its reason.
 
 ## 13 · Identity, accounts, access
 
@@ -1046,8 +1177,7 @@ survivor.
 choke point is tested once; the behaviour keys name decisions; the gate answers from what changed and fits its
 budgets.
 
-**Unexamined:** `scripts/offline_run.py`, `scripts/gate.py`, `tests/test_spend.py`, `tests/test_scoring.py`,
-`tests/test_security.py`, `tests/test_identity.py`
+**Unexamined:** none (w10-tests read each against the Target; what it found is a row below).
 
 - **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
@@ -1068,16 +1198,20 @@ budgets.
   `webapp/vite.config.ts::webappTree` stamps (check that both name one tree). **Rides with:** the next
   chain touching `application/health.py`. **Re-test:** the full gate's playwright is green on the
   desk beside its pytest.
+  Second case (w10-tests' landing): `touch` phone-412 "every view fits its viewport" failed in
+  `webapp/e2e/harness.ts::drawn`, with a read still open past `expect.timeout` (15 s), while
+  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Root: playwright,
+  the gate's critical path, shares the desk with its two heaviest checks. Fix it in `gate.py`'s
+  schedule, or make `drawn` wait on what the page serves rather than on a clock. **Rides with:**
+  area 14's chain.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
-  `tests/conftest.py::own_home`, buying back about half. Left: the budget-cut table
-  (`test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`, ~3 s) opens
-  a campaign per case, each writing its own cut under its own panel gate, and a CAPO round on 16 rows
-  walks in ~0.7 s, a tenth of it one `fsync` of `charges.jsonl` per send. Action: a round costs what
-  its cells cost, found in the run's write path, never by the test. **Rides with:** tests-w's
-  successor. **Re-test:** the wall is back under 77.8 s, and `pytest --durations=10` lists no peer
-  fact over 2 s.
+  `tests/conftest.py::own_home`, buying back about half (65.8 s on 4-core Linux at w10-tests). Left: a
+  CAPO round on 16 rows walks in ~0.7 s, a tenth of it one `fsync` of `charges.jsonl` per send (the
+  budget-cut table's walk is in **A rule the suite reaches only through a round…**). Action: a round costs what its cells cost, found in the
+  run's write path, never by the test. **Rides with:** the chain owning `application/runner/`.
+  **Re-test:** `pytest --durations=10` lists no peer fact over 2 s.
 - **One guard is tested once per door**: tests grew +2.3k lines in three days, mostly security and
   identity, a test per door of one guard; the test-shape split (landing 43) kept every assert. Action:
   a guard living at one choke point is tested once, over the table of its doors; a guard spelled at
@@ -1170,27 +1304,11 @@ budgets.
   one copying back from its checkout, following `--staged`'s two modes — one mode, one stage —
   **Rides with:** `area 14's chain` — **Re-test:** `git grep -c "_LANDING_KEY" -- scripts/gate.py`
   names one `git add`.
-- **The gate reports only after every check ends** (tw-x, 11-26): `scripts/gate.py::main` — the
-  per-check table and failures print once `_schedule` returns, so a long run cannot be watched — each
-  check's verdict line prints when it ends — **Rides with:** `area 14's chain` — **Re-test:**
-  `python scripts/gate.py --py` prints a check's line before the last check starts.
-- **The idle world's Router is built at three sites** (web-tail, 11-25):
-  `scripts/offline_world.py::install_network`'s callers spell `Router(FakeLLM(lambda _body: "ok"),
-  FakeBackend([]))` in `tests/world.py`, `scripts/offline_world.py` and `webapp/e2e/serve_app.py` —
-  `offline_world.py` owns the idle world's constructor and the other two call it — **Rides with:**
-  `area 14's chain` — **Re-test:** `git grep -c "FakeLLM(lambda _body" -- tests scripts webapp/e2e`
-  sums to 1.
 - **The offline world reports no cached_tokens** (usage-2, 11-19): `scripts/offline_world.py::USAGE`
   — `prompt_tokens_details` holds only `cache_write_tokens`, so every offline prefix reads
   "unreported" where OpenRouter reports a cold 0 — the world's usage carries `cached_tokens` as the
   provider does — **Rides with:** `area 14's chain` — **Re-test:** `git grep -c cached_tokens --
   scripts/offline_world.py` is above 0.
-- **test_spend's `_running` hard-codes an identity and a jobs dir as workspace** (tests-x, 11-19):
-  `tests/test_spend.py::_running` — it passes `user_id="sub-9"` and
-  `workspace=WorkspaceDir(registry.jobs_dir)`, a jobs dir standing in for a workspace — the helper
-  takes both from `stores.identity` and the stores' workspace — **Rides with:** `area 14's chain` —
-  **Re-test:** `git grep -c 'sub-9' -- tests/test_spend.py` falls with `_running` taking its user from
-  its `stores`.
 - **The offline-run check is landing tier, so `--changed` misses a script break** (bkeys-4, 11-19):
   `scripts/gate.py::_offline_leg` — `gate.py --changed` skips the offline-run check, so a break in
   `scripts/offline_run.py` itself (e.g. a `CellSheet` that cannot parse from JSON in the trace) shows
@@ -1209,4 +1327,24 @@ budgets.
   (`application/CLAUDE.md` § Registries complete at import), then the test goes — **Rides with:**
   `area 14's chain` — **Re-test:** the test is gone and an over-budget framing refuses at import.
   (item 200)
+- **The offline world runs no launch a browser starts** (w11-walk, 11-27): `webapp/e2e/serve_app.py`
+  routes the server's own sends through `scripts/offline_world.py`'s `Router`, but a launch runs in
+  `promptpotter/application/jobs/launcher/run_job.py`'s child, which reads no `TERMNORM_ENDPOINTS` and
+  is released `backend_unreachable`; the world also holds no provider key (every run act 422
+  `no_api_key`) and its pricing and capability refreshes dial out (403 through a refusing proxy). So
+  no walk can watch a round live, pause, resume or fork on divergence. Root: the child inherits the
+  world's backend posture from the server that spawned it. **Rides with:** `area 14's chain` —
+  **Re-test:** Start on the cold world's email-tagging check-in closes round 0.
+- **A rule the suite reaches only through a round is decided where no table can reach it** (w10-tests
+  link 1): the slowest `offline` facts walk a campaign to reach one decision, e.g.
+  `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`
+  (2.58 s, a CAPO campaign per case, `execute_round` / `post_round` driven by hand) and
+  `tests/test_scoring.py::test_a_round_file_the_disk_refuses_is_one_warning_and_the_next_round_files_its_own`
+  (1.55 s); the cut's election, the round file's refusal and the formula re-read are decided inside
+  `promptpotter/application/runner/`, which exposes no pure function for them, and test_scoring's
+  hand-driven rounds (8 lines, 4681–5421 at `42bd9ca42`) are the same root. Root: each rule becomes a
+  pure function in the module that decides it (`scoring/row_policy.py::send_rows` is the model), its
+  facts a table, the walk left to a leg. **Rides with:** the chain owning `application/runner/` beside
+  area 14's chain. **Re-test:** `pytest --durations=10` lists no `offline` fact over 1 s on Linux, and
+  `git grep -c "execute_round(" -- tests/test_scoring.py` is 0.
 

@@ -14,9 +14,9 @@ REPO = Path(__file__).resolve().parents[2]
 
 def _install_offline_world() -> None:
     sys.path.insert(0, str(REPO / "scripts"))
-    from offline_world import FakeBackend, FakeLLM, Router, install_network
+    from offline_world import Router, install_network
 
-    install_network(Router(FakeLLM(lambda _body: "ok"), FakeBackend([])))
+    install_network(Router.idle())
     print("[e2e] offline world: every send answered in-process", flush=True)
 
 

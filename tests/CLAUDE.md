@@ -42,10 +42,9 @@
   | `family_tree` | archive | on `displaced`: a fork of the fork at 3, a steer off an uncrowned arm | ~1.7 s | 1 (the mask; the subtree's rules are tables) |
   | `origin_forks` | archive | on `line`: two steers off round 1's crown, origin unmodified and edited | ~1.6 s | 2 |
   | `gated` | archive | an origin the gate halts | ~0.3 s | 2 (one reads in place) |
-  | `steered_line` | identity | a root on a served menu, forked at 0 on a wider one | ~2.7 s | 7 |
+  | `steered_line` | identity | a root on a served menu (its origin only), forked at 0 on a wider one | ~1.7 s | 7 |
   | `banked_line` | scoring | a CAPO bench line opened through `opened_round`, round 1 closed, the origin's bench pass banked; its facts lay the backend's answers | ~0.6 s | 5 (2 read the run's `Cycle`, so walk their own) |
   | `l4_outer` | identity | an L4 outer over a potter and a CAPO seat (`l4_panel`) opened through `opened_round`; a fact re-opens its copy, the inner cells read off the archive | ~1.8 s | 3 (~0.3 s each) |
-  | `head_to_head` | scoring | potter, capo, gepa as one head-to-head, and a lone capo, 60 rows (gepa's floor) | ~3.6 s | 3 |
 - `Ran.session`, `Ran.result`, `Ran.hop`; `world.ledger(hop)`, `world.records(hop)`; `world.net` is the `Router` (`net.backend.faults`, `net.llm.sent`, `net.rates`).
 - Its teardown is the fixtures': `offline` restores the network and asserts nothing went unrouted, `own_home`'s tree goes with `tmp_path`.
 

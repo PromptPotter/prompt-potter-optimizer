@@ -9,13 +9,13 @@ npm run e2e                 # build the app, then walk it (walk + cold)
 npm run e2e:fast            # skip the build — iterating on specs; a build of another webapp/ refuses to serve
 npm run e2e:watch           # the same, in a browser you can watch
 npm run e2e:ui              # step, time-travel, pick locators
-npx playwright test --project=walk -g "theme"    # one slice
+npx playwright test --project=touch -g "theme"   # one slice
 ```
 
 First time on a machine: `npx playwright install chromium`.
 
-**`gate.py` runs `cold`, `walk` and `touch`**, the walk (and `touch`, the same specs on a 390px touch
-phone) against the `walk-world` check's run
+**`gate.py` runs `cold`, `touch` and `walk`**, the walk on a 390px touch phone (and at desktop width,
+the specs tagged `DESKTOP` alone) against the `walk-world` check's run
 (`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign:
 `PP_E2E_WALK_WORLD` (resolved to an absolute path, and set empty on every other server) names a run — potter's straight run, with the L4 fixture's outer campaign nested in its data root
 (`offline_run.py --straight --l4`), is what `gate.py --only walk-world` leaves
@@ -35,8 +35,8 @@ TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 | Project | Workspace | Covers |
 |---|---|---|
-| `walk` | a copy of `PP_E2E_WALK_WORLD`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
-| `touch` | the walk's | the walk's specs at 390px with `hasTouch` + `isMobile`, so `(pointer:coarse)` matches; a spec that walks the desktop layout says so in its `test.skip(isMobile, …)` |
+| `touch` | a copy of `PP_E2E_WALK_WORLD`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw — at 390px with `hasTouch` + `isMobile`, so `(pointer:coarse)` matches: the phone is the operator's surface. Issues no write. |
+| `walk` | the touch's | only the walk's specs tagged `world.ts::DESKTOP`, whose layout exists at desktop width alone (a sidebar beside its view, two columns); the phone skips them. |
 | `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker. |
 | `spend` | the same throwaway world | two campaigns taken to a measured round, each under `PP_E2E_BUDGET_USD`. **Real money** — `PP_E2E_SPEND=1`, and the dataset's backend must be up. `run.spec.ts` is the browser ingest path, `l4.spec.ts` the recursion; each spec's header states why it is minted the way it is. |
 

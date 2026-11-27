@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { PYTHON, PYTHON_ENV, REPO } from "./e2e/python.mjs";
-import { COLD_HOME, WALK_HOME } from "./e2e/world";
+import { COLD_HOME, DESKTOP, WALK_HOME } from "./e2e/world";
 
 // Two servers: cold and spend share a throwaway PROMPTPOTTER_HOME, which binds at import; walk reads a
 // copy of PP_E2E_WALK_WORLD (a run such as `scripts/offline_run.py` makes).
@@ -63,7 +63,11 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  reporter: process.env.CI ? [["github"]] : [["list"]],
+  // Every run, green too, leaves each spec's seconds in `test-results/durations.json`.
+  reporter: [
+    process.env.CI ? ["github"] : ["list"],
+    ["json", { outputFile: "test-results/durations.json" }],
+  ],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
@@ -74,16 +78,19 @@ export default defineConfig({
   },
   projects: [
     {
+      // Only the specs whose layout exists at desktop width alone; the phone walks the rest.
       name: "walk",
       testMatch: /walk[/\\].*\.spec\.ts/,
+      grep: new RegExp(DESKTOP.tag),
       // Cold and spend never retry: their workspace resets once per RUN, so a retry is a different test.
       retries: process.env.CI ? 1 : 0,
       use: { ...devices["Desktop Chrome"], baseURL: WALK_URL },
     },
     {
-      // The walk again on a phone: `hasTouch` + `isMobile` make `(pointer:coarse)` match.
+      // The walk on a phone, the operator's surface: `hasTouch` + `isMobile` make `(pointer:coarse)` match.
       name: "touch",
       testMatch: /walk[/\\].*\.spec\.ts/,
+      grepInvert: new RegExp(DESKTOP.tag),
       retries: process.env.CI ? 1 : 0,
       use: {
         ...devices["Desktop Chrome"],

@@ -1534,12 +1534,12 @@ def _vitest(sel: Selection) -> Outcome:
 
 def _pytest(_: Selection) -> Outcome:
     # The cap is the suite's, never the compiler's: whatever `__pycache__` a checkout starts with,
-    # every module it imports is bytecode, pytest's rewritten ones too, before the job meters it.
+    # every module it imports is bytecode before the job meters it. The suite rewrites and collects
+    # its own tests once, inside it.
     job, metered.job = metered.job, None
-    for warm in (("compileall", "-q", "promptpotter", "scripts"), ("pytest", "--collect-only")):
-        code, out = run(_py(*warm), REPO)
-        if code:
-            return code, out
+    code, out = run(_py("compileall", "-q", "promptpotter", "scripts"), REPO)
+    if code:
+        return code, out
     metered.job = job
     return run(_py("pytest"), REPO)
 
@@ -2061,6 +2061,17 @@ def _schedule(
     def execute(check: Check) -> None:
         result = _execute(check, sel, store)
         with moved:
+            # Its verdict line as it ends, so a long gate is watched; failures print at the end.
+            if not result.kept:
+                peak = f"{result.peak_mb or '-'} of {check.mb} MB"
+                verdict = "FAIL" if result.rc else "ok"
+                secs, cpu = result.secs, result.cpu_secs
+                cores = "-" if cpu is None or not secs else f"{cpu / secs:.2f}"
+                print(
+                    f"{check.name:<24}{check.kind:<8}{verdict:>5}{secs:>8.1f}s{peak:>16}"
+                    f"{cores:>6} cpu/wall",
+                    flush=True,
+                )
             running.discard(check)
             done[check] = result
             moved.notify()
@@ -2543,15 +2554,6 @@ def main() -> int:
     kept = sum(r.kept for r in results)
     unchanged = f", {kept} unchanged since green" if kept else ""
 
-    for r in results:
-        if not r.kept:
-            peak = f"{r.peak_mb or '-'} of {r.check.mb} MB"
-            verdict = "FAIL" if r.rc else "ok"
-            cores = "-" if r.cpu_secs is None or not r.secs else f"{r.cpu_secs / r.secs:.2f}"
-            print(
-                f"{r.check.name:<24}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s{peak:>16}"
-                f"{cores:>6} cpu/wall"
-            )
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
     busy = sum(r.secs for r in results)

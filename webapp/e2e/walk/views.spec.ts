@@ -1,4 +1,5 @@
 import { test, expect, open, ready, DASHBOARD_VIEWS } from "../harness";
+import { DESKTOP } from "../world";
 
 type Page = import("@playwright/test").Page;
 
@@ -47,8 +48,8 @@ test.describe("the view axis", () => {
     await expect.poll(() => new URL(page.url()).hash).not.toContain("/files");
   });
 
-  test("command words open views, and a view opens once", async ({ page, rich, isMobile }) => {
-    test.skip(isMobile, "a phone shows one column: the opened view replaces the chat it was typed in");
+  // A phone shows one column: the opened view replaces the chat it was typed in.
+  test("command words open views, and a view opens once", DESKTOP, async ({ page, rich }) => {
     await open(page, rich.addr);
     const field = page.getByRole("textbox", { name: "Chat input" });
     await field.fill("samples and spend");
@@ -60,8 +61,8 @@ test.describe("the view axis", () => {
     await expect.poll(() => new URL(page.url()).hash).toContain("/spend/samples");
   });
 
-  test("Compare opens from the campaign list beside what is open", async ({ page, rich, isMobile }) => {
-    test.skip(isMobile, "a phone shows one column: nothing stands beside the opened Compare");
+  // A phone shows one column: nothing stands beside the opened Compare.
+  test("Compare opens from the campaign list beside what is open", DESKTOP, async ({ page, rich }) => {
     await open(page, `${rich.addr}${DASHBOARD_VIEWS}`);
     await page
       .getByRole("navigation", { name: "Primary" })
