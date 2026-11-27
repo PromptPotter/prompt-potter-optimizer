@@ -64,7 +64,15 @@ from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, withheld
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
-from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
+from promptpotter.domain.spend import (
+    LifetimeSpend,
+    MeteredSpend,
+    UserSpend,
+    bill_text,
+    calls_rate_priced,
+    rate_priced_text,
+    usd_text,
+)
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
@@ -121,24 +129,25 @@ def _state_row(status: RunStatus) -> Figure:
     )
 
 
-def _spend_row(
-    key: FigureKey, label: str, spent: MeteredSpend | LifetimeSpend, unreported: float | None
-) -> Figure:
+def _spend_row(spent: MeteredSpend) -> Figure:
     return _figure(
-        key,
-        label,
-        f"{'≥' if spent.bill_is_floor else ''}{usd_text(spent.billed_usd)}",
-        f"up to {usd_text(unreported)} more unreported"
-        if unreported is not None
-        else f"{usd_text(spent.rate_priced_usd)} {RATE_PRICED_LABEL}"
-        if spent.calls_rate_priced
-        else None,
+        "spend",
+        "Spend",
+        bill_text(spent.billed_usd, floor=spent.bill_is_floor),
+        rate_priced_text(spent.rate_priced_usd, priced=spent.calls_rate_priced),
     )
 
 
-def _lifetime_row(spent: LifetimeSpend) -> Figure:
-    return _spend_row(
-        "spend_lifetime", "Spent", spent, spent.unreported_usd if spent.sends_unreported else None
+def _lifetime_row(spent: UserSpend) -> Figure:
+    return _figure(
+        "spend_lifetime",
+        "Spent",
+        LifetimeSpend.of(spent).bill,
+        f"up to {usd_text(spent.unreported_usd)} more unreported"
+        if spent.sends_unreported
+        else rate_priced_text(
+            spent.rate_priced_usd, priced=calls_rate_priced(spent.rate_priced_usd)
+        ),
     )
 
 
@@ -203,7 +212,7 @@ def _cycle_figures(
     if runs_with is not None:
         models = [model for vendor in runs_with.vendors for model in vendor.models]
         rows.append(_figure("optimizer", "Optimizer", runs_with.optimizer, " · ".join(models)))
-    rows.append(_spend_row("spend", "Spend", facts.spend, None))
+    rows.append(_spend_row(facts.spend))
     if not on_live_cycle:
         rows.append(_bench_row(ReadingState.HELD_ELSEWHERE, None))
     elif bench is not None:
@@ -486,7 +495,7 @@ def campaign_entry(
     else:
         state = live.state
     spent = campaign_spend(stores.campaigns, stores.charges, campaign.campaign_id)
-    lifetime = LifetimeSpend.of(spent.total)
+    lifetime = spent.total
     return HierarchyCampaign(
         address=Subject(campaign.campaign_id, inside=inside).address,
         parent=Subject.of(inside).address if inside else None,
@@ -531,7 +540,7 @@ def unstarted_entry(
     """An open check-in as a campaign: its spend is what the check-in cost."""
     ledger = stores.drafts.ledger(draft.draft_id)
     billed = billed_spend([ledger] if ledger.is_file() else [])
-    spent = LifetimeSpend.of(billed.plus(unreported_under(stores.charges, ledger)).total)
+    spent = billed.plus(unreported_under(stores.charges, ledger)).total
     dataset = draft.dataset_name
     lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(

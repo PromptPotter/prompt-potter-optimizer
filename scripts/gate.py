@@ -190,6 +190,8 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str | tuple[str, ...]], ...] = (
     ("application/", ("presentation/",), ""),
     ("shared/", ("!shared/",), ""),
     ("domain/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
+    # Above `domain/`, below every layer that reads the settings.
+    ("config/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
     ("infrastructure/", ("application/", "presentation/"), ""),
     # `infrastructure/` reads the connector table, so a connector importing `application/` is a cycle.
     ("connectors/", ("application/", "presentation/"), ""),
@@ -1404,10 +1406,10 @@ class Check:
     # `commit`: the pre-commit set, cheap and writing nothing a sibling gate reads, so a gate of
     # only these never queues; `landing` proves a landing, so `--changed` leaves it out.
     tier: Literal["commit", "edit", "landing"] = "edit"
-    # The cores it keeps busy; the schedule never runs more beside each other than the box has.
-    slots: int = 1
-    # Set where it starts under a hard-coded timeout (Playwright's `webServer`, Vitest's worker
-    # start), which beside a CPU-bound check trips on the desk's load, not on a defect: until it
+    # The cores it keeps busy, its CPU-s over its wall measured alone (`time gate.py --only NAME`,
+    # after `#`); the schedule never runs more beside each other than the box has.
+    slots: float = 1
+    # Set where it starts under a hard-coded timeout (Playwright's `webServer`), which beside a CPU-bound check trips on the desk's load, not on a defect: until it
     # answers that its start is behind it, the check takes every core.
     started: Callable[[], bool] | None = None
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A product it reads is
@@ -1420,9 +1422,13 @@ class Check:
     builds: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
-    # The HEAD trees its product stamps (`webapp/vite.config.ts`'s build stamp), which a commit
-    # moves while every source byte stands: they key it beside its sources.
-    stamps_head: tuple[str, ...] = ()
+    # Runs the engine though its kind is not `py`, so it runs in the pinned venv all the same.
+    engine: bool = False
+
+    @property
+    def pinned(self) -> bool:
+        """Whether it runs the engine, so a run holding it runs in the pinned venv."""
+        return self.engine or self.kind in ("py", "parity")
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -1436,8 +1442,7 @@ class Check:
         if prefixes is None or self.kind == "parity":
             return None
         made = [key for b in _builders(self, CHECKS) if (key := b.key(store)) is not None]
-        heads = [git("rev-parse", f"HEAD:{tree}")[1].encode() for tree in self.stamps_head]
-        return digest(store.key(prefixes).encode(), *heads, *(key.encode() for key in made)).hex()
+        return digest(store.key(prefixes).encode(), *(key.encode() for key in made)).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
         standing = all((REPO / path.format(key=key)).exists() for path in self.builds)
@@ -1483,7 +1488,8 @@ def _vitest(sel: Selection) -> Outcome:
     if sel.narrowed:
         related = ("vitest", "related", "--run", "--passWithNoTests", *sel.narrowed)
         return run(_node("npx", *related), _WEBAPP)
-    return run(_node("npm", "run", "test"), _WEBAPP)
+    # Not `npm test`, which queues on the lock this gate already holds.
+    return run(_node("npx", "vitest", "run"), _WEBAPP)
 
 
 def _pytest(_: Selection) -> Outcome:
@@ -1810,7 +1816,7 @@ CHECKS: tuple[Check, ...] = (
         _offline_leg(_OFFLINE_HOME),
         mb=1240,  # 986: 1017 at a child peak of 196 MB, 190 at tw-0 under the same slots
         tier="landing",
-        slots=min(OFFLINE_RUN_CHILDREN_MAX, _CORES),
+        slots=0.84 * min(OFFLINE_RUN_CHILDREN_MAX, _CORES),  # 3.34 at four children
         reads=(*OFFLINE_RUN_READS, *_GATE),
         builds=(str(_OFFLINE_HOME),),
     ),
@@ -1820,16 +1826,18 @@ CHECKS: tuple[Check, ...] = (
         _offline_leg(clone_cache() / _CONTROLLED, "--controlled"),
         mb=460,  # 368
         tier="landing",
-        slots=2,  # its two workspaces
+        slots=1.5,  # 1.54, its two workspaces
         reads=(*OFFLINE_RUN_READS, *_GATE),
     ),
-    # "py" as it runs the engine: a `--web` gate then runs in the pinned venv `walk` serves from.
+    # "web" as only `playwright` reads its world, so `--py` runs none; it runs the engine, so a
+    # `--web` gate runs in the pinned venv `walk` serves from.
     Check(
         "walk-world",
-        "py",
+        "web",
         _walk_world,
         mb=300,  # 237
         tier="landing",
+        engine=True,
         reads=(*OFFLINE_RUN_READS, *_GATE),
         builds=(_WALK_WORLD,),
     ),
@@ -1850,28 +1858,41 @@ CHECKS: tuple[Check, ...] = (
         reads=(str(_OFFLINE_HOME),),
     ),
     Check("lockfile", "web", _lockfile, mb=0, tier="commit"),
-    Check("eslint", "web", _eslint, mb=2135, tier="commit", narrow=_web_modules),  # 1706
-    # Its pool starts a worker per project inside the run, which nothing outside it sees.
-    Check("vitest", "web", _vitest, mb=735, started=lambda: False, narrow=_web_modules),  # 586
+    Check(
+        "eslint",
+        "web",
+        _eslint,
+        mb=2135,  # 1706
+        slots=1.3,  # 1.27
+        tier="commit",
+        narrow=_web_modules,
+    ),
+    Check(
+        "vitest",
+        "web",
+        _vitest,
+        mb=735,  # 586
+        slots=1.3,  # 1.33
+        narrow=_web_modules,
+    ),
     Check(
         "vite-build",
         "web",
         lambda _: run(_node("npm", "run", "build"), _WEBAPP),
         mb=1360,  # 1086
-        slots=2,
+        slots=1.6,  # 1.61
         # Inside `out/`, so vite's `emptyOutDir` takes it with the product it vouched for.
         builds=("webapp/out/.built-{key}",),
-        stamps_head=("webapp",),
     ),
     # Its incremental `tsconfig.tsbuildinfo` is written only where its content moved.
-    Check("tsc", "web", _tsc, mb=735, tier="commit"),  # 586
+    Check("tsc", "web", _tsc, mb=735, slots=2, tier="commit"),  # 586, 2.05
     Check(
         "playwright",
         "web",
         _playwright,
         mb=1680,  # 1344
         tier="landing",
-        # Past its servers' start, the walk keeps half a core busy (89 CPU-s in 173 s, Linux).
+        slots=0.6,  # 0.58: 109 CPU-s in 188 s, its servers' start included
         started=_e2e_served,
         # Both servers' backend is the offline world's (`e2e/serve_app.py`); `walk` walks its run.
         reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS, "webapp/out/", os.path.join(_WALK_WORLDS, "")),
@@ -1910,6 +1931,8 @@ class Result:
     kept: bool = False  # green on these inputs already, so not run
     # Every process it started, at once; `None` where no job object meters (off Windows).
     peak_mb: int | None = None
+    # The CPU-s of every process it started: ÷ `secs` re-measures `Check.slots`.
+    cpu_secs: float | None = None
 
 
 def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
@@ -1918,7 +1941,7 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
         result = _verdict(check, sel, store)
     finally:
         metered.job = None
-        peak = close_job(job)
+        peak, cpu = close_job(job)
     if result.kept:
         return result
     if peak is not None and peak > check.mb:
@@ -1926,8 +1949,8 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
         for path in check.builds:
             shutil.rmtree(REPO / path.format(key=result.key), ignore_errors=True)
         over = f"peaked at {peak} MB, over its {check.mb} MB cap.\n{result.out}"
-        return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak)
-    return dataclasses.replace(result, peak_mb=peak)
+        return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak, cpu_secs=cpu)
+    return dataclasses.replace(result, peak_mb=peak, cpu_secs=cpu)
 
 
 def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
@@ -1958,14 +1981,36 @@ def _schedule(
 ) -> list[Result]:
     """Each check once its producers are done, beside every other the box's free memory and cores
     still hold; first the one most others wait on, then the widest. One too big for the box runs
-    when nothing else does, and none starts past a timed check waiting for it to empty."""
+    when nothing else does, and none starts past a timed check waiting for it to empty. While a
+    timed check waits on its producers only they start, so it starts on a box they leave empty
+    rather than once every check begun beside them has drained it."""
     done: dict[Check, Result] = {}
     running: set[Check] = set()
     started: set[Check] = set()
     waiting = Counter(p for c in checks for p in _producers(c, checks))
     moved = threading.Condition()
 
-    def cores(check: Check) -> int:
+    def fed(check: Check) -> set[Check]:
+        chain, todo = set[Check](), list(_producers(check, checks))
+        while todo:
+            if (producer := todo.pop()) not in chain:
+                chain.add(producer)
+                todo.extend(_producers(producer, checks))
+        return chain
+
+    chains = {check: fed(check) for check in checks if check.started is not None}
+
+    def holding() -> set[Check] | None:
+        """The producers a timed check still waits on, the only checks that may start; `None`
+        where no timed check waits."""
+        held = [
+            chain
+            for timed, chain in chains.items()
+            if timed not in done and not done.keys() >= set(_producers(timed, checks))
+        ]
+        return set().union(*held) if held else None
+
+    def cores(check: Check) -> float:
         return _CORES if check.started is not None and check not in started else check.slots
 
     def execute(check: Check) -> None:
@@ -1990,7 +2035,10 @@ def _schedule(
                 for c in checks
                 if c not in done and c not in running and done.keys() >= set(_producers(c, checks))
             ]
+            held = holding()
             for check in sorted(ready, key=lambda c: (-waiting[c], -cores(c), -c.mb)):
+                if held is not None and check not in held:
+                    continue
                 mb = sum(c.mb for c in running) + check.mb
                 if running and (mb > free_mb or sum(map(cores, running)) + cores(check) > _CORES):
                     # Behind a running timed check it waits out that check, not the narrow ones.
@@ -2220,11 +2268,9 @@ def _with_builders(checks: list[Check]) -> list[Check]:
     return pulled
 
 
-# The kinds that run the engine, so a run holding one runs in the pinned venv.
-_PINNED_KINDS = ("py", "parity")
-# A `--web` gate asks no engine check, yet playwright reads the walk world an engine check builds:
-# what it pulls in must hold a pinned kind, or the run re-execs nowhere.
-if not any(c.kind in _PINNED_KINDS for c in _with_builders([_NAMED["playwright"]])):
+# A `--web` gate asks no `py` check, yet playwright reads the walk world an engine check builds:
+# what it pulls in must hold a pinned check, or the run re-execs nowhere.
+if not any(c.pinned for c in _with_builders([_NAMED["playwright"]])):
     raise RuntimeError("playwright pulls in no engine check, so a --web gate re-execs nowhere")
 
 
@@ -2401,8 +2447,8 @@ def main() -> int:
 
     sel = Selection.build(args.staged, args.changed)
     checks = _query(args, sel)
-    # Over the very checks the run executes, builders included: `--web` runs walk-world, a py check.
-    if not args.push and any(c.kind in _PINNED_KINDS for c in checks):
+    # Over the very checks the run executes, builders included: `--web` runs walk-world, an engine run.
+    if not args.push and any(c.pinned for c in checks):
         # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
         _reexec_pinned()
     if args.push:
@@ -2444,7 +2490,11 @@ def main() -> int:
         if not r.kept:
             peak = f"{r.peak_mb or '-'} of {r.check.mb} MB"
             verdict = "FAIL" if r.rc else "ok"
-            print(f"{r.check.name:<24}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s{peak:>16}")
+            cores = "-" if r.cpu_secs is None or not r.secs else f"{r.cpu_secs / r.secs:.2f}"
+            print(
+                f"{r.check.name:<24}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s{peak:>16}"
+                f"{cores:>6} cpu/wall"
+            )
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
     busy = sum(r.secs for r in results)

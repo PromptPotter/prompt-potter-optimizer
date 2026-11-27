@@ -1,7 +1,6 @@
 import {
   type Budget,
   type KindSpend,
-  type LifetimeSpend,
   type MeteredSpend,
   type ServedDashboard,
   RATE_PRICED_LABEL,
@@ -38,26 +37,6 @@ export function spendHeadline(m: MeteredSpend): string {
 // Never spent, so it sits beside a bill, never inside one (served: `domain/spend.py::calls_rate_priced`).
 export function ratePricedText(usd: number, callsRatePriced: boolean): string | null {
   return callsRatePriced ? `${fmtUsd(usd)} ${RATE_PRICED_LABEL}` : null;
-}
-
-// What the allowance draws beyond the box's keys' bill, worded once for every surface that reads `CouponStatus`.
-export function allowanceCaveats(l: LifetimeSpend): string[] {
-  const lines: string[] = [];
-  if (l.bill_is_floor) {
-    lines.push(
-      `${fmtUnit("tokens", l.unpriced_tokens)} billed by a model with no known price: the dollar figure undercounts, so the token unit binds.`,
-    );
-  }
-  const priced = ratePricedText(l.rate_priced_usd, l.calls_rate_priced);
-  if (priced) {
-    lines.push(`${priced}: calls no provider reported a bill for, drawn at our rate.`);
-  }
-  if (l.sends_unreported) {
-    lines.push(
-      `Up to ${fmtUsd(l.unreported_usd)} unreported: sends that ended with no bill (cancelled, timed out, killed), drawn at the most they may have cost.`,
-    );
-  }
-  return lines;
 }
 
 export function replayShareLine(m: MeteredSpend): string {

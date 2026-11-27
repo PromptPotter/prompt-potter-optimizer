@@ -29,6 +29,16 @@ def authorship_of(source: str, issued_by: Principal | None) -> str:
     return f"operator:{issued_by.id}"
 
 
+class CellMean(StrictModel):
+    """One side channel's mean over a point's cells, worded once for every reader."""
+
+    key: str = Field(description="The channel, for code to pair two points' means on.")
+    label: str
+    value: float
+    text: str = Field(description="`value` in the channel's unit.")
+    lead: bool = Field(description="Shown in the lead row, above the rest.")
+
+
 class SubjectMask(StrictModel):
     """The mask this channel is read under, echoed back. Served rather than left implicit in the
     key, so a chart legend can say what a channel IS without re-splitting an address."""
@@ -161,8 +171,10 @@ class SubjectReading(StrictModel):
     cycle_spend_usd: float | None
     cycle_rounds_scored: int
     spend_to_round: dict[str, float]
-    # A channel none of its cells carries is absent, never 0.
-    cell_means: dict[str, float]
+    cell_means: list[CellMean] = Field(
+        description="Each side channel's mean over the point's own cells, in display order; a "
+        "channel none of its cells carries is absent, never 0."
+    )
     values: dict[str, float]
     bench_values: dict[str, float] = Field(
         default_factory=dict,

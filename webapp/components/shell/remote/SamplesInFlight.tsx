@@ -1,15 +1,6 @@
 import { type ServedBackpressure, LOOKAHEAD_WORDS } from "@/lib/api/types";
 import { Said, SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
-import {
-  affordableText,
-  lookaheadAbreastHint,
-  lookaheadAbreastLabel,
-  lookaheadDepthHint,
-  lookaheadDepthLabel,
-  lookaheadScope,
-  lookaheadShallow,
-} from "@/lib/derivations";
 import { fmtDuration, fmtUsd } from "@/lib/format";
 import type { RemoteModel } from "./useRemoteModel";
 
@@ -22,7 +13,6 @@ function providerHold(held: ServedBackpressure): string {
 
 export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
   const { lookahead: la, providerHeld } = m;
-  const scope = lookaheadScope(la);
   return (
     <div className="remote-panel-section">
       <div className="section-title">Samples in flight</div>
@@ -55,7 +45,7 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
               la.cell_reserve_usd != null ? `, ${fmtUsd(la.cell_reserve_usd)} here` : ""
             }, so once the ceiling cannot hold another the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
           >
-            {affordableText(la.affordable)}
+            {la.affordable}
           </Term>
         </div>
       ) : null}
@@ -72,7 +62,7 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
       ) : (
         <p className="remote-note">{la.flight}</p>
       )}
-      {scope !== null ? <p className="remote-note">{scope}</p> : null}
+      {la.scope !== null ? <p className="remote-note">{la.scope}</p> : null}
     </div>
   );
 }
@@ -81,7 +71,7 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
 function LookaheadControls({ model: m }: { model: RemoteModel }) {
   const { lookahead: la } = m;
   const pending = m.pending !== null;
-  const shallow = lookaheadShallow(la);
+  const { shallow } = la;
   const maxOffered = la.depths.some((d) => d.cells === "max" && d.pickable);
   return (
     <>
@@ -94,10 +84,10 @@ function LookaheadControls({ model: m }: { model: RemoteModel }) {
           onChange={m.armCells}
           options={la.depths.map((d) => ({
             value: String(d.cells),
-            label: lookaheadDepthLabel(d, la),
+            label: d.label,
             fill: d.fill ?? undefined,
             disabled: pending || la.max_speed || !d.pickable,
-            hint: lookaheadDepthHint(d, la),
+            hint: d.hint,
           }))}
         />
         <span className="lbl">Candidates at once</span>
@@ -108,9 +98,9 @@ function LookaheadControls({ model: m }: { model: RemoteModel }) {
           onChange={m.armAbreast}
           options={la.abreasts.map((s) => ({
             value: String(s.abreast),
-            label: lookaheadAbreastLabel(s),
+            label: s.label,
             disabled: pending || la.max_speed || !s.pickable,
-            hint: lookaheadAbreastHint(s),
+            hint: s.hint,
           }))}
         />
         <p className="remote-note">{la.flight}</p>

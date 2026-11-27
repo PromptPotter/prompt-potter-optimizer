@@ -274,11 +274,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   like unnecessary stale stuff"). Measured on the v0.8.21 release (`CI=1 gate.py`, 16 cores): 737 s
   wall, 1334 s of checks; playwright 337 s, pytest 315 s, offline-run 300 s, offline-run-controlled
   102 s, optimizer-plugin 78 s, walk-world 45 s (the world playwright serves), surface-ledger 29 s.
-  Playwright, pytest and the two offline legs are most of it: what one walks that another already
-  walked goes first. Then the slowest facts by `pytest --durations`, each against
-  [`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Budget per test: one over it shares its run or goes;
-  then each check that re-reads the whole tree answers from what changed. CI's own wall is measured
-  beside it.
+  The schedule half is done (w7-gate): measured slots start playwright, the critical path, at 28 s
+  instead of 115 s (`CI=1 gate.py` on 4 cores, 381 s → 277 s warm). Sharing potter's L4 run with
+  playwright's world was refuted, because it moves the estimator key. What is left is in the ledger:
+  the three tests over [`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Budget per test, CI's unread
+  `walk-world` in `check`, and the gate metering CPU itself; then each check that re-reads the whole
+  tree answers from what changed. CI's own wall is measured beside it.
 - **θ off the round's statement, before an L4 campaign banks a result** (operator, 2026-11-26: a
   re-key or a run-data wipe voids paid L4 runs; a de novo review of the round decision): v0.8.21
   decides a round on pairings (`PairedReading`), yet θ still rides every round's envelope (the

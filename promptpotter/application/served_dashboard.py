@@ -203,6 +203,8 @@ class LookaheadDepth(StrictModel):
         description="Whether a press of this depth is admitted now: the control applies, the run "
         "admits `set-sample-lookahead` and the next walk can take that many."
     )
+    label: str = Field(description="Its segment's words: one at a time, the count, or Max.")
+    hint: str = Field(description="What a press of it holds, a hover away.")
 
 
 class LookaheadAbreastStep(StrictModel):
@@ -213,6 +215,8 @@ class LookaheadAbreastStep(StrictModel):
         description="Whether a press of this count is admitted now: the control applies and the "
         "run admits `set-sample-lookahead`."
     )
+    label: str = Field(description="Its segment's words: one after another, the count, or All.")
+    hint: str = Field(description="What a press of it sends, a hover away.")
 
 
 class SampleLookahead(StrictModel):
@@ -255,9 +259,9 @@ class SampleLookahead(StrictModel):
         "next round alone."
     )
     pick_max: int = Field(description="The deepest press the next walk can take.")
-    affordable: int | None = Field(
-        description="How many more cells the spend limits admit, where money and not the armed "
-        "depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not."
+    affordable: str | None = Field(
+        description="How many more cells the spend limits admit, worded, where money and not the "
+        "armed depth holds the walk; null where it does not."
     )
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
@@ -276,10 +280,14 @@ class SampleLookahead(StrictModel):
         description="Each count of candidates at once the control draws, 1 to `ceiling`, then "
         "`all` where `ceiling` exceeds 1."
     )
-    shallow: LookaheadShallow | None = Field(
-        description="Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the "
-        "backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls "
-        "for, money, or the stop rules; null where a deeper one is."
+    shallow: str | None = Field(
+        description="Why no deeper press than `depth` is admitted now, worded: the backend's "
+        "ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, "
+        "money, or the stop rules; null where a deeper one is."
+    )
+    scope: str | None = Field(
+        description="What the depth in force holds and until when; null where the auto-arm "
+        "switch is shut (`auto_refusal` says why)."
     )
     flight: str = Field(
         description="The look-ahead now in one line: calls out, both axes in force and their "
@@ -288,9 +296,7 @@ class SampleLookahead(StrictModel):
 
     def lines(self) -> list[str]:
         """The panel's rows as text, for a door that prints them: one wording, `LOOKAHEAD_WORDS`."""
-        if self.shallow is None:
-            return [self.flight]
-        return [self.flight, LOOKAHEAD_WORDS[self.shallow].format_map(self.model_dump())]
+        return [self.flight] if self.shallow is None else [self.flight, self.shallow]
 
 
 class RoundAxis(StrictModel):
@@ -698,6 +704,18 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     return _remainder(stores, hop, binding_run_limits(stores, at, config, stores.run_state(hop)))
 
 
+def _abreast_step(abreast: LookaheadAbreast, *, pickable: bool) -> LookaheadAbreastStep:
+    words = LOOKAHEAD_WORDS
+    label, hint = (
+        (words["abreast_all"], words["abreast_all_hint"])
+        if abreast == "all"
+        else (words["abreast_one"], words["abreast_one_hint"])
+        if abreast == 1
+        else (str(abreast), words["abreast_many"].format(abreast=abreast))
+    )
+    return LookaheadAbreastStep(abreast=abreast, pickable=pickable, label=label, hint=hint)
+
+
 def _lookahead(
     state: LiveDashboardState,
     *,
@@ -734,13 +752,14 @@ def _lookahead(
         else None
     )
     pressable = ceiling > 1 and run.lookahead_refusal == "" and not held.followed
-    shallow: LookaheadShallow | None = (
+    why: LookaheadShallow | None = (
         auto_refusal
         or ("no_run" if not pressable else None)
         or ("past_money" if held_by_money is not None else None)
         or ("past_most" if depth >= pick_max and pick_max < ceiling else None)
     )
-    shown = LOOKAHEAD_WORDS["depth_max"].format(ceiling=ceiling) if pressed == "max" else depth
+    said = {"affordable": held_by_money, "pick_max": pick_max, "ceiling": ceiling}
+    shown = LOOKAHEAD_WORDS["depth_max"].format_map(said) if pressed == "max" else depth
     offered: list[LookaheadAbreast] = list(range(1, ceiling + 1))
     if ceiling > 1:
         offered.append("all")
@@ -756,7 +775,11 @@ def _lookahead(
         most=most,
         scoring_now=in_flight > 0 or allowed > 0,
         pick_max=pick_max,
-        affordable=held_by_money,
+        affordable=None
+        if held_by_money is None
+        else LOOKAHEAD_WORDS["no_further_cell"]
+        if held_by_money <= 0
+        else f"{held_by_money} {LOOKAHEAD_WORDS['more_affordable']}",
         cell_reserve_usd=state.cell_reserve_usd,
         auto_refusal=auto_refusal,
         depths=[
@@ -764,12 +787,29 @@ def _lookahead(
                 cells=n,
                 fill="full" if n <= in_flight else "part" if n <= allowed else None,
                 pickable=pressable and n <= pick_max,
+                label=LOOKAHEAD_WORDS["depth_one"] if n == 1 else str(n),
+                hint=LOOKAHEAD_WORDS["depth_one" if n == 1 else "depth_many"].format(cells=n),
             )
             for n in range(1, ceiling + 1)
         ]
-        + ([LookaheadDepth(cells="max", fill=None, pickable=pressable)] if ceiling > 1 else []),
-        abreasts=[LookaheadAbreastStep(abreast=n, pickable=pressable) for n in offered],
-        shallow=shallow,
+        + (
+            [
+                LookaheadDepth(
+                    cells="max",
+                    fill=None,
+                    pickable=pressable,
+                    label=LOOKAHEAD_WORDS["depth_max"].format_map(said),
+                    hint=LOOKAHEAD_WORDS["depth_max_hint"].format_map(said),
+                )
+            ]
+            if ceiling > 1
+            else []
+        ),
+        abreasts=[_abreast_step(n, pickable=pressable) for n in offered],
+        shallow=None if why is None else LOOKAHEAD_WORDS[why].format_map(said),
+        scope=None
+        if auto_refusal is not None
+        else LOOKAHEAD_WORDS["holds_every_round" if auto else "holds_this_round"].format_map(said),
         flight=LOOKAHEAD_WORDS["flight"].format(
             in_flight=in_flight,
             most=most,

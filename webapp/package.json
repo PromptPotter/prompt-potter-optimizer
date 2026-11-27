@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint --cache --cache-strategy content",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "python ../scripts/queue_then.py npm-test vitest run",
     "e2e": "npm run build && playwright test",
     "e2e:fast": "playwright test",
     "e2e:watch": "playwright test --headed",

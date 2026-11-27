@@ -146,31 +146,16 @@ export interface CouponStatus {
  * life. */
 export interface LifetimeSpend {
   /** What the providers REPORTED they billed, over every cycle, fork and forwarded
-   * inner run, plus what a deleted cycle banked. Never an estimate: a call
-   * priced off our rate table is `rate_priced_usd`, a send whose bill never
-   * came `unreported_usd`. */
-  billed_usd: number;
-  /** What our rate table prices the calls no provider reported a cost for. Not
-   * spent — an estimate, shown beside `billed_usd` and never added into it.
-   * It binds the ceiling beside `billed_usd`. */
-  rate_priced_usd: number;
-  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
-   * beside the bill. */
-  calls_rate_priced: boolean;
-  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
-   * the token ceiling is then the binding one. */
-  bill_is_floor: boolean;
-  /** Tokens no provider billed and no rate on file prices. */
-  unpriced_tokens: number;
+   * inner run, plus what a deleted cycle banked, as a person reads it: `≥`
+   * where a token no rate prices makes it a floor. Never an estimate: a call
+   * priced off our rate table and a send whose bill never came are `caveats`. */
+  bill: string;
   /** Every token the sends billed, priced or not: what a token allowance counts. */
   billed_tokens: number;
-  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
-   * account than `billed_usd` says. */
-  sends_unreported: boolean;
-  /** The most that sends which ended with no bill (cancelled, timed out, killed
-   * with a run) may have cost, at the bounds they were admitted on. Not spent
-   * — unknown. It binds the ceiling beside `billed_usd`. */
-  unreported_usd: number;
+  /** What the allowance draws beyond the bill, a line each: the unpriced tokens,
+   * the rate-priced calls, the unreported sends; empty where the bill is the
+   * whole story. */
+  caveats: string[];
 }
 
 /** Who pays this account's sends on one provider. */
@@ -201,17 +186,10 @@ export interface ActivityResponse {
   /** Every series in the window, in first-seen order — one colour per label, stable
    * across the buckets. A call outside the optimizer's own carries its kind. */
   series_labels: string[];
-  /** What providers reported they billed. */
-  total_spend_usd: number;
-  /** What our rate table prices the window's calls no provider billed. Never spent,
-   * and in no series. */
-  total_rate_priced_usd: number;
-  /** Some call in the window was priced at our rate, so there is a
-   * `total_rate_priced_usd` to show beside the bill. */
-  calls_rate_priced: boolean;
-  /** The two totals understate: a call in the window carries neither a bill nor a
-   * rate's price. */
-  bill_is_floor: boolean;
+  /** What providers reported they billed in the window, `≥` where a call carries
+   * neither a bill nor a rate's price, then what our rate table prices the
+   * calls no provider billed: never spent, and in no series. */
+  bill: string;
   total_tokens: number;
   total_requests: number;
   /** The tallest bucket's billed USD — the scale the spend bars are drawn against.
@@ -226,8 +204,8 @@ export interface ActivityResponse {
 /** One time bucket of the Activity pane's three stacked bar charts. */
 export interface ActivityBucket {
   /** Billed USD per `series_labels` entry. A call no provider billed adds nothing
-   * here and still counts in the other two; one no rate prices either sets
-   * the response's `bill_is_floor`. */
+   * here and still counts in the other two; one no rate prices either marks
+   * the response's `bill` a floor. */
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
@@ -1734,11 +1712,7 @@ export interface ServedDashboard {
   verification: VerificationMark[];
   composite_fitness_formula: string | null;
   display_metric: 'fitness' | 'composite' | 'ability';
-  degraded_count: number;
-  error_count: number;
-  backend_retry_count: number;
   recent_backend_warnings: BackendWarning[];
-  total_backend_calls: number;
   current_query_payload: string | null;
   backpressure: ServedBackpressure | null;
   measured_unit: 'sample' | 'cell';
@@ -2366,9 +2340,9 @@ export interface SampleLookahead {
   scoring_now: boolean;
   /** The deepest press the next walk can take. */
   pick_max: number;
-  /** How many more cells the spend limits admit, where money and not the armed
-   * depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not. */
-  affordable: number | null;
+  /** How many more cells the spend limits admit, worded, where money and not the
+   * armed depth holds the walk; null where it does not. */
+  affordable: string | null;
   /** What each call out holds of the ceiling; null where no book binds. */
   cell_reserve_usd: number | null;
   /** Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead
@@ -2383,11 +2357,13 @@ export interface SampleLookahead {
   /** Each count of candidates at once the control draws, 1 to `ceiling`, then `all`
    * where `ceiling` exceeds 1. */
   abreasts: LookaheadAbreastStep[];
-  /** Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the
-   * backend's ceiling, the cycle settled, an enclosing run's Max speed, no
-   * run to hold calls for, money, or the stop rules; null where a deeper one
-   * is. */
-  shallow: 'one_at_a_time' | 'settled' | 'followed' | 'no_run' | 'past_money' | 'past_most' | null;
+  /** Why no deeper press than `depth` is admitted now, worded: the backend's
+   * ceiling, the cycle settled, an enclosing run's Max speed, no run to hold
+   * calls for, money, or the stop rules; null where a deeper one is. */
+  shallow: string | null;
+  /** What the depth in force holds and until when; null where the auto-arm switch
+   * is shut (`auto_refusal` says why). */
+  scope: string | null;
   /** The look-ahead now in one line: calls out, both axes in force and their scope,
    * the calls cut so far. */
   flight: string;
@@ -2403,6 +2379,10 @@ export interface LookaheadDepth {
   /** Whether a press of this depth is admitted now: the control applies, the run
    * admits `set-sample-lookahead` and the next walk can take that many. */
   pickable: boolean;
+  /** Its segment's words: one at a time, the count, or Max. */
+  label: string;
+  /** What a press of it holds, a hover away. */
+  hint: string;
 }
 
 /** One count of candidates sending at once the look-ahead control offers. */
@@ -2411,6 +2391,10 @@ export interface LookaheadAbreastStep {
   /** Whether a press of this count is admitted now: the control applies and the run
    * admits `set-sample-lookahead`. */
   pickable: boolean;
+  /** Its segment's words: one after another, the count, or All. */
+  label: string;
+  /** What a press of it sends, a hover away. */
+  hint: string;
 }
 
 /** Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's,
@@ -2807,7 +2791,9 @@ export interface SubjectReading {
   cycle_spend_usd: number | null;
   cycle_rounds_scored: number;
   spend_to_round: Record<string, number>;
-  cell_means: Record<string, number>;
+  /** Each side channel's mean over the point's own cells, in display order; a
+   * channel none of its cells carries is absent, never 0. */
+  cell_means: CellMean[];
   values: Record<string, number>;
   /** The subject's values on the cells it was graded on HELD OUT — its bench pass,
    * which only a round's selection has — keyed like `values` and never pooled
@@ -2837,6 +2823,18 @@ export interface WinnerChainPoint {
   label: string;
   estimate: Estimate | null;
   n_cells: number;
+}
+
+/** One side channel's mean over a point's cells, worded once for every reader. */
+export interface CellMean {
+  /** The channel, for code to pair two points' means on. */
+  key: string;
+  label: string;
+  value: number;
+  /** `value` in the channel's unit. */
+  text: string;
+  /** Shown in the lead row, above the rest. */
+  lead: boolean;
 }
 
 /** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways
@@ -5812,7 +5810,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "25b00721ea1c4743";
+export const SERVED_CONTRACT = "912b41c61b8f91f7";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -6370,6 +6368,15 @@ export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost
   "kept": "kept position",
 };
 
+// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_TONE, in display order.
+export const SAMPLE_MOVEMENT_TONE: Record<'new' | 'readded' | 'gained' | 'lost' | 'kept', Tone> = {
+  "new": "attention",
+  "readded": "attention",
+  "gained": "success",
+  "lost": "warn",
+  "kept": "quiet",
+};
+
 // Mirror of domain/dataset_start.py::START_BLOCK_WORDS, in display order.
 export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "verifier_graded": "Each sample is graded by running a verifier rather than by a labelled answer, so it is launched from the command line, not from here.",
@@ -6694,6 +6701,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
+  [SAMPLE_MOVEMENT_TONE, ["new", "readded", "gained", "lost", "kept"]],
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],

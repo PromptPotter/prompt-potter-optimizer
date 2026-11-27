@@ -44,7 +44,6 @@ from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.application.views.render.phase import acts_line, render_completion
-from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.checkin_draft import OriginResolution
@@ -76,6 +75,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
+from promptpotter.presentation.cli.first_run import ensure_api_key
 from promptpotter.presentation.cli.main import (
     ARM_GRAMMAR,
     SET_GRAMMAR,

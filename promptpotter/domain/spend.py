@@ -19,6 +19,7 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
 
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
+from promptpotter.domain.paired_reading import level_text
 from promptpotter.domain.strict_model import (
     FrozenModel,
     NonNegativeWireFloat,
@@ -497,6 +498,16 @@ def usd_text(usd: float) -> str:
     return f"${usd:.4f}" if usd < 1 else f"${usd:.2f}"
 
 
+def bill_text(usd: float, *, floor: bool) -> str:
+    """A bill as a person reads it: `≥` where it understates (`bill_is_floor`)."""
+    return f"{'≥' if floor else ''}{usd_text(usd)}"
+
+
+def rate_priced_text(usd: float, *, priced: bool) -> str | None:
+    """What our rate prices, said beside a bill and never inside it; null where no call was."""
+    return f"{usd_text(usd)} {RATE_PRICED_LABEL}" if priced else None
+
+
 def metered_line(meter: CeilingMeter, *, count: SpendCount, cap: Budget, share: Budget) -> str:
     """THE cycle's spend in its campaign's meter, said on every run, capped or not, a replay
     included: *count* is this cycle's, by part, *share* its part of the caps; tokens where they bind."""
@@ -659,51 +670,51 @@ NO_OVERSHOOT = Overshoot(calls=0, usd=0.0)
 class LifetimeSpend(StrictModel):
     """What an account, or one campaign's share of it, was billed over its whole life."""
 
-    billed_usd: float = Field(
+    bill: str = Field(
         description="What the providers REPORTED they billed, over every cycle, fork and "
-        "forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced "
-        "off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`."
-    )
-    rate_priced_usd: float = Field(
-        description="What our rate table prices the calls no provider reported a cost for. Not "
-        "spent — an estimate, shown beside `billed_usd` and never added into it. It binds the "
-        "ceiling beside `billed_usd`."
-    )
-    calls_rate_priced: bool = Field(
-        description="Some call was priced at our rate, so there is a `rate_priced_usd` to show "
-        "beside the bill."
-    )
-    bill_is_floor: bool = Field(
-        description="`billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` "
-        "cost; the token ceiling is then the binding one."
-    )
-    unpriced_tokens: int = Field(
-        description="Tokens no provider billed and no rate on file prices."
+        "forwarded inner run, plus what a deleted cycle banked, as a person reads it: `≥` where "
+        "a token no rate prices makes it a floor. Never an estimate: a call priced off our rate "
+        "table and a send whose bill never came are `caveats`."
     )
     billed_tokens: int = Field(
         description="Every token the sends billed, priced or not: what a token allowance counts."
     )
-    sends_unreported: bool = Field(
-        description="Some send ended with no bill, so up to `unreported_usd` more may have left "
-        "the account than `billed_usd` says."
-    )
-    unreported_usd: float = Field(
-        description="The most that sends which ended with no bill (cancelled, timed out, killed "
-        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
-        "binds the ceiling beside `billed_usd`."
+    caveats: list[str] = Field(
+        description="What the allowance draws beyond the bill, a line each: the unpriced tokens, "
+        "the rate-priced calls, the unreported sends; empty where the bill is the whole story."
     )
 
     @classmethod
     def of(cls, spent: UserSpend) -> LifetimeSpend:
+        floor, priced = (
+            bill_is_floor(spent.unpriced_tokens),
+            calls_rate_priced(spent.rate_priced_usd),
+        )
+        rate_priced = rate_priced_text(spent.rate_priced_usd, priced=priced)
         return cls(
-            billed_usd=round(spent.used_usd, 6),
-            rate_priced_usd=round(spent.rate_priced_usd, 6),
-            calls_rate_priced=calls_rate_priced(spent.rate_priced_usd),
-            bill_is_floor=bill_is_floor(spent.unpriced_tokens),
-            unpriced_tokens=spent.unpriced_tokens,
             billed_tokens=spent.used_tokens,
-            sends_unreported=spent.sends_unreported,
-            unreported_usd=round(spent.unreported_usd, 6),
+            bill=bill_text(spent.used_usd, floor=floor),
+            caveats=[
+                said
+                for shown, said in (
+                    (
+                        floor,
+                        f"{level_text(spent.unpriced_tokens, 'tokens')} billed by a model with no "
+                        "known price: the dollar figure undercounts, so the token unit binds.",
+                    ),
+                    (
+                        priced,
+                        f"{rate_priced}: calls no provider reported a bill for, drawn at our rate.",
+                    ),
+                    (
+                        spent.sends_unreported,
+                        f"Up to {usd_text(spent.unreported_usd)} unreported: sends that ended "
+                        "with no bill (cancelled, timed out, killed), drawn at the most they may "
+                        "have cost.",
+                    ),
+                )
+                if shown
+            ],
         )
 
 

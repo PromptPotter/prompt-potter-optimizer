@@ -84,9 +84,6 @@ row it closes.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
-- **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
-  and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
-  (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
 - **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
   `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
   fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
@@ -560,9 +557,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   check (`gate.py::Check`'s `started`), but a builder outside the lock still shares its hard-coded 90 s
   worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127 runs).
   **Rides with:** rel 2. **Re-test:** the same on the Windows desk, no reap.
-- **`Check.slots` is a guess beside `mb`'s measured peak**: Playwright claimed 3 slots and used 0.5;
-  offline-run claims `min(8, cores)`. Action: derive slots from measured CPU-s ÷ wall as `mb` is.
-  **Held:** none claims it. **Re-test:** each `slots` within a quarter of its measured ratio.
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
@@ -863,12 +857,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **The composite step has no band beside the fitness difference**: `domain/verification.py::VerifyReading.composite_increment`
   (`:152`) is a bare float while `fitness_difference` (`:148`) is an `Estimate`. Root: both columns'
   fresh − recorded are one shape. **Re-test:** one shape for both columns' fresh − recorded.
-- **A build stamp names HEAD while the build reads the worktree**: `webapp/vite.config.ts:81` stamps
-  `git rev-parse HEAD:./` and `application/health.py::webapp_bundle` (`:184`) compares `HEAD:webapp`, so a
-  dirty-tree build is stamped as HEAD's and a commit after a build turns a byte-identical page "out of date".
-  `scripts/gate.py::Check.stamps_head` (`:1414`) keys `vite-build` on `HEAD:webapp`. Root: the stamp names
-  the bytes it built (a worktree tree hash) on both sides. **Re-test:** `stamps_head` is deleted and a
-  build-then-commit walk stays green.
 - **A focus ring is re-skinned outside `base.css`**: `webapp/app/styles/domains/shell.css:64`
   `.sidebar-filter-search:focus-visible{outline:none;border-color:…}` and `compare.css:477`'s
   `.cmp-expr-bad{border-color}` state a field's look beside the skin. Root: the focus and invalid states of
@@ -900,12 +888,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   this process carries it, so tests patch both to 0 (`test_security.py::_held_at_arms_gate` and the
   reaped-queued test). Root: a cross-process wake on the jobs dir or ledger write (a lock handoff or a
   file watch). **Re-test:** neither constant exists and no test patches a poll.
-- **`config/` has no layering row**: `scripts/gate.py::_LAYERING` (`:189`) lists application, shared,
-  domain, infrastructure and connectors but not `config/`, so nothing bars it from `application/` or
-  `presentation/`. It imports `infrastructure/` once (`config/first_run.py:9`, `store.io.write_text`)
-  while 17 infrastructure files import `config/`. Root: `config/` gets its row, and first-run's write
-  moves to the side the row puts below it. **Re-test:** `_LAYERING` names `config/` and the gate's
-  `layering` check is green.
 
 ### wave-6 · what the test rework's world could not seat (tw-x, tw-j at their landing)
 
@@ -1134,6 +1116,21 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `application.account` directly (decisions § 0004); `/bulletin` is the first to dispatch a
   `CommandKind`. Door: each bot verb is a command kind. **Re-test:** the bot imports no
   `application.account` writer.
+- **`MeteredSpend` is banked, so its words cannot be served** (w7-web): the stop record holds
+  `StopSpend.spent: MeteredSpend` (`run_records.py`), so `spend.ts::spendHeadline`,
+  `meteredBucketsLine`, `replayShareLine` and `ratePricedText` stay browser composers. Root: the stop
+  record banks the `SpendRollup` facts and the read serves `MeteredSpend`. **Run data:** a wipe.
+  **Re-test:** `git grep -n "export function" -- webapp/lib/derivations/spend.ts` names no composer.
+- **Two served fields no door reads by name** (w7-web): `HealthResponse.service` (`main.py`; only
+  `deploy-linux/deploy.config.example` names it) and the `WarmingDashboard.warming_up` discriminator
+  (`served_dashboard.py`). Each is deleted, or the discriminator is a `Literal` tag the union reads.
+  **Re-test:** `p_served` falls by two.
+- **Vitest's start meets load from outside the gate lock** (w7-gate, built, Windows re-test owed):
+  `npm test` now queues behind the clone's lock (`scripts/queue_then.py`). **Re-test:** five looping
+  builders plus one gate on the Windows desk reap none.
+- **One test over the 2 s budget** (w7-gate): `test_security.py`'s stdio MCP host (2.05 s), whose child
+  `promptpotter mcp` spends ~1.8 s importing before its first answer. Door: the stdio server starts
+  without the API's import closure. **Re-test:** `pytest --durations=10` lists none over 2 s.
 - **A fork's cut is opened beside its admission** (w7-open): `commands/launching.py::fork_cycle` cuts
   the fork outside a request's `open`, so the fork half of **A fork is not opened under a carried
   admission** stays. Door: the fork is a request kind whose `open` cuts it. **Re-test:** `fork_cycle`

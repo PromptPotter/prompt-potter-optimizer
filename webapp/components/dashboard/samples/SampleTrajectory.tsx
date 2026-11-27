@@ -1,9 +1,8 @@
 import { useMemo, useState, type CSSProperties } from "react";
-import type { ServedRound } from "@/lib/api/types";
+import { type ServedRound, SAMPLE_MOVEMENT_TONE } from "@/lib/api/types";
 import { CardFrame, SegmentedControl } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import {
-  MOVEMENT_CLASS,
   type SelectMode,
   buildSorted,
   unionFirstAppearance,
@@ -74,7 +73,7 @@ export function SampleTrajectoryMiniButton({
             return (
               <span
                 key={`${r.round}-${sid}`}
-                className={cx("hs-mini-cell", kind === undefined ? "absent" : MOVEMENT_CLASS[kind])}
+                className={cx("hs-mini-cell", kind === undefined ? "absent" : `tone-${SAMPLE_MOVEMENT_TONE[kind]}`)}
               />
             );
           });
@@ -163,7 +162,7 @@ function DeltaView({ sorted }: { sorted: SortedRounds }) {
               <span key={`d-${sid}`} className="st-sq drop" title={`dropped ${sid}`}>−{sid}</span>
             ))}
             {adds.map((sid) => (
-              <span key={`a-${sid}`} className={cx("st-sq", MOVEMENT_CLASS.gained)} title={`added ${sid}`}>+{sid}</span>
+              <span key={`a-${sid}`} className={cx("st-sq", `tone-${SAMPLE_MOVEMENT_TONE.gained}`)} title={`added ${sid}`}>+{sid}</span>
             ))}
           </Row>
         );

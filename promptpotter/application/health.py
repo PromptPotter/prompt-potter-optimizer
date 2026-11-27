@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
+import tempfile
 from collections.abc import Awaitable, Callable
 from functools import partial
 from pathlib import Path
@@ -175,29 +177,29 @@ REBUILD = "run `npm run build` in webapp/, then reload the page"
 
 
 def webapp_bundle() -> Reading | None:
-    """A checkout serves `webapp/out/` as last built, however old: a bundle built from another
-    `webapp/` tree than the checkout's is broken, refusing nothing. None where nothing is built."""
+    """A checkout serves `webapp/out/` as last built, however old: a bundle built from other
+    `webapp/` bytes than the checkout's is broken, refusing nothing. None where nothing is built."""
     checkout, served = source_checkout_root(), webapp_static_root()
     if checkout is None or not served.is_dir():
         return None
-    try:
-        git = subprocess.run(
-            ["git", "rev-parse", "HEAD:webapp"],
-            cwd=checkout,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
+    # The worktree's bytes as `webapp/vite.config.ts::webappTree` stamps them, in an index of its own.
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        git = partial(
+            subprocess.run, cwd=checkout, env=env, capture_output=True, text=True, timeout=10
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return Reading("unverified", f"no webapp/ tree to compare: {exc}")
-    if git.returncode:
-        return Reading("unverified", f"no webapp/ tree to compare: {git.stderr.strip()}")
+        try:
+            git(["git", "add", "-A", "--", "webapp"], check=True)
+            tree = git(["git", "write-tree", "--prefix=webapp/"], check=True).stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            return Reading("unverified", f"no webapp/ tree to compare: {exc.stderr.strip()}")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return Reading("unverified", f"no webapp/ tree to compare: {exc}")
     try:
         built = json.loads((served / BUILD_SOURCE).read_text(encoding="utf-8")).get("webapp_tree")
     except (OSError, ValueError, AttributeError):
         built = None
-    if built == git.stdout.strip():
+    if built == tree:
         return Reading("held", "built from this checkout's webapp/")
     if built is None:
         return Reading("broken", "the page carries no build stamp")

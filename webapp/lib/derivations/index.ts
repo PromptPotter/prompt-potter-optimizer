@@ -1,6 +1,5 @@
 export * from "./candidate-search-point";
 export * from "./candidate-views";
-export * from "./cell-means";
 export * from "./compare-items";
 export * from "./connector-state";
 export * from "./fitness";
