@@ -10,7 +10,6 @@ import {
   type Segment,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, billText } from "@/lib/derivations";
 import {
   ACCOUNT_TAB_INFO,
   SLOT_BOUND_WORDS,
@@ -85,7 +84,7 @@ function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
           {coupon.used_share !== null ? (
             <Meter share={coupon.used_share} warn={said.tone === "warn"} />
           ) : null}
-          {allowanceCaveats(coupon.host_key_spend).map((line) => (
+          {coupon.host_key_spend.caveats.map((line) => (
             <span key={line} className="account-warn">
               {line}
             </span>
@@ -93,7 +92,7 @@ function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
         </div>
         <div className="account-wallet-cell">
           <span className="account-kicker">On your own keys</span>
-          <span className="account-figure">{billText(own.billed_usd, own.bill_is_floor)}</span>
+          <span className="account-figure">{own.bill}</span>
           <span className="account-note">
             {held === 0
               ? "No key held."

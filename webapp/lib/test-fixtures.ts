@@ -94,14 +94,9 @@ export function configParam(over: Partial<NodeConfigParam> & { key: string }): N
 
 export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
   return {
-    billed_usd: 0,
-    rate_priced_usd: 0,
-    calls_rate_priced: false,
-    bill_is_floor: false,
-    unpriced_tokens: 0,
     billed_tokens: 0,
-    sends_unreported: false,
-    unreported_usd: 0,
+    bill: "$0.0000",
+    caveats: [],
     ...over,
   };
 }
@@ -573,11 +568,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     composite_fitness_weights: null,
     composite_fitness_anchors: null,
     display_metric: "fitness",
-    degraded_count: 0,
-    error_count: 0,
-    backend_retry_count: 0,
     recent_backend_warnings: [],
-    total_backend_calls: 0,
     current_query_payload: null,
     lookahead: {
       depth: 1,
@@ -593,10 +584,11 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       affordable: null,
       cell_reserve_usd: null,
       auto_refusal: "one_at_a_time",
-      depths: [{ cells: 1, fill: null, pickable: true }],
-      abreasts: [{ abreast: 1, pickable: true }],
+      depths: [{ cells: 1, fill: null, pickable: true, label: "One at a time", hint: "One at a time" }],
+      abreasts: [{ abreast: 1, pickable: true, label: "One after another", hint: "" }],
       pressed: 1,
-      shallow: "one_at_a_time",
+      shallow: "This backend runs one sample at a time — a single call has no latency to overlap.",
+      scope: null,
       flight: "0 of 0 out · depth 1 per candidate · one candidate sends ahead this round · 0 discarded so far.",
     },
     held_call: null,

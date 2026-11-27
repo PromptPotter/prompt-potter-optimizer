@@ -70,7 +70,7 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.results import Election
-from promptpotter.domain.results_health import is_degraded, terminal_node
+from promptpotter.domain.results_health import terminal_node
 from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
@@ -251,13 +251,7 @@ class DashboardFacts(StrictModel):
     composite_fitness_formula: str | None = None
     display_metric: DisplayMetric
 
-    degraded_count: int = 0
-    error_count: int = 0
-
-    backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
-
-    total_backend_calls: int = 0
 
     current_query_payload: str | None = None
 
@@ -483,7 +477,6 @@ class LiveDashboardProjection(Projection):
             self.state.error = None
 
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None:
-        self.state.backend_retry_count += 1
         warning = BackendWarning(
             ts=record.timestamp,
             kind=record.kind,
@@ -668,7 +661,12 @@ class LiveDashboardProjection(Projection):
         self._open_samples.pop((record.individual_id, record.position), None)
         # A beat names no cell: an inner run still open names itself again on its next beat.
         self._inner = None
-        self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
+        if not self._in_pass:
+            self._set_state(
+                DashboardState.BETWEEN_CANDIDATES
+                if qi + 1 >= qt
+                else DashboardState.BETWEEN_SAMPLES
+            )
         # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
         if (arm := self._narration.take(record)) is not None:
             if record.round == self._live:
@@ -713,25 +711,6 @@ class LiveDashboardProjection(Projection):
 
     def _label(self, key: ArmKey) -> str:
         return "" if (name := self._name(key)) is None else name.label
-
-    def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
-        s = self.state
-
-        # The second arm is not redundant: `pipeline.error` is the BACKEND faulting a row PP classified clean.
-        if facts.errored or facts.pipeline.error:
-            s.error_count += 1
-
-        if not facts.cached:
-            s.total_backend_calls += 1
-            if is_degraded(facts):
-                s.degraded_count += 1
-
-        if not self._in_pass:
-            self._set_state(
-                DashboardState.BETWEEN_CANDIDATES
-                if last_in_candidate
-                else DashboardState.BETWEEN_SAMPLES
-            )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         # Assigned, never banked in place: a snapshot `value` served holds the rollups as they were.

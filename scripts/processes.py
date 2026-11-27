@@ -20,6 +20,7 @@ Outcome = tuple[int, str]
 
 _KILL_ON_JOB_CLOSE = 0x2000
 _EXTENDED_LIMIT_INFORMATION = 9
+_BASIC_ACCOUNTING_INFORMATION = 1
 # A child starts suspended and joins its check's job before it can start a grandchild.
 _CREATE_SUSPENDED = 0x4
 _SET_QUOTA_TERMINATE_RESUME = 0x0100 | 0x0001 | 0x0800
@@ -50,6 +51,16 @@ class _Extended(ctypes.Structure):
         ("job_memory_limit", ctypes.c_size_t),
         ("peak_process_memory", ctypes.c_size_t),
         ("peak_job_memory", ctypes.c_size_t),
+    )
+
+
+class _Accounting(ctypes.Structure):  # JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+    _fields_ = (
+        ("total_user_time", ctypes.c_longlong),  # 100 ns ticks
+        ("total_kernel_time", ctypes.c_longlong),
+        ("this_period_user_time", ctypes.c_longlong),
+        ("this_period_kernel_time", ctypes.c_longlong),
+        *((f"count{i}", ctypes.c_ulong) for i in range(4)),
     )
 
 
@@ -91,9 +102,25 @@ if sys.platform == "win32":
 
 
 class _Metered(threading.local):
-    """The job a running check spawns into: its peak is every process that check started."""
+    """The job a running check spawns into: its peak is every process that check started.
+
+    Off Windows there is no job, so `cpu` is the metering: the CPU-s of every child this check's
+    `run` reaped, `None` outside a metered check."""
 
     job: int | None = None
+    cpu: float | None = None
+
+
+if sys.platform != "win32":
+
+    class _Child(subprocess.Popen[str]):
+        """A child whose reaping reads its rusage: its CPU-s, the descendants it waited on in."""
+
+        def _try_wait(self, wait_flags: int) -> tuple[int, int]:
+            pid, status, usage = os.wait4(self.pid, wait_flags)
+            if pid and metered.cpu is not None:
+                metered.cpu += usage.ru_utime + usage.ru_stime
+            return pid, status
 
 
 metered = _Metered()
@@ -113,6 +140,7 @@ def _join_job(job: int, pid: int) -> None:
 
 
 def open_job() -> int | None:
+    metered.cpu = None if sys.platform == "win32" else 0.0
     if sys.platform == "win32":
         job: int | None = _kernel32.CreateJobObjectW(None, None)
         if not job:
@@ -122,18 +150,27 @@ def open_job() -> int | None:
         return None
 
 
-def close_job(job: int | None) -> int | None:
-    """The job's peak committed memory in MB, then the job is closed."""
+def close_job(job: int | None) -> tuple[int | None, float | None]:
+    """The job's peak committed memory in MB and its processes' CPU-s, then the job is closed;
+    off Windows, no peak and the CPU-s of the children `run` reaped."""
     if sys.platform == "win32" and job is not None:
-        usage = _Extended()
+        usage, accounting = _Extended(), _Accounting()
         queried = _kernel32.QueryInformationJobObject(
             job, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(usage), ctypes.sizeof(usage), None
+        ) and _kernel32.QueryInformationJobObject(
+            job,
+            _BASIC_ACCOUNTING_INFORMATION,
+            ctypes.byref(accounting),
+            ctypes.sizeof(accounting),
+            None,
         )
         _kernel32.CloseHandle(job)
         if not queried:
             raise ctypes.WinError(ctypes.get_last_error())
-        return int(usage.peak_job_memory) >> 20
-    return None
+        ticks = accounting.total_user_time + accounting.total_kernel_time
+        return int(usage.peak_job_memory) >> 20, ticks / 1e7
+    cpu, metered.cpu = metered.cpu, None
+    return None, cpu
 
 
 def alive(pid: int) -> bool:
@@ -178,7 +215,10 @@ def end_children_with_this_process() -> None:
 def run(argv: Sequence[str], cwd: Path, *, input: str | None = None, **extra_env: str) -> Outcome:
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", **extra_env}
     job = metered.job
-    with subprocess.Popen(
+    spawn: type[subprocess.Popen[str]] = subprocess.Popen
+    if sys.platform != "win32":
+        spawn = _Child
+    with spawn(
         list(argv),
         cwd=cwd,
         env=env,

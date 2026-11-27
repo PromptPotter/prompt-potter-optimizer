@@ -23,7 +23,7 @@ from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
 from promptpotter.domain.ruler import AbilityReading, LevelSeries
-from promptpotter.domain.said import Said
+from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import (
     CAP_AXIS_INFO,
@@ -73,6 +73,16 @@ SAMPLE_MOVEMENT_LABELS: Worded[SampleMovement, str] = Worded(
     }
 )
 assert SAMPLE_MOVEMENT_LABELS.keys() == set(get_args(SampleMovement))
+#: The ink a movement is drawn in; a re-added sample reads as new.
+SAMPLE_MOVEMENT_TONE: Worded[SampleMovement, Tone] = Worded(
+    {
+        "new": "attention",
+        "readded": "attention",
+        "gained": "success",
+        "lost": "warn",
+        "kept": "quiet",
+    }
+)
 
 
 def sample_status(facts: MeasuredCell, grade: Grade) -> SampleStatus:

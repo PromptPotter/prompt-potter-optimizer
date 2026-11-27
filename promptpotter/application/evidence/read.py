@@ -54,6 +54,7 @@ from promptpotter.application.evidence.metric_catalogue import (
     resolve_metric,
 )
 from promptpotter.application.evidence.subjects import (
+    CellMean,
     SubjectMask,
     SubjectReading,
     WinnerChainPoint,
@@ -84,8 +85,10 @@ from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
     Measurand,
+    MeasurandUnit,
     MemberAddress,
     PairedReading,
+    level_text,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.records.partition import PartitionRecord
@@ -778,15 +781,32 @@ def _score_cells(
     return (values, sorted(missed))
 
 
-SIDE_CHANNELS: tuple[str, ...] = ("cost", "latency", "tokens", "target_prompt_chars")
+class _SideChannel(NamedTuple):
+    label: str
+    # `None` reads in characters, a unit no measurand takes.
+    unit: MeasurandUnit | None
+    lead: bool
 
 
-def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
-    means: dict[str, float] = {}
-    for channel in SIDE_CHANNELS:
+# In display order.
+SIDE_CHANNELS: dict[str, _SideChannel] = {
+    "target_prompt_chars": _SideChannel("prompt length", None, lead=True),
+    "latency": _SideChannel("avg time / cell", "seconds", lead=True),
+    "cost": _SideChannel("avg cost / cell", "usd", lead=False),
+    "tokens": _SideChannel("avg tokens / cell", "tokens", lead=False),
+}
+
+
+def _cell_means(channels: dict[str, dict[str, float]]) -> list[CellMean]:
+    means: list[CellMean] = []
+    for channel, side in SIDE_CHANNELS.items():
         carried = [cell[channel] for cell in channels.values() if channel in cell]
         if carried:
-            means[channel] = sum(carried) / len(carried)
+            mean = sum(carried) / len(carried)
+            text = f"{round(mean):,} chars" if side.unit is None else level_text(mean, side.unit)
+            means.append(
+                CellMean(key=channel, label=side.label, value=mean, text=text, lead=side.lead)
+            )
     return means
 
 

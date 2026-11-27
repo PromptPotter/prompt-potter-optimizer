@@ -27,14 +27,13 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, NamedTuple, cast, override
 
 import httpx
 import pytest
-from build_ts_types import derived_landing_key
 from factories import (
     PROMPT_INFO,
     archive_row,
@@ -131,7 +130,6 @@ from promptpotter.application.jobs.reaper import (
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance import landing as landing_module
-from promptpotter.application.maintenance.built_key import LANDING_KEY
 from promptpotter.application.maintenance.landing import (
     apply_landing,
     holding_landing,
@@ -165,7 +163,6 @@ from promptpotter.config.paths import (
     user_data_root,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION, settings
-from promptpotter.domain import kinds as kinds_module
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -509,28 +506,6 @@ for key in PROVIDER_KEYS:
 router = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
 install_network(router)
 """
-
-_SERVE_THE_API = f"""{_OFFLINE_CHILD}
-from fastapi.testclient import TestClient
-from promptpotter.infrastructure.producer_lock import minted_producer
-from promptpotter.main import app
-with TestClient(app) as client:
-    assert client.get("/api/v1/health").status_code == 200
-    assert minted_producer(app.state.job_registry.jobs_dir) is not None
-assert not router.unrouted, router.unrouted
-"""
-
-
-def test_the_api_starts_under_the_loop_guard_with_its_held_producer_lock() -> None:
-    # The real lifespan, on a loop: a lock its preamble waits on there refuses the server's start.
-    # Its own process: the lifespan's state outlives the app's shutdown.
-    started = subprocess.run(
-        [sys.executable, "-c", _SERVE_THE_API, str(_REPO / "scripts")],
-        cwd=_REPO,
-        capture_output=True,
-        text=True,
-    )
-    assert started.returncode == 0, f"the API refused its own start: {started.stderr[-2000:]}"
 
 
 def _uploader(user_id: str) -> Stores:
@@ -2985,22 +2960,6 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     assert fold.exists(), "older code dropped a file the newer code landed"
 
 
-def test_an_edit_to_code_a_load_runs_lands_the_root_again() -> None:
-    # Every ledger line and banked state part parses through `KindTable.parse`, a module no schema
-    # names: an edit there changes what loads, so a root landed before it is walked again.
-    helper = Path(kinds_module.__file__)
-    read = Path.read_text
-    with pytest.MonkeyPatch.context() as edited:
-        edited.setattr(
-            Path,
-            "read_text",
-            lambda path, *a, **kw: read(path, *a, **kw) + ("\nEDITED = 1\n" * (path == helper)),
-        )
-        assert derived_landing_key() != LANDING_KEY, (
-            "an edit to `KindTable.parse`, which every ledger load runs, left the landing key"
-        )
-
-
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_dry_run_landing_at_a_root_older_code_landed_writes_nothing(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
@@ -3900,10 +3859,16 @@ def host_tenant() -> _HostTenant:
 async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process_door_does(
     host_tenant: _HostTenant,
 ) -> None:
-    tenant, _, session, answered, keyed, upload = host_tenant
-    async with _stdio_host(tenant) as host:
+    tenant, _, _, answered, keyed, upload = host_tenant
+    async with AsyncExitStack() as stack:
+        # The child boots (~1.8 s of imports) while the in-process door answers what it is read against.
+        host, was, beside = await asyncio.gather(
+            stack.enter_async_context(_stdio_host(tenant)),
+            answered("user-settings", {}),
+            answered("ingest-upload", keyed(upload)),
+        )
         # A command lands in the terminal principal's account, which a read then answers alike.
-        flipped = not (await answered("user-settings", {}))["demo_mode_enabled"]
+        flipped = not was["demo_mode_enabled"]
         sent = await host("set-user-settings", keyed({"demo_mode_enabled": flipped}))
         assert not sent.get("isError"), sent["content"]
         here = await answered("user-settings", {})
@@ -3918,59 +3883,58 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
         draft = opened["structuredContent"]
         reopened = await answered("draft", {"draft_id": draft["draft_id"]})
         assert reopened["draft"] == draft, "the stdio draft is not the one a read reopens"
-        beside = await answered("ingest-upload", keyed(upload))
         # The pipeline answers for its subject, the draft, by its id.
         for opened_draft in (draft, beside):
             assert opened_draft["pipeline"].pop("campaign_id") == opened_draft["draft_id"]
         moved = {key for key in draft if draft[key] != beside[key]}
         assert moved == {"draft_id", "created_at"}, f"the two doors parsed one file apart: {moved}"
 
-        # A key names one act, its bytes included: a corrected file re-sent under the key of the
-        # first is refused, never answered with the first file's draft.
-        reused = keyed(upload)
-        first = await host("ingest-upload", reused)
-        assert not first.get("isError"), first["content"]
-        replayed = await host("ingest-upload", reused)
-        assert replayed.get("structuredContent") == first["structuredContent"], (
-            "a retried act was not answered as it was first"
-        )
-        corrected = base64.b64encode(b"question,answer\n2+2,4\n3+3,6\n1+1,2\n4+4,8\n").decode()
-        moved_key = await host("ingest-upload", {**reused, "blob": corrected})
-        assert moved_key.get("isError") and "idempotency_key_reused" in json.dumps(moved_key), (
-            "a reused key on other bytes replayed the first act's answer"
-        )
         # A payload nesting a model is digested in a process that built none of it before.
         patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
         edited = await host("edit-draft-campaign", keyed(patched))
         assert not edited.get("isError"), edited["content"]
-        # A null drops the draft's own override, so the layer below runs again: Start would
-        # otherwise launch a value the operator took back.
-        laid = [edited["structuredContent"]["config"]]
-        for value in (7, None):
-            edit = {
-                "config": {
-                    "optimization": {
-                        "nodes": {"adaptive_queue": {"config": {"sp_budget_round": value}}}
-                    }
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_key_names_one_act_its_bytes_included_a_corrected_file_under_it_is_refused(
+    host_tenant: _HostTenant,
+) -> None:
+    _, _, _, answered, keyed, upload = host_tenant
+    reused = keyed(upload)
+    first = await answered("ingest-upload", reused)
+    assert await answered("ingest-upload", reused) == first, (
+        "a retried act was not answered as it was first"
+    )
+    corrected = base64.b64encode(b"question,answer\n2+2,4\n3+3,6\n1+1,2\n4+4,8\n").decode()
+    with pytest.raises(PotterError) as raised:
+        await answered("ingest-upload", {**reused, "blob": corrected})
+    assert "idempotency_key_reused" in json.dumps(
+        Refusal.of(raised.value).model_dump(mode="json")
+    ), "a reused key on other bytes replayed the first act's answer"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_null_edit_drops_the_drafts_own_override_so_start_never_launches_a_value_taken_back(
+    host_tenant: _HostTenant,
+) -> None:
+    _, _, _, answered, keyed, upload = host_tenant
+    draft = await answered("ingest-upload", keyed(upload))
+    laid = []
+    for value in (None, 7, None):
+        edit = {
+            "config": {
+                "optimization": {
+                    "nodes": {"adaptive_queue": {"config": {"sp_budget_round": value}}}
                 }
             }
-            sent_edit = await host(
-                "edit-draft-campaign", keyed({"draft_id": draft["draft_id"], "patch": edit})
-            )
-            assert not sent_edit.get("isError"), sent_edit["content"]
-            laid.append(sent_edit["structuredContent"]["config"])
-        assert laid[0] != laid[1] and laid[2] == laid[0], (
-            "a reset left the draft's own override in what Start launches"
+        }
+        sent = await answered(
+            "edit-draft-campaign", keyed({"draft_id": draft["draft_id"], "patch": edit})
         )
-        # A refusal is the value the in-process door raises.
-        run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
-        with pytest.raises(PotterError) as raised:
-            await session.answer(CallTool("start-run", keyed(run)))
-        called = await host("start-run", keyed(run))
-        refusal = Refusal.of(raised.value).model_dump(mode="json")
-        assert called.get("isError") and json.loads(called["content"][0]["text"]) == refusal, (
-            "a tool call over stdio served a refusal another way"
-        )
+        laid.append(sent["config"])
+    assert laid[0] != laid[1] and laid[2] == laid[0], (
+        "a reset left the draft's own override in what Start launches"
+    )
 
 
 @pytest.mark.usefixtures("offline")

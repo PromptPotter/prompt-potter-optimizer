@@ -3755,7 +3755,7 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
         "the coupon read another remainder than the box's keys left it"
     )
     status = coupon_status(spent_out)
-    assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"
+    assert status.own_key_spend.bill == "$5.00", "the own key's spend went unread"
     payers = {route.provider: route.payer for route in status.routes}
     assert (payers["openrouter"], payers["openai"]) == ("user", "host"), (
         "the served payer of a provider is not the one its sends go out on"
@@ -5429,7 +5429,8 @@ def test_a_reset_over_a_reshaped_ledger_drops_it_and_the_accounts_charges_with_i
     with pytest.raises(FileUnreadableError):
         billed_spend([reshaped])
     activity = account_activity(stores, window="1d", group_by="model")
-    assert activity.total_spend_usd == pytest.approx(framed_total + 0.13), (
+    billed = sum(sum(b.series_spend.values()) for b in activity.buckets)
+    assert billed == pytest.approx(framed_total + 0.13), (
         "the Activity pane read another bill than the account's charges"
     )
     assert activity.total_tokens == tokens_before + 2_800 + 400 + 700 + 2 * 15, (

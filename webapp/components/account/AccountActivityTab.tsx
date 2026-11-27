@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Empty, ReadState, Select, type SelectOption } from "@/components/ui";
-import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
 import { useRead } from "@/lib/hooks/useRead";
@@ -64,7 +63,6 @@ export function AccountActivityTab() {
 function ActivityCharts({ data }: { data: ActivityResponse }) {
   const labels = data.series_labels;
   const palette = labels.map((_, i) => seriesVar(i));
-  const priced = ratePricedText(data.total_rate_priced_usd, data.calls_rate_priced);
   return (
     <>
       <ul className="activity-legend">
@@ -81,9 +79,7 @@ function ActivityCharts({ data }: { data: ActivityResponse }) {
       </ul>
       <ActivityBarChart
         title="Spend"
-        valueLabel={
-          billText(data.total_spend_usd, data.bill_is_floor) + (priced ? ` + ${priced}` : "")
-        }
+        valueLabel={data.bill}
         buckets={data.buckets}
         labels={labels}
         palette={palette}

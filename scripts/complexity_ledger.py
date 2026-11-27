@@ -285,7 +285,12 @@ BASELINE = {
     # open cells; `measuring_arm`, the race fold and the subtree's `inherited` go.
     # w7-open (+59): one `opening.py::Opening` per run, the `LaunchRequest` shape its five kinds
     # share (the embedded and inner doors among them), and `jobs/shares.py` beside quota.
-    "package_lines": 113220,
+    # w7-gate (+6): `config/` gets its layering row, so first-run's `.env` write moves under
+    # `application/` (`first_run.py::keep_api_key`), its prompt to the CLI that asks it.
+    # w7-gate (+2): `health.py::webapp_bundle` hashes the worktree's `webapp/` in an index of its own.
+    # w7-web (+78): the words the browser composed are served (a lookahead's segments, a subject's
+    # cell means, the lifetime bill and its caveats, a sample movement's tone); 12 unread fields go.
+    "package_lines": 113306,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -349,7 +354,8 @@ BASELINE = {
     # where a door states a layer; three of their keys no surface reads by name yet.
     # vote (+3): `origin_panel_cells` on the three served campaign configs, which no surface edits yet.
     # w7-host (-1): the webapp's bulletins read every field they serve, and one more the account already did.
-    "p_served": 209,
+    # w7-line, w7-web (−2): an unread served field each deleted.
+    "p_served": 207,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

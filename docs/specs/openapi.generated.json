@@ -275,7 +275,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either sets the response's `bill_is_floor`.",
+            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either marks the response's `bill` a floor.",
             "title": "Series Spend",
             "type": "object"
           },
@@ -346,10 +346,10 @@
         "additionalProperties": false,
         "description": "Time-bucketed spend / requests / tokens over the requested window.",
         "properties": {
-          "bill_is_floor": {
-            "description": "The two totals understate: a call in the window carries neither a bill nor a rate's price.",
-            "title": "Bill Is Floor",
-            "type": "boolean"
+          "bill": {
+            "description": "What providers reported they billed in the window, `≥` where a call carries neither a bill nor a rate's price, then what our rate table prices the calls no provider billed: never spent, and in no series.",
+            "title": "Bill",
+            "type": "string"
           },
           "buckets": {
             "items": {
@@ -357,11 +357,6 @@
             },
             "title": "Buckets",
             "type": "array"
-          },
-          "calls_rate_priced": {
-            "description": "Some call in the window was priced at our rate, so there is a `total_rate_priced_usd` to show beside the bill.",
-            "title": "Calls Rate Priced",
-            "type": "boolean"
           },
           "group_by": {
             "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Bill.key_source`).",
@@ -416,19 +411,9 @@
             "title": "Series Labels",
             "type": "array"
           },
-          "total_rate_priced_usd": {
-            "description": "What our rate table prices the window's calls no provider billed. Never spent, and in no series.",
-            "title": "Total Rate Priced Usd",
-            "type": "number"
-          },
           "total_requests": {
             "title": "Total Requests",
             "type": "integer"
-          },
-          "total_spend_usd": {
-            "description": "What providers reported they billed.",
-            "title": "Total Spend Usd",
-            "type": "number"
           },
           "total_tokens": {
             "title": "Total Tokens",
@@ -455,10 +440,7 @@
           "group_by",
           "buckets",
           "series_labels",
-          "total_spend_usd",
-          "total_rate_priced_usd",
-          "calls_rate_priced",
-          "bill_is_floor",
+          "bill",
           "total_tokens",
           "total_requests",
           "peak_spend_usd",
@@ -3658,6 +3640,44 @@
           "label"
         ],
         "title": "CellCandidate",
+        "type": "object"
+      },
+      "CellMean": {
+        "additionalProperties": false,
+        "description": "One side channel's mean over a point's cells, worded once for every reader.",
+        "properties": {
+          "key": {
+            "description": "The channel, for code to pair two points' means on.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lead": {
+            "description": "Shown in the lead row, above the rest.",
+            "title": "Lead",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "`value` in the channel's unit.",
+            "title": "Text",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "text",
+          "lead"
+        ],
+        "title": "CellMean",
         "type": "object"
       },
       "CellPrice": {
@@ -9917,56 +9937,29 @@
         "additionalProperties": false,
         "description": "What an account, or one campaign's share of it, was billed over its whole life.",
         "properties": {
-          "bill_is_floor": {
-            "description": "`billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost; the token ceiling is then the binding one.",
-            "title": "Bill Is Floor",
-            "type": "boolean"
+          "bill": {
+            "description": "What the providers REPORTED they billed, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked, as a person reads it: `≥` where a token no rate prices makes it a floor. Never an estimate: a call priced off our rate table and a send whose bill never came are `caveats`.",
+            "title": "Bill",
+            "type": "string"
           },
           "billed_tokens": {
             "description": "Every token the sends billed, priced or not: what a token allowance counts.",
             "title": "Billed Tokens",
             "type": "integer"
           },
-          "billed_usd": {
-            "description": "What the providers REPORTED they billed, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`.",
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "calls_rate_priced": {
-            "description": "Some call was priced at our rate, so there is a `rate_priced_usd` to show beside the bill.",
-            "title": "Calls Rate Priced",
-            "type": "boolean"
-          },
-          "rate_priced_usd": {
-            "description": "What our rate table prices the calls no provider reported a cost for. Not spent — an estimate, shown beside `billed_usd` and never added into it. It binds the ceiling beside `billed_usd`.",
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "sends_unreported": {
-            "description": "Some send ended with no bill, so up to `unreported_usd` more may have left the account than `billed_usd` says.",
-            "title": "Sends Unreported",
-            "type": "boolean"
-          },
-          "unpriced_tokens": {
-            "description": "Tokens no provider billed and no rate on file prices.",
-            "title": "Unpriced Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `billed_usd`.",
-            "title": "Unreported Usd",
-            "type": "number"
+          "caveats": {
+            "description": "What the allowance draws beyond the bill, a line each: the unpriced tokens, the rate-priced calls, the unreported sends; empty where the bill is the whole story.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Caveats",
+            "type": "array"
           }
         },
         "required": [
-          "billed_usd",
-          "rate_priced_usd",
-          "calls_rate_priced",
-          "bill_is_floor",
-          "unpriced_tokens",
+          "bill",
           "billed_tokens",
-          "sends_unreported",
-          "unreported_usd"
+          "caveats"
         ],
         "title": "LifetimeSpend",
         "type": "object"
@@ -10328,6 +10321,16 @@
           "abreast": {
             "$ref": "#/components/schemas/LookaheadAbreast"
           },
+          "hint": {
+            "description": "What a press of it sends, a hover away.",
+            "title": "Hint",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its segment's words: one after another, the count, or All.",
+            "title": "Label",
+            "type": "string"
+          },
           "pickable": {
             "description": "Whether a press of this count is admitted now: the control applies and the run admits `set-sample-lookahead`.",
             "title": "Pickable",
@@ -10336,7 +10339,9 @@
         },
         "required": [
           "abreast",
-          "pickable"
+          "pickable",
+          "label",
+          "hint"
         ],
         "title": "LookaheadAbreastStep",
         "type": "object"
@@ -10376,6 +10381,16 @@
             "description": "`full` where that many calls are out now, `part` where the gauge allows that many; null past both.",
             "title": "Fill"
           },
+          "hint": {
+            "description": "What a press of it holds, a hover away.",
+            "title": "Hint",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its segment's words: one at a time, the count, or Max.",
+            "title": "Label",
+            "type": "string"
+          },
           "pickable": {
             "description": "Whether a press of this depth is admitted now: the control applies, the run admits `set-sample-lookahead` and the next walk can take that many.",
             "title": "Pickable",
@@ -10385,7 +10400,9 @@
         "required": [
           "cells",
           "fill",
-          "pickable"
+          "pickable",
+          "label",
+          "hint"
         ],
         "title": "LookaheadDepth",
         "type": "object"
@@ -15916,13 +15933,13 @@
           "affordable": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "How many more cells the spend limits admit, where money and not the armed depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not.",
+            "description": "How many more cells the spend limits admit, worded, where money and not the armed depth holds the walk; null where it does not.",
             "title": "Affordable"
           },
           "allowed": {
@@ -16011,6 +16028,18 @@
             "$ref": "#/components/schemas/LookaheadCells",
             "description": "The depth the control shows pressed: `max` where the ceiling is armed by name, else `depth`."
           },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the depth in force holds and until when; null where the auto-arm switch is shut (`auto_refusal` says why).",
+            "title": "Scope"
+          },
           "scoring_now": {
             "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
             "title": "Scoring Now",
@@ -16019,21 +16048,13 @@
           "shallow": {
             "anyOf": [
               {
-                "enum": [
-                  "one_at_a_time",
-                  "settled",
-                  "followed",
-                  "no_run",
-                  "past_money",
-                  "past_most"
-                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
+            "description": "Why no deeper press than `depth` is admitted now, worded: the backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
             "title": "Shallow"
           }
         },
@@ -16055,6 +16076,7 @@
           "depths",
           "abreasts",
           "shallow",
+          "scope",
           "flight"
         ],
         "title": "SampleLookahead",
@@ -16335,11 +16357,6 @@
             "title": "At Offset",
             "type": "integer"
           },
-          "backend_retry_count": {
-            "default": 0,
-            "title": "Backend Retry Count",
-            "type": "integer"
-          },
           "backend_revision": {
             "anyOf": [
               {
@@ -16454,18 +16471,8 @@
             ],
             "description": "Set where the bench defaults or the treatment the campaign's declaration is a delta over moved since it was declared, under an unchanged origin: this launch runs today's values."
           },
-          "degraded_count": {
-            "default": 0,
-            "title": "Degraded Count",
-            "type": "integer"
-          },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric"
-          },
-          "error_count": {
-            "default": 0,
-            "title": "Error Count",
-            "type": "integer"
           },
           "fork_remainder": {
             "anyOf": [
@@ -16674,11 +16681,6 @@
               }
             ],
             "description": "The fork a supersede moved this cycle's line to, its cycle id the `value`: what runs now runs there. Null where the line is its own."
-          },
-          "total_backend_calls": {
-            "default": 0,
-            "title": "Total Backend Calls",
-            "type": "integer"
           },
           "verification": {
             "description": "Each arm's latest verify and held-out bench pass on this cycle's ledger, in flight or ended; its rows are no round's cells.",
@@ -17781,11 +17783,12 @@
             "type": "string"
           },
           "cell_means": {
-            "additionalProperties": {
-              "type": "number"
+            "description": "Each side channel's mean over the point's own cells, in display order; a channel none of its cells carries is absent, never 0.",
+            "items": {
+              "$ref": "#/components/schemas/CellMean"
             },
             "title": "Cell Means",
-            "type": "object"
+            "type": "array"
           },
           "comparable": {
             "anyOf": [

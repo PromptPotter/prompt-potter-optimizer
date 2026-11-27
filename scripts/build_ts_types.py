@@ -583,6 +583,10 @@ def loading_modules() -> dict[str, str]:
     _ran(list(MIGRATIONS.values()), modules)
     closure = import_closure(modules)
     closure.pop(built_key.__name__, None)
+    # Every ledger line and banked state part parses through `KindTable.parse`, a module no schema
+    # names: an edit there changes what loads, so the key must hold its code.
+    if KindTable.__module__ not in closure:
+        raise RuntimeError(f"the landing key omits {KindTable.__module__}, which every load runs")
     return closure
 
 
