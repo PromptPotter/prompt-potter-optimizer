@@ -34,6 +34,7 @@ from promptpotter.application.pipeline_resolve import (
     laid_config,
     laid_session,
 )
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
 from promptpotter.domain.job import CampaignLaunch
@@ -47,6 +48,7 @@ from promptpotter.infrastructure.store.stores import Stores
 if TYPE_CHECKING:
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.launcher.opening import Opening
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,8 +66,8 @@ class CheckinStart(LaunchRequest):
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name, draft_id=self.claim.draft_id)
 
-    def connector(self, _stores: Stores) -> str:
-        return self.served.connector.name
+    def connector(self, _stores: Stores) -> Connector:
+        return self.served.connector
 
     def endpoint(self, _stores: Stores) -> str | None:
         return self.served.endpoint
@@ -77,9 +79,9 @@ class CheckinStart(LaunchRequest):
         return draft_sends(stores, owned_draft(stores, self.claim.draft_id))
 
     @asynccontextmanager
-    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
+    async def open(self, opening: Opening) -> AsyncIterator[OpenedCycle]:
         """Nothing before the slot is HELD touches the draft: it lands, mints and closes here."""
-        draft_id = self.claim.draft_id
+        stores, draft_id = opening.stores, self.claim.draft_id
         async with open_checkin(stores, draft_id, self.served, overlays=[{}]) as opened:
             session, config = laid_session(opened.session, opened.layers)
             plan = resolve_cycle_plan(
@@ -89,7 +91,10 @@ class CheckinStart(LaunchRequest):
                 session.bank.samples,
                 origin_override=opened.origin_override,
             )
-            yield mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
+            campaign_id = fresh_campaign_id(session)
+            yield await asyncio.to_thread(
+                mint, plan, campaign_id=campaign_id, adopting=draft_id, opening=opening
+            )
 
 
 def _land_draft(
@@ -127,7 +132,7 @@ def _land_draft(
         config = laid_config(
             stores,
             pipeline.config_layers.over(overlay),
-            connector=basis.connector,
+            connector=pipeline.connector,
             schema=pipeline.declared,
         ).config
         refuse_unrunnable(
@@ -137,7 +142,7 @@ def _land_draft(
             params,
             chain,
             stores=stores,
-            connector=basis.connector,
+            connector=pipeline.connector,
         )
     commit_upload_definition(stores, draft, source=source, pipeline=pipeline)
     return None

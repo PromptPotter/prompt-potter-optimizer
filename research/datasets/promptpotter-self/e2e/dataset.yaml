@@ -9,7 +9,7 @@ campaign:
   # Every number here is the smallest that still exercises the TRANSITION it belongs to, and
   # none of them is calibrated. `family.yaml::campaign` above this directory carries the reasoning
   # for the real values — the panel width that lets PoBB eliminate, the round count that makes a lift
-  # falsifiable, the epsilon fitted to its own p_best stream. None of that survives at this size,
+  # falsifiable, the epsilon priced against a tied field's share. None of that survives at this size,
   # which is the point: this fixture exists to prove the L4 path RUNS — generate, score, elect,
   # carry a winner into the next round — and it is deliberately unable to MEASURE anything.
   optimizer_narrowing:

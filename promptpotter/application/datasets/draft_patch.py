@@ -154,10 +154,10 @@ async def plan_draft_patch(
 
     if "config" in changes:
         # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
-        was_unpriced, was_outside = _refusals(was, fence=free_fence(stores, held.connector.name))
+        was_unpriced, was_outside = _refusals(was, fence=free_fence(stores, held.connector))
         unpriced, outside = _refusals(
             draft_pipeline(stores, draft.patch(**changes), served),
-            fence=free_fence(stores, served.connector.name),
+            fence=free_fence(stores, served.connector),
         )
         refuse_unpriced([r for r in unpriced if r not in was_unpriced])
         refuse_outside_free_tier([o for o in outside if o not in was_outside])

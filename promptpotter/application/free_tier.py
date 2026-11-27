@@ -6,10 +6,10 @@ import functools
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
-from promptpotter import connectors
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.free_tier_file import FREE_TIER_ADAPTER, Bounds, FreeTier
 from promptpotter.domain.judges import JudgeStage
@@ -64,13 +64,13 @@ class FreeFence(NamedTuple):
     providers: frozenset[str]
 
 
-def free_fence(stores: Stores, connector: str) -> FreeFence | None:
+def free_fence(stores: Stores, connector: Connector) -> FreeFence | None:
     """``None`` off the free tier (`on_free_tier`)."""
     if not on_free_tier(stores):
         return None
     keys = stores.api_keys.load()
     return FreeFence(
-        task=draws_coupon(connectors.CONNECTORS.get(connector).cell_payer),
+        task=draws_coupon(connector.cell_payer),
         providers=frozenset(
             provider
             for provider in providers()

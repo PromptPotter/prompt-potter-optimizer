@@ -8,11 +8,16 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from promptpotter.application.maintenance.migrations import job_endings, live_jobs_index
+from promptpotter.application.maintenance.migrations import (
+    job_endings,
+    job_workspaces,
+    live_jobs_index,
+)
 from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
     # First: the index reads each job in this code's shape.
     "job endings": job_endings.staged,
+    "job workspaces": job_workspaces.staged,
     "live-jobs index": live_jobs_index.staged,
 }

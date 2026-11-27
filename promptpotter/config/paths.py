@@ -43,14 +43,36 @@ def _os_app_data_dir() -> Path:
         return base / "promptpotter"
 
 
+def long_form(p: str | Path) -> str:
+    """Windows' long-path prefix bypasses `MAX_PATH=260`, which nested sandbox dirs exceed."""
+    s = str(p)
+    if sys.platform == "win32" and not s.startswith("\\\\.\\"):
+        return "\\\\?\\" + short_form(s)  # The prefix turns off normalizing: `..` stays literal.
+    return s
+
+
+def short_form(p: str | Path) -> str:
+    """What two paths are related in: a syscall takes `long_form`, but a path from off the root
+    (an argument, a test's dir) carries no prefix, and Windows relates no two spellings."""
+    return os.path.abspath(str(p).removeprefix("\\\\?\\"))
+
+
 def user_data_root() -> Path:
-    override = os.environ.get(_ENV_HOME)
-    if override:
-        return Path(override).expanduser().resolve()
+    return _long_root(os.environ.get(_ENV_HOME) or None)
+
+
+@lru_cache(maxsize=4)
+def _long_root(override: str | None) -> Path:
+    """Spelled ONCE, resolved and in its long form, so every path derived from it reads past
+    `MAX_PATH`, a bare read outside `store/io.py` included."""
     checkout = source_checkout_root()
-    if checkout is not None:
-        return checkout / ".promptpotter"
-    return _os_app_data_dir()
+    if override:
+        root = Path(override).expanduser()
+    elif checkout is not None:
+        root = checkout / ".promptpotter"
+    else:
+        root = _os_app_data_dir()
+    return Path(long_form(root.resolve()))
 
 
 INSTALL_CACHE_DIR = ".cache"

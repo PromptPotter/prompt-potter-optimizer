@@ -77,11 +77,11 @@ class JobSpec(StrictModel):
         return self
 
 
-async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
+async def spawn_job(held: HeldLaunch) -> asyncio.Task[None]:
     """Returns only once the run's process holds the job (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
-    stores, hop = held.session.store, held.session.hop
+    stores, hop = held.opening.stores, held.hop
     log_path = CycleLayout(stores.campaigns.cycle_dir(hop)).job_log
     loop = asyncio.get_running_loop()
     # Until a process takes the job (its spec unbuilt among them), nothing else will ever hand its
@@ -164,47 +164,22 @@ def _tell_spawner() -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class HeldRun:
-    """A launch past everything that can refuse it: its machine slot held and its ceiling admitted
-    (``launcher.admission``), its cycle on disk, a session bound to that cycle. A launch arrives
-    here by ``launch.py::hold`` and an arm by its head-to-head's mint, and what is left is the
-    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run`, each closing
-    what opened its session and its opening's exit (*closing*) once the run is handed off or ended."""
+class HeldLaunch:
+    """A launch past its admission (``launcher.admission``), its cycle on disk: what is left is the
+    run-invocation, an entry point's ONE act. :meth:`detach` hands it to its own process, which
+    opens the cycle's session (`run_job`); each act closes its opening's exit (*closing*)."""
 
     opening: Opening
-    session: Session
-    cycle: CycleConfig
+    hop: CycleHop
     budget: HeldBudget
-    optimizer: SelectedOptimizer
     closing: AsyncExitStack
     mode: RunMode  # `launch.py::Admitted.mode`'s: no door re-derives it
 
-    @classmethod
-    def of(
-        cls,
-        opening: Opening,
-        opened: OpenedCycle,
-        budget: HeldBudget,
-        closing: AsyncExitStack,
-        mode: RunMode,
-    ) -> HeldRun:
-        """The opened cycle is what it reads back as, which a detached run rebuilds: a mint lays
-        the one span it writes, a resume reads its line."""
-        return cls(
-            opening=opening,
-            session=opened.session,
-            cycle=opened.cycle,
-            budget=budget,
-            optimizer=opened.optimizer,
-            closing=closing,
-            mode=mode,
-        )
-
     def job_spec(self) -> JobSpec:
-        stores = self.session.store
+        stores = self.opening.stores
         return JobSpec(
             job_id=self.opening.job_id,
-            hop=self.session.hop,
+            hop=self.hop,
             mode=self.mode,
             identity=stores.identity,
             budget=self.budget,
@@ -218,6 +193,30 @@ class HeldRun:
     async def detach(self) -> asyncio.Task[None]:
         async with self.closing:
             return await spawn_job(self)
+
+
+@dataclass(frozen=True, slots=True)
+class HeldRun(HeldLaunch):
+    """Held with its session bound to its cycle, here: by ``launch.py::hold``, or a head-to-head's
+    mint for an arm."""
+
+    session: Session
+    cycle: CycleConfig
+    optimizer: SelectedOptimizer
+
+    @classmethod
+    def of(
+        cls,
+        opening: Opening,
+        opened: OpenedCycle,
+        budget: HeldBudget,
+        closing: AsyncExitStack,
+        mode: RunMode,
+    ) -> HeldRun:
+        """The opened cycle is what it reads back as, which a detached run rebuilds: a mint lays
+        the one span it writes, a resume reads its line."""
+        held = (opened.hop, budget, closing, mode, opened.session, opened.cycle, opened.optimizer)
+        return cls(opening, *held)
 
     async def run_inline(
         self, *, readout_sink: Callable[[str], None] | None
@@ -263,11 +262,11 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     try:
         async with AsyncExitStack() as closing:
             closing.push_async_exit(opening)
-            # Asked again here, under the claim: the admitting process's answer is a handoff old.
+            # Asked here alone, under the claim: the admitting process opened nothing of the cycle.
             # A refusal is the job's, never the cycle's stop: the cycle keeps the one it had.
             refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
+            opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(opening))
             opening.owns(spec.hop)
-            opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(stores))
             _, result = await run_held_job(
                 opening,
                 opened.session,

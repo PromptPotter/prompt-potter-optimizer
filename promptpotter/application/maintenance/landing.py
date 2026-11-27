@@ -9,7 +9,7 @@ import functools
 import math
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
@@ -42,7 +42,7 @@ from promptpotter.config.paths import default_projects_root, jobs_dir, user_data
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.job import JOB_ADAPTER
+from promptpotter.domain.job import JOB_ADAPTER, UNRESOLVED_HOP, Job
 from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.strict_model import FrozenModel
@@ -361,11 +361,8 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     torn: list[Unloadable] = []
     for unit, found in manifestless.items():
         why = f"{unit}: a mint torn before its manifest"
-        # Any run in its workspace may be that mint in flight, whatever cycle it names.
-        if (
-            holder := holder_in_reach(jobs, (unit.parent.parent,), _locks(data_root, unit))
-        ) is not None:
-            unloadable.append(Unloadable(unit, found, f"{why}, while {holder} holds its workspace"))
+        if (holder := _minting(jobs, unit, data_root)) is not None:
+            unloadable.append(Unloadable(unit, found, f"{why}, while {holder} mints it"))
         else:
             torn.append(Unloadable(unit, found, why))
     caches: list[Unloadable] = []
@@ -523,6 +520,9 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
             if CampaignLayout(mint.path).manifest.is_file():
                 kept.append(mint._replace(why=f"{mint.path}: minted since the plan"))
                 continue
+            if (held := _minting(jobs, mint.path, data_root)) is not None:
+                kept.append(mint._replace(why=f"{mint.path}: {held} mints it"))
+                continue
             stores = tenant_stores(projects_root, WorkspaceDir(mint.path.parent.parent))
             with destroying(stores, registry, mint.path.name):
                 stores.campaigns.delete_campaign(mint.path.name, keep_results=False)
@@ -535,6 +535,13 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     )
     write_text(_stamp(projects_root), stamp.model_dump_json())
     return applied
+
+
+def _minting(jobs: Sequence[Job], unit: Path, data_root: Path) -> str | None:
+    """Who mints the campaign *unit*: a mint's job names its cycle before writing any of it
+    (`opening.py::Opening.name`), so a job naming none writes no campaign."""
+    named = [job for job in jobs if job.hop != UNRESOLVED_HOP]
+    return holder_in_reach(named, (unit,), _locks(data_root, unit))
 
 
 def _stamp(projects_root: Path) -> Path:

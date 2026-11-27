@@ -157,6 +157,7 @@ from promptpotter.config.paths import (
     default_projects_root,
     install_datasets_root,
     jobs_dir,
+    short_form,
     user_data_root,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION, settings
@@ -1593,13 +1594,16 @@ def test_a_filed_command_answers_its_result_when_a_store_vanishes_under_its_ack(
     route = next(r for r in commands_api.commands_router.routes if r.name == "rename-campaign")  # type: ignore[attr-defined]
     payload = SetCampaignLabelPayload(campaign_id=hop.campaign_id, label="renamed")
     scandir = os.scandir
-    sandbox_campaigns = str(
+    sandbox_campaigns = short_form(
         campaigns_root_dir_for(WorkspaceDir(sandbox / str(built_stores.tenant_id)))
     )
 
+    deleted: list[bool] = []
+
     def deleted_under_the_walk(path: str = ".") -> object:
-        # The sandbox goes between the walk finding it and listing it.
-        if str(path) == sandbox_campaigns:
+        # The sandbox goes between the walk finding it and listing it, once: the delete lists it too.
+        if short_form(path) == sandbox_campaigns and not deleted:
+            deleted.append(True)
             rmtree_robust(sandbox)
         return scandir(path)
 
@@ -3166,6 +3170,29 @@ def test_a_job_v0_8_21_wrote_with_how_its_run_ended_lands_counted_by_the_quota_a
     )
 
 
+def test_a_job_v0_8_21_spelled_off_the_long_root_still_holds_its_campaign_past_the_landing(
+    tmp_path: Path,
+) -> None:
+    # v0.8.21 spelled a workspace from the root as given: on Windows short of its long form; on
+    # POSIX through a link, here. A run in flight then matched no campaign of its own store.
+    projects_root, root = default_projects_root(), user_data_root()
+    if sys.platform == "win32":
+        was = Path(str(root).removeprefix("\\\\?\\"))
+    else:
+        (was := tmp_path / "linked").symlink_to(root)
+    registry = JobRegistry.attach(jobs_dir(projects_root))
+    job = registry.create(
+        user_id="u", principal_id="u", workspace=WorkspaceDir(was / PROJECTS_DIR / "u"),
+        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    assert job.workspace != str(projects_root / "u"), "the job was spelled from the long root"
+    staged = {one.path: one.data for one in MIGRATIONS["job workspaces"](projects_root, {})}
+    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged).get(job.job_id)
+    assert landed is not None and landed.on_campaign(
+        WorkspaceDir(projects_root / "u"), job.campaign_id
+    ), "a run in flight across the landing lost its campaign"
+
+
 def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_survivor() -> None:
     torn = PurePosixPath(PROJECTS_DIR, "u", "datasets", "d", ".x.tmp")
     found_torn = classify(torn)
@@ -3245,19 +3272,21 @@ def test_a_landing_keeps_the_files_of_a_run_started_since_its_plan_and_drops_the
 def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_spend_banked(
     built_stores: Stores, offline: Router, tmp_path: Path
 ) -> None:
-    # Listed by no verb, it holds what its draft billed; it never goes while a run holds its
-    # workspace.
+    # Listed by no verb, it holds what its draft billed; it never goes while the job minting it
+    # names it.
     campaigns = built_stores.campaigns
     kept_hop = asyncio.run(_mint(built_stores, offline, tmp_path))
     torn_hop = CycleHop(campaign_id="c__bbbbbb", cycle_id="y")
     laid_ledger(campaigns.cycle_dir(torn_hop)).append(billed_call(0.25))
     torn_dir = campaigns.campaign_root_dir(torn_hop.campaign_id)
     assert campaigns.iter_campaign_dirs() == [campaigns.campaign_root_dir(kept_hop.campaign_id)]
-    # A launch admitted in the workspace may be that mint in flight, whatever cycle it names.
+    # A mint's job names its cycle before the mint writes any of it.
     holders = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 1)
     (holding,) = request_jobs(
-        stores=built_stores, job_registry=holders, holder=CampaignLaunch("ds1"), hop=kept_hop
+        stores=built_stores, job_registry=holders, holder=CampaignLaunch("ds1"), hop=UNRESOLVED_HOP
     )
+    holders.move(holding.job_id, LaunchMove.ADMIT)
+    holders.move(holding.job_id, LaunchMove.LAND, hop=torn_hop)
     minting = plan_landing(built_stores.projects_root, reset=False)
     assert minting.refused and not minting.torn, "a landing took a mint a held run may finish"
     assert [one.path for one in minting.unloadable] == [torn_dir]

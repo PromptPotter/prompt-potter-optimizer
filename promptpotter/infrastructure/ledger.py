@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from promptpotter.config.paths import short_form
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import CycleMintedRecord
@@ -22,12 +23,12 @@ def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
     child_dir = Path(cycle_dir)
     # By dir, never id: two trees can hold the same cycle id. A mint names its parent off the
     # child's own path, so the spelling alone is compared, with no filesystem call per hop.
-    seen = {os.path.normcase(os.path.abspath(child_dir))}
+    seen = {os.path.normcase(short_form(child_dir))}
     while (link := _fork_link(child_dir)) is not None:
         minted, parent_dir = link
         cut = minted.forked_at_offset
         assert cut is not None
-        if (spelled := os.path.normcase(os.path.abspath(parent_dir))) in seen:
+        if (spelled := os.path.normcase(short_form(parent_dir))) in seen:
             raise ValueError(
                 f"{child_dir}: parent {parent_dir} is already on this fork chain — "
                 "the mints describe a cycle, which no walk can resolve."

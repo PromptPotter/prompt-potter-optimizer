@@ -29,6 +29,7 @@ from promptpotter.domain.spend import (
     MONEY_AXES,
     NESTED_NODE_PREFIX,
     NOTHING_PAID,
+    RESERVE_PER_CEILING,
     Budget,
     CeilingMeter,
     KeySource,
@@ -499,7 +500,7 @@ class SpendBook:
         for category, reserve, n in self._room(asks, None, paid_by):
             if n < 1 and (reserve or self.binds(kind)):
                 refusal = self._refusal(category, reserve, asks[reserve], what)
-                if reserve:
+                if reserve and not self.reserve_is_own():
                     # Whether a key of the account's own would pay this send is not the book's to know.
                     raise HostAllowanceExhaustedError(
                         f"{refusal}.", reason=LaunchRefusalReason.USED_UP, provider=None
@@ -525,9 +526,12 @@ class SpendBook:
 
     def _refusal(self, category: ErrorCategory, reserve: bool, each: SendBound, what: str) -> str:
         limit = (
-            "this run's reserve of the host's allowance, beside sends on the account's own keys,"
-            if reserve
-            else "cycle's share of the campaign ceiling"
+            "cycle's share of the campaign ceiling"
+            if not reserve
+            else f"reserve the host's allowance holds for this run, {RESERVE_PER_CEILING} times "
+            "its share of the campaign ceiling,"
+            if self.reserve_is_own()
+            else "this run's reserve of the host's allowance, beside sends on the account's own keys,"
         )
         bounds = self.reserve if reserve else self.allotment
         count = self._count(self._money(), host=reserve, beside=None)
@@ -603,6 +607,17 @@ class SpendBook:
     def prices_sends(self) -> bool:
         """Whether ANY send is held in dollars here: a price list is then needed whoever pays."""
         return self.allotment.usd is not None or self.reserve.usd is not None
+
+    def reserve_is_own(self) -> bool:
+        """The reserve holds `RESERVE_PER_CEILING` times the cycle's share on an axis the share
+        bounds: the run's ceiling sized it, not the allowance's room, so past it is past its own."""
+        share, held = self.allotment, self.reserve
+        return any(
+            (cap := getattr(share, axis)) is not None
+            and (kept := getattr(held, axis)) is not None
+            and kept >= RESERVE_PER_CEILING * cap
+            for axis in MONEY_AXES
+        )
 
     def coupon_left(self) -> Remainder:
         """What the reserve still admits on the box's key, past what it counted and has out."""

@@ -54,8 +54,6 @@ class CycleResult(StrictModel):
     result_prompt_fields: dict[str, dict[str, str]]
     result_pipeline_params: PipelineParams | None = None
     stop_reason: StopReason
-    # A pause at the round allowance its launch was started with (``start-run {step_rounds}``).
-    stepped: bool = False
     started_at: str
     finished_at: str
     wall_clock: WallClock

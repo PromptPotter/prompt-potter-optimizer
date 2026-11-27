@@ -297,7 +297,7 @@ class JobRegistry:
         """Ends the job, answering the stop its raise *ended* reads as, which the cycle's declared
         stop takes (`opening.py::Opening`'s exit; a run declares its own): an interrupt, or a raise
         once admitted, is the stop it reads as (`run_stop_reason`); ``None`` where it was withdrawn
-        from the queue, refused (before its admission, or by its campaign at any point), or
+        from the queue, refused (before its run started, or by its campaign at any point), or
         returned. How it ended is its cycle's stop, never the job's (`command_reading.py`); a
         refusal is filed beside it, before its release, so no reader finds it released unsaid."""
         with self.admission_gate():
@@ -308,7 +308,7 @@ class JobRegistry:
                 self.move(job_id, LaunchMove.END)
                 return None
             refused = isinstance(ended, CampaignRefusedError) or (
-                not job.admitted and not launch_interrupted(ended)
+                job.started_at is None and not launch_interrupted(ended)
             )
             if refused:
                 said = ended if isinstance(ended, PotterError) else PotterError(str(ended))

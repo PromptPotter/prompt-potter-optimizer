@@ -551,6 +551,9 @@ class CellPrice(FrozenModel):
 MoneyAxis = Literal["usd", "tokens"]
 MONEY_AXES = frozenset(get_args(MoneyAxis))
 CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})
+# What the coupon reserves of a run per axis its ceiling caps, at most the coupon's room: a run past
+# a reserve this sized is past its own ceiling (`SpendBook.reserve_is_own`), not the allowance.
+RESERVE_PER_CEILING = 2
 
 
 def cycle_axes_only(budget: Budget) -> Budget:

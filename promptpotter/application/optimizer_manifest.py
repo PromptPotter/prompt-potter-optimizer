@@ -64,7 +64,8 @@ from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.dataset_access import campaign_defaults
-from promptpotter.infrastructure.store.io import file_stat, read_json, read_yaml
+from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.infrastructure.store.read_model import Signature, file_sig
 from promptpotter.shared.errors import (
     FileKind,
     NotFoundError,
@@ -90,24 +91,16 @@ if TYPE_CHECKING:
     )
 
 
-def _stamp(path: Path) -> int:
-    try:
-        return file_stat(path).st_mtime_ns
-    except OSError:
-        # A vanished file is its reader's error to raise; the stamp only keys the cache.
-        return -1
-
-
 @functools.lru_cache(maxsize=16)
-def _read_manifest(path: Path, _mtime_ns: int) -> PipelineManifest | ManifestSwitch:
-    # Keyed on path AND mtime: an operator's edit or tenant shadow takes effect without a restart.
+def _read_manifest(path: Path, _sig: Signature | None) -> PipelineManifest | ManifestSwitch:
+    # Keyed on path AND its validator: an operator's edit or tenant shadow lands without a restart.
     if not path.is_file():
         raise FileNotFoundError(f"no optimizer manifest at {path}")
     return AUTHORED_MANIFEST.validate_python(read_yaml(path))
 
 
 def authored_manifest(path: Path) -> PipelineManifest | ManifestSwitch:
-    return _read_manifest(path, _stamp(path))
+    return _read_manifest(path, file_sig(path))
 
 
 @functools.lru_cache(maxsize=8)
@@ -772,10 +765,10 @@ def manifest_directories(name: str) -> tuple[Path, ...]:
     return tuple(_located(n)[0] for n in read)
 
 
-def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
+def _stamps(name: str) -> tuple[tuple[Path, Signature | None], ...]:
     # Every file *name* resolves from, so an edit to what a switch extends re-resolves the switch.
     paths = [optimizer_manifest_path(directory) for directory in manifest_directories(name)]
-    return tuple((path, _stamp(path)) for path in paths)
+    return tuple((path, file_sig(path)) for path in paths)
 
 
 def _whole(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
@@ -1098,7 +1091,7 @@ class CheckinManifest:
 
 
 @functools.lru_cache(maxsize=2)
-def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
+def _checkin_at(path: Path, _sig: Signature | None) -> CheckinManifest:
     manifest = CHECKIN_MANIFEST.validate_python(read_yaml(path))
     schemas = _read_schemas(checkin_assets_root() / "resolved_schemas.json")
     return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
@@ -1106,7 +1099,7 @@ def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
 
 def checkin_manifest() -> CheckinManifest:
     path = checkin_manifest_path()
-    return _checkin_at(path, _stamp(path))
+    return _checkin_at(path, file_sig(path))
 
 
 def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

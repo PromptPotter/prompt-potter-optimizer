@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_run_fork
 from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.shares import declare_round_allowance
@@ -72,7 +72,6 @@ def build_cycle_result(
     session: Session,
     *,
     stop_reason: StopReason,
-    stepped: bool,
     cycle_error: ErrorRecord | None,
     finished_at: str,
     spend: SpendRollup | None,
@@ -110,7 +109,6 @@ def build_cycle_result(
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
-        stepped=stepped,
         started_at=started_at,
         finished_at=finished_at,
         wall_clock=scan_ledger_wall_clock(
@@ -160,7 +158,6 @@ def close_cycle(
             cycle,
             session,
             stop_reason=stop_reason,
-            stepped=pause_cause is PauseCause.STEP and stop_reason is StopReason.PAUSED,
             cycle_error=cycle_error,
             finished_at=finished_at,
             # In-memory, never the debounced ``dashboard.json``.
@@ -382,10 +379,9 @@ def _cut_rebase_fork(
     learned = held[max(held)].close.optimizer_state
     hung = rebase_req.hangs_from
     picked = hung.election.selected if hung is not None and hung.election is not None else None
-    fork = cut_fork(
-        session.store,
-        parent=parent,
-        fork_from_round=cut,
+    fork = cut_run_fork(
+        session,
+        cut,
         trigger=rebase_req.trigger,
         reason=rebase_req.reason,
         issued_by=rebase_req.issued_by,

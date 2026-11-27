@@ -328,7 +328,7 @@ def clone_cache() -> Path:
 
 def long_path(p: Path) -> str:
     # A cycle tree nests past Windows MAX_PATH=260 under a deep home; the prefix lifts it. The gate's
-    # own: it spells before the venv exists, so it imports no `store/io.py::_long_path`.
+    # own: it spells before the venv exists, so it imports no `config/paths.py::long_form`.
     s = str(p.resolve())
     return "\\\\?\\" + s if os.name == "nt" and not s.startswith("\\\\?\\") else s
 

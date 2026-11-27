@@ -5146,7 +5146,6 @@ async def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_co
             cycle,
             session,
             stop_reason=StopReason.ROUNDS_BUDGET,
-            stepped=False,
             cycle_error=None,
             finished_at="",
             spend=None,

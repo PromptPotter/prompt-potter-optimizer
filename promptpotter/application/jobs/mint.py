@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 from collections import Counter
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
@@ -47,6 +48,7 @@ from promptpotter.application.preflight import (
 )
 from promptpotter.application.run_observers import declare_run_wiring
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
@@ -101,6 +103,7 @@ from promptpotter.shared.hashing import stable_hash
 if TYPE_CHECKING:
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.launcher.opening import Opening
 
 
 def origin_content_hash(
@@ -129,11 +132,11 @@ def refuse_unrunnable(
     schema: PipelineSchema,
     *,
     stores: Stores,
-    connector: str,
+    connector: Connector,
 ) -> BankPartition:
     """Every refusal a run owes on *connector*, before anything is paid or written; an upload's
     Start asks it of the draft."""
-    refuse_unfit_pipeline(selected, schema, connector)
+    refuse_unfit_pipeline(selected, schema, connector.name)
     refuse_off_contract(pipeline_params, schema)
     partition = partition_bank(
         dataset, campaign_config.dataset_split, seed=campaign_config.run_seed
@@ -285,7 +288,7 @@ def _planned(
         pipeline_params,
         res.chain,
         stores=session.store,
-        connector=spec.environment.connector,
+        connector=session.backend_client.connector,
     )
     return CyclePlan(
         spec=spec,
@@ -638,10 +641,15 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     return session
 
 
-def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCycle:
-    """*adopting* is a draft whose ledger paid toward this cycle before it existed."""
+def mint(
+    plan: CyclePlan, *, campaign_id: str, adopting: str | None, opening: Opening | None = None
+) -> OpenedCycle:
+    """*adopting* is a draft whose ledger paid toward this cycle before it existed; *opening*'s job
+    names the cycle before anything of it is written (a job-less mint is a test's)."""
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
+    if opening is not None:
+        opening.name(hop)
     return OpenedCycle(
         cycle=plan.cycle,
         session=_mint_campaign(plan, hop=hop, adopting=adopting),
@@ -661,7 +669,11 @@ def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None
 
 
 def _mint_all(
-    plans: Sequence[CyclePlan], *, adopting: str | None, stored: HeadToHeadRecord | None
+    plans: Sequence[CyclePlan],
+    *,
+    adopting: str | None,
+    stored: HeadToHeadRecord | None,
+    openings: Sequence[Opening],
 ) -> Iterator[OpenedCycle]:
     """Arms join their head-to-head on the framed plans they mint, each answered as it lands, so a
     raise at a later arm leaves the earlier ones owned; each campaign id is drawn here, past every
@@ -679,17 +691,31 @@ def _mint_all(
             plan,
             campaign_id=fresh_campaign_id(plan.session),
             adopting=adopting if i == 0 else None,
+            opening=openings[i] if openings else None,
         )
 
 
-def mint_arms(plans: Sequence[CyclePlan], *, adopting: str | None) -> Iterator[OpenedCycle]:
-    """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
+def mint_arms(
+    plans: Sequence[CyclePlan], *, adopting: str | None, openings: Sequence[Opening] = ()
+) -> Iterator[OpenedCycle]:
+    """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing. One per
+    *openings*' job, each naming its cycle off the loop (`off_loop`)."""
     with _record_held(plans) as stored:
-        yield from _mint_all(plans, adopting=adopting, stored=stored)
+        yield from _mint_all(plans, adopting=adopting, stored=stored, openings=openings)
+
+
+async def off_loop(minting: Iterator[OpenedCycle]) -> AsyncIterator[OpenedCycle]:
+    """Each mint off the loop: one naming its job waits on the admission gate."""
+    while (cycle := await asyncio.to_thread(next, minting, None)) is not None:
+        yield cycle
 
 
 async def mint_framed_arms(
-    session: Session, plans: Sequence[CyclePlan], *, task_text: str | None = None
+    session: Session,
+    plans: Sequence[CyclePlan],
+    *,
+    task_text: str | None = None,
+    openings: Sequence[Opening] = (),
 ) -> AsyncIterator[OpenedCycle]:
     """*plans* from ``arm_plans``: a framing the dataset still owes is paid once and frames every
     arm. The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or
@@ -697,7 +723,9 @@ async def mint_framed_arms(
     description = _description_to_decompose(session, plans[0].cycle.config, task_text)
     with _record_held(plans) as stored:
         if description is None:
-            for cycle in _mint_all(plans, adopting=None, stored=stored):
+            async for cycle in off_loop(
+                _mint_all(plans, adopting=None, stored=stored, openings=openings)
+            ):
                 yield cycle
             return
         drafts = session.store.drafts
@@ -705,7 +733,8 @@ async def mint_framed_arms(
         make_dirs(drafts.draft_dir(draft_id))
         try:
             framed = await _framed(session, plans, description, draft_id)
-            for cycle in _mint_all(framed, adopting=draft_id, stored=stored):
+            minting = _mint_all(framed, adopting=draft_id, stored=stored, openings=openings)
+            async for cycle in off_loop(minting):
                 yield cycle
         except BaseException:
             drafts.discard(drafts.hold(draft_id))
@@ -731,12 +760,15 @@ async def mint_framed_cycle(
     *,
     task_text: str | None,
     origin_override: dict[str, NodePrompt] | None = None,
+    opening: Opening | None = None,
 ) -> OpenedCycle:
     """An optimize run; an arm is planned with its head-to-head, and an L4 inner cell mints
     through ``mint``, so cells never race to decompose."""
     # Every refusal the mint owes, before the check-in below bills.
     plan = resolve_cycle_plan(session, config, Optimize(), dataset, origin_override=origin_override)
-    (minted,) = [cycle async for cycle in mint_framed_arms(session, [plan], task_text=task_text)]
+    openings = () if opening is None else (opening,)
+    minting = mint_framed_arms(session, [plan], task_text=task_text, openings=openings)
+    (minted,) = [cycle async for cycle in minting]
     return minted
 
 

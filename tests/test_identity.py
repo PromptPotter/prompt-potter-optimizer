@@ -1840,9 +1840,7 @@ def test_an_upload_searches_the_model_axis_its_connectors_menu_bounds() -> None:
     )
     upload_graph = parse_pipeline_response(
         served_termnorm.over(
-            with_node_templates(
-                upload_pipeline_json(UploadBasis(connector="termnorm", kept="x.csv"), {})
-            )
+            with_node_templates(upload_pipeline_json(CONNECTORS.get("termnorm"), {}))
         )
     )
     answering = upload_graph.get_node("llm_only")
@@ -2540,7 +2538,10 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
     on_dataset = defaulted_config(restated).model_dump(mode="json")
     laid = laid_config(
-        stores, ConfigLayers(on_dataset, restated), connector="termnorm", schema=None
+        stores,
+        ConfigLayers(on_dataset, restated),
+        connector=CONNECTORS.get("termnorm"),
+        schema=None,
     )
     assert laid.knob_layers["l1_generate"]["n_variants"] == "campaign", (
         "an edit restating the dataset's value read as the dataset's"

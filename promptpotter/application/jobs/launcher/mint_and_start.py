@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
     fork_config,
@@ -24,6 +26,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import Campaign, CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.checkin_draft import DraftFile
@@ -114,8 +117,11 @@ class LaunchRequest:
             return EmbeddedRun(self.dataset_name)
         return CampaignLaunch(self.dataset_name)
 
-    def connector(self, stores: Stores) -> str:
-        return runnable_definition(resolve_dataset(stores, self.dataset_name)).connector
+    def connector(self, stores: Stores) -> Connector:
+        """Its campaign's, as minted; else its definition's."""
+        if self.campaign is not None:
+            return connectors.CONNECTORS.get(self.campaign.connector)
+        return runnable_definition(resolve_dataset(stores, self.dataset_name)).owner
 
     def endpoint(self, stores: Stores) -> str | None:
         """The definition's, as the run's session reads it."""
@@ -127,7 +133,8 @@ class LaunchRequest:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         raise NotImplementedError
 
-    def open(self, stores: Stores) -> AbstractAsyncContextManager[OpenedCycle]:
+    def open(self, opening: Opening) -> AbstractAsyncContextManager[OpenedCycle]:
+        """A mint's job names the cycle before the mint writes any of it (`Opening.name`)."""
         raise NotImplementedError
 
     def stand(self, _opening: Opening, _held: HeldBudget) -> LaunchRequest:
@@ -149,8 +156,8 @@ class FreshMint(LaunchRequest):
     def dataset_name(self) -> str:
         return self.dataset.name
 
-    def connector(self, _stores: Stores) -> str:
-        return runnable_definition(self.dataset).connector
+    def connector(self, _stores: Stores) -> Connector:
+        return runnable_definition(self.dataset).owner
 
     def endpoint(self, _stores: Stores) -> str | None:
         return runnable_definition(self.dataset).endpoint
@@ -165,13 +172,13 @@ class FreshMint(LaunchRequest):
         return self.campaign_config(stores).optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self.campaign_config(stores), self.connector(stores))
+        return sends_on(stores, self.campaign_config(stores), self.connector(stores).name)
 
     @asynccontextmanager
-    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
+    async def open(self, opening: Opening) -> AsyncIterator[OpenedCycle]:
         """The session, past the probe, then the mint: a refused one writes nothing. A host's
         *rows* replace the definition's bank, which the mint labels."""
-        hosted = self.hosted or Hosted()
+        stores, hosted = opening.stores, self.hosted or Hosted()
         async with init_services(
             dataset_name=self.dataset_name,
             identity=stores.identity,
@@ -184,7 +191,7 @@ class FreshMint(LaunchRequest):
                 session = replace(session, bank=bank)
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
-                session, config, session.bank.samples, task_text=self.task_text
+                session, config, session.bank.samples, task_text=self.task_text, opening=opening
             )
 
 
@@ -199,9 +206,6 @@ class ExistingCycle(LaunchRequest):
     def dataset_name(self) -> str:
         return self.at.campaign.dataset_name
 
-    def connector(self, _stores: Stores) -> str:
-        return self.at.campaign.connector
-
     def declared_budget(self, stores: Stores) -> Budget:
         return cycle_config(stores, self.at).config.optimization.budget
 
@@ -209,10 +213,9 @@ class ExistingCycle(LaunchRequest):
         return campaign_sends(stores, self.at)
 
     @asynccontextmanager
-    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
-        """The cycle on disk, bound and drift-checked: in the admitting process, and again in a
-        detached run's own."""
-        async with bind_cycle_session(stores, self.at) as session:
+    async def open(self, opening: Opening) -> AsyncIterator[OpenedCycle]:
+        """The cycle on disk, bound and drift-checked, in the process its run runs in."""
+        async with bind_cycle_session(opening.stores, self.at) as session:
             plan = resolve_resume(session, self.at.campaign, session.bank.samples)
             yield OpenedCycle(plan.cycle, plan.session, plan.optimizer)
 
@@ -239,9 +242,6 @@ class ForkLaunch(LaunchRequest):
     def campaign(self) -> Campaign:
         return self.parent.campaign
 
-    def connector(self, _stores: Stores) -> str:
-        return self.parent.campaign.connector
-
     def armed_budget(self, stores: Stores) -> Budget:
         # A fork inherits no standing budget of its parent's cycle.
         return stores.campaigns.read_campaign_ceiling(self.parent.campaign).budget
@@ -253,7 +253,7 @@ class ForkLaunch(LaunchRequest):
         return self._config(stores).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self._config(stores).config, self.connector(stores))
+        return sends_on(stores, self._config(stores).config, self.connector(stores).name)
 
     def stand(self, opening: Opening, held: HeldBudget) -> ExistingCycle:
         """Cut under its admission's gate, its share landed on the child: no sibling admitted after
@@ -286,13 +286,13 @@ class InnerSeat(LaunchRequest):
         return ()
 
     @asynccontextmanager
-    async def open(self, _stores: Stores) -> AsyncIterator[OpenedCycle]:
-        plan = self.plan
-        session = (
-            plan.session
-            if self.at is not None
-            else mint(plan, campaign_id=self.campaign_id, adopting=None).session
-        )
+    async def open(self, opening: Opening) -> AsyncIterator[OpenedCycle]:
+        plan, session = self.plan, self.plan.session
+        if self.at is None:
+            minted = await asyncio.to_thread(
+                mint, plan, campaign_id=self.campaign_id, adopting=None, opening=opening
+            )
+            session = minted.session
         yield OpenedCycle(plan.cycle, session, plan.optimizer)
 
 

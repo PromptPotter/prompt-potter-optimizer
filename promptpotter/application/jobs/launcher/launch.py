@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Coroutine
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any, assert_never
@@ -16,7 +16,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.mint_and_start import Hosted, LaunchRequest
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
@@ -57,23 +57,33 @@ class Launched(LaunchOutcome):
         return [self.launch]
 
 
-async def hold(request: LaunchRequest, opening: Opening, mode: RunMode) -> HeldRun:
+async def hold(
+    request: LaunchRequest, opening: Opening, mode: RunMode, *, here: bool
+) -> HeldLaunch:
     """THE way into a held run: past the queue and the money admission, then the request's cycle
     opened, its session and the opening's exit riding the held run's ``closing``. One with no hop
     yet mints it, so a refusal before then leaves nothing written and one after stamps the minted
-    cycle; an existing cycle's is never stamped, so it stays as resumable as it was. A check-in's
-    claim ends with this hold however it ends."""
+    cycle; an existing one is never stamped, and is opened only *here*, never twice: a detached
+    run opens it in its own process. A check-in's claim ends with this hold however it ends."""
     try:
         async with AsyncExitStack() as closing:
             closing.push_async_exit(opening)
             held, standing = await admit_and_hold(request, opening)
-            opened = await closing.enter_async_context(standing.open(opening.stores))
+            if standing.at is not None and not here:
+                return HeldLaunch(opening, standing.at.hop, held, closing.pop_all(), mode)
+            opened = await closing.enter_async_context(standing.open(opening))
             if standing.at is None:
                 await asyncio.to_thread(opening.land, opened.hop, held)
             return HeldRun.of(opening, opened, held, closing.pop_all(), mode)
     finally:
         if isinstance(request, CheckinStart):
             request.claim.release()
+
+
+async def _here(holding: Awaitable[HeldLaunch]) -> HeldRun:
+    held = await holding
+    assert isinstance(held, HeldRun), "a launch held here opens its cycle"
+    return held
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,24 +103,28 @@ class Admitted(LaunchOutcome):
         await self.opening.abandon(exc)
 
     async def held(self) -> HeldRun:
-        """Its run held: past the queue, the money admission and the cycle's session."""
-        return await hold(self.request, self.opening, self.mode)
+        """Its run held here: past the queue, the money admission and the cycle's session."""
+        return await _here(hold(self.request, self.opening, self.mode, here=True))
 
-    async def hand_over(self, holding: Coroutine[Any, Any, HeldRun]) -> Launched:
-        """*holding* — `held`, or a held step that acts once the run is held (a fork's cut on its
+    async def handed(self) -> HeldLaunch:
+        """Held for where its run goes: inline, its session opened here; else in its own process."""
+        return await hold(self.request, self.opening, self.mode, here=self.inline is not None)
+
+    async def hand_over(self, holding: Coroutine[Any, Any, HeldLaunch]) -> Launched:
+        """*holding* — `handed`, or a held step that acts once the run is held (a fork's cut on its
         parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
         job = self.opening.job
         if self.inline is not None:
             # A queued one answers its place first, as a detached one does; its door awaits the rest.
-            hold = asyncio.ensure_future(holding)
+            hold = asyncio.ensure_future(_here(holding))
             if job.queued:
                 return Launched(LaunchedJob.of(job), hold)
-            return Launched(LaunchedJob.of(job, (await hold).session.hop), hold)
+            return Launched(LaunchedJob.of(job, (await hold).hop), hold)
 
         async def hold_and_detach() -> CycleHop:
             held = await holding
             await held.detach()
-            return held.session.hop
+            return held.hop
 
         if job.queued:
             self.opening.job_registry.detach(hold_and_detach())

@@ -16,13 +16,9 @@ from promptpotter.application.initialization.scoring_scope import cycle_partitio
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.jobs.launcher.opening import land_job, open_spend_book
+from promptpotter.application.jobs.launcher.opening import open_spend_book
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.jobs.shares import (
-    cycle_share,
-    move_campaign_money,
-    stand_held_budget,
-)
+from promptpotter.application.jobs.shares import move_campaign_money, stand_held_budget
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
@@ -50,7 +46,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.domain.spend import HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import refresh_rates
@@ -209,30 +205,10 @@ def enter_cycle(
 
 
 def _rebased_observers(session: Session, cut: ForkCut, observers: RunObservers) -> RunObservers:
-    # The cut's last step: everything the fork stands on landed before it supersedes its parent.
+    # The cut's last step: everything the fork stands on, its share included
+    # (`fork_siblings.py::cut_run_fork`), landed before it supersedes its parent.
     cut.take(session.store)
-    _rebase_held(session, cut.parent)
     return enter_cycle(session, forked_from=observers)
-
-
-def _rebase_held(session: Session, parent: CycleHop) -> None:
-    """The job follows the fork, and its share stops counting *parent*'s metered spend, which the campaign's holds."""
-    held = session.state.held
-    if held is None:
-        raise RuntimeError("a run rebases only over what admission held for it")
-    spent = session.store.campaigns.cycle_metered(parent, ceiling_meter(session.purpose))
-    job_registry = JobRegistry.attach(session.store.jobs_dir)
-    with job_registry.admission_gate():
-        job = job_registry.get(held.job_id)
-        if job is None:
-            raise RuntimeError(f"a run rebases only on its own job, and {held.job_id} is gone")
-        live = cycle_share(session.store, job)
-        allotment = Budget(
-            usd=None if live.usd is None else max(0.0, live.usd - spent.usd_amount),
-            tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
-        )
-        land_job(session.store, job_registry, job.job_id, session.hop, allotment)
-    stand_held_budget(session.store, session.hop, held)
 
 
 async def onto_fork(
@@ -375,7 +351,8 @@ async def open_cycle(
         optimizer=selected,
         survey=survey,
     )
-    cut = resume_with_divergence_check(cycle, mode) if replays else None
+    # Off the loop: a divergence cuts under the admission gate.
+    cut = await asyncio.to_thread(resume_with_divergence_check, cycle, mode) if replays else None
     if cut is not None:
         # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
         session.state.resumed_from_round = _next_round(session.store, cut.child)

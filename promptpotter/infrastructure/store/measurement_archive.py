@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import gzip
 import json
-import os
 import re
 import threading
 import uuid
@@ -36,6 +35,7 @@ from promptpotter.infrastructure.store.io import (
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import (
+    Signature,
     file_sig,
     read_file,
     read_rows_past,
@@ -312,12 +312,12 @@ class MeasurementArchive:
     def path(self, kind: ArchiveFile, key: str = "") -> Path:
         return self.folder(kind) / kind.file_name(key)
 
-    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, os.stat_result]]:
+    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, Path]]:
         """The one enumeration: each file `path` builds for *kind*, beside its key."""
         try:
-            for path, st in iter_files(self.folder(kind)):
+            for path, _st in iter_files(self.folder(kind)):
                 if path.parent == self.folder(kind) and (key := kind.key_of(path.name)) is not None:
-                    yield key, st
+                    yield key, path
         except OSError:
             return
 
@@ -473,18 +473,21 @@ class MeasurementArchive:
     def entry(self, key: str, dataset_hash: str) -> ArchiveEntry | None:
         return self._live_rows().get(_fold_key(key, dataset_hash))
 
-    def cell_signatures(self) -> dict[str, tuple[int, int]]:
-        out: dict[str, tuple[int, int]] = {}
+    def cell_signatures(self) -> dict[str, Signature]:
+        """Each cell file's `read_model.py::file_sig`: an append moves its size, a rewrite its inode,
+        which a listing's stat does not carry on Windows."""
+        out: dict[str, Signature] = {}
         with contextlib.suppress(OSError):
-            for key, st in self._named(ArchiveFile.CELLS):
-                out[key] = (st.st_mtime_ns, st.st_size)
+            for key, path in self._named(ArchiveFile.CELLS):
+                if (sig := file_sig(path)) is not None:
+                    out[key] = sig
         return out
 
     def signature(
         self,
         entry: ArchiveEntry | None = None,
-        sigs: dict[str, tuple[int, int]] | None = None,
-    ) -> tuple[tuple[str, int, int], ...] | None:
+        sigs: dict[str, Signature] | None = None,
+    ) -> tuple[tuple[str, int, int, int], ...] | None:
         sigs = self.cell_signatures() if sigs is None else sigs
         keys = sorted(sigs) if entry is None else file_keys(entry)
         held = tuple((key, *sigs[key]) for key in keys if key in sigs)

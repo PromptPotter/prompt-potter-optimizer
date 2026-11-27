@@ -7,7 +7,6 @@ from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, contextma
 from functools import cmp_to_key
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
-from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.jobs.launcher.opening import (
     Opening,
@@ -33,6 +32,7 @@ from promptpotter.application.jobs.shares import (
 )
 from promptpotter.application.pipeline_resolve import cycle_config, experiment_outside_run
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import (
     Campaign,
@@ -76,7 +76,7 @@ from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
-    DatasetDefinition,
+    RunnableDefinition,
     definition_version,
     resolve_dataset,
     runnable_definition,
@@ -97,9 +97,8 @@ if TYPE_CHECKING:
 
 
 async def probe_backend(
-    name: str, endpoint: str | None
+    connector: Connector, endpoint: str | None
 ) -> BackendUnreachableError | MissingExtraError | None:
-    connector = connectors.CONNECTORS.get(name)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
     if (down := await connector.unreachable(endpoint)) is not None:
@@ -108,27 +107,24 @@ async def probe_backend(
 
 
 async def refuse_unreachable(
-    stores: Stores, dataset_name: str | None, name: str, endpoint: str | None
+    stores: Stores, dataset_name: str | None, connector: Connector, endpoint: str | None
 ) -> None:
     """THE launch probe, asked at every door before anything mints: the backend *dataset_name*
     runs on, then each backend a dataset its connector's own declaration nests runs on (an L4
     panel's seats), each once. A check-in's draft names no dataset yet: its connector serves
     uploads and owns no panel."""
-    probed = dict.fromkeys(
-        [(name, endpoint)]
-        + [(d.connector, d.endpoint) for d in _nested_definitions(stores, dataset_name, name)]
-    )
-    for backend, at in probed:
+    nested = _nested_definitions(stores, dataset_name, connector)
+    pairs = [(connector, endpoint), *((d.owner, d.endpoint) for d in nested)]
+    for backend, at in {(c.name, at): (c, at) for c, at in pairs}.values():
         if (down := await probe_backend(backend, at)) is not None:
             raise down
 
 
 def _nested_definitions(
-    stores: Stores, dataset_name: str | None, name: str
-) -> list[DatasetDefinition]:
+    stores: Stores, dataset_name: str | None, connector: Connector
+) -> list[RunnableDefinition]:
     """Only a panel the connector declares in-process nests a dataset (`nested_datasets`); a
     served backend's declaration is read past its probe."""
-    connector = connectors.CONNECTORS.get(name)
     if dataset_name is None or not connector.owns_panel or connector.pipeline_declaration is None:
         return []
     dataset = resolve_dataset(stores, dataset_name)

@@ -23,6 +23,7 @@ from promptpotter.application.jobs.mint import (
     arm_plans,
     mint_arms,
     mint_framed_arms,
+    off_loop,
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
@@ -81,7 +82,7 @@ async def dataset_arms(
 ) -> DatasetArms:
     """*stated* is a declaration in place of the dataset's own (`ConfigLayers.of`)."""
     definition = runnable_definition(dataset)
-    await refuse_unreachable(stores, dataset.name, definition.connector, definition.endpoint)
+    await refuse_unreachable(stores, dataset.name, definition.owner, definition.endpoint)
     closing = AsyncExitStack()
     session = await closing.enter_async_context(
         init_services(dataset_name=dataset.name, identity=stores.identity, stores=stores)
@@ -92,7 +93,7 @@ async def dataset_arms(
 async def checkin_arms(
     stores: Stores, claim: DraftClaim, request: HeadToHeadRequest, served: ServedPipeline
 ) -> CheckinArms:
-    await refuse_unreachable(stores, None, served.connector.name, served.endpoint)
+    await refuse_unreachable(stores, None, served.connector, served.endpoint)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
     closing = AsyncExitStack()
     opened = await closing.enter_async_context(
@@ -111,14 +112,17 @@ def _opened(source: ArmSource) -> tuple[Session, ConfigLayers, OpenedCheckin | N
             assert_never(source)
 
 
-async def _mint(source: ArmSource, plans: list[CyclePlan]) -> AsyncIterator[OpenedCycle]:
-    """Each arm as it lands."""
+async def _mint(
+    source: ArmSource, plans: list[CyclePlan], openings: list[Opening]
+) -> AsyncIterator[OpenedCycle]:
+    """Each arm as it lands, its job naming its cycle first."""
     match source:
         case DatasetArms(session=session):
-            async for cycle in mint_framed_arms(session, plans):
+            async for cycle in mint_framed_arms(session, plans, openings=openings):
                 yield cycle
         case CheckinArms(opened=opened):
-            for cycle in mint_arms(plans, adopting=opened.draft.draft_id):
+            draft_id = opened.draft.draft_id
+            async for cycle in off_loop(mint_arms(plans, adopting=draft_id, openings=openings)):
                 yield cycle
         case _:
             assert_never(source)
@@ -169,7 +173,7 @@ class AdmittedHeadToHead(LaunchOutcome):
                 for closing, (opening, _) in zip(closings, self.admitted, strict=True):
                     closing.push_async_exit(opening)
                     every.push_async_exit(closing)
-                async for cycle in _mint(self.source, self.plans):
+                async for cycle in _mint(self.source, self.plans, [o for o, _ in self.admitted]):
                     opening, held = self.admitted[len(minted)]
                     minted.append(cycle)
                     await asyncio.to_thread(opening.land, cycle.hop, held)

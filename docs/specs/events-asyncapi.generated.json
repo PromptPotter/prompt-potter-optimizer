@@ -2504,11 +2504,6 @@
             "title": "Started At",
             "type": "string"
           },
-          "stepped": {
-            "default": false,
-            "title": "Stepped",
-            "type": "boolean"
-          },
           "stop_reason": {
             "$ref": "#/components/schemas/StopReason"
           },

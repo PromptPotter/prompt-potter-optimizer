@@ -15,14 +15,6 @@ row it closes.
 
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
-- **A mint takes no claim until `opening.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
-  embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
-  registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of
-  the mint's whole workspace: any live job there keeps every torn mint in it). Action: the mint claims
-  its cycle before `DraftStore.become`, and the landing reads the claim, its act too: `apply_landing` keeps
-  a claimed mint (today it asks a torn mint only its manifest; once a mint claims first, that is the
-  read `destroying` would otherwise raise `CycleBusyError` on). **Rides with:** admit-2. **Re-test:**
-  `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
 - **A queued launch dies with the asking process**: the queue wait runs in the caller
   (`jobs/launcher/launch.py`). Action (the operator, 2026-11-11): a queued launch is a job on disk; the
   job file holds the principal's id, never a credential, and `jobs/registry.py::claim_next`'s promoter
@@ -42,16 +34,11 @@ row it closes.
 
 ### batch/26 · money
 
-- **A connector's name is looked up again where its `Connector` is held** (served-1's report):
-  `free_tier.py::free_fence`, `pipeline_resolve.py::laid_config` and
-  `jobs/launcher/admission.py::refuse_unreachable` take a `str`, so callers in
-  `pipeline_resolve.py`, `datasets/draft_patch.py` and `jobs/launcher/` (`checkin.py`,
-  `head_to_head.py`, `mint_and_start.py`) pass `.name` and `free_fence` looks it up again;
-  `UploadBasis.connector` (`pipeline_resolve.py`) is a name every read resolves. Action: they take
-  the `Connector`, and the campaign-name sites (`resolve_pipeline_for_campaign`, `jobs/mint.py`, `mask/load.py`,
-  `hierarchy.py`'s `is_self_optimization` call) look it up once. **Rides with:** after load-2 (it shares
-  `admission.py` and `pipeline_resolve.py`). **Re-test:** `git grep -n "connector\.name" --
-  promptpotter/application/pipeline_resolve.py promptpotter/application/datasets promptpotter/application/jobs` → 0.
+- **A connector's name is looked up again where its `Connector` is held** (served-1's report; w8-launch4
+  closed every holder but this): `jobs/quota.py::sends_on` takes a `str` and looks it up again, so
+  `mint_and_start.py`'s `sends` pass `.name`. Action: it takes the `Connector`. **Rides with:** the
+  chain owning `quota.py`. **Re-test:** `git grep -n "connector(stores)\.name" --
+  promptpotter/application/jobs` → 0.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -136,10 +123,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### valid (after rk-dec, before the behaviour keys)
 
-- **A fork's share lands at its landing**: a running cycle's job moves onto its fork through
-  `jobs/launcher/opening.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
-  `set-limits` filed between the cut and the landing re-shares the campaign without the fork. Action:
-  the share is taken against the campaign with the cut. **Rides with:** admit-2.
 - **`ab` under an edited scorer refits what the archive still holds**: `difficulty.py::regraded_ruler`
   re-grades a ruler row off its address's archive answer, but `ruler.jsonl` is never rewritten and
   outlives those answers (hotpotqa's tenant scale, 2026-11-15: 305 of 372 addresses, 5,840 of 7,874
@@ -390,7 +373,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
   offline its `open_launch`, `open_cycle` and `close_init` total about 0.3 s and the landing stamps once
   per schema, so the wait sits on the backend's network edges (every symbol is present, but the box
   half is unchecked; bac873699, landing 41, changed the TermNorm term push, so that candidate's cost may
-  have moved). Action: time `probe_backend`,
+  have moved). A detached resume opens its session once now, in its own process (w8-launch4,
+  `run_job.py::HeldLaunch`). Action: time `probe_backend`,
   `served_pipeline`, `ensure_model_capabilities` and the term push on the box for one paused cycle, then
   drop whichever one a resume re-does. **Rides with:** box (it needs the box measured), whose Owns gain
   `runner/run_init.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
@@ -439,13 +423,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   382 of ~10k a 25-s run), an immediate re-open included, which is a silent wrong read. **Held:** a
   design whose reader never reads a present file as absent; the box (Linux) is untouched.
   **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes and 0 absent reads.
-- **Run data is read bare outside `store/io.py`** (w8-store: every `.stat()` and listing now reads
-  through it): 140 `is_file`/`is_dir`/`exists`/`glob`/`iterdir`/`read_text`/`read_bytes` calls in 53
-  files (`store/layout.py::cycle_ledgers` among them) read a long path bare, so a ledger past `MAX_PATH` reads
-  as absent. Root: the data root spelled once in its long form (`config/paths.py`), so every derived
-  path carries it. **Held:** on Windows it moves every persisted path a job file holds
-  (`domain/job.py::Job`'s `workspace`, a SURVIVOR), so it lands with that file's one-shot migration. **Re-test:** on
-  the Windows desk, a campaign under a home 200 characters deep lists, reads and resumes.
 - **Unverified, for the next change to each file**: `shell/CriticalAlertBanner` builds `Said` rows in the
   browser; `ViewTabs.show` is many `open`/`close` calls, not one workspace act;
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
@@ -760,15 +737,16 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `StopLoop(StopReason.REBASED, fork=…)` and `runner/entry.py::open_line`'s stop pass no detail.
   Door: the stop's record carries the cut round and the `RebaseRequest.reason`, and its words read
   them. **Rides with:** wave 6.
-- **A host-allowance halt below the face, unexplained**: a visitor's first run ended `host_allowance`
-  at $0.041 spent of a $0.30 face (hold bound $0.06). Unchecked whether the run's own ceiling was
-  worded as the host's allowance. **Rides with:** money. **Re-test:** a run halted on its own
-  ceiling names that ceiling, never the allowance.
-- **`promptpotter-self`'s ε 0.30 is priced on the retired pairwise statistic**: its comment weighs a
-  false cut against a false survival on the pairwise p_best (and a 0.15 default), but since
-  5cf502c7b ε reads a field share that a 3-variant round ties at 0.25, so 0.30 cuts a tied leader
-  (`epsilon_at_a_tied_share` names it). Door: a value measured on the field-wise p_best stream of an
-  outer campaign. **Rides with:** L4. **Re-test:** the outer round's check-in names no collision.
+- **A library connector's cells are planned as the box's whatever keys the account holds** (w8-box2,
+  w8-wallet): `connectors/dspy_module.py` and `connectors/harbor.py` declare `Connector.cell_payer=
+  "host"`, but since w8-box2 their cells send on `wallet.py::sending_key`'s key, the account's own
+  first. Every reader of `cell_payer` still plans and holds such a cell as the box's:
+  `jobs/quota.py::sends_on` (the launch's reservation, the tier cap), the in-run planners, and
+  `wallet.py::AccountWallet.refused` ("whatever keys this account holds"). Root: the payer is
+  resolved per cell by `sending_key`'s rule at every reader, so `cell_payer` goes. Fixing the launch
+  alone reserves nothing for an own-keyed run that the planners still hold as host-paid, so the run
+  halts at its first cell. **Rides with:** money. **Re-test:** an account holding its own
+  openrouter key launches a DSPy cell with no coupon reserved.
 
 ### wave-6 · what the round-decision restructure left (2026-11-26)
 
@@ -805,6 +783,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   queues behind the clone's lock (`scripts/queue_then.py`) rather than sharing its hard-coded 90 s
   worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127
   runs). **Re-test:** five looping builders plus one gate on the Windows desk reap none.
+- **capo's skip twin moved once on the Windows desk** (w8-tests3's leg, 2026-11-27): the full gate
+  on 6b3f691b3 read "a skip stands at [3] cells, its twin paused inside round 1 and resumed, skip,
+  decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
+  A green rerun is a gate or desk defect, never a pass: a twin's pause point or its replay depends on
+  something the leg does not pin. **Re-test:** five desk runs of the leg read UNMOVED.
 
 ## Held — no wave-4 chain yet
 

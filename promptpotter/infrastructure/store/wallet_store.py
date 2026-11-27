@@ -13,6 +13,7 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, TypeAdapter
 
+from promptpotter.config.paths import short_form
 from promptpotter.domain.records.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
@@ -123,4 +124,4 @@ class ChargeBook:
         append_line(self.path, raw)
 
     def held_on(self, ledger: Path) -> str:
-        return Path(os.path.relpath(ledger, self.account_dir)).as_posix()
+        return Path(os.path.relpath(short_form(ledger), short_form(self.account_dir))).as_posix()

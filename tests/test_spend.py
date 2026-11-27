@@ -71,6 +71,7 @@ from offline_world import (
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 from world import Shared, World, shared_run
 
+from promptpotter import connectors
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores, set_coupon
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
@@ -106,7 +107,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.launch import Inline, admit
 from promptpotter.application.jobs.launcher.mint_and_start import ForkLaunch
 from promptpotter.application.jobs.launcher.opening import Opening, claim_cycle, open_spend_book
-from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
+from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
@@ -168,7 +169,6 @@ from promptpotter.domain.campaign import CampaignCycle, Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
-    CycleConfig,
 )
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -849,15 +849,12 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         step_rounds=2,
     )
     mode = RunMode(from_round=2)
-    launched_config = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
     held_job = spawned.get(held.job_id)
     assert held_job is not None
-    launched = HeldRun(
+    launched = HeldLaunch(
         opening=Opening(stores, spawned, held_job),
-        session=_minted(stores, offline),
-        cycle=CycleConfig.laid(launched_config, []),
+        hop=_minted(stores, offline).hop,
         budget=held,
-        optimizer=select_optimizer(launched_config.optimization),
         closing=contextlib.AsyncExitStack(),
         mode=mode,
     )
@@ -1950,7 +1947,7 @@ def _planned_arms(stores: Stores) -> tuple[HeadToHeadPlan, list[Any], list[Any]]
         laid_config(
             stores,
             on_disk.over(head.head_to_head.declared_optimization(arm)),
-            connector="termnorm",
+            connector=connectors.CONNECTORS.get("termnorm"),
             schema=None,
         ).config
         for head in plan.heads()
@@ -3660,6 +3657,20 @@ def test_a_grant_file_without_its_start_does_not_load() -> None:
 
 
 @pytest.mark.usefixtures("run_bound")
+def test_a_reserve_its_ceiling_sized_halts_the_run_on_that_ceiling_never_the_allowance() -> None:
+    # `quota.py::_reserve` holds twice a $0.03 ceiling: sends its meter skips drew it, not the face.
+    send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
+    for reserve, stop in ((0.06, StopReason.SPEND_BUDGET), (0.05, StopReason.HOST_ALLOWANCE)):
+        book = spend_book(0.03, usd_reserve=reserve, meters="search_incurred")
+        book.hold(send, _BENCH, what="b", paid_by="host", ledger="b")
+        with pytest.raises(SendRefusedError) as past:
+            book.hold(send, _BENCH, what="b", paid_by="host", ledger="b")
+        assert run_stop_reason(past.value) is stop, (
+            f"a run past a ${reserve} reserve of a $0.03 ceiling halted as another stop"
+        )
+
+
+@pytest.mark.usefixtures("run_bound")
 def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     book = spend_book(None, usd_reserve=0.05)
     send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
@@ -3724,11 +3735,12 @@ def free_fence() -> _FreeFence:
     """A web account's fence on the box's keys and on its own key, and a check-in laid under it."""
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     boxed = free_tier.free_fence(
-        _account_stores(issuer=_WEB, user=_other(user, "boxed"), spent=None), "termnorm"
+        _account_stores(issuer=_WEB, user=_other(user, "boxed"), spent=None),
+        connectors.CONNECTORS.get("termnorm"),
     )
     keyed = free_tier.free_fence(
         _account_stores(issuer=_WEB, user=_other(user, "keyed"), spent=None, own_key="openrouter"),
-        "termnorm",
+        connectors.CONNECTORS.get("termnorm"),
     )
     assert boxed is not None and keyed is not None and boxed.task and keyed.task, (
         "a backend's cells, paid by the box whatever the account holds, left the tier's fence"

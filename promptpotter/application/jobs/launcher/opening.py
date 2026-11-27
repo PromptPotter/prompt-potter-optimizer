@@ -101,16 +101,21 @@ class Opening:
         """The cycle its job writes from here, which a raise stamps; ``None`` stamps none."""
         self._stamps = hop
 
-    def land(self, hop: CycleHop, held: HeldBudget) -> None:
-        """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
-        cycle."""
+    def name(self, hop: CycleHop) -> None:
+        """The job onto the cycle its mint is about to write, before any write of it: a landing
+        asks the job of that campaign alone (`landing.py::plan_landing`)."""
         self.owns(hop)
-        land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
+        self.job_registry.move(self.job_id, LaunchMove.LAND, hop=hop)
+
+    def land(self, hop: CycleHop, held: HeldBudget) -> None:
+        """Its share and its claim onto the cycle it named, once minted."""
+        claim_share(self.stores, self.job_registry, self.job_id, hop, held.share)
 
     def land_cut(self, cut: ForkCut, held: HeldBudget) -> None:
         """The job onto the child a fork's admission cut, which its exit withdraws until taken."""
         self.cut = cut
-        self.land(cut.child, held)
+        self.owns(cut.child)
+        land_job(self.stores, self.job_registry, self.job_id, cut.child, held.share)
 
     def take_cut(self) -> None:
         """The fork's act on its parent: from here its cut is the parent's line, never withdrawn."""
@@ -161,11 +166,19 @@ def claim_cycle(stores: Stores, hop: CycleHop, job_id: str) -> None:
 def land_job(
     stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
 ) -> None:
-    """THE LAND of a launch: onto the cycle its mint named, or a running one onto its fork; its
-    share, its job's hop and its claim of the cycle together under the gate."""
+    """THE LAND of a launch onto a cycle it did not mint (a fork's cut, a running one onto its
+    fork): its job's hop, its share and its claim of the cycle together under the gate."""
+    with job_registry.admission_gate():
+        job_registry.move(job_id, LaunchMove.LAND, hop=hop)
+        claim_share(stores, job_registry, job_id, hop, allotment)
+
+
+def claim_share(
+    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
+) -> None:
+    """The cycle its job names: its share and its claim, under the gate."""
     with job_registry.admission_gate():
         hold_moved(stores, hop, allotment)
-        job_registry.move(job_id, LaunchMove.LAND, hop=hop)
         claim_cycle(stores, hop, job_id)
 
 

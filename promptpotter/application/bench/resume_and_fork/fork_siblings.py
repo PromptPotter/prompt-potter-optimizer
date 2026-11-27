@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import destroying
+from promptpotter.application.jobs.launcher.opening import land_job
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import cycle_share, stand_held_budget
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
     declared_config,
@@ -17,7 +20,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import ArmState, Proposed
-from promptpotter.domain.campaign import CampaignCycle
+from promptpotter.domain.campaign import CampaignCycle, ceiling_meter
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_kinds import ForkCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
@@ -36,6 +39,7 @@ from promptpotter.domain.records.run_records import (
     parent_address,
 )
 from promptpotter.domain.run_standing import line_reference
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores
@@ -49,7 +53,7 @@ from promptpotter.shared.identity import Principal, acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.application.initialization.session import Session
 
 
 def _fork_sibling_setup(
@@ -108,15 +112,13 @@ def fork_config(stores: Stores, parent: CampaignCycle, start: CycleStart | None)
     )
 
 
-def _fork_suffix(*parts: str) -> str:
-    """The clock, at MICROSECOND resolution, is all that separates two forks of one parent: *parts* cannot."""
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    return stable_hash([*parts, stamp], length=8)
-
-
 def _sibling_id(root_cycle_id: str, parent: CycleHop, payload: ForkSpec) -> str:
-    """Fixed length at any depth: the line is the `CycleMintedRecord` chain, never the id."""
-    return f"{root_cycle_id}_fork_{_fork_suffix(parent.cycle_id, payload.trigger)}"
+    """Fixed length at any depth: the line is the `CycleMintedRecord` chain, never the id. The
+    clock, at MICROSECOND resolution, is all that separates two forks of one parent."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    return (
+        f"{root_cycle_id}_fork_{stable_hash([parent.cycle_id, payload.trigger, stamp], length=8)}"
+    )
 
 
 def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) -> RoundArm:
@@ -230,6 +232,50 @@ def cut_fork(
     return ForkCut(parent=parent, child=child, direction=direction)
 
 
+def cut_run_fork(
+    session: Session,
+    fork_from_round: int,
+    *,
+    trigger: ForkTrigger,
+    reason: str,
+    issued_by: Principal,
+    named: RoundArm | None = None,
+    start: CycleStart | None = None,
+) -> ForkCut:
+    """THE in-run cut, a rebase's and a divergence's, under the run's admission gate with its job
+    landed on the child, as `ForkLaunch.stand` cuts an operator's: no set-limits between them
+    re-shares the campaign without the fork. Its share is what the line has left, since
+    *session*'s metered spend is the campaign's."""
+    held = session.state.held
+    if held is None:
+        raise RuntimeError("a run forks only over what admission held for it")
+    stores, parent = session.store, session.hop
+    job_registry = JobRegistry.attach(stores.jobs_dir)
+    with job_registry.admission_gate():
+        job = job_registry.get(held.job_id)
+        if job is None:
+            raise RuntimeError(f"a run forks only on its own job, and {held.job_id} is gone")
+        cut = cut_fork(
+            stores,
+            parent,
+            fork_from_round,
+            trigger=trigger,
+            reason=reason,
+            issued_by=issued_by,
+            named=named,
+            start=start,
+        )
+        live = cycle_share(stores, job)
+        spent = stores.campaigns.cycle_metered(parent, ceiling_meter(session.purpose))
+        allotment = Budget(
+            usd=None if live.usd is None else max(0.0, live.usd - spent.usd_amount),
+            tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
+        )
+        land_job(stores, job_registry, job.job_id, cut.child, allotment)
+    stand_held_budget(stores, cut.child, held)
+    return cut
+
+
 def declare_steered_values(
     start: CycleStart, narrowing: Mapping[str, NodeSearchNarrowing]
 ) -> CycleStart:
@@ -285,7 +331,7 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         stores,
         hop,
         at if keep else 0,
-        trigger=operator_trigger(payload),
+        trigger=ForkTrigger.OPERATOR_REWIND if keep else ForkTrigger.OPERATOR_STEERED,
         reason=payload.reason
         or (
             f"operator-applied from round {at} of {hop.cycle_id}"
@@ -296,10 +342,6 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleSta
         named=_named(payload),
         start=operator_start(stores, payload, start),
     )
-
-
-def operator_trigger(payload: ForkCyclePayload) -> ForkTrigger:
-    return ForkTrigger.OPERATOR_REWIND if payload.keep_rounds else ForkTrigger.OPERATOR_STEERED
 
 
 def _named(payload: ForkCyclePayload) -> RoundArm | None:

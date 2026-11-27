@@ -203,10 +203,12 @@ from promptpotter.infrastructure.store.io import (
     Appended,
     append_jsonl,
     append_line,
+    file_stat,
     make_dirs,
     probe_lock,
     rewrite_lines,
     take_lock,
+    write_bytes,
     write_json,
     write_text,
 )
@@ -235,6 +237,7 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
     PotterError,
 )
+from promptpotter.shared.hashing import ADDRESS_HEX
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -601,6 +604,20 @@ def compacted_rows(built_stores: Stores) -> _Compacted:
         )
         [(_, compacted_refs[f"q{sid}"], _)] = filed(archive, [row], whole)
     return _Compacted(compacted, compacted_bank, compacted_refs, whole)
+
+
+def test_a_cell_file_rewritten_to_its_size_in_one_tick_moves_its_signature(
+    built_stores: Stores,
+) -> None:
+    # A graded population is cached on it: a shared version serves the grades of the rows replaced.
+    archive, key = built_stores.archive, "0" * ADDRESS_HEX
+    path = archive.cell_path(key)
+    write_bytes(path, b'{"a": 1}\n')
+    held = file_stat(path)
+    before = archive.cell_signatures()[key]
+    write_bytes(path, b'{"b": 2}\n')
+    os.utime(path, ns=(held.st_atime_ns, held.st_mtime_ns))
+    assert archive.cell_signatures()[key] != before, "a rewrite read as the version it replaced"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1032,6 +1049,12 @@ def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
         with pytest.raises(NotFoundError):
             write_json(Path(root.name) / "manifest.json", {})
     assert not root.exists(), "a relative path re-made a deleted campaign"
+    # A linked spelling (POSIX: an unprivileged Windows user may make no symlink).
+    if sys.platform != "win32":
+        (tmp_path / "linked").symlink_to(root.parent)
+        with pytest.raises(NotFoundError):
+            write_json(tmp_path / "linked" / root.name / "manifest.json", {})
+        assert not root.exists(), "a linked path re-made a deleted campaign"
     # An 8.3 short spelling of the same dir, where the volume keeps one.
     if sys.platform == "win32":
         import ctypes

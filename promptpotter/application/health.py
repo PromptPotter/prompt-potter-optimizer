@@ -29,6 +29,7 @@ from promptpotter.config.paths import (
     webapp_static_root,
 )
 from promptpotter.config.settings import settings
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.records.run_records import HealthReader, HealthRecord, HealthState
@@ -55,23 +56,22 @@ class Probe(NamedTuple):
     fix: str
 
 
-def _backend(name: str, endpoint: str | None) -> Probe:
-    connector = connectors.CONNECTORS.get(name)
-
+def _backend(connector: Connector, endpoint: str | None) -> Probe:
     async def check() -> Reading:
         # No address is no answer: said on every check, never recorded or told as broken.
         if (unset := connector.unconfigured(endpoint)) is not None:
             return Reading("unverified", unset)
         # Any refusal a launch would get is broken: a missing extra refuses it as surely.
-        refused = await probe_backend(name, endpoint)
+        refused = await probe_backend(connector, endpoint)
         if refused is None:
             return Reading("held", BACKEND_REACHABILITY_INFO["live"].label)
         return Reading("broken", str(refused))
 
     return Probe(
-        f"backend:{name}" + (f":{endpoint}" if endpoint else ""),
+        f"backend:{connector.name}" + (f":{endpoint}" if endpoint else ""),
         check,
-        connector.unconfigured(endpoint) or f"bring {name} up at {connector.base_url(endpoint)}",
+        connector.unconfigured(endpoint)
+        or f"bring {connector.name} up at {connector.base_url(endpoint)}",
     )
 
 
@@ -227,7 +227,7 @@ def probes() -> list[Probe]:
     reached = offer_connectors()
     return [
         *(
-            _backend(name, endpoint)
+            _backend(connector, endpoint)
             for name, connector in connectors.CONNECTORS.table.items()
             if connector.execution == "remote_http" and (reached is None or name in reached)
             for endpoint in connector.probed_endpoints()

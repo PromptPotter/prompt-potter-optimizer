@@ -44,7 +44,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     FreshMint,
     assert_origin_ready,
 )
-from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.launcher.run_job import HeldLaunch
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
@@ -205,14 +205,14 @@ async def _held_at_depth(
     dispatcher: CommandDispatcher,
     door: Door,
     press: LookaheadPress | None,
-    holding: Awaitable[HeldRun],
-) -> HeldRun:
+    holding: Awaitable[HeldLaunch],
+) -> HeldLaunch:
     """The launch's depth, filed as `set-sample-lookahead` on the cycle its run now holds: before
     the walk's first cell, so an origin's cells are held ahead too."""
     held = await holding
     if press is None:
         return held
-    hop = held.session.hop
+    hop = held.hop
     pressed = SetSampleLookaheadPayload.model_validate(
         {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, **press.model_dump()}
     )
@@ -316,7 +316,7 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
         )
-        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.held())
+        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.handed())
         return await admitted.hand_over(held)
 
     return _launch_applier(dispatcher, _apply_start, refused_on=hop)
@@ -346,13 +346,13 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
     return _launch_applier(dispatcher, _apply_fork)
 
 
-async def _held_fork(dispatched: Dispatched[ForkCyclePayload], admitted: Admitted) -> HeldRun:
+async def _held_fork(dispatched: Dispatched[ForkCyclePayload], admitted: Admitted) -> HeldLaunch:
     """Its parent untouched until the fork's run is held: a refused fork cut nothing, and leaves
     its parent's line, inbox, pointer and comparison as they stood. A held fork then leaves its
     parent and the comparison, BEFORE the cut is taken, so a fork that fails names no parent
     superseded; its opening's exit withdraws the cut."""
     dispatcher = dispatched.dispatcher
-    held = await admitted.held()
+    held = await admitted.handed()
     cut = held.opening.cut
     assert cut is not None, "a fork's admission cut it"
     async with AsyncExitStack() as closing:
@@ -410,7 +410,7 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
         )
-        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.held())
+        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.handed())
         return await admitted.hand_over(held)
 
     return _launch_applier(dispatcher, _apply_mint)
@@ -498,7 +498,7 @@ async def launched(
     result, payload = outcome.result, outcome.payload
     if isinstance(result, Admitted):
         press = payload.lookahead if isinstance(payload, LaunchPayload) else None
-        return await result.hand_over(_held_at_depth(dispatcher, door, press, result.held()))
+        return await result.hand_over(_held_at_depth(dispatcher, door, press, result.handed()))
     if isinstance(result, AdmittedHeadToHead):
         return await result.launched()
     assert isinstance(result, Launched | HeadToHeadLaunched), "a launch kind answers its launch"

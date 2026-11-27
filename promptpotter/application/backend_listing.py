@@ -63,7 +63,7 @@ async def backend_health(backend_id: str) -> BackendHealthResponse:
     connector = connectors.CONNECTORS.table.get(backend_id)
     if connector is None:
         raise NotFoundError(f"Backend '{backend_id}' not found")
-    downs = [await probe_backend(connector.name, e) for e in connector.probed_endpoints()]
+    downs = [await probe_backend(connector, e) for e in connector.probed_endpoints()]
     down = next((d for d in downs if d is not None), None)
     return BackendHealthResponse(
         status=backend_reachability(down),

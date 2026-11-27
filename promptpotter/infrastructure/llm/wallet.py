@@ -266,15 +266,18 @@ class AccountWallet(NamedTuple):
 
 def sending_key(provider: str) -> ProviderKey:
     """The key a send under the bound account goes out on, a library's included: `paying_key`'s,
-    refused where the box's key would pay past what the run's reserve has left, or none exists."""
+    refused where the box's key would pay past what the allowance reserved the run, or none
+    exists; one its ceiling sized refuses the send at its admission, as that ceiling."""
     what = f"a send on {provider}"
     stores = bound_account(what)
     key = paying_key(stores.api_keys.load(), provider)
     if key is None:
         raise unpaid(provider)
+    book = require_spend_book(what).root()
     if (
         draws_coupon(key.paid_by)
-        and (left := require_spend_book(what).root().coupon_left()).run_out
+        and (left := book.coupon_left()).run_out
+        and not book.reserve_is_own()
     ):
         raise AccountWallet(read_coupon(stores), left.budget).refused(
             ProviderSend(provider, key.paid_by), what="this account"

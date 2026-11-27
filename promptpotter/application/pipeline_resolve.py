@@ -358,9 +358,9 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
     draft's definition half (`UPLOAD_DEFINITION_KEYS`) laid in, which its Start writes; a reused
     dataset's own file."""
     match draft.basis:
-        case UploadBasis() as upload:
+        case UploadBasis():
             half = ConfigLayers(campaign_defaults(), draft.config).config()
-            return upload_pipeline_json(upload, half.pipeline_overlay)
+            return upload_pipeline_json(draft_backend(stores, draft)[0], half.pipeline_overlay)
         case DatasetBasis(dataset=name):
             return runnable_definition(resolve_dataset(stores, name)).pipeline
         case _:
@@ -558,7 +558,7 @@ class LaidConfig(NamedTuple):
 
 
 def laid_config(
-    stores: Stores, layers: ConfigLayers, *, connector: str, schema: PipelineSchema | None
+    stores: Stores, layers: ConfigLayers, *, connector: Connector, schema: PipelineSchema | None
 ) -> LaidConfig:
     """THE read of a run's config, the draft's and the mint's: the dataset's block, the door's
     edit, then a free account's tier, bound to each node of *schema* (``None`` binds none)."""
@@ -581,7 +581,7 @@ def laid_config(
 def laid_session(session: Session, layers: ConfigLayers) -> tuple[Session, CampaignConfig]:
     """The mint's `laid_config`: *session* records which layer set each knob, its mint writes."""
     declared = session.pipeline_read.declared_schema()
-    connector = session.backend_client.connector.name
+    connector = session.backend_client.connector
     laid = laid_config(session.store, layers, connector=connector, schema=declared)
     fence = free_fence(session.store, connector)
     read = session.pipeline_read.model_copy(
@@ -611,7 +611,7 @@ def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
     return laid_config(
         stores,
         draft_layers(stores, draft),
-        connector=draft_backend(stores, draft)[0].name,
+        connector=draft_backend(stores, draft)[0],
         schema=None,
     ).config
 
@@ -833,8 +833,8 @@ def outside_run(
     templated = with_node_templates(local)
     declaration = served.over(templated)
     declared = parse_pipeline_response(declaration)
-    laid = laid_config(stores, config_layers, connector=served.connector.name, schema=declared)
-    fence = free_fence(stores, served.connector.name)
+    laid = laid_config(stores, config_layers, connector=served.connector, schema=declared)
+    fence = free_fence(stores, served.connector)
     read = PipelineRead(
         declaration=declaration,
         dataset_overlay=pipeline_node_overlay(templated),
@@ -864,7 +864,7 @@ def merge_outside_run(
         config_layers=config_layers,
         local=local,
         connector=served.connector,
-        free=_task_fenced(free_fence(stores, served.connector.name)),
+        free=_task_fenced(free_fence(stores, served.connector)),
     )
 
 
@@ -979,7 +979,7 @@ def _response(
         res,
         folded,
         ran,
-        free=_task_fenced(free_fence(stores, connector.name)),
+        free=_task_fenced(free_fence(stores, connector)),
         steer_bound=steer_bound,
     )
     return CampaignPipelineResponse(

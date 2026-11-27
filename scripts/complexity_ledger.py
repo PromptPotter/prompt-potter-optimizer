@@ -345,7 +345,19 @@ BASELINE = {
     # `LIFT_SIDE_INFO`, so the browser words no side.
     # w8-spine3 (−5): an invalid arm has no reason and the envelope no report; a decision is one
     # `DecisionRecord`; a race's priors are sheets of the session scorer.
-    "package_lines": 113942,
+    # w8-fork (+16): an in-run cut lands its job's share under the gate it cuts under
+    # (`fork_siblings.py::cut_run_fork`), whose signature forwards `cut_fork`'s.
+    # w8-wallet (+12): a send past a reserve its ceiling sized halts as that ceiling, never as the
+    # allowance (`SpendBook.reserve_is_own`, `RESERVE_PER_CEILING`); `slot_rate` folds two helpers.
+    # w8-store2 (+24): the data root is spelled once, resolved and long (`paths.py::long_form`), so
+    # a job file's `workspace` (a SURVIVOR) is re-spelled by a one-shot migration (`job_workspaces`).
+    # w8-launch4 (+3 net of its links): a detached resume's hold carries no session
+    # (`run_job.py::HeldLaunch`), so the run's own process opens its cycle once. (+61): a mint's
+    # job names its cycle before the mint writes it (`opening.py::Opening.name`), every kind's open
+    # taking its `Opening`, so the landing keeps the torn mint its job names, not its workspace.
+    # Windows long-root fix (+9): `paths.py::short_form` relates two paths in one spelling and
+    # `long_form` normalizes through it; `cell_signatures` reads `file_sig` per file.
+    "package_lines": 114067,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

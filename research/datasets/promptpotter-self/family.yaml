@@ -106,13 +106,13 @@ campaign:
           l1_patience: 1
       pobb:
         config:
-          # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
-          # general round corpus). Here one candidate-cell is a whole inner campaign, so the two
-          # errors are priced very differently: a false cut loses one arm of a 3-variant round,
-          # while a false survival spends the rest of a 6-cell panel on an arm already losing.
-          # Racing at the global epsilon captured about a quarter of the headroom its own p_best
-          # stream offered on `promptpotter-self__af6252`.
-          epsilon: 0.30
+          # Per-campaign, NOT the global 0.05: one candidate-cell is a whole inner campaign, so a
+          # false survival (the rest of a 6-cell panel spent on an arm already losing) costs more
+          # than a false cut (one arm of a 3-variant round). p_best is a share of the field, tied
+          # at 1/(k+1); the global 0.05 is 0.3 of a tie at its 5 variants, the 0.15 it replaced on
+          # the pairwise statistic (tied at 0.5), and this campaign's 0.30 there was 0.6 of a tie:
+          # 0.6 / 4 here, under the 0.25 a tied field holds (`epsilon_at_a_tied_share`).
+          epsilon: 0.15
 
 panel:
   # Each outer cell runs an inner campaign on a cheap proxy benchmark; docs/concepts/l4.md. One

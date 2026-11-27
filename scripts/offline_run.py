@@ -280,8 +280,9 @@ WOUNDS: dict[str, dict[str, tuple[tuple[Heal, ...], str]]] = {
 
 def data_root(leg: Path) -> Path:
     """A leg's outputs and the legs nested in it sit beside its run's data root, never in it: every
-    process lands its root at entry, and a file no row names refuses the landing."""
-    return leg / "data"
+    process lands its root at entry, and a file no row names refuses the landing. Spelled long, as
+    the run spells it, so a read under a deep home finds what the run wrote."""
+    return Path(long_path(leg / "data"))
 
 
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
@@ -2281,9 +2282,7 @@ def recombined(workspace: Path, host: str) -> int:
             for value in node:
                 walk(value)
 
-    for path in Path(long_path(data_root(workspace))).glob(
-        "projects/*/campaigns/*/cycles/*/rounds/*.json"
-    ):
+    for path in data_root(workspace).glob("projects/*/campaigns/*/cycles/*/rounds/*.json"):
         walk(json.loads(path.read_text(encoding="utf-8")))
     return len(found)
 
@@ -2558,17 +2557,13 @@ def bought(workspace: Path) -> tuple[int, int]:
 
 def filed_answers(workspace: Path) -> Counter[tuple[str, str]]:
     """How many answers a leg's archive files per (configuration, sample)."""
-    cells = Path(long_path(data_root(workspace))).glob(
-        f"**/{MEASUREMENTS_DIR}/{ArchiveFile.CELLS.folder}/*"
-    )
+    cells = data_root(workspace).glob(f"**/{MEASUREMENTS_DIR}/{ArchiveFile.CELLS.folder}/*")
     return Counter((row["config_key"], row["sample_key"]) for path in cells for row in _jsonl(path))
 
 
 def leg_ledger_path(workspace: Path) -> Path:
     """The one cycle's ledger a leg ran, off its own data root."""
-    (ledger,) = Path(long_path(data_root(workspace))).glob(
-        "projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl"
-    )
+    (ledger,) = data_root(workspace).glob("projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl")
     return ledger
 
 

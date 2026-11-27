@@ -32,6 +32,7 @@ from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import (
     MONEY_AXES,
+    RESERVE_PER_CEILING,
     ZERO_SPEND,
     Budget,
     KeySource,
@@ -165,8 +166,12 @@ def _metered_held(meter: _Meter, now: float) -> float:
     )
 
 
-def _refuse_metered(meter: _Meter | None, *, asked: int) -> None:
-    if meter is None:
+@contextmanager
+def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -> Iterator[None]:
+    """Refused at the slot door, debited *asked* tokens when its body admits: the caller holds the
+    admission gate across both, so no two asks read one bucket; a refused ask spends no token."""
+    if (meter := _slot_meter(stores, holder, hop)) is None:
+        yield
         return
     with _rate_lock:
         held = _metered_held(meter, time.monotonic())
@@ -174,24 +179,10 @@ def _refuse_metered(meter: _Meter | None, *, asked: int) -> None:
         raise RateLimitedError(
             meter.refusal, retry_after_s=(asked - held) * 60.0 / settings.USER_RATE_PER_MIN
         )
-
-
-def _debit_metered(meter: _Meter | None, *, tokens: int) -> None:
-    if meter is None:
-        return
+    yield
     now = time.monotonic()
     with _rate_lock:
-        _rate_buckets[meter.bucket] = (_metered_held(meter, now) - tokens, now)
-
-
-@contextmanager
-def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -> Iterator[None]:
-    """Refused at the slot door, debited *asked* tokens when its body admits: the caller holds the
-    admission gate across both, so no two asks read one bucket; a refused ask spends no token."""
-    meter = _slot_meter(stores, holder, hop)
-    _refuse_metered(meter, asked=asked)
-    yield
-    _debit_metered(meter, tokens=asked)
+        _rate_buckets[meter.bucket] = (_metered_held(meter, now) - asked, now)
 
 
 #: The act past every retryable refusal: the same ask, once its served wait passes.
@@ -703,7 +694,7 @@ def _reserve(budget: Budget, headroom: Budget) -> Budget:
     for axis in sorted(MONEY_AXES):
         room, ceiling = getattr(headroom, axis), getattr(budget, axis)
         if ceiling is not None:
-            held[axis] = UNBOUNDED if room is None else min(room, 2 * ceiling)
+            held[axis] = UNBOUNDED if room is None else min(room, RESERVE_PER_CEILING * ceiling)
         elif axis != "tokens" or not priced:
             held[axis] = UNBOUNDED if room is None else room
     return Budget.model_validate(held)

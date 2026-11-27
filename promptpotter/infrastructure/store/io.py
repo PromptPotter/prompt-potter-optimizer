@@ -12,12 +12,12 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable, Iterator
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO, Any, NamedTuple
 
 import yaml
 
-from promptpotter.config.paths import JOBS_DIR, PROJECTS_DIR, user_data_root
+from promptpotter.config.paths import JOBS_DIR, PROJECTS_DIR, long_form, short_form, user_data_root
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
@@ -100,16 +100,6 @@ else:
         _atomic_replace(tmp, path)
 
 
-def _long_path(p: str | Path) -> str:
-    """The Windows long-path prefix bypasses `MAX_PATH=260`, which nested sandbox dirs exceed."""
-    s = str(p)
-    if os.name != "nt":
-        return s
-    if s.startswith(("\\\\?\\", "\\\\.\\")):
-        return s
-    return "\\\\?\\" + os.path.abspath(s)
-
-
 # A subject's version is stamped by its writer, once, as it writes: every write here appends one
 # byte to the `.stamp` of the nearest subject root above it, so a reader stats one file per subject
 # and walks none. A root is matched by its PLACE from the data root (`_SUBJECT`), as a delete's
@@ -118,16 +108,17 @@ STAMP_FILE = ".stamp"
 
 
 def _spelled(path: Path | str) -> str:
-    return os.path.normcase(os.path.abspath(str(path).removeprefix("\\\\?\\")))
+    return os.path.normcase(short_form(path))
 
 
 def _from_root(path: Path | str) -> tuple[str, str] | None:
-    """The data root, and *path* `/`-joined from it, spelled lexically (a realpath per write costs
-    ~80 µs); ``None`` off the data root."""
-    at, root = _spelled(path), _spelled(user_data_root())
-    if not at.startswith(root + os.sep):
-        return None
-    return root, at[len(root) + 1 :].replace(os.sep, "/")
+    """THE placer: the data root, and *path* `/`-joined from it; ``None`` off it. Spelled lexically
+    (a realpath per write costs ~80 µs), resolved only where that lands off it: a link or an 8.3
+    name may still spell a place on it."""
+    root, at = _spelled(user_data_root()) + os.sep, _spelled(path)
+    if not at.startswith(root):
+        at = _spelled(os.path.realpath(at))
+    return (root[:-1], at[len(root) :].replace(os.sep, "/")) if at.startswith(root) else None
 
 
 def stamp(path: Path | str) -> None:
@@ -150,13 +141,13 @@ _gone_with_root = partial(contextlib.suppress, FileNotFoundError, NotADirectoryE
 
 
 def _appended(path: str) -> IO[bytes]:
-    return open(_long_path(path), "ab", buffering=0, opener=lambda p, f: os.open(p, f, 0o600))
+    return open(long_form(path), "ab", buffering=0, opener=lambda p, f: os.open(p, f, 0o600))
 
 
 def _compact_stamp(root: str) -> None:
     """By the writer that grew it past the length, if it takes the epoch's lock (a taker crashed
     in an odd epoch is completed); no write waits on it."""
-    stamp_path = _long_path(os.path.join(root, STAMP_FILE))
+    stamp_path = long_form(os.path.join(root, STAMP_FILE))
     with _gone_with_root(), _appended(os.path.join(root, STAMP_EPOCH_FILE)) as epoch:
         epoch.seek(0)  # Every taker locks byte 0; an append-mode open sits at the end.
         if not _try_lock(epoch.fileno()):
@@ -204,7 +195,7 @@ def unlink_robust(path: Path) -> None:
 def _open_read[T](path: Path, opener: Callable[[str], T]) -> T:
     """Every read of a file here: Windows refuses an open for the instant a writer, in this process
     or another, swaps the file (`_atomic_replace`), so the open is retried past it."""
-    name = _long_path(path)
+    name = long_form(path)
     for attempt in range(3):
         try:
             return opener(name)
@@ -235,7 +226,7 @@ def rmtree_robust(path: Path) -> None:
                 pass
         raise exc
 
-    target = _long_path(path)
+    target = long_form(path)
     for attempt in range(4):
         try:
             shutil.rmtree(target, onexc=_onexc)
@@ -259,7 +250,7 @@ def iter_files(
     while stack:
         current = stack.pop()
         try:
-            with os.scandir(_long_path(current)) as it:
+            with os.scandir(long_form(current)) as it:
                 for entry in it:
                     path = current / entry.name
                     try:
@@ -281,7 +272,7 @@ def prune_empty_dirs(root: Path) -> None:
     """Every empty directory under *root*, deepest first and past `MAX_PATH` too; *root* stays.
 
     Walked top-down so a junction is cut before it is entered: `os.walk` follows one."""
-    top = _long_path(root)
+    top = long_form(root)
     below: list[str] = []
     for current, dirs, _files in os.walk(top):
         dirs[:] = [d for d in dirs if not os.path.isjunction(os.path.join(current, d))]
@@ -294,7 +285,7 @@ def prune_empty_dirs(root: Path) -> None:
 def remove_bare_dir(path: Path | str) -> None:
     """*path* removed once nothing but its subject's stamp is left in it: a subject with no data has
     no version left to keep (`stamp`), so its stamp goes with it; a directory holding more stays."""
-    at = _long_path(path)
+    at = long_form(path)
     with contextlib.suppress(OSError):
         if (left := set(os.listdir(at))) and left <= {STAMP_FILE, STAMP_EPOCH_FILE}:
             for name in left:
@@ -305,7 +296,7 @@ def remove_bare_dir(path: Path | str) -> None:
 def stat_optional(path: Path) -> os.stat_result | None:
     """A file's stat past `MAX_PATH` too; ``None`` where no file is."""
     try:
-        held = os.stat(_long_path(path))
+        held = os.stat(long_form(path))
     except FileNotFoundError:
         return None
     return held if stat.S_ISREG(held.st_mode) else None
@@ -316,7 +307,7 @@ def _atomic_replace(tmp: str, path: Path) -> None:
     last_exc: OSError | None = None
     for attempt in range(3):
         try:
-            os.replace(_long_path(tmp), _long_path(path))
+            os.replace(long_form(tmp), long_form(path))
             return
         except PermissionError as exc:
             last_exc = exc
@@ -353,15 +344,6 @@ _ANCHORS = tuple(
 ) + tuple((f"{workspace}/{DRAFTS_DIR}/*", "draft") for workspace in WORKSPACE_SHAPES)
 
 
-def _place(path: Path) -> Path | None:
-    """*path* from the data root, both absolute, links and 8.3 names resolved; ``None`` off it."""
-    path, root = (
-        Path(os.path.realpath(str(p).removeprefix("\\\\?\\")).removeprefix("\\\\?\\"))
-        for p in (path, user_data_root())
-    )
-    return path.relative_to(root) if path.is_relative_to(root) else None
-
-
 def globbed(patterns: tuple[str, ...]) -> re.Pattern[str]:
     """`PurePath.full_match`'s semantics, compiled once: it recompiles per call."""
     return re.compile(
@@ -389,13 +371,14 @@ def _durable(path: Path) -> bool:
 
 def refuse_off_workspace(workspace: Path) -> None:
     """A workspace stands at one of `WORKSPACE_SHAPES`, or no anchor binds under it."""
-    if not ((rel := _place(workspace)) and any(rel.full_match(s) for s in WORKSPACE_SHAPES)):
+    placed = _from_root(workspace)
+    if not (placed and any(PurePosixPath(placed[1]).full_match(s) for s in WORKSPACE_SHAPES)):
         raise ValueError(f"{workspace} is no workspace of the data root {user_data_root()}")
 
 
 def claim_dir(directory: Path) -> None:
     """THE dir maker, by `_created`'s rule: exclusive, so a dir that stands raises `FileExistsError`."""
-    _created(directory, lambda: os.mkdir(_long_path(directory)))
+    _created(directory, lambda: os.mkdir(long_form(directory)))
     stamp(directory)
 
 
@@ -413,9 +396,9 @@ def _created[T](path: Path, create: Callable[[], T]) -> T:
         return create()
     except FileNotFoundError as missing:
         # Matched whole from the data root, normalized first: a `..` reaches no anchor unseen.
-        rel = _place(path)
+        rel = PurePosixPath(placed[1]) if (placed := _from_root(path)) else None
         if rel and (unit := next((u for s, u in _ANCHORS if rel.parent.full_match(s)), None)):
-            if os.path.isdir(_long_path(user_data_root() / rel.parent)):
+            if os.path.isdir(long_form(user_data_root() / rel.parent)):
                 raise  # The unit stands: what vanished is the create's own (a swept temporary).
             raise NotFoundError(f"{unit} {rel.parent.name!r} is gone") from None
         # The path as given, never its resolved spelling: a dangling link's target is made by no write.
@@ -437,7 +420,7 @@ def write_bytes(path: Path, data: bytes) -> None:
     temporary's lock holds from its creation to the replace on POSIX, so a wipe reads it as a write in
     flight; on Windows it lapses at the close, and a reset in that gap unlinks the temporary."""
     # Dot-named, which the cycle file listing skips.
-    temp = partial(tempfile.mkstemp, dir=_long_path(path.parent), prefix=".", suffix=".tmp")
+    temp = partial(tempfile.mkstemp, dir=long_form(path.parent), prefix=".", suffix=".tmp")
     durable = _durable(path)
     fd, tmp = _created(path, temp)
     _try_lock(fd)
@@ -468,7 +451,7 @@ def write_text(path: Path, content: str) -> None:
 
 def file_stat(path: Path) -> os.stat_result:
     """THE stat of run data: through the long-path prefix, as every read here opens it."""
-    return os.stat(_long_path(path))
+    return os.stat(long_form(path))
 
 
 def read_bytes_optional(path: Path) -> bytes | None:
@@ -674,7 +657,7 @@ def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
 
 
 def _poll_lock(path: Path, wait_s: float) -> HeldLock | None:
-    name = _long_path(path)
+    name = long_form(path)
     deadline = time.monotonic() + wait_s
     while True:
         fd = _created(path, lambda: os.open(name, os.O_RDWR | os.O_CREAT))
@@ -709,7 +692,7 @@ def _holding(path: Path, lock: HeldLock | None, wait_s: float) -> Iterator[None]
 def probe_lock(path: Path) -> Iterator[bool]:
     """Whether *path* is held, asked without an exclusive hold another probe would read as one."""
     try:
-        fd = os.open(_long_path(path), os.O_RDONLY)
+        fd = os.open(long_form(path), os.O_RDONLY)
     except FileNotFoundError:
         yield False
         return
@@ -758,7 +741,7 @@ def append_line(path: Path, line: bytes) -> range:
 def appending(path: Path) -> Iterator[Callable[[bytes], range]]:
     """`append_line` held: what is read of *path* under it is what the line lands after, so a
     writer refusing a line the file already holds refuses it inside the write."""
-    name, durable = _long_path(path), _durable(path)
+    name, durable = long_form(path), _durable(path)
     with write_lock(path):
         try:
             yield lambda line: _append_held(name, line + b"\n", durable=durable)
@@ -779,7 +762,7 @@ def _append_held(name: str, data: bytes, *, durable: bool) -> range:
 def open_append(path: Path | str) -> IO[bytes]:
     """Created 0600, as the atomic writer's `mkstemp` is; `O_BINARY` keeps Windows from translating `\\n`."""
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
-    return os.fdopen(_created(Path(path), lambda: os.open(_long_path(path), flags, 0o600)), "ab")
+    return os.fdopen(_created(Path(path), lambda: os.open(long_form(path), flags, 0o600)), "ab")
 
 
 def _landed(name: str, f: IO[bytes], data: bytes, *, durable: bool) -> range:

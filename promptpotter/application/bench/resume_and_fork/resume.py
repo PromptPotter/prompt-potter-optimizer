@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
-from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_run_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.records.run_records import ArmAct, ForkTrigger
@@ -88,10 +88,8 @@ def _branch(
     cycle: Cycle, prior: list[RoundResult], div: ReplayMismatch, self_inflicted: bool
 ) -> ForkCut:
     session = cycle.session
-    hop = session.hop
-    fork = cut_fork(
-        session.store,
-        hop,
+    fork = cut_run_fork(
+        session,
         div.round_num,
         trigger=ForkTrigger.SCORING_DIVERGENCE,
         reason=f"resume_divergence:{div.kind}",
