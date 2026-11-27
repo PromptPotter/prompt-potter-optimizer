@@ -198,6 +198,11 @@ class BackendClient:
             if connector.cells_hold_the_machine
             else None
         )
+        # A machine-held cell is counted once, by the pool every process shares: arming counts this
+        # client's phases alone and each cell waits on its slot (`MachineSlots.hold`).
+        self._phases: set[CellsOut] = (
+            set() if self._machine_slots is not None else _SENDING.setdefault(self._machine, set())
+        )
 
     @property
     def connector(self) -> Connector:
@@ -206,22 +211,20 @@ class BackendClient:
     @contextlib.contextmanager
     def sending(self, phase: CellsOut) -> Iterator[None]:
         """*phase*'s calls out count against ``max_cells_in_flight`` beside every other phase on
-        this machine while it sends."""
-        held = _SENDING.setdefault(self._machine, set())
-        held.add(phase)
+        this machine while it sends; a machine-held connector's, beside this client's alone."""
+        self._phases.add(phase)
         try:
             yield
         finally:
-            held.discard(phase)
+            self._phases.discard(phase)
 
     def cells_out(self) -> int:
-        return sum(phase.out() for phase in _SENDING.get(self._machine, ()))
+        return sum(phase.out() for phase in self._phases)
 
     def room(self, phase: CellsOut) -> int:
         """The cells *phase* may still send: the ceiling past every phase's calls out, less one for
         each other phase holding none while *phase* holds some, or the first to send starves it."""
-        held = _SENDING.get(self._machine, set())
-        waiting = sum(1 for other in held if other is not phase and not other.out())
+        waiting = sum(1 for other in self._phases if other is not phase and not other.out())
         return (
             self._connector.max_cells_in_flight - self.cells_out() - (waiting if phase.out() else 0)
         )

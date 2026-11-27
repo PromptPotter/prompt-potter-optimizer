@@ -2912,6 +2912,28 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     )
 
 
+def test_a_machine_held_connector_arms_on_its_pool_never_the_process_count(tmp_path: Path) -> None:
+    class Phase:
+        def __init__(self, out: int) -> None:
+            self.calls = out
+
+        def out(self) -> int:
+            return self.calls
+
+    # held -> the room a phase with 1 out has, while another client's phase holds 2 on its machine.
+    for held, room in ((False, 1), (True, 3)):
+        mine, other = (
+            backend_client(tmp_path, max_cells_in_flight=4, cells_hold_the_machine=held)
+            for _ in range(2)
+        )
+        phase = Phase(1)
+        with other.sending(Phase(2)), mine.sending(phase):
+            assert mine.room(phase) == room, (
+                f"cells_hold_the_machine={held}: room {mine.room(phase)}, so the machine's "
+                "ceiling is counted twice or not shared"
+            )
+
+
 def dspy_billed(net: Router, out: Path) -> dict[str, Any]:
     """The dspy cells, run where dspy is imported: a child process in the offline world, never the
     suite's (its `extras` import costs the suite's process tens of MB it never returns). What each

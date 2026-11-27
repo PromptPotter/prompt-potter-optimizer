@@ -640,18 +640,13 @@ selection explicit.
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
-  file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
-  in-process count per backend. The two count different subjects: `infrastructure/backend.py::_SENDING` this
-  process's calls by `(connector, base_url)`, which `query_loop.py`'s `room()`/`freed()` schedule
-  from; `MachineSlots` containers across processes by `connector.name`, by file locks a probe
-  cannot read machine-wide (POSIX `fcntl` locks are per-process). Decided (2026-11-19): for a
-  machine-held connector the in-process count gives way and arming waits on the pool, one count of
-  one fact. **Rides with:** a store or spend lane. **Re-test:** no machine-held connector's arming
-  reads `_SENDING`.
-- **The sweep unlinks a dead producer's lock before the reaper reads it** (w7-small, not re-tested):
-  `docker_host.py::reap_dead_producers` then never reaps that producer's containers. **Rides with:**
-  area 08's chain. **Re-test:** a producer killed mid-run leaves no container after one sweep.
+- **The box keeps 21 dead producers' locks** (`jobs/producers/`), though one sweep reaps a dead
+  producer's containers and then its lock (re-tested 2026-11-27 off a dead lock and a scripted
+  `docker ps`; the w7-small symptom, a lock unlinked before the reaper reads it, holds no more). What
+  keeps them is a sweep that never reaches `docker_host.py::reap_dead_producers` or raises in it: a
+  raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
+  next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
+  `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 
