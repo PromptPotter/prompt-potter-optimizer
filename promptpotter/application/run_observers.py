@@ -6,12 +6,12 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.application.bench.export import ExportProjection
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import ProducerHold
 from promptpotter.application.run_stop import run_stop_detail, run_stop_reason
-from promptpotter.application.runner.output import ExportProjection
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.served_dashboard import spend_counts
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
@@ -19,6 +19,7 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import (
+    SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
     PauseCause,
     StopOutcome,
@@ -33,7 +34,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.spend import MONEY_AXES, Budget, StopSpend
 from promptpotter.infrastructure.llm.spend_book import SpendBook
-from promptpotter.infrastructure.llm.telemetry import append_record, billing_ledger, current_round
+from promptpotter.infrastructure.llm.telemetry import billing_ledger, current_round
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.campaign_store.store import CycleIndexProjection
@@ -46,11 +47,13 @@ def declare_run_stop(
     observers: RunObservers,
     stop_reason: StopReason,
     *,
-    interrupted_by: PauseCause,
+    cause: PauseCause | None = None,
     detail: str = "",
+    error: ErrorRecord | None = None,
 ) -> None:
-    """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second
-    record. *detail* is an ending's reason, where its raiser gave one."""
+    """THE door of a run's stop, declared where the run ENDS, never at the checkpoint that raised
+    it: its reason, its words (*detail*) and its error (`end_run_on`). A pause a ledger asked names
+    its own cause and words; else a self-pause's row (`SELF_PAUSE_CAUSE`), else *cause*."""
     limits = session.store.campaigns.run_limits(session.at)
     assert limits is not None, "a run stops on the wiring it declared"
     budget = limits.budget
@@ -66,17 +69,20 @@ def declare_run_stop(
         cap=Budget(usd=budget.usd, tokens=budget.tokens),
         share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )
-    if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
-        stop = RunPhaseRecord.stop(stop_reason, detail=detail, spend=spend)
-    else:
-        cause, detail = session.state.control.take_pause() or (interrupted_by, "")
-        stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
-    session.store.declare_stop(session.hop, stop)
+    if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED:
+        asked = session.state.control.take_pause()
+        if asked is None:
+            cause = SELF_PAUSE_CAUSE.get(stop_reason, cause)
+        else:
+            cause, detail = asked
+    stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
+    session.store.declare_stop(session.hop, stop, error=error)
 
 
 def end_run_on(exc: BaseException) -> tuple[StopReason, ErrorRecord | None, str]:
     """Call INSIDE the ``except``: the traceback is read off the live exception, dead by finalize.
-    Answers the stop, its error record where it failed, and `run_stop_detail`."""
+    Answers the stop, its error record where it failed (`declare_run_stop` files it), and
+    `run_stop_detail`."""
     reason, detail = run_stop_reason(exc), run_stop_detail(exc)
     info = STOP_REASON_INFO[reason]
     if info.outcome is not StopOutcome.FAILED:
@@ -88,7 +94,6 @@ def end_run_on(exc: BaseException) -> tuple[StopReason, ErrorRecord | None, str]
         traceback=traceback.format_exc() if info.has_traceback else None,
         round=current_round(),
     )
-    append_record(record)
     return reason, record, detail
 
 

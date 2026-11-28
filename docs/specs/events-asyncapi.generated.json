@@ -5552,7 +5552,7 @@
       },
       "OriginPanel": {
         "additionalProperties": false,
-        "description": "The round's ONE origin-panel record: the line's reading there, and whose panel rows the\nelection pooled; the rest of a round's panel rows `reading` bought after it\n(`round.py::measure_overlap`), which the race never held.",
+        "description": "The round's ONE origin-panel record: the line's reading there, and whose panel rows the\nelection pooled; the rest of a round's panel rows `reading` bought after it\n(`runner/measure.py::measure_overlap`), which the race never held.",
         "properties": {
           "raced": {
             "default": [],

@@ -4,6 +4,7 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.application.bench.line import cycle_bench, cycle_curve, cycle_verify
 from promptpotter.application.datasets.draft_campaign import owned_drafts
 from promptpotter.application.jobs.launcher.admission import admitted
 from promptpotter.application.jobs.registry import JobRegistry
@@ -15,7 +16,6 @@ from promptpotter.application.pipeline_resolve import (
     line_config,
     resolved,
 )
-from promptpotter.application.runner.bench import cycle_bench, cycle_curve, cycle_verify
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import ArmReading, fitness_terms_text
 from promptpotter.domain.bench import BenchCurve, BenchScore

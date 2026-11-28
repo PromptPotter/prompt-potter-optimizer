@@ -40,6 +40,7 @@ from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.application.path_patch import path_patch
 from promptpotter.application.pipeline_resolve import fork_preview
+from promptpotter.application.runner.entry import run_watched
 from promptpotter.application.views.render.phase import acts_line, render_completion
 from promptpotter.config.logging import setup_logging
 from promptpotter.connectors.protocol import Connector
@@ -222,7 +223,7 @@ async def run_inline(held: HeldRun) -> CycleResult:
     hop = held.session.hop
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
     with ctrl_c_pauses(CommandDispatcher(held.session.store), [pause]):
-        _, result = await held.run_inline(readout_sink=functools.partial(print, flush=True))
+        _, result = await run_watched(held, readout_sink=functools.partial(print, flush=True))
     return result
 
 

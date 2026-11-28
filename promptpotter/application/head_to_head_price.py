@@ -9,6 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from pydantic import Field
 
+from promptpotter.application.bench.line import line_launches
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.initialization.wiring import session_bank
@@ -18,7 +19,6 @@ from promptpotter.application.preflight import (
     check_cap_funds_round,
     check_search_split_holds_round,
 )
-from promptpotter.application.runner.bench import line_launches
 from promptpotter.application.scoring.sample_measurement import measured_cell_price
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign_config import CampaignConfig

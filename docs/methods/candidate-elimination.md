@@ -30,9 +30,9 @@ PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel
 
 1. The cells read are those θ is read on (`rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order) that every standing arm scored, or, under `pobb.shape: per_round`, that any did: the union, since each arm answers rows of its own. An arm is cut only once it answered `elimination_n_min` of them itself, and its ε(n) ramps on that own depth; under `per_candidate` every racer's depth is the shared count, as before. A rival with no row on a cell is **excluded there, never zero-filled**: the fit reads each member on the cells it answered.
 2. One hierarchical Rasch fit of the whole field on those cells, θ and δ together (`rasch.py::fit_rasch`), and a Monte Carlo over its θ draws, seeded by the read (`pobb.py::field_p_best`): `p_best` is each arm's posterior probability of being the field's best. The shares sum to 1, so the multiplicity of a wide field is inside the statement and slot order enters nowhere. A pairwise "credibly worse than some rival" cut was slot-dependent (serial, 0.25 → 0.63 by slot) or, raced against every sibling, cut a planted better arm 11.8% of the time against serial's 7.1%; the joint fit cuts it 4.7% at ε 0.05, flat by slot.
-3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). A round the parent and k arms open is tied at 1/(k+1), so an ε at or above it cuts a tied leader, and the config check names it (`couplings.py::POBB`, `epsilon_at_a_tied_share`). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
+3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). A round the parent and k arms open is tied at 1/(k+1), so an ε at or above it cuts a tied leader, and the config check names it (`couplings.py::POBB`, `epsilon_at_a_tied_share`). **An arm that ran its panel joins the priors** (`runner/measure.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
 
-The **origin panel's top-up is one more stretch of the same race** (`runner/round.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/round.py::panel_triggers` reads, so the monitor never buys it back.
+The **origin panel's top-up is one more stretch of the same race** (`runner/measure.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/measure.py::panel_triggers` reads, so the monitor never buys it back.
 
 **The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election, with what the origin panel's line bought after it (`results.py::RoundResult.closed_rows`), which no race read.
 
@@ -78,7 +78,7 @@ read one cell set. `draw` pairs an arm with its parent on every cell raced.
 `overlap` (the default) pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
 panel trigger seats there (`potter/election.py::seated`, `origin_panel.py::panel_trigger`) is electable: the panel, a monitor
 under `draw`, is the verdict, and a PoBB stop, which it never seats, leaves the election. Its cells are bought before the election
-(`runner/round.py::read_origin_panel`), the crowning cells included, since the panel stays fixed
+(`runner/measure.py::read_origin_panel`), the crowning cells included, since the panel stays fixed
 at C0; θ, its lift, the statistic and `admission` are the same under both. The panel holds
 `CampaignConfig.origin_panel_cells` of each benchmark's cells (unset: as many as a round walks),
 cut from the origin's own round, which `sp_budget_origin` sizes and must cover.
@@ -148,7 +148,7 @@ is out at once, never what is committed, so a cut wastes at most the press.
 ## Tunable knobs
 
 - potter's `pobb` `epsilon_stop` — the one stop's switch, shipped on (capo-pobb reads the same `pobb` config).
-- potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and, under `vote: draw`, never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
+- potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and, under `vote: draw`, never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/measure.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/measure.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
 - potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
 - potter's `theta_election` `vote` (`overlap` in its manifest) — which rows that bar pairs on (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
@@ -160,7 +160,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.invalid`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/round.py::_open_arm` |
+| 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.invalid`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/measure.py::_open_arm` |
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |

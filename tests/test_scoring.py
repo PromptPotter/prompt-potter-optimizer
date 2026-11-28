@@ -83,12 +83,22 @@ from world import Shared, World, serving, shared_run
 
 from promptpotter import connectors
 from promptpotter.application import optimizer_contract as node_contract
+from promptpotter.application.bench import line as line_bench
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import (
     JudgingRuler,
     ruler_clock,
     session_ruler_scope,
+)
+from promptpotter.application.bench.line import (
+    LineSpan,
+    bench_selection,
+    line_round_budget,
+    pair_on_bench,
+    read_bench,
+    read_curve,
+    score_on_bench,
 )
 from promptpotter.application.bench.node_context import NodeContext, own_rows
 from promptpotter.application.caller import Caller
@@ -185,23 +195,14 @@ from promptpotter.application.optimizers.variation.members import (
 )
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.run_stop import StopLoop, panel_gate_tripped, standing_tripped
-from promptpotter.application.runner import bench as line_bench
-from promptpotter.application.runner.bench import (
-    LineSpan,
-    bench_selection,
-    line_round_budget,
-    pair_on_bench,
-    read_bench,
-    read_curve,
-    score_on_bench,
-)
 from promptpotter.application.runner.entry import build_cycle_result
+from promptpotter.application.runner.measure import ReferencePairs
 from promptpotter.application.runner.round import (
-    ReferencePairs,
     announce_opening,
     close_round,
     execute_round,
     hold_for_operator,
+    panel_gate_on,
     post_round,
 )
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
@@ -3252,6 +3253,27 @@ def test_a_holed_panel_stops_as_no_interrupt_and_the_backends_hole_on_its_own_st
     assert served is not None and served.reason is StopReason.BACKEND_HOLE, (
         "a backend's hole lost the stop its L4 outer re-asks on"
     )
+
+
+def test_a_budget_cut_trips_the_panel_gate_only_where_it_left_an_eligible_arm_short() -> None:
+    # The cut round's election: an arm a cut left short of its panel is crowned on a holed panel
+    # unless the gate stops the round in the cut's words.
+    cut = StopLoop(StopReason.SPEND_BUDGET, detail="the cycle's share is spent")
+    at = ArmPosition(round=1, idx=0, total=1)
+    short, whole = arm_state("c0", position=at, total=6), arm_state("c0", position=at, total=4)
+    locked = arm_state("c0", position=at, total=6, locked_in=True)
+    for arm, by, strict, holes, stops in (
+        (short, cut, True, 2, True),
+        (short, cut, False, 2, False),
+        (short, None, True, 0, False),
+        (locked, cut, True, 0, False),
+        (whole, cut, True, 0, False),
+    ):
+        result = round_result(1, arms=[arm, arm_state("parent")])
+        gate = panel_gate_on(result, by, "strict" if strict else "off")
+        case = f"{arm.expected_samples} expected, cut={by is not None}, strict={strict}"
+        assert gate.holes[ArmKey(arm.individual.id)] == holes, f"{case}: holes miscounted"
+        assert (gate.tripped is cut) is stops, f"{case}: the gate's stop moved"
 
 
 # 7. Paired readings over shared cells

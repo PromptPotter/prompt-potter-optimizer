@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, NamedTuple
 
+from promptpotter.application.bench.line import line_spans
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
@@ -29,7 +30,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.bench import line_spans
+from promptpotter.application.runner.entry import run_held
 from promptpotter.application.runner.inner.tasks import (
     InnerTasks,
     ResolvedInnerPanel,
@@ -326,7 +327,7 @@ async def _run_inner_campaign(
             )
             minted.append(session.hop)
             unrun.pop_all()
-            ended, result = await held.run(readout_sink=None)
+            ended, result = await run_held(held, readout_sink=None)
             spans = line_spans(ended.store, ended.state.scoring.scorer, ended.hop)
             declared = ended.store.campaigns.last(ended.hop, RunPhaseRecord)
     assert declared is not None and declared.stop_reading is not None, "an inner run ends declared"

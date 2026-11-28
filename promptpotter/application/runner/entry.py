@@ -1,19 +1,17 @@
+"""A launch's run: a held launch run here or in its own process (`run_job`), its line of cycles
+(`run_optimization`) and each cycle's close."""
+
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from contextlib import contextmanager
+import contextlib
+import sys
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import AsyncExitStack, contextmanager
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_run_fork
-from promptpotter.application.initialization.scoring_scope import session_scope
-from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.shares import declare_round_allowance
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.run_observers import RunObservers, declare_run_stop, end_run_on
-from promptpotter.application.run_stop import RUN_ENDS, RUN_STOPS
-from promptpotter.application.runner.bench import (
+from promptpotter.application.bench.line import (
     bank_campaign_result,
     bench_selection,
     declare_line_bench,
@@ -22,28 +20,46 @@ from promptpotter.application.runner.bench import (
     own_level,
     read_curve,
 )
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_run_fork
+from promptpotter.application.initialization.scoring_scope import session_scope
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.capacity import resolve_run_capacity
+from promptpotter.application.jobs.launcher.admission import refuse_campaign
+from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
+from promptpotter.application.jobs.launcher.opening import Opening
+from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec, stores_of
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.shares import declare_round_allowance
+from promptpotter.application.jobs.spawning import tell_spawner
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.run_observers import RunObservers, declare_run_stop, end_run_on
+from promptpotter.application.run_stop import RUN_ENDS, RUN_STOPS
 from promptpotter.application.runner.loop import open_origin_round, run_round_loop
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.run_init import (
     PreparedRun,
     close_init,
+    enter_cycle,
     onto_fork,
     open_cycle,
     open_launch,
     start_launch,
 )
 from promptpotter.application.served_dashboard import fork_remainder
+from promptpotter.config.logging import setup_logging
+from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.bench import BenchCurve, BenchScore
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, start_layer
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.job import LaunchMove
 from promptpotter.domain.paired_reading import RoundArm
 from promptpotter.domain.phases import (
-    SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
     PauseCause,
     StopOutcome,
     StopReason,
+    stop_reason_outcome,
 )
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
@@ -55,11 +71,13 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import round_clocks
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import HeldBudget, SpendRollup
+from promptpotter.domain.spend import Budget, HeldBudget, SpendRollup
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import TIMELINES, wall_clock_of
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 from promptpotter.shared.clock import utcnow_iso
 
@@ -199,22 +217,22 @@ def _finalize_run(
             finished_at=cycle_result.finished_at,
             optimizer_phases=selected.phases,
         )
-    if is_paused:
-        # Declared where every paused exit converges, rather than trusting each raise site.
-        declare_run_stop(
-            session,
-            observers,
-            stop_reason,
-            interrupted_by=SELF_PAUSE_CAUSE.get(stop_reason, pause_cause),
-        )
-    else:
-        # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
+    if not is_paused:
+        # A pause leaves the cycle ACTIVE: the PAUSED it declares must stay the last declaration read.
         session.store.campaigns.append(
             session.hop,
             CycleFinalRecord(interrupted_round=interrupted_round, final=cycle_result),
         )
-        # After what it banked, and before the drain renders the artifacts that name the stop.
-        declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause, detail=detail)
+    # Where every exit converges, rather than trusting each raise site: after what it banked, and
+    # before the drain renders the artifacts that name the stop.
+    declare_run_stop(
+        session,
+        observers,
+        stop_reason,
+        cause=pause_cause,
+        detail=detail,
+        error=cycle_result.error,
+    )
 
 
 @contextmanager
@@ -247,7 +265,6 @@ async def open_line(
             session,
             observers,
             StopReason.REBASED,
-            interrupted_by=PauseCause.INTERRUPT,
             detail=cut.said(session.store),
         )
         observers.drain_all()
@@ -330,9 +347,12 @@ async def _run_single_cycle(
                     trigger=cycle.config.bench_trigger,
                 )
         elif fork is not None and cancel_exc is None and stop_reason == StopReason.REBASED:
-            # Before the stop, which names the fork; off the loop: its reads wait on the line.
-            onto = await asyncio.to_thread(_cut_rebase_fork, prep, session, fork)
-            detail = onto[1].said(session.store)
+            # Before the stop, which names the fork; off the loop: its reads wait on the line. A
+            # cancel waits the cut out, so the stop names every child it minted.
+            cut, cancel_exc = await completing(
+                asyncio.to_thread(_cut_rebase_fork, prep, session, fork)
+            )
+            onto, detail = cut, cut[1].said(session.store)
     except RUN_ENDS as exc:
         # A pause leaves the pass owed, which the resume takes again; anything else that ends it
         # is the stop the cycle closes on, never an escape past `close_cycle`.
@@ -348,7 +368,7 @@ async def _run_single_cycle(
         open_round=open_round,
         config=campaign_config,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
-        rebasing=onto is not None,
+        rebasing=onto is not None and cancel_exc is None,
         selected=prep.optimizer,
         detail=detail,
     )
@@ -358,10 +378,25 @@ async def _run_single_cycle(
     return _CycleOutcome(
         session=session,
         cycle_result=cycle_result,
-        onto=onto,
+        # A cancelled line ends on the stop naming its fork, which a resume runs.
+        onto=onto if cancel_exc is None else None,
         observers=observers,
         cancelled=cancel_exc,
     )
+
+
+async def completing[T](work: Awaitable[T]) -> tuple[T, asyncio.CancelledError | None]:
+    """*work* run to its end whatever cancels its awaiter: its answer, and the cancel still owed
+    to its asker."""
+    task = asyncio.ensure_future(work)
+    owed: asyncio.CancelledError | None = None
+    while True:
+        try:
+            return await asyncio.shield(task), owed
+        except asyncio.CancelledError as exc:
+            if task.cancelled():
+                raise
+            owed = owed or exc
 
 
 def _cut_rebase_fork(
@@ -482,7 +517,7 @@ async def run_optimization(
                     session,
                     observers,
                     StopReason.PAUSED,
-                    interrupted_by=(
+                    cause=(
                         PauseCause.CANCELLED
                         if isinstance(exc, asyncio.CancelledError)
                         else PauseCause.INTERRUPT
@@ -507,3 +542,107 @@ async def run_optimization(
         held = session.state.observers
         assert held is not None, "a run opens on observers that hold its cycle"
         held.release()
+
+
+async def run_watched(
+    held: HeldRun, *, readout_sink: Callable[[str], None] | None
+) -> tuple[Session, CycleResult]:
+    """A run a person watches (`Inline`): the readout pointer names its cycle first."""
+    session = held.session
+    readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
+    # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
+    with contextlib.suppress(OSError):
+        write_text(user_data_root() / READOUT_POINTER, f"{readout}\n")
+    return await run_held(held, readout_sink=readout_sink)
+
+
+async def run_held(
+    held: HeldRun, *, readout_sink: Callable[[str], None] | None
+) -> tuple[Session, CycleResult]:
+    """A launch held here runs inside its opening's exit (*held*'s stack)."""
+    async with held.closing:
+        return await _run_opened(
+            held.opening,
+            held.session,
+            held.cycle,
+            mode=held.mode,
+            budget=held.budget,
+            optimizer=held.optimizer,
+            readout_sink=readout_sink,
+        )
+
+
+async def run_job(spec: JobSpec) -> StopOutcome | None:
+    """A detached launch's run, in the process `run_job.py::spawn_job` started."""
+    stores = stores_of(spec)
+    job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
+    # The job, its claim with it, now lives and dies with THIS process: a run killed before it
+    # declares itself leaves the cycle free.
+    if (adopted := await asyncio.to_thread(job_registry.adopt, spec.job_id)) is None:
+        return None
+    opening = Opening.of(stores, job_registry, adopted)
+    tell_spawner()
+    try:
+        async with AsyncExitStack() as closing:
+            closing.push_async_exit(opening)
+            # Asked here alone, under the claim: the admitting process opened nothing of the cycle.
+            # A refusal is the job's, never the cycle's stop: the cycle keeps the one it had.
+            refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
+            opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(opening))
+            opening.owns(spec.hop)
+            _, result = await _run_opened(
+                opening,
+                opened.session,
+                opened.cycle,
+                mode=spec.mode,
+                budget=spec.budget,
+                optimizer=opened.optimizer,
+            )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return StopOutcome.PAUSED
+    except Exception:  # noqa: BLE001 -- the opening's exit released the job with it
+        return StopOutcome.FAILED
+    return stop_reason_outcome(result.stop_reason)
+
+
+async def _run_opened(
+    opening: Opening,
+    session: Session,
+    cycle: CycleConfig,
+    *,
+    mode: RunMode,
+    budget: HeldBudget,
+    optimizer: SelectedOptimizer,
+    readout_sink: Callable[[str], None] | None = None,
+) -> tuple[Session, CycleResult]:
+    """THE run of a held launch at every door, an inner seat's too: START, the run, its END, the
+    END being *opening*'s exit, which its door's stack holds. Answers the session the run ENDED on
+    (`run_optimization`). Its START and its hold wait on gates, off the loop."""
+    # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
+    # own producer may still be running it.
+    opening.owns(None)
+    await asyncio.to_thread(opening.job_registry.move, opening.job_id, LaunchMove.START)
+    observers = await asyncio.to_thread(enter_cycle, session, readout_sink=readout_sink)
+    # Anything raised from here fired OUTSIDE the runner's try, an interrupt aside: it stamps.
+    opening.running_on(session.hop)
+    return await run_optimization(
+        list(session.bank.samples),
+        cycle,
+        session=session,
+        observers=observers,
+        mode=mode,
+        budget=budget,
+        optimizer=optimizer,
+    )
+
+
+if __name__ == "__main__":
+    # The detached run's entry alone lands: the landing completes the inner door's registry, which
+    # imports `run_held` from this module, so the module itself never imports the landing.
+    from promptpotter.application.maintenance.landing import land_at_entry
+
+    setup_logging()
+    _spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
+    land_at_entry(every_treatment=False)
+    if (_outcome := asyncio.run(run_job(_spec))) is not None and (_code := _outcome.exit_code):
+        sys.exit(_code)

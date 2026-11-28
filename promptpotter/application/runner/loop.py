@@ -1,6 +1,6 @@
-"""Round 0's one door (`open_origin_round`): the origin is walked inside it, a tripped gate halts,
-and fixing the backend then resuming re-measures the origin's lost cells (`walk_round_zero`) with
-no re-mint."""
+"""The loop of rounds: round 0's one door (`open_origin_round`), then rounds 1 on until a stop
+(`run_round_loop`). The origin is walked inside its door, a tripped gate halts, and fixing the
+backend then resuming re-measures the origin's lost cells (`walk_round_zero`) with no re-mint."""
 
 from __future__ import annotations
 
@@ -8,15 +8,14 @@ import asyncio
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle, RoundContext
+from promptpotter.application.bench.line import bench_origin, declare_line_bench
 from promptpotter.application.bench.node_context import walk_origin
 from promptpotter.application.bench.resume_and_fork.decisions import decision
-from promptpotter.application.bench.resume_and_fork.repair import origin_only
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.origin import lock_criterion
 from promptpotter.application.run_observers import end_run_on
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.run_stop import RUN_ENDS, StopLoop, origin_gate_tripped
-from promptpotter.application.runner.bench import bench_origin, declare_line_bench
 from promptpotter.application.runner.round import (
     emit_origin_round,
     execute_round,
@@ -202,7 +201,9 @@ async def walk_round_zero(ctx: RoundContext, dataset: list[Sample]) -> None:
     holes, unsent = repairable_holes(rows), max(0, head.expected_samples - len(rows))
     if origin.at_offset is not None:
         standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
-        if not origin_only(cycle.rounds, standing) or not (holes or unsent):
+        # Read once a round closed past it or walked on it.
+        taken = [rr.round for rr in cycle.rounds] != [0] or 1 in standing.proposals
+        if taken or not (holes or unsent):
             return
     elif not head.expected_samples:
         return

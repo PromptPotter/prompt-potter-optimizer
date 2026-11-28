@@ -6,13 +6,7 @@ from typing import NamedTuple
 
 from pydantic import Field, computed_field
 
-from promptpotter.application.datasets.authored import defaults_config
-from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.initialization.session import drawn_partition
-from promptpotter.application.jobs.quota import next_launch_budget
-from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import cycle_config, resolved
-from promptpotter.application.runner.bench import (
+from promptpotter.application.bench.line import (
     bench_line,
     bench_members,
     line_launches,
@@ -21,6 +15,12 @@ from promptpotter.application.runner.bench import (
     pair_on_bench,
     read_bench,
 )
+from promptpotter.application.datasets.authored import defaults_config
+from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.application.initialization.session import drawn_partition
+from promptpotter.application.jobs.quota import next_launch_budget
+from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.pipeline_resolve import cycle_config, resolved
 from promptpotter.application.scoring.paired import (
     MemberRows,
     grade_measurands,

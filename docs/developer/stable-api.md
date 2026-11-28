@@ -87,7 +87,7 @@ Nothing on this path imports a server: `pip install promptpotter` is the engine,
 
 ## 5c. The export artifact
 
-`cycles/{id}/export.json` answers *what the run found, and how good it is*, for a reader that never opens the campaign tree; written by `runner/output.py::ExportProjection` as the run drains, off the ledger that stamps `index.json::final`, so both are projections of one ledger.
+`cycles/{id}/export.json` answers *what the run found, and how good it is*, for a reader that never opens the campaign tree; written by `bench/export.py::ExportProjection` as the run drains, off the ledger that stamps `index.json::final`, so both are projections of one ledger.
 
 ```python
 from promptpotter.domain.export import parse_prompt_export

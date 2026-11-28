@@ -170,7 +170,7 @@ def _definition_read(stores: Stores, name: str) -> _DefinitionRead:
 def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError | None:
     """THE campaign's own refusal, a pure read of it and of its dataset's definition (read as the
     mint read it), answered, never raised: admission raises it (`refuse_campaign`), and a served
-    can-run answer serves its `refusal` (`runner/bench.py::BenchLine.refused`)."""
+    can-run answer serves its `refusal` (`bench/line.py::BenchLine.refused`)."""
     if not campaign.active:
         return CampaignRefusedError(
             CampaignRefusal.NOT_ACTIVE,

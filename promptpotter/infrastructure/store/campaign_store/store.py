@@ -592,7 +592,7 @@ class CampaignStore:
         self.append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        """`runner/output.py::ExportProjection` writes it off the ledger as the run drains."""
+        """`bench/export.py::ExportProjection` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:

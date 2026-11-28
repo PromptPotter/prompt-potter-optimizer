@@ -479,7 +479,7 @@ round.
    derivation only, and it matters only where τ > 0.
 4. **An inner run that elects in two rounds is read, not excluded**: a seat benches
    `every_adoption`, the end pass grading every selection its line adopted (one 20-row pass per extra
-   election), and `runner/bench.py::read_curve` reads the area over them all. C0 re-measured
+   election), and `bench/line.py::read_curve` reads the area over them all. C0 re-measured
    (2026-11-15, `promptpotter-self/panel`, now `dev`, $0.335, 85 min one cell at a time): the six seats read
    +7.5, 0, 0, 0, −5 and +10 held-out points, mean +2.1, fitness 0.52. Two inner runs adopted
    nothing; the four that did claimed +7.5 to +17.5 on their origin panels and read +7.5, +10, 0
