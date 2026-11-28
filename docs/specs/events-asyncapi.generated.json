@@ -7418,6 +7418,32 @@
         "title": "RoleScope",
         "type": "string"
       },
+      "RootFiling": {
+        "additionalProperties": false,
+        "description": "How an L4 outer files a send its inner run filed: the kind of the pass that spawned the\nrun, in the outer's round.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TokenUsageKind"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          }
+        },
+        "required": [
+          "kind",
+          "round"
+        ],
+        "title": "RootFiling",
+        "type": "object"
+      },
       "RoundAdvance": {
         "description": "Whether a closed round ADVANCED the best-so-far line.",
         "enum": [
@@ -8189,7 +8215,7 @@
             "type": "number"
           },
           "dominant_warning": {
-            "description": "``{node_name}:{warning_type}`` of the most frequent warning across the candidate's measurements; the prefix selects the node whose config is captured in ``observed_config``.",
+            "description": "``{node_name}:{warning_type}`` of the most frequent warning across the candidate's measurements; the prefix selects the node whose call ``observed`` captures.",
             "title": "Dominant Warning",
             "type": "string"
           },
@@ -8208,14 +8234,12 @@
                 "type": "null"
               }
             ],
-            "description": "The node whose config ``observed_config`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole config.",
+            "description": "The node whose call ``observed`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole document.",
             "title": "Node"
           },
-          "observed_config": {
-            "additionalProperties": true,
-            "description": "Snapshot of the failing node's effective config — the (param, value) tuples the `l1_config_not_in_runtime_failures` validator scans on subsequent rounds to reject re-proposals.",
-            "title": "Observed Config",
-            "type": "object"
+          "observed": {
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Snapshot of the effective params: the failing node's call alone, or an abort's whole document — the (param, value) pairs the `l1_config_not_in_runtime_failures` validator scans on subsequent rounds to reject re-proposals."
           },
           "owner": {
             "$ref": "#/components/schemas/NurseOwner",
@@ -8240,7 +8264,7 @@
           "degraded_rate",
           "degraded_count",
           "total_scored",
-          "observed_config"
+          "observed"
         ],
         "title": "RuntimeFailure",
         "type": "object"
@@ -9358,11 +9382,6 @@
             "title": "Input Tokens",
             "type": "integer"
           },
-          "mirrored": {
-            "default": false,
-            "title": "Mirrored",
-            "type": "boolean"
-          },
           "money": {
             "anyOf": [
               {
@@ -9404,6 +9423,17 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MeasurementRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "root_filing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RootFiling"
               },
               {
                 "type": "null"

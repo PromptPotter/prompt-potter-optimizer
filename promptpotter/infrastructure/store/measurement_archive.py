@@ -16,6 +16,7 @@ from typing import Any, ClassVar, NamedTuple
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.l4.proxies import read_inner_report
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
+from promptpotter.domain.pipeline_params import NodeCall, NodeChain, laid_chain
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer, Grading
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
@@ -102,31 +103,36 @@ assert all(
 ), "an archive kind names a file it does not enumerate, or a key holding a separator names one"
 
 
-def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:
-    return stable_hash(node_configs, length=ADDRESS_HEX)
+def config_key(node_configs: NodeChain) -> str:
+    if not node_configs:
+        raise ValueError(
+            "a configuration naming no node has no archive address: its schema runs no chain"
+        )
+    return stable_hash(laid_chain(node_configs), length=ADDRESS_HEX)
 
 
-assert config_key([("solve", CANONICAL_PIN)]) == "f50c75d3792a48e09028a5e79dacd742", (
-    "a moved configuration key strands every banked cell filed under the old one"
-)
+assert (
+    config_key([("solve", NodeCall.model_validate(CANONICAL_PIN))])
+    == "f50c75d3792a48e09028a5e79dacd742"
+), "a moved configuration key strands every banked cell filed under the old one"
 
 
-def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> str:
-    return stable_hash([node_configs, sample_key], length=ADDRESS_HEX)
+def _cell_key(node_configs: NodeChain, sample_key: str) -> str:
+    return stable_hash([laid_chain(node_configs), sample_key], length=ADDRESS_HEX)
 
 
 def _fold_key(key: str, dataset_hash: str) -> str:
     return f"{key}|{dataset_hash}"
 
 
-def chain_keys(node_configs: list[tuple[str, dict[str, Any]]]) -> list[str]:
+def chain_keys(node_configs: NodeChain) -> list[str]:
     """The key of each prefix of a node chain, its first node's first: a cell files under the
     prefix ending at the node that answered it."""
     return [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
 
 
 def file_keys(entry: ArchiveEntry) -> list[str]:
-    return chain_keys(entry.node_configs) or [entry.config_key]
+    return chain_keys(entry.node_configs)
 
 
 def _file_of(entry: ArchiveEntry, cell: MeasuredCell) -> str:
@@ -140,12 +146,12 @@ def _file_of(entry: ArchiveEntry, cell: MeasuredCell) -> str:
 
 
 def _matches_subset(
-    node_configs: list[tuple[str, dict[str, Any]]],
+    node_configs: NodeChain,
     predicate: dict[str, dict[str, Any]],
 ) -> bool:
     if not predicate:
         return False
-    by_name = dict(node_configs)
+    by_name = dict(laid_chain(node_configs))
     for node_name, subdict in predicate.items():
         cfg = by_name.get(node_name)
         if cfg is None:
@@ -597,7 +603,7 @@ class ReplayFeed:
     def __init__(
         self,
         archive: MeasurementArchive,
-        node_configs: list[tuple[str, dict[str, Any]]],
+        node_configs: NodeChain,
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs

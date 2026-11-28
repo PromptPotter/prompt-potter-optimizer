@@ -50,7 +50,7 @@ from promptpotter.domain.records.llm_calls import (
     LLMCallRecord,
     LLMCallStartRecord,
 )
-from promptpotter.domain.records.money import StandingBudgetRecord, TokenUsageRecord
+from promptpotter.domain.records.money import StandingBudgetRecord
 from promptpotter.domain.records.provider import (
     BackendWarningRecord,
     FlightRecord,
@@ -85,7 +85,6 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
 )
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
@@ -307,11 +306,6 @@ class LiveDashboardState(DashboardFacts):
     cell_reserve_usd: float | None = None
     # `1` says the look-ahead control does not apply.
     max_cells_in_flight: int
-
-    spend: SpendRollup = Field(default_factory=SpendRollup)
-
-    # PER ROUND, and NOT clamped by a rewind, unlike `rounds[]`: a re-measured round costs twice.
-    spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
     def orphaned(self, spare: MeasurementRole | None = None) -> list[VerificationMark]:
         """The passes, each still running and not of kind *spare* ended stopped: its process is gone ungraded."""
@@ -714,14 +708,6 @@ class LiveDashboardProjection(Projection):
     def _label(self, key: ArmKey) -> str:
         return "" if (name := self._name(key)) is None else name.label
 
-    def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        # Assigned, never banked in place: a snapshot `value` served holds the rollups as they were.
-        key = str(record.spend_round)
-        held = self.state.spend_by_round.get(key)
-        self.state.spend = self.state.spend.banked(record)
-        rollup = (SpendRollup() if held is None else held).banked(record)
-        self.state.spend_by_round = {**self.state.spend_by_round, key: rollup}
-
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._open_calls[record.call_id] = record.node
 
@@ -834,11 +820,6 @@ class DashboardCheckout(Projection):
         return self._index.live(
             LiveDashboardProjection, start=_start(LiveDashboardProjection, self._prefix)
         )
-
-    @property
-    def spend(self) -> SpendRollup:
-        """What the run has spent so far, as its fold banks it."""
-        return self.live.state.spend
 
     def feed(self, record: CycleRecord) -> None:
         with self._lock:

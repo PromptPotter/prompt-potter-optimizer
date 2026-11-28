@@ -482,7 +482,7 @@ CONNECTOR = Connector(
     cell_terms=INNER_CELL_TERMS,
     reported_keys=INNER_REPORTED_KEYS,
     resolve_experiment=ResolvedInnerPanel.read,
-    # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
+    # The outer's graph IS the inner optimizer's, so it is served here, never copied into a file.
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
     self_optimization=True,

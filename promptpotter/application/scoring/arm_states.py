@@ -49,7 +49,6 @@ def read_breakage(
     aborted = signal.check_name == SCORING_ERROR_ABORT
     # An abort names an error, not a node, so it shows the whole config.
     node = None if aborted else cr["dominant_warning"].split(":", 1)[0]
-    node_cfg = params.dump() if node is None else params.node(node).laid_keys()
     operator_terminal = cr["fatal"] or (aborted and _abort_is_config_break(cr))
     return Broken(
         failure=RuntimeFailure(
@@ -59,7 +58,9 @@ def read_breakage(
             degraded_rate=cr["degraded_rate"],
             degraded_count=cr["degraded_count"],
             total_scored=cr["total_scored"],
-            observed_config=dict(node_cfg),
+            observed=params
+            if node is None
+            else PipelineParams.model_validate({node: params.node(node)}),
             first_seen_round=round_num,
             changes_description=changes_description,
             owner=NurseOwner.OPERATOR if operator_terminal else NurseOwner.L1,

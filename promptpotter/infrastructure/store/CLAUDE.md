@@ -7,7 +7,7 @@
 - **`optimizer_reuse` and `judge_reuse` are separate `LLMReuseCache` instances**: a grader reading the loop's cached answers would be a ruler fed by what it measures.
 - **`store/__init__.py` re-exports nothing**, or a leaf import cycles back through `ledger`. <!-- probe: git grep -cE "^(from|import) " -- promptpotter/infrastructure/store/__init__.py == 0 -->
 - **JSON for what code writes, YAML for the operator-authored tier; there is no tolerant YAML reader.** <!-- probe: git grep -cE "read_yaml_tolerant" -- promptpotter/*.py == 0 -->
-- **`account_spend.py` banks a cycle's spend inside every destroyer**; `mirrored` L4 inner copies are skipped, or that money banks twice.
+- **`account_spend.py` banks a cycle's spend inside every destroyer**. A send is filed once, on the ledger of the run that sent it; an L4 outer's money lines fold its inner cycles' ledgers (`read_model.py::enclosing`, as `TokenUsageRecord.root_filing` files each), so no ledger carries a copy.
 - **A cycle's own facts are ledger records; `index.json` is their fold**, read back off the ledger, never the file; so are the cycle start and the standing budget (patches folded in order of arrival, never inherited by a fork). What a cycle's loop was asked is the account's command log's (`CommandBook.controls`), which no ledger move or delete reaches. The δ ruler is the tenant's `ruler.jsonl`, never rewritten.
 
 ## The lineage tree

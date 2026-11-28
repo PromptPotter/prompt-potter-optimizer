@@ -100,7 +100,7 @@ def _bounded_narrowing(
     config = CampaignConfig.model_validate(laid)
     space = schema.narrow(config.optimizer_narrowing)
     narrowing: dict[str, Any] = {}
-    for node, _, bounds in _bounded_nodes(config, space, tier):
+    for node, _, _, bounds in _bounded_nodes(config, space, tier):
         kept = node.param_allowed_values
         allowed = {p: [v for v in vs if p not in kept or v in kept[p]] for p, vs in bounds.items()}
         # A searched model axis offers the tier's models alone: Start refuses none it offered.
@@ -115,27 +115,37 @@ def free_tier_overlay(
     config: CampaignConfig, schema: PipelineSchema, fence: FreeFence | None
 ) -> dict[str, dict[str, Any]]:
     """The `free_tier` param layer (`pipeline_schema.py::ParamLayer`): per fenced task node of
-    *schema*, each param its model's bounds name and neither the node nor *config* sets, launched
-    at the lowest."""
+    *schema*, the model `_bounded_nodes` launches where the node's own is off the tier, and each
+    param that model's bounds name and nothing chosen for it sets, launched at the lowest."""
     if fence is None or not fence.task:
         return {}
     tier = free_tier()
     return {
-        node.name: {p: vs[0] for p, vs in bounds.items() if p not in cfg and vs}
-        for node, cfg, bounds in _bounded_nodes(config, schema, tier)
+        node.name: {
+            **({} if node.current_config.model == model else {"model": model}),
+            **{p: vs[0] for p, vs in bounds.items() if p not in cfg and vs},
+        }
+        for node, model, cfg, bounds in _bounded_nodes(config, schema, tier)
     }
 
 
 def _bounded_nodes(
     config: CampaignConfig, schema: PipelineSchema, tier: FreeTier
-) -> Iterator[tuple[PipelineNode, dict[str, Any], Bounds]]:
-    """Each llm node of *schema* on a task model the tier bounds: its config as *config* lays it,
-    and its model's bounds."""
+) -> Iterator[tuple[PipelineNode, str, dict[str, Any], Bounds]]:
+    """Each llm node of *schema* on a task model the tier bounds: that model, the tier's first
+    where the node declares one off the tier and *config* names none, as a param's lowest value is
+    laid; the config chosen for it (the node's own beside its own model); and the model's bounds."""
+    first = next(iter(tier.task_models), None)
     for node in schema.declared_nodes:
         laid = config.pipeline_overlay.get(node.name, NodeCall()).laid_keys()
         call = node.current_config.model_copy(update=laid)
-        if node.is_llm and (bounds := tier.task_models.get(str(call.model))):
-            yield node, call.laid_keys(), bounds
+        model = str(call.model)
+        if model not in tier.task_models and "model" not in laid and first is not None:
+            model, chosen = first, laid
+        else:
+            chosen = call.laid_keys()
+        if node.is_llm and (bounds := tier.task_models.get(model)):
+            yield node, model, chosen, bounds
 
 
 def free_task_models() -> frozenset[str]:

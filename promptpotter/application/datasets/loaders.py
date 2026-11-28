@@ -387,9 +387,9 @@ def archive_entry(
     """*search_point* filed under *cell_identity* (`PipelineParams.keyed_by`): its id is what it sends."""
     sp_h = search_point.sp_hash(pipeline_schema)
     params = search_point.pipeline_params
-    node_configs = pipeline_schema.node_configs(params.keyed_by(cell_identity)) if params else []
+    node_configs = pipeline_schema.node_configs(params.keyed_by(cell_identity))
     return ArchiveEntry(
-        config_key=config_key(node_configs or [("", {"prompt_fields_id": sp_h})]),
+        config_key=config_key(node_configs),
         prompt_fields_id=sp_h,
         node_configs=node_configs,
         pipeline_params=params,

@@ -476,7 +476,7 @@ class CampaignStore:
     def delete_inner_sandbox(self, sandbox: Path, *, owner: SandboxOwner) -> None:
         """Each inner campaign banked inside *owner*, the cycle whose sandbox it is: inner ids are
         content-addressed and repeat across sandboxes. Metered nothing of the outer ceiling: the
-        outer ledger carries every inner call."""
+        outer's metered line folded every inner call, and its delete banked it."""
         if not sandbox.exists():
             return
         inner = self.in_sandbox(sandbox)

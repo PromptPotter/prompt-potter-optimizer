@@ -378,13 +378,14 @@ class Measurand(FrozenModel):
 
 
 class UnitFormat(NamedTuple):
-    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then ``suffix``; a lift is signed."""
+    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then ``suffix``; a lift is signed.
+    ``None`` digits read the money rule (`money_places`)."""
 
     scale: float
-    digits: int
+    digits: int | None
     prefix: str
     suffix: str
-    lift_digits: int
+    lift_digits: int | None
     lift_word: str
     lift_name: str
     compact: bool
@@ -397,7 +398,7 @@ UNIT_FORMATS: Worded[MeasurandUnit, UnitFormat] = Worded(
         "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
         "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
         "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
-        "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
+        "usd": UnitFormat(1.0, None, "$", "", None, "USD", "dollar", False),
         "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
         "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
         "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
@@ -407,12 +408,25 @@ UNIT_FORMATS: Worded[MeasurandUnit, UnitFormat] = Worded(
 _COMPACT_STEPS = ((1_000_000.0, "M"), (1_000.0, "k"))
 
 
-def _number(value: float, fmt: UnitFormat, digits: int, sign: str) -> str:
+def money_places(value: float) -> int:
+    """THE money rule, `webapp/lib/format.ts::moneyPlaces`'s: three significant digits under a
+    dollar, so a cheap model's cent reads, else two places."""
+    if value == 0 or abs(value) >= 1:
+        return 2
+    places = 2 - math.floor(math.log10(abs(value)))
+    return places if abs(round(value, places)) < 1 else 2
+
+
+def _places(scaled: float, digits: int | None) -> int:
+    return money_places(scaled) if digits is None else digits
+
+
+def _number(value: float, fmt: UnitFormat, digits: int | None, sign: str) -> str:
     scaled = fmt.scale * value
     for step, mark in _COMPACT_STEPS if fmt.compact else ():
         if abs(scaled) >= step:
             return f"{scaled / step:{sign}.1f}{mark}"
-    return f"{scaled:{sign}.{digits}f}"
+    return f"{scaled:{sign}.{_places(scaled, digits)}f}"
 
 
 def level_text(value: float | None, unit: MeasurandUnit) -> str:
@@ -430,7 +444,8 @@ def _signed(value: float, fmt: UnitFormat) -> str:
 def lift_shown(value: float, unit: MeasurandUnit) -> float:
     """The lift as `lift_text` prints it, so a colour or a sign reads what the reader sees."""
     fmt = UNIT_FORMATS[unit]
-    return round(fmt.scale * value, fmt.lift_digits)
+    scaled = fmt.scale * value
+    return round(scaled, _places(scaled, fmt.lift_digits))
 
 
 # Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.

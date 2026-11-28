@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import enum
-import json
 from collections.abc import Iterable
-from typing import Any
 
 from pydantic import Field
 
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.hashing import stable_hash
 
 
 class NurseOwner(enum.StrEnum):
@@ -30,7 +29,7 @@ class ValidationReason(enum.StrEnum):
     NOT_IN_PARAM_ALLOWED_VALUES = "not_in_param_allowed_values"
     # Declared by the node, refused by the chosen model: the healing move is the model.
     NOT_ACCEPTED_BY_MODEL = "not_accepted_by_model"
-    # Matches a prior `RuntimeFailure.observed_config` row.
+    # Matches a prior `RuntimeFailure.observed` row.
     REPROPOSES_KNOWN_FAILING_CONFIG = "reproposes_known_failing_config"
     # Non-fatal: the phantom node's edit is stripped and the candidate still scores.
     HALLUCINATED_NODE = "hallucinated_node"
@@ -128,14 +127,14 @@ class RuntimeFailure(FrozenModel):
         description=(
             "``{node_name}:{warning_type}`` of the most frequent warning "
             "across the candidate's measurements; the prefix selects the "
-            "node whose config is captured in ``observed_config``."
+            "node whose call ``observed`` captures."
         ),
     )
     node: str | None = Field(
         description=(
-            "The node whose config ``observed_config`` captures: the ``dominant_warning`` "
-            "prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, "
-            "and captures the whole config."
+            "The node whose call ``observed`` captures: the ``dominant_warning`` prefix. "
+            "``None`` on a ``scoring_error_abort``, which names an error, not a node, and "
+            "captures the whole document."
         ),
     )
     degraded_rate: float = Field(
@@ -143,10 +142,10 @@ class RuntimeFailure(FrozenModel):
     )
     degraded_count: int = Field(description="Sample count with at least one warning.")
     total_scored: int = Field(description="Sample count actually measured for the candidate.")
-    observed_config: dict[str, Any] = Field(
+    observed: PipelineParams = Field(
         description=(
-            "Snapshot of the failing node's effective config — the "
-            "(param, value) tuples the `l1_config_not_in_runtime_failures` "
+            "Snapshot of the effective params: the failing node's call alone, or an abort's whole "
+            "document — the (param, value) pairs the `l1_config_not_in_runtime_failures` "
             "validator scans on subsequent rounds to reject re-proposals."
         ),
     )
@@ -168,11 +167,6 @@ class RuntimeFailure(FrozenModel):
         ),
     )
 
-    @property
-    def observed_call(self) -> NodeCall:
-        """The failing node's call, typed; an abort captures the whole document, no node's call."""
-        return NodeCall() if self.node is None else NodeCall.model_validate(self.observed_config)
-
 
 _NON_FATAL_REASONS = frozenset({ValidationReason.HALLUCINATED_NODE})
 assert not COLLAPSE_WORDS.keys() & _NON_FATAL_REASONS
@@ -182,10 +176,6 @@ def fatal_validation_failures(failures: Iterable[ValidationFailure]) -> list[Val
     return [vf for vf in failures if vf.reason not in _NON_FATAL_REASONS]
 
 
-def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
+def rf_dedup_key(rf: RuntimeFailure) -> tuple[str, str, str]:
     """Canonical, so intra-cycle dedup and cross-cycle sibling-wound inheritance match."""
-    return (
-        rf_dict["source"],
-        rf_dict["dominant_warning"],
-        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
-    )
+    return (rf.source, rf.dominant_warning, stable_hash(rf.observed.dump()))

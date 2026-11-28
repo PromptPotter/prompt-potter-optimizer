@@ -67,10 +67,16 @@ export function fmtGap(seconds: number): string {
   return `${Math.round(seconds / 86_400)}d`;
 }
 
+// `paired_reading.py::money_places`: three significant digits under a dollar, else two places.
+function moneyPlaces(v: number): number {
+  if (v === 0 || Math.abs(v) >= 1) return 2;
+  const places = 2 - Math.floor(Math.log10(Math.abs(v)));
+  return Math.abs(Number(fixed(v, places))) < 1 ? places : 2;
+}
+
+// A sum of money as `domain/spend.py::usd_text` prints it: the `usd` measurand's level.
 export function fmtUsd(n: number): string {
-  // `domain/spend.py::usd_text`'s rule: three significant digits under a dollar, else two places.
-  if (n === 0 || Math.abs(n) >= 1) return `$${n.toFixed(2)}`;
-  return `$${n.toFixed(2 - Math.floor(Math.log10(Math.abs(n))))}`;
+  return fmtUnit("usd", n);
 }
 
 export function fmtCompact(v: number): string {
@@ -116,11 +122,12 @@ function fixed(v: number, digits: number): string {
 
 // `paired_reading.py::_number`: a compact unit steps a thousand or more to one digit of k or M;
 // −0 keeps its sign, as Python prints it.
-function numberIn(f: UnitFormat, v: number, digits: number, signed: boolean): string {
+function numberIn(f: UnitFormat, v: number, digits: number | null, signed: boolean): string {
   const scaled = f.scale * v;
   const size = Math.abs(scaled);
   const step = f.compact ? COMPACT_STEPS.find(([at]) => size >= at) : undefined;
-  const text = step ? `${fixed(size / step[0], 1)}${step[1]}` : fixed(size, digits);
+  const places = digits ?? moneyPlaces(size);
+  const text = step ? `${fixed(size / step[0], 1)}${step[1]}` : fixed(size, places);
   if (scaled < 0 || Object.is(scaled, -0)) return `-${text}`;
   return signed ? `+${text}` : text;
 }

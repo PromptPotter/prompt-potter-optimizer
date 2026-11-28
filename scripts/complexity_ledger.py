@@ -415,7 +415,17 @@ BASELINE = {
     # replays it, and refuses a key not held, where it answered a bare 202 either way.
     # w11-connectors3 (−7): each connector's tunables are its own `EnvBlock`, and harbor's panel
     # recipe folds into its connector, against `settings.py`'s fields and `harbor_panel.py` going.
-    "package_lines": 114311,
+    # w11-config3 (+40): the archive carrier typed (`pipeline_params.py::NodeChain`, `laid_chain`)
+    # and the scoring block laid by the fold (`layer_fold.py::ScalarAs`, `campaign_config.py::ScoringBlock`).
+    # w11-spend2 (+60): an outer's money lines fold its inner ledgers (`read_model.py::enclosing`,
+    # `money_fold.py::cycle_money`) where each inner send was copied onto the root's ledger; +10:
+    # the money rule is `paired_reading.py::money_places`, the `usd` unit's digits; +7:
+    # `wire_record.py::FLAT` lays a model flat, so `StepUsage` holds a `TokenAccount`; +11: a
+    # coupon's window sums on from its last read (`account_spend.py::_Bills.billed_since`); +10:
+    # the free tier lays its first task model where a node's own is off it (`free_tier.py`); +28:
+    # a cycle's row reads its cut sends off the charge book (`account_spend.py::cycle_unreported`)
+    # and an unbilled series is said (`served_dashboard.py::SpendByRound.empty`).
+    "package_lines": 114477,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -2380,6 +2380,8 @@ export interface SpendByRound {
   series: KindSeries[];
   /** Each round's bill by kind in one line, as `rounds`. */
   readings: string[];
+  /** Said in place of the series where no round billed anything; null otherwise. */
+  empty: string | null;
 }
 
 export interface KindSeries {
@@ -5829,7 +5831,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "4f57bcb33a20aa40";
+export const SERVED_CONTRACT = "b234071abdb64483";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6193,10 +6195,10 @@ export interface ReadingStateInfo {
 
 export interface UnitFormat {
   scale: number;
-  digits: number;
+  digits: number | null;
   prefix: string;
   suffix: string;
-  lift_digits: number;
+  lift_digits: number | null;
   lift_word: string;
   lift_name: string;
   compact: boolean;
@@ -6667,7 +6669,7 @@ export const UNIT_FORMATS: Record<MeasurandUnit, UnitFormat> = {
   "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
   "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
   "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
-  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
+  "usd": { scale: 1.0, digits: null, prefix: "$", suffix: "", lift_digits: null, lift_word: "USD", lift_name: "dollar", compact: false },
   "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
   "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
   "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },

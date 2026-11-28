@@ -143,6 +143,15 @@ def laid_calls(calls: Mapping[str, NodeCall]) -> dict[str, dict[str, Any]]:
     return {node: call.laid_keys() for node, call in calls.items()}
 
 
+# The archive's carrier: each node's call in chain order, the order its address hashes.
+NodeChain = list[tuple[str, NodeCall]]
+
+
+def laid_chain(chain: NodeChain) -> list[tuple[str, dict[str, Any]]]:
+    """What an archive address hashes: each call's laid dump, in chain order."""
+    return [(node, call.laid_keys()) for node, call in chain]
+
+
 def _call_keys_in(roster: _Roster) -> frozenset[str]:
     return frozenset(
         name for name, info in NodeCall.model_fields.items() if roster in info.metadata

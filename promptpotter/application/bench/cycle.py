@@ -73,7 +73,7 @@ def _cut_failures(rr: RoundOutcome) -> list[RuntimeFailure]:
 def _distinct(failures: Sequence[RuntimeFailure]) -> list[RuntimeFailure]:
     out: dict[tuple[str, str, str], RuntimeFailure] = {}
     for rf in failures:
-        out.setdefault(rf_dedup_key(rf.model_dump(mode="json")), rf)
+        out.setdefault(rf_dedup_key(rf), rf)
     return list(out.values())
 
 

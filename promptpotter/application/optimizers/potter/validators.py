@@ -143,7 +143,9 @@ def l1_config_not_in_runtime_failures(
         effective = {**pipeline_params.node(node_name).laid_keys(), **node_params}
         for param, value in node_params.items():
             for rf in runtime_failures:
-                obs_cfg = rf.observed_config or {}
+                if rf.node is None:  # an abort convicts no node's value
+                    continue
+                obs_cfg = rf.observed.node(rf.node).laid_keys()
                 if not all(
                     obs_cfg.get(k) == effective.get(k) for k in WHO_ANSWERS_KEYS if k in obs_cfg
                 ):

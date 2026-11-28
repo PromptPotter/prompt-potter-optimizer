@@ -195,7 +195,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 | Signal | Fields |
 |---|---|
 | `diagnostics` | STATUS `fires`🧩 `stall_count`🧩 · body `samples`🧩 (`terminal_node`🧩 `query`🧩 `predicted`🧩 `ground_truth`🧩 `rank`🧩 `gt_in_source`🧩 `gt_in_ranked`🧩) `near_misses`🧩 `rank_buckets`🧩 `top_k_accuracy`🧩 `error_rate`🧩 `warning_rate`🧩 `l1_yield`🧩 · EVOLUTION `l1_stall_depth`🧩 `overlap.advance`🧩 `headline`🧩 `vs_previous_pick`🧩 `triggered_rates`🧩 |
-| `l1_wounds` | validation `axis`🧩 `value`🧩 `reason`🧩 `allowed`🧩 `l1_parse_failure`🧩 · runtime `owner`🧩 `dominant_warning`🧩 `degraded_rate`🧩 `total_scored`🧩 `observed_config`🧩 |
+| `l1_wounds` | validation `axis`🧩 `value`🧩 `reason`🧩 `allowed`🧩 `l1_parse_failure`🧩 · runtime `owner`🧩 `dominant_warning`🧩 `degraded_rate`🧩 `total_scored`🧩 `observed`🧩 |
 | `guard_breaches` | `validator_id`🧩 `evidence`🧩, per layer |
 | `critique` | `priority_fix`🧩 `suggested_axes`🧩 `failure_highlights`🧩 (`mechanism`🧩 `sample_ids`🧩 `claim`🧩) |
 | `task_context` | `domain`🧩 `pipeline_purpose`🧩 `data_characteristics`🧩 `optimization_goals`🧩 `key_challenges`🧩 `upstream_context`🧩 `downstream_context`🧩; never `raw_description`🧩 |

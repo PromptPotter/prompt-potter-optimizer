@@ -25,7 +25,6 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.scoring.evaluators import campaign_owners
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
-    MATCHER_KEY,
     SCORING_BLOCK_KEYS,
     campaign_terms,
     parse_dials,
@@ -109,14 +108,15 @@ async def plan_draft_patch(
     was = draft_pipeline(stores, draft, held)
     sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
     if patch.config is not None:
+        if (scoring := sent.get("scoring")) is not None:
+            # Over the criterion the draft RUNS, never its partial's: a dial edit folds into the chain's.
+            config = {**config, "scoring": was.config.scoring}
+            edit = _scoring_edit(scoring, was.config.scoring, campaign_terms(served.connector))
+            sent = {**sent, "scoring": edit}
         layers = [Layer("draft", config), Layer("edit", sent)]
         config = _stamp_optimizer(
             fold_layers(CAMPAIGN_RULE, layers).document, was.config.optimization.optimizer
         )
-        if "scoring" in sent and sent["scoring"] is not None:
-            config["scoring"] = _folded_scoring(
-                was.config.scoring, sent["scoring"], campaign_terms(served.connector)
-            )
     if patch.mode is not None:
         config = _picked_mode(changes, draft, config, patch.mode, served, was.declared)
     if patch.node_output is not None:
@@ -215,36 +215,26 @@ def _stamp_optimizer(config: dict[str, Any], running: str) -> dict[str, Any]:
     return {**config, "optimization": {**optimization, "optimizer": running}}
 
 
-def _folded_scoring(
-    running: str | dict[str, str] | None, edit: object, terms: Mapping[str, CellTerm]
+def _scoring_edit(
+    edit: object, running: str | dict[str, str] | None, terms: Mapping[str, CellTerm]
 ) -> object:
-    """A string *edit* is the criterion whole; a mapping folds into *running*, the criterion the
-    draft runs. Dials re-sent as the running criterion reads them move nothing, so a pinned
-    formula's anchors survive a round trip; other dials replace it, to be anchored on the origin.
-    *terms* are the patched draft's backend's: what its dials may weigh."""
+    """*edit* as the layer laid over *running*, the criterion the draft runs (`ScoringBlock` lays
+    its keys). Dials re-sent as *running* reads them move nothing, so a pinned formula's anchors
+    survive a round trip; empty ones clear the composite. *terms* are the patched draft's
+    backend's: what its dials may weigh."""
     if not isinstance(edit, dict):
         return edit
     if unknown := sorted(set(edit) - SCORING_BLOCK_KEYS):
         raise PayloadInvalidError(
             f"patch.config.scoring names {unknown}; a scoring edit takes {sorted(SCORING_BLOCK_KEYS)}."
         )
-    block = dict(running) if isinstance(running, dict) else {"per_sample": running}
-    # The compiler's block, as stored: a pick replaces the formula, and a formula the pick.
-    for key, other in ((MATCHER_KEY, "per_sample"), ("per_sample", MATCHER_KEY)):
-        if key in edit:
-            block.pop(other, None)
-            block[key] = edit[key]
-    if "per_cell" in edit:
-        block.pop(DIALS_KEY, None)
-        block["per_cell"] = edit["per_cell"]
+    # Canonical: two drafts declaring one criterion mint one block, so an empty value is none.
+    laid: dict[str, object] = {k: v or None for k, v in edit.items() if k != DIALS_KEY}
     if DIALS_KEY in edit:
         dials = spell_dials(parse_dials(str(edit[DIALS_KEY]), terms), terms)
         if dials != draft_criterion(running, terms).dials:
-            block.pop("per_cell", None)
-            block[DIALS_KEY] = dials
-    # Canonical: two drafts declaring one criterion mint one block; empty dials are none.
-    kept = {k: v for k, v in block.items() if v}
-    return kept.get("per_sample") if set(kept) <= {"per_sample"} else kept
+            laid |= {DIALS_KEY: dials} if dials else {DIALS_KEY: None, "per_cell": None}
+    return laid
 
 
 def _authored_contract(

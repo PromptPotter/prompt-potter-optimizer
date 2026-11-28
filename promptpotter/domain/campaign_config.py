@@ -17,7 +17,16 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.fork import ConfigOverrides
 from promptpotter.domain.judges import JudgeSpec
-from promptpotter.domain.layer_fold import Folded, Lay, Layer, ScopedBy, fold_layers, rules_of
+from promptpotter.domain.layer_fold import (
+    Folded,
+    LaidAs,
+    Lay,
+    Layer,
+    ScalarAs,
+    ScopedBy,
+    fold_layers,
+    rules_of,
+)
 from promptpotter.domain.origin_panel import NotSeparatedStall
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_params import NodeCall, laid_calls, lay_nodes
@@ -37,6 +46,16 @@ GateMode = Literal["strict", "off"]
 ArmGateMode = Literal["off", "review", "author"]
 # A scoring formula: the shipped datasets' longest is 59 characters.
 _Formula = Annotated[str, Field(max_length=2048)]
+
+
+class ScoringBlock(StrictModel):
+    """The scoring block as the fold lays it, key by key: a pick replaces its formula and a formula
+    its pick; dials replace the composite they lock into, and the composite its dials."""
+
+    per_sample: Annotated[_Formula | None, ScopedBy("matcher")] = None
+    matcher: Annotated[_Formula | None, ScopedBy("per_sample")] = None
+    per_cell: Annotated[_Formula | None, ScopedBy("dials")] = None
+    dials: Annotated[_Formula | None, ScopedBy("per_cell")] = None
 
 
 class Estimand(StrEnum):
@@ -128,8 +147,7 @@ class OptimizerChoice(StrictModel):
             "node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
         ),
     )
-    # A bare selection holds no round: the manifest as declared. A campaign's gate is its own.
-    arm_gate: ArmGateMode = "off"
+    arm_gate: ArmGateMode
 
 
 class OptimizationConfig(OptimizerChoice):
@@ -313,7 +331,12 @@ class CampaignConfig(StrictModel):
         "+ graded C (`steer_verdict`, asked when a fork's start is parsed). Nothing declared for "
         "a node = nothing sanctioned there, the restrictive default.",
     )
-    scoring: Annotated[_Formula | dict[str, _Formula], Knob(Estimand.GATE)]
+    scoring: Annotated[
+        _Formula | dict[str, _Formula],
+        Knob(Estimand.GATE),
+        LaidAs(ScoringBlock),
+        ScalarAs("per_sample"),
+    ]
     judges: Annotated[dict[str, JudgeSpec], Knob(Estimand.GATE)] = Field(
         default_factory=dict,
         description="LLM-as-judge graders for datasets whose answer is free text, where no "
@@ -443,30 +466,22 @@ refuse_code_defaults(CampaignConfig)
 
 def start_layer(overrides: ConfigOverrides) -> Layer[str]:
     """A fork's delta: a ``scoring`` mapping is laid into the criterion's block, as the ``score:F`` lens."""
-    return Layer("start", functools.partial(_started, overrides))
+    return Layer("start", _started(overrides))
 
 
-def _started(overrides: ConfigOverrides, held: Mapping[str, object]) -> dict[str, Any]:
+def _started(overrides: ConfigOverrides) -> dict[str, Any]:
     optimization: dict[str, Any] = {}
     if overrides.budget.named:
         optimization["budget"] = overrides.budget.model_dump(mode="json", exclude_unset=True)
     if overrides.nodes:
         optimization["nodes"] = {n: o.model_dump(mode="json") for n, o in overrides.nodes.items()}
     patch: dict[str, Any] = {"optimization": optimization} if optimization else {}
-    if isinstance(overrides.scoring, dict):
-        patch["scoring"] = {**_scoring_block(held.get("scoring")), **overrides.scoring}
-    elif overrides.scoring:
+    if overrides.scoring:
         patch["scoring"] = overrides.scoring
     return patch
 
 
 _TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
-
-
-def _scoring_block(scoring: object) -> dict[str, str]:
-    if isinstance(scoring, dict):
-        return dict(scoring)
-    return {"per_sample": str(scoring)} if scoring else {}
 
 
 def _locked(lock: ScoringLockedRecord, held: Mapping[str, object]) -> dict[str, object]:

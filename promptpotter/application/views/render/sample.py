@@ -72,8 +72,8 @@ def fmt_query_result(
         groups = []
         for node_name, usage in pd.step_tokens.items():
             mark = "~" if usage.estimated else ""
-            io_seg = f"io={mark}{usage.input}/{mark}{usage.output}"
-            if badge := usage.account.prefix(replayed=cached).badge:
+            io_seg = f"io={mark}{usage.tokens.input}/{mark}{usage.tokens.output}"
+            if badge := usage.tokens.prefix(replayed=cached).badge:
                 io_seg += f" {badge}"
             if single_node:
                 groups.append(io_seg)

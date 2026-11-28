@@ -111,15 +111,14 @@ def _row_cell(cell: GradedCell, *, key: str, position: int) -> CellRow:
 
 def _span(
     node: str,
-    cfg: dict[str, Any],
+    call: NodeCall,
     pd: PipelineData,
     recorded: Mapping[str, object],
     variables: dict[str, Any],
     output_keys: list[str],
 ) -> CellSpan:
     usage = pd.step_tokens.get(node)
-    prompt, config = split_rendered_prompt(cfg)
-    call = NodeCall.model_validate(config)
+    prompt, config = split_rendered_prompt(call.laid_keys())
     return CellSpan(
         node=node,
         model=(usage.model if usage else None) or call.model,
@@ -128,9 +127,9 @@ def _span(
         config=config,
         outputs={k: recorded[k] for k in output_keys if k in recorded},
         seconds=pd.step_timings.get(node),
-        input_tokens=usage.input if usage else None,
-        output_tokens=usage.output if usage else None,
-        cache_read_tokens=usage.cache_read if usage else None,
+        input_tokens=usage.tokens.input if usage else None,
+        output_tokens=usage.tokens.output if usage else None,
+        cache_read_tokens=usage.tokens.cache_read if usage else None,
         cost_usd=usage.cost_usd if usage else None,
         rate_priced_usd=usage.rate_priced_usd if usage else None,
         estimated=usage.estimated if usage else False,
@@ -154,8 +153,8 @@ def _assemble(
         "question": pd.question,
     }
     spans = [
-        _span(node, cfg, pd, recorded, variables, list(filed.output_keys.get(node, ())))
-        for node, cfg in described.node_configs
+        _span(node, call, pd, recorded, variables, list(filed.output_keys.get(node, ())))
+        for node, call in described.node_configs
     ]
     attributed = {k for s in spans for k in s.outputs} | _SPAN_KEYS
     return Cell(

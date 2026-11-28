@@ -590,30 +590,6 @@
           },
           "StepUsage": {
             "properties": {
-              "cache_read": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Cache Read"
-              },
-              "cache_write": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Cache Write"
-              },
               "cost_usd": {
                 "anyOf": [
                   {
@@ -643,11 +619,6 @@
                 "default": null,
                 "title": "Finish Reason"
               },
-              "input": {
-                "default": 0,
-                "title": "Input",
-                "type": "integer"
-              },
               "model": {
                 "anyOf": [
                   {
@@ -659,11 +630,6 @@
                 ],
                 "default": null,
                 "title": "Model"
-              },
-              "output": {
-                "default": 0,
-                "title": "Output",
-                "type": "integer"
               },
               "provider": {
                 "anyOf": [
@@ -689,18 +655,6 @@
                 "default": null,
                 "title": "Rate Priced Usd"
               },
-              "reasoning": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Reasoning"
-              },
               "served_by": {
                 "anyOf": [
                   {
@@ -713,6 +667,9 @@
                 "default": null,
                 "title": "Served By"
               },
+              "tokens": {
+                "$ref": "#/$defs/TokenAccount"
+              },
               "unreported_attempts": {
                 "default": 0,
                 "title": "Unreported Attempts",
@@ -720,6 +677,60 @@
               }
             },
             "title": "StepUsage",
+            "type": "object"
+          },
+          "TokenAccount": {
+            "additionalProperties": false,
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum\nadds the parts reported and stays null only where neither side reported one.",
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cache_write": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "reasoning": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
+              }
+            },
+            "title": "TokenAccount",
             "type": "object"
           },
           "TurnRecord": {
@@ -1154,30 +1165,6 @@
           },
           "StepUsage": {
             "properties": {
-              "cache_read": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Cache Read"
-              },
-              "cache_write": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Cache Write"
-              },
               "cost_usd": {
                 "anyOf": [
                   {
@@ -1207,11 +1194,6 @@
                 "default": null,
                 "title": "Finish Reason"
               },
-              "input": {
-                "default": 0,
-                "title": "Input",
-                "type": "integer"
-              },
               "model": {
                 "anyOf": [
                   {
@@ -1223,11 +1205,6 @@
                 ],
                 "default": null,
                 "title": "Model"
-              },
-              "output": {
-                "default": 0,
-                "title": "Output",
-                "type": "integer"
               },
               "provider": {
                 "anyOf": [
@@ -1253,18 +1230,6 @@
                 "default": null,
                 "title": "Rate Priced Usd"
               },
-              "reasoning": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Reasoning"
-              },
               "served_by": {
                 "anyOf": [
                   {
@@ -1277,6 +1242,9 @@
                 "default": null,
                 "title": "Served By"
               },
+              "tokens": {
+                "$ref": "#/$defs/TokenAccount"
+              },
               "unreported_attempts": {
                 "default": 0,
                 "title": "Unreported Attempts",
@@ -1284,6 +1252,60 @@
               }
             },
             "title": "StepUsage",
+            "type": "object"
+          },
+          "TokenAccount": {
+            "additionalProperties": false,
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum\nadds the parts reported and stays null only where neither side reported one.",
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cache_write": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "reasoning": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
+              }
+            },
+            "title": "TokenAccount",
             "type": "object"
           },
           "TurnRecord": {
@@ -1339,6 +1361,10 @@
       ],
       "shape": {
         "$defs": {
+          "NodeCall": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "PipelineParams": {
             "additionalProperties": true,
             "type": "object"
@@ -1360,8 +1386,7 @@
                   "type": "string"
                 },
                 {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/$defs/NodeCall"
                 }
               ],
               "type": "array"
@@ -1426,8 +1451,7 @@
                       "type": "string"
                     },
                     {
-                      "additionalProperties": true,
-                      "type": "object"
+                      "$ref": "#/$defs/NodeCall"
                     }
                   ],
                   "type": "array"
@@ -1451,6 +1475,10 @@
               "dataset_hash"
             ],
             "title": "ArchiveEntry",
+            "type": "object"
+          },
+          "NodeCall": {
+            "additionalProperties": true,
             "type": "object"
           },
           "PipelineParams": {

@@ -105,23 +105,14 @@ def emit_replay_usage(
     price: CallPrice,
     served_by: str | None,
 ) -> None:
-    """Through the run's book, which meters a nested run's replay on its root's ledger too; a
-    muted ledger files nothing."""
+    """A muted ledger files nothing."""
     if (ledger := bound_ledger(node)) is None:
         return
-    book = run_scope().book
-    record = token_usage_record(
-        node=node,
-        usage=usage,
-        duration_s=duration_s,
-        money=price,
-        served_by=served_by,
-        mirrored=False,
+    ledger.append(
+        token_usage_record(
+            node=node, usage=usage, duration_s=duration_s, money=price, served_by=served_by
+        )
     )
-    if book is None:
-        ledger.append(record)
-    else:
-        book.file(record, ledger)
 
 
 def token_usage_record(
@@ -131,8 +122,9 @@ def token_usage_record(
     duration_s: float,
     money: Bill | CallPrice,
     served_by: str | None,
-    mirrored: bool,
 ) -> TokenUsageRecord:
+    """Filed once, on the ledger its run bound; a nested run's names how its root files it."""
+    book = run_scope().book
     return TokenUsageRecord(
         node=node,
         served_by=served_by,
@@ -144,7 +136,7 @@ def token_usage_record(
         cache_write_tokens=usage.cache_write,
         duration_s=float(duration_s),
         money=money,
-        mirrored=mirrored,
+        root_filing=None if book is None else book.root_filing(),
         round=current_round(),
         role=cand.role if (cand := run_scope().measured) else None,
     )

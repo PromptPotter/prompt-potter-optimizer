@@ -8,18 +8,19 @@ import { useViewedDashboard } from "@/lib/state/poll";
 
 ensureChartRegistered();
 
-const NO_SPEND = { rounds: [], series: [], readings: [] } as const;
-
 // How the bill splits by round, as served (`SpendByRound`); the bill itself is the masthead's SPEND.
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useViewedDashboard();
   useThemeVersion();
-  const { rounds, series, readings } = dash?.spend_by_round ?? NO_SPEND;
+  const spend = dash?.spend_by_round;
+  const rounds = spend?.rounds ?? [];
   const { at, events, frame } = useChartReading(rounds.length);
+  // The served sentence where nothing billed: an empty axis says nothing.
+  const empty = spend === undefined ? null : spend.empty;
 
   const labels = rounds.map(String);
   // A kind's ink is its place in the served order, every kind served.
-  const datasets = series.map((s, ink) => ({
+  const datasets = (spend?.series ?? []).map((s, ink) => ({
     label: s.label,
     data: s.billed_usd,
     backgroundColor: seriesColor(ink),
@@ -38,11 +39,18 @@ export const CostStrip = memo(function CostStrip() {
     },
   };
 
-
+  const readings = spend?.readings ?? [];
+  const drawn = spend !== undefined && empty === null;
   return (
     <CardFrame title={<span>Spend by round</span>}>
       <div className="chart-frame" {...frame}>
-        {rounds.length === 0 ? (
+        {drawn ? (
+          <Bar
+            data={{ labels, datasets }}
+            options={options}
+            aria-label="Spend per round, stacked by the buckets that round carried"
+          />
+        ) : (
           <div
             style={{
               color: "var(--color-text-secondary)",
@@ -50,17 +58,11 @@ export const CostStrip = memo(function CostStrip() {
               padding: "var(--space-16)",
             }}
           >
-            Cost lands per round as calls bill. Nothing has been spent yet.
+            {empty}
           </div>
-        ) : (
-          <Bar
-            data={{ labels, datasets }}
-            options={options}
-            aria-label="Spend per round, stacked by the buckets that round carried"
-          />
         )}
       </div>
-      {rounds.length > 0 && (
+      {drawn && (
         <ChartReading hint="Hover, tap or press ← → on the chart to read a round's bill.">
           {at === null ? null : (readings[at] ?? null)}
         </ChartReading>

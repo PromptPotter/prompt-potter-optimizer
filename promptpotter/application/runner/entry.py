@@ -74,6 +74,7 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     CYCLE_TIMELINES,
+    LEDGER_SPEND,
     wall_clock_of,
 )
 from promptpotter.infrastructure.store.io import write_text
@@ -170,14 +171,12 @@ def close_cycle(
             stop_reason=stop_reason,
             cycle_error=cycle_error,
             finished_at=finished_at,
-            # In-memory, never the debounced ``dashboard.json``.
-            spend=observers.dashboard.spend,
+            spend=session.store.campaigns.read(session.hop, LEDGER_SPEND).spend,
             bench=bench,
             selected=selected,
         )
         _finalize_run(
             session,
-            observers,
             cycle_result,
             selected=selected,
             open_round=open_round,
@@ -192,7 +191,6 @@ def close_cycle(
 
 def _finalize_run(
     session: Session,
-    observers: RunObservers,
     cycle_result: CycleResult,
     *,
     selected: SelectedOptimizer,
@@ -224,7 +222,6 @@ def _finalize_run(
     # before the drain renders the artifacts that name the stop.
     declare_run_stop(
         session,
-        observers,
         stop_reason,
         cause=pause_cause,
         detail=detail,
@@ -260,7 +257,6 @@ async def open_line(
         # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
         declare_run_stop(
             session,
-            observers,
             StopReason.REBASED,
             detail=cut.said(session.store),
         )
@@ -512,7 +508,6 @@ async def run_optimization(
                 # Prep sits outside `_run_single_cycle`'s try: undeclared, it leaves a dead run `running`.
                 declare_run_stop(
                     session,
-                    observers,
                     StopReason.PAUSED,
                     cause=(
                         PauseCause.CANCELLED

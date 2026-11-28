@@ -78,7 +78,7 @@ from promptpotter.domain.verification import (
     VerificationPass,
     VerifyReading,
 )
-from promptpotter.infrastructure.llm.money_fold import Money, MoneyFold
+from promptpotter.infrastructure.llm.money_fold import Money, MoneyFold, filed
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     CAMPAIGN,
@@ -92,6 +92,7 @@ from promptpotter.infrastructure.store.read_model import (
     LineScope,
     Moment,
     RecordClasses,
+    enclosing,
     last,
     line_concat,
     line_union,
@@ -1065,24 +1066,27 @@ WALKED_ANSWERS = line_union(_Answers, CAMPAIGN_WALKS)
 PRICED_KEYS = line_union(_PricedKeys, CAMPAIGN)
 
 
-def _spend_then(held: LedgerSpend, own: Money, _: LedgerSpan) -> LedgerSpend:
+def _spend_then(held: LedgerSpend, own: Money, span: LedgerSpan) -> LedgerSpend:
+    own = filed(own, span)
     for rollup in own.by_round.values():
         held.spend.absorb(rollup)
     return LedgerSpend(held.spend, held.calls + own.calls, held.worked_s + own.worked_s)
 
 
+# Each money line reads a cycle with its L4 inner cycles (`enclosing`): a send is filed once.
 LEDGER_SPEND: Line[Money, LedgerSpend] = Line(
-    MoneyFold, lambda: LedgerSpend(SpendRollup(), 0, 0.0), _spend_then, CHAIN
+    MoneyFold, lambda: LedgerSpend(SpendRollup(), 0, 0.0), _spend_then, enclosing(CHAIN)
 )
 # Every cycle's spend read whole: what the line has paid.
-LINE_SPEND = replace(LEDGER_SPEND, over=SUPERSEDE_LINE)
+LINE_SPEND = replace(LEDGER_SPEND, over=enclosing(SUPERSEDE_LINE))
 # The cycle's own: a run's rollup is a snapshot each bank replaces, so two reads of one never move.
-CYCLE_SPEND = replace(LEDGER_SPEND, over=CYCLE)
+CYCLE_SPEND = replace(LEDGER_SPEND, over=enclosing(CYCLE))
 
 
 def _metered_then(
-    held: dict[CeilingMeter, Budget], own: Money, _: LedgerSpan
+    held: dict[CeilingMeter, Budget], own: Money, span: LedgerSpan
 ) -> dict[CeilingMeter, Budget]:
+    own = filed(own, span)
     return {meter: counted.plus(own.metered[meter]) for meter, counted in held.items()}
 
 
@@ -1091,22 +1095,24 @@ CAMPAIGN_METERED: Line[Money, dict[CeilingMeter, Budget]] = Line(
     MoneyFold,
     lambda: dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED),
     _metered_then,
-    CAMPAIGN,
+    enclosing(CAMPAIGN),
 )
-CYCLE_METERED = replace(CAMPAIGN_METERED, over=CYCLE)
+CYCLE_METERED = replace(CAMPAIGN_METERED, over=enclosing(CYCLE))
 
 
 def _by_round_then(
-    held: dict[int, SpendRollup], own: Money, _: LedgerSpan
+    held: dict[int, SpendRollup], own: Money, span: LedgerSpan
 ) -> dict[int, SpendRollup]:
-    for n, rollup in own.by_round.items():
+    for n, rollup in filed(own, span).by_round.items():
         spend_slot(held, n, SpendRollup).absorb(rollup)
     return dict(sorted(held.items()))
 
 
 # Not clamped by a rewind: a round measured twice cost money both times.
-SPEND_BY_ROUND: Line[Money, dict[int, SpendRollup]] = Line(MoneyFold, dict, _by_round_then, CHAIN)
-LINE_SPEND_BY_ROUND = replace(SPEND_BY_ROUND, over=SUPERSEDE_LINE)
+SPEND_BY_ROUND: Line[Money, dict[int, SpendRollup]] = Line(
+    MoneyFold, dict, _by_round_then, enclosing(CHAIN)
+)
+LINE_SPEND_BY_ROUND = replace(SPEND_BY_ROUND, over=enclosing(SUPERSEDE_LINE))
 # This launch's clock over the line's ledgers.
 TIMELINES: Line[Timeline, list[Timeline]] = Line(
     _Timeline, list, lambda held, own, _: [*held, own], SUPERSEDE_LINE
