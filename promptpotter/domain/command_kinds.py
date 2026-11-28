@@ -1030,6 +1030,8 @@ type ArchiveMode = Literal["compact", "restore", "purge-cold", "reclaim"]
 class ArchiveModeInfo(NamedTuple):
     label: str
     sentence: str
+    # Its apply deletes for good: nothing puts the rows back.
+    irreversible: bool = False
 
 
 #: What each archive verb does, as the operator picks one.
@@ -1048,11 +1050,13 @@ ARCHIVE_MODE_INFO: Worded[ArchiveMode, ArchiveModeInfo] = Worded(
             "Purge",
             "Deletes the compressed copy for good. The rows cost real money and hours to measure "
             "again, and nothing puts them back.",
+            irreversible=True,
         ),
         "reclaim": ArchiveModeInfo(
             "Reclaim",
             "Deletes every answer one dataset measured, and names the runs that lose them. "
             "Nothing puts them back.",
+            irreversible=True,
         ),
     }
 )
@@ -1397,7 +1401,7 @@ class MintApiTokenPayload(CommandPayload, kind=CommandKind.MINT_API_TOKEN):
     scopes: list[str] = Field(
         min_length=1,
         max_length=16,
-        description="The `/grant` names it may command; reads need none.",
+        description="The `grant-delegation` names it may command; reads need none.",
     )
 
 

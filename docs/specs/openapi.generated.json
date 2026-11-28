@@ -11213,7 +11213,7 @@
             "type": "string"
           },
           "scopes": {
-            "description": "The `/grant` names it may command; reads need none.",
+            "description": "The `grant-delegation` names it may command; reads need none.",
             "items": {
               "type": "string"
             },
@@ -18711,7 +18711,7 @@
             "title": "Revoked At"
           },
           "scopes": {
-            "description": "The `/grant` names of what it may command.",
+            "description": "The `grant-delegation` names of what it may command.",
             "items": {
               "type": "string"
             },

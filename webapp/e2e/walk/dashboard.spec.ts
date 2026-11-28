@@ -44,6 +44,16 @@ test.describe("dashboard", () => {
     await ready(page);
   });
 
+  test("the remote control opens on the served run's limits", async ({ page }) => {
+    // `RemotePanel` mounts only when open, so its read of the cycle's caps renders nowhere else.
+    const remote = page.getByRole("group", { name: "Campaign remote control" });
+    await remote.getByRole("button", { name: "Job status and configuration" }).click();
+    const panel = page.getByRole("region", { name: "Job status and configuration" });
+    await expect(panel.getByText("Finishing criteria")).toBeVisible();
+    // The world's run ended on its round budget: the cap stands armed at a whole count.
+    await expect(panel.getByRole("spinbutton", { name: "Round cap in rounds" })).toHaveValue(/^[1-9]\d*$/);
+  });
+
   test("every canvas is named for a screen reader", async ({ page }) => {
     const unnamed = await page.locator("canvas:not([aria-label]):not([aria-hidden='true'])").count();
     expect(unnamed, "a <canvas> is on screen with no accessible name").toBe(0);

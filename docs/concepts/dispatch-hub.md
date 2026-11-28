@@ -147,7 +147,7 @@ The registered signals are every `@signal(…)` under `dispatch/injections/` —
 | where it is produced | the bound that judges it |
 |---|---|
 | an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary, never a wire `maxLength` ([`structured-output.md`](../research/structured-output.md) § Enforcement is provider-dependent) |
-| operator-authored framing (`task_context`) | `TaskDecomposition.check_budget` at mint — per field and in total |
+| operator-authored framing (`task_context`) | `TaskDecomposition.check_budget` at mint — per field and in total; a shipped one at import (`dataset_access.py::check_shipped_framings`) |
 | a derived/measurement view | its own `*_RENDER_CAP` top-K, bounding rows rather than characters |
 
 `char_cap` catches only what those missed, on the indivisible panels alone: `facade.py::_cap_runaway` is the runaway backstop and emits `injection_budget_overrun`. No other panel carries one — a set of production caps chosen one at a time has a sum nobody owns.

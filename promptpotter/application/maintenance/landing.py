@@ -67,6 +67,7 @@ from promptpotter.infrastructure.store.data_root import (
 )
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_SWAP_DIR,
+    check_shipped_framings,
     complete_definition_swap,
 )
 from promptpotter.infrastructure.store.io import (
@@ -95,7 +96,7 @@ def complete_registries() -> None:
     """Every registry whose members import back up the stack, completed as this module imports:
     every entry imports it to land, so no process reads a ledger or a member before. The recursion's
     connector is the application's own built-in, registered here; the roster gains the readers no
-    run imports, every projection and the health probes' standing."""
+    run imports, every projection and the health probes' standing; each shipped framing is in budget."""
     connectors.CONNECTORS.complete((spawn.__name__, spawn.CONNECTOR))
     for name, connector in connectors.CONNECTORS.table.items():
         if shadowed := connector_name_refusals(connector.cell_terms, connector.reported_keys):
@@ -114,6 +115,7 @@ def complete_registries() -> None:
     for connector in connectors.CONNECTORS.table.values():
         if connector.completion_check is not None:
             connector.completion_check()
+    check_shipped_framings()
 
 
 def check_treatment(name: str) -> None:

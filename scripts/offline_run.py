@@ -183,8 +183,13 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import CYCLE_INDEX, LEDGER_SPEND
-from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
-from promptpotter.infrastructure.store.io import rmtree_robust
+from promptpotter.infrastructure.store.dataset_access import (
+    MATERIALIZED_PANEL_FILE,
+    install_dataset,
+    read_dataset_definition,
+    resolve_dataset,
+)
+from promptpotter.infrastructure.store.io import rmtree_robust, write_yaml
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     dataset_id_prefix,
@@ -263,6 +268,8 @@ L4 = "l4"
 # The browser walk's L4 fixture: an outer potter campaign whose every cell runs an inner potter
 # campaign on `DATASET`, in this world.
 L4_DATASET = "promptpotter-self/e2e"
+# The inner benchmarks its search seats measure: two, so a round draws across them.
+L4_BENCHMARKS = (DATASET, "justlogic/d234-held")
 HEALED = "healed"
 HEALS: dict[str, tuple[Heal, ...]] = {
     "L1CritiqueOutput_0": (Heal.EMPTY,),
@@ -337,11 +344,14 @@ SCALED: dict[str, dict[str, Any]] = {
 }
 
 
-def stand_in_fetch(stores: Stores, samples: list[Sample]) -> None:
-    """The synthetic rows as the cut of the definition's own `source:`: no fetch reaches the hub."""
-    src = definition_source(resolve_dataset(stores, DATASET))
-    assert src is not None, f"{DATASET} names a source"
-    stores.tenant_datasets.record_cut(cut_identity(src), Bank.of(samples))
+def stand_in_fetch(
+    stores: Stores, samples: list[Sample], datasets: tuple[str, ...] = (DATASET,)
+) -> None:
+    """The synthetic rows as the cut of each definition's own `source:`: no fetch reaches the hub."""
+    for name in datasets:
+        src = definition_source(resolve_dataset(stores, name))
+        assert src is not None, f"{name} names a source"
+        stores.tenant_datasets.record_cut(cut_identity(src), Bank.of(samples))
 
 
 def synthetic_rows(n: int) -> list[Sample]:
@@ -1094,15 +1104,40 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
         )
 
 
+def mixed_panel(stores: Stores) -> None:
+    """The fixture's panel as a source recipe would materialize it into the tenant tier, two search
+    seats on each of `L4_BENCHMARKS`: a round's draw spreads over them, its walk interleaves them
+    (`rasch.py::build_round_order`) and the origin panel seats each, as no one-benchmark panel can."""
+    definition = read_dataset_definition(resolve_dataset(stores, L4_DATASET))
+    assert definition is not None and definition.panel is not None, f"{L4_DATASET} owns a panel"
+    search = [
+        {
+            "kind": "seat",
+            "id": f"{name.replace('/', '-')}/seed-{seed}",
+            "inner_dataset": name,
+            "run_seed": seed,
+        }
+        for name in L4_BENCHMARKS
+        for seed in (0, 1)
+    ]
+    held = {"kind": "seat", "id": "justlogic-d234/seed-2", "held_out": True, "run_seed": 2}
+    panel = {**definition.panel, "tasks": [*search, held]}
+    materialized = stores.tenant_datasets.materialized_panel_dir(L4_DATASET)
+    write_yaml(materialized / MATERIALIZED_PANEL_FILE, panel)
+
+
 async def run_l4(workspace: Path, *, rows: int) -> None:
     """The fixture's knobs, its spend cap lifted and its draws seeded: the inner runs execute the
     optimizer code a change touches, and the outer trace reads what they measured."""
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     samples = synthetic_rows(rows)
-    stand_in_fetch(stores, samples)
+    stand_in_fetch(stores, samples, L4_BENCHMARKS)
+    mixed_panel(stores)
     raw = dict(dataset_campaign_block(resolve_dataset(stores, L4_DATASET)))
     opt = raw["optimization"]
     opt.update(budget={**opt["budget"], "usd": 1000.0}, determinism={"seed": 0})
+    # A round draws all four search seats, spread by benchmark: its walk interleaves them.
+    opt["nodes"]["adaptive_queue"]["config"].update(sp_budget_round=4, strata="dataset")
     config = CampaignConfig.model_validate(raw)
     harness = Harness.installed(workspace, text_templates(config), samples, crossing=False)
     session, result = await run_campaign(
@@ -1438,7 +1473,7 @@ _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
 _FORK_ID = re.compile(r"cycle_[0-9a-f]{8,}_fork_[0-9a-f]{8}")
 _CAMPAIGN_ID = re.compile(
     # A root campaign's 6 hex, an inner one's 12 (`spawn.py::inner_campaign_id`).
-    f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (DATASET, L4_DATASET))})__[0-9a-f]{{6}}(?:[0-9a-f]{{6}})?"
+    f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (*L4_BENCHMARKS, L4_DATASET))})__[0-9a-f]{{6}}(?:[0-9a-f]{{6}})?"
 )
 _SESSION_ID = re.compile(r"\bs_[0-9a-f]{8}\b")
 _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")

@@ -9,11 +9,13 @@ import time
 from promptpotter.application import health
 from promptpotter.application.account import trails_since
 from promptpotter.application.app_visits import due_digest, mark_told
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.power import PowerLevel, power_change
 from promptpotter.application.views.trail import trail_fields
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.outbound import notify_operator, post_json
+from promptpotter.infrastructure.producer_lock import minted_producer
 from promptpotter.shared.clock import utcnow_iso
 
 _TRAIL_WINDOW_H = 24
@@ -39,6 +41,22 @@ def tell_landed(tally: str) -> None:
         notify_operator(
             f"landed the data root: {tally}. `land-data --dry-run` lists each line.", ring=False
         )
+
+
+def tell_shutdown(registry: JobRegistry) -> None:
+    """The server's runs in flight as it stops, told. A clean exit 0 leaves ``Restart=on-failure``
+    quiet; a SIGKILL or OOM never reaches this."""
+    own = minted_producer(registry.jobs_dir)
+    running = [] if own is None else [j for j in registry.list_running() if j.producer_id == own]
+    name = settings.BRAND_SERVICE_NAME
+    if not running:
+        notify_operator(f"{name} stopped (nothing of its own running).", ring=False)
+        return
+    notify_operator(
+        f"⚠ {name} stopped with {len(running)} run(s) in flight: "
+        f"{', '.join(job.what for job in running)}\nResume from the campaign once it is back up.",
+        ring=True,
+    )
 
 
 def tell_poll(token: str, refused: str | None) -> None:

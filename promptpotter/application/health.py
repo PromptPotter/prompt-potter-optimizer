@@ -34,6 +34,7 @@ from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.records.workspace import HealthReader, HealthRecord, HealthState
+from promptpotter.domain.said import Said
 from promptpotter.infrastructure.identity.accounts import build_identity_bundle
 from promptpotter.infrastructure.identity.grants import default_identity_paths
 from promptpotter.infrastructure.identity.oidc import CodeExchangeError
@@ -206,6 +207,15 @@ def webapp_bundle() -> Reading | None:
     if built is None:
         return Reading("broken", "the page carries no build stamp")
     return Reading("broken", "the page was built from another webapp/ than this checkout's")
+
+
+def stale_page() -> Said | None:
+    """The page's own build, said where the checkout moved past it: `/health` serves it."""
+    bundle = webapp_bundle()
+    if bundle is None or bundle.state != "broken":
+        return None
+    label = "This page is out of date"
+    return Said(key=WEBAPP_BUNDLE, tone="warn", label=label, sub=f"{bundle.said}: {REBUILD}.")
 
 
 def _webapp_probe() -> Probe:

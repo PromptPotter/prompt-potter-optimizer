@@ -316,7 +316,7 @@ HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
   warns.
 
 **What it tells you, and how loud.** It rings for what wants you now: a health probe turning broken,
-a new account (`/block` it or not), a sign-up refused at `MAX_ACCOUNTS`, the server stopping
+a new account (`/block-email` it or not), a sign-up refused at `MAX_ACCOUNTS`, the server stopping
 runs it was serving, the box losing power or its battery reaching 15%. It is silent for the record:
 a probe working again, a stop with nothing of its own running (a detached run continues,
 unannounced), power back, the daily outside-visits digest. The
@@ -338,17 +338,21 @@ on the parent domain (`app.example.com` → `example.com`). This app's record sk
 signed out, and the public site flags its visits `self`, so the morning briefing never counts you.
 `?self=1` on any site page marks a browser that never signs in; `?self=0` takes the mark off.
 
+A write is the terminal's verb of the same name, run on the terminal's own grammar
+(`presentation/admin_bot.py::_FILED`; quote a text holding spaces): a misspelling answers that verb's
+usage, and any other message the list of commands.
+
 | You send | Effect |
 |---|---|
-| `/block <email>` · `/unblock <email>` · `/blocked` | Withdraw access (every command refused from the next request), give it back, list. |
-| `/grant <sub_user_id> step,create` · `/revoke <sub_user_id>` · `/grants` | Delegate an attenuated sub-principal into your workspace, remove it, list. The id is the delegate's own account modal's (`/auth/me`). |
-| `/coupon <user_id> <usd\|-> <tokens\|-> [afresh]` | Set that account's coupon (`-` leaves a unit unbounded); `afresh` starts its draw now, so nothing charged before counts. The bill is never moved. |
-| `/delete <user_id>` | Delete that account: its tree (campaigns, keys, bill), tokens, grants, sign-ins and bulletin dismissals. Refused for the host's and while it runs anything; the terminal's `delete-account` files the same command. |
-| `/trail <email>` | What that account did, oldest first, across every workspace it owns or acts in; the terminal's `trail <email>` reads the same. |
+| `/block-email <email>` · `/unblock-email <email>` · `/blocked` | Withdraw access (every command refused from the next request), give it back, list. |
+| `/grant-delegation <sub_user_id> step,create` · `/revoke-delegation <sub_user_id>` · `/grants` | Delegate an attenuated sub-principal into your workspace, remove it, list. The id is the delegate's own account modal's (`/auth/me`). |
+| `/set-coupon <user_id> --max-usd <usd\|unbounded> --max-tokens <n\|unbounded> [--afresh]` | Set that account's coupon; `--afresh` starts its draw now, so nothing charged before counts. The bill is never moved. |
+| `/delete-account <user_id>` | Delete that account: its tree (campaigns, keys, bill), tokens, grants, sign-ins and bulletin dismissals. Refused for the host's and while it runs anything. |
+| `/trail <email>` | What that account did, oldest first, across every workspace it owns or acts in. |
 | `/spend` | Every account's spend and output. |
-| `/bulletin [popup] <text>` | Post a bulletin to every account; `popup` opens it on every page load until each account dismisses it. The terminal's `post-bulletin` files the same command. |
+| `/post-bulletin [--pops-up] "<text>"` · `/bulletins` · `/withdraw-bulletin <id>` | Post a bulletin to every account (`--pops-up` opens it on every page load until each account dismisses it), list what stands with each id, take one back. |
 
-With a passphrase set, prefix **every** message with it (`my-word /block alice@example.com`). A
+With a passphrase set, prefix **every** message with it (`my-word /block-email alice@example.com`). A
 refused message and a lost one look identical in Telegram; `journalctl -u $APP_NAME-admin-bot`
 tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit.jsonl` in
 `.promptpotter/identity/`.

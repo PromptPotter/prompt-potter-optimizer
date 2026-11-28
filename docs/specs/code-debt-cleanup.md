@@ -768,60 +768,34 @@ never a copy of history.
 one `Verb` row; every write goes through `CommandDispatcher.dispatch`; everything on stdout is also on disk;
 the served contract is generated and the browser derives nothing; mobile first.
 
-- **The host door's import closure loads the LLM client** (w11-web3 census, 11-28):
-  `application/host_surface.py` imports `bench/task_context.py::checkin_template`, which imports
-  `bench/llm_call.py`, so the stdio host fact in `tests/test_security.py` runs 2.05–2.44 s against the 2 s
-  budget. The template reads only `optimizer_manifest.py`. Root: `checkin_template` moves into
-  `optimizer_manifest.py`, with no lazy import. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -c "bench.task_context" -- promptpotter/application/host_surface.py` is 0.
+- **The host door's import closure loads the LLM client** (w11-web3 census, 11-28; w11-cli, 11-28):
+  `host_surface.py` imports `commands/dispatcher.py`, whose `jobs/launcher/launch.py` →
+  `launcher/checkin.py` → `mint_and_start.py` → `datasets/draft_build.py` → `jobs/mint.py` imports
+  `bench/task_context.py` (`campaign_framing`, `checkin_provider`, `commit_task_framing`,
+  `committed_task_context`), which imports `bench/llm_call.py`; so the stdio host fact in
+  `tests/test_security.py` runs 2.2 s against the 2 s budget (2.4 s before `checkin_template` moved into
+  `optimizer_manifest.py`). Root: the framing `jobs/mint.py` reads lives below `bench/`, beside the
+  manifest it reads. **Rides with:** area 05's chain. **Re-test:**
+  `git grep -c "bench.task_context" -- promptpotter/application/jobs/mint.py` is 0.
 - **A locked act's reason is written in the browser** (w11-web3 census, 11-28):
   `RunLimitsControl.tsx:190` and `AccountPreferencesTab.tsx:34` both spell "not yours to set", because
   `lib/hooks/useFiles.ts::useFiles` answers only a boolean from `filable`. Root: the served filable answer
   carries its refusal as a `Said` row, and `useFiles` returns it. **Rides with:** area 12's chain.
   **Re-test:** `git grep -c "not yours to set" -- webapp/components` is 0.
-- **No walk spec opens the remote panel** (w11-web3 census, 11-28): `RemoteControl.tsx:31` mounts
-  `RemotePanel` (provenance, `RunLimitsControl`) only when open, and no file under `webapp/e2e` names the
-  remote control, so the panel's render against a served cycle rides RTL tests alone. Root: a walk spec
-  opens the remote on a served run and reads its limits. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -c "Campaign remote control" -- webapp/e2e/walk` is at least 1.
-- **The CLI's welcome and the archive modes are spelled beside their rows** (w11-web3 census, 11-28):
-  `cli/main.py::main` hand-writes five verbs and their help beside the `VERBS` rows that carry it;
-  `cli/main.py`'s `compact-archive` choices restate `command_kinds.py::ArchiveMode`, and
-  `cli/commands/writes.py::_render` and `ArchiveCompactionControl.tsx`'s `DELETES` each re-spell
-  `("purge-cold", "reclaim")` as the irreversible pair. Root: the welcome draws from `VERBS` (a `Verb` flag
-  names the listed ones), `ArchiveModeInfo` serves `irreversible`, and the choices come from
-  `get_args(ArchiveMode)`. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -cE '"purge-cold",? "reclaim"' -- promptpotter webapp/components` is 1 (4 now).
-- **A refused Ctrl+C pause is swallowed** (w11-web3 census, 11-28): `cli/commands/launch.py`'s
-  `ctrl_c_pauses._pause_each` and `ctrl_c_stops_pass._stop` wrap the dispatch in
-  `contextlib.suppress(PotterError)`, so a refused pause or cancel says nothing while the run goes on;
-  `_ctrl_c.send` in the same file says its refusal. Root: both go through `send`, said with its
-  `next_acts`. **Rides with:** area 12's chain. **Re-test:** `git grep -c "suppress(PotterError)" --
-  promptpotter/presentation/cli/commands/launch.py` is 0 (2 now).
 - **A terminal launch's start-up summary is said on stderr only** (w11-web3 census, 11-28):
   `cli/commands/launch.py::_run_origin` and `_resume` say the reached backend URL, the dataset and its query count,
   the node list and the minted campaign through `_checkin_line` and `log_startup_summary`, a logger on
   stderr; no `readout.log` holds them and no other door says them. Root: the readout's header renders
-  them, and the CLI hands only its line sink. **Rides with:** area 12's chain. **Re-test:**
+  them, and the CLI hands only its line sink. w11-cli: the header's writer is
+  `run_observers.py::_bind_observers`, which builds the `ReadoutProjection` with no backend client and
+  opens it; the backend URL and the node list reach the readout only through that constructor, so the
+  fix rides with the chain owning `run_observers.py`. **Rides with:** area 05's chain. **Re-test:**
   `git grep -cE "_checkin_line\(|log_startup_summary\(" -- promptpotter/presentation/cli/commands/launch.py`
   is 0 (14 now).
-- **The server's adapter words health and shutdown itself** (w11-web3 census, 11-28):
-  `promptpotter/main.py::health_check` builds the stale-bundle `Said` row beside `health.py::WEBAPP_BUNDLE`,
-  and `promptpotter/main.py::_telegram_shutdown_notice` decides which jobs are this producer's and words the notice. Root:
-  `health.py` serves the bundle row and `notices.py` owns the notice. **Rides with:** area 12's chain.
-  **Re-test:** `git grep -cE "This page is out of date|stopped with" -- promptpotter/main.py` is 0.
-- **The admin bot keeps its own verb table, grammar and spend sums** (w11-web3 census, 11-28):
-  `admin_bot.py::handle_command` is a 13-branch if-chain with `_USAGE`, parsing each kind by hand
-  (`_set_coupon` spells unbounded `-` where the CLI spells `unbounded`), and `_render_install_spend`
-  totals and flags the install's spend outside `application/views/`. Root: the bot's commands derive from
-  `CommandKind` rows and their payload spellings as `cli/main.py::command_verb` does, and
-  `jobs/install_spend.py` serves the totals the views render. **Rides with:** area 12's chain.
-  **Re-test:** `git grep -cE "if command (==|in)|def _render" -- promptpotter/presentation/admin_bot.py` is 0.
-- **The maintenance verbs' renderers live in the CLI adapter** (w11-web3 census, 11-28):
-  `cli/commands/writes.py::_render_summary`, `_render_landing`, `_render` and `_render_inventory` format
-  the reset, landing and archive reports in `cli/`, where every renderer is `application/views/`'s. Root:
-  they move to `application/views/render`, and the verbs hand back the text. **Rides with:** area 12's
-  chain. **Re-test:** `git grep -c "def _render" -- promptpotter/presentation/cli` is 0 (4 now).
+- **The admin bot keeps its own spend sums** (w11-web3 census, 11-28): `admin_bot.py::_render_install_spend`
+  totals and flags the install's spend outside `application/views/` (the verb table and grammar now
+  ride the CLI's rows: w11-cli). Root: `jobs/install_spend.py` serves the totals the views render.
+  **Rides with:** area 05's chain. **Re-test:** `git grep -c "def _render" -- promptpotter/presentation/admin_bot.py` is 0.
 - **Adapters over a flat served shape** (webb-5's): `useCandidatesModel.ts` joins about twelve sources;
   `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
   served rows carry what the adapters join. **Rides with:** webd. **Re-test:**
@@ -968,6 +942,9 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+  w11-tests5: not reproduced beside 12 CPU spinners or a busy pytest on 4-core Linux; suspect
+  `read_model.py::shielded` catching `io.py::_holding`'s `TimeoutError` (an `OSError`) as
+  `derived_file_stale` under lock contention.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
@@ -997,6 +974,8 @@ budgets.
   unpinned panel (L4's is pinned) and a moved roster is a moved bank, so the resume refuses on the
   origin before run init restates it. Door: `world.campaign` on an owning connector whose panel
   moves without its rows. **Rides with:** area 14's chain. **Re-test:** the fact sets no workload.
+  w11-tests5: `World.opened` takes a connector and `World.campaign` does not, so the door is a
+  `connector=` on `tests/world.py::World.campaign`.
 - **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
   "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
   with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
@@ -1033,6 +1012,12 @@ budgets.
   queues behind the clone's lock (`scripts/queue_then.py`) rather than sharing its hard-coded 90 s
   worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127
   runs). **Re-test:** five looping builders plus one gate on the Windows desk reap none.
+- **A vitest test's 5 s budget pays a fresh module graph** (group M's full gate, 2026-11-28):
+  `stale-build.test.ts`'s stream test calls `vi.resetModules()` and re-imports `lib/api/client` and
+  `lib/live-stream` inside the test, so its time is the graph's transform under the gate's load. It
+  timed out at 5.10 s at 0.37 cpu/wall; the same tree's vitest alone ran green in 103 s at 0.93. The
+  stale flag is module state that a test can only reset by importing the module again. **Re-test:** the
+  file's slowest test stays under 1 s inside a full gate.
 - **capo's skip twin moved once on the Windows desk** (w8-tests3's leg, 2026-11-27): the full gate
   on 6b3f691b3 read "a skip stands at [3] cells, its twin paused inside round 1 and resumed, skip,
   decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
@@ -1054,18 +1039,16 @@ budgets.
 - **A torn-bill fact takes 3.08 s** (w11-tests2):
   `test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill` runs over the 2 s budget.
   **Rides with:** area 14's chain. **Re-test:** `pytest --durations=10` does not list it.
-- **No offline leg draws a mixed-benchmark round** (draw-strata, 11-18):
-  `scripts/offline_run.py::run_l4` — the L4 leg (`L4_DATASET = "promptpotter-self/e2e"`) seats one
-  search and one held-out cell on one benchmark, so `build_round_order`'s interleave and
-  `origin_panel`'s per-benchmark seats are proved by pytest alone and a regression moves no leg — the
-  e2e L4 panel seats two benchmarks — **Rides with:** `area 14's chain` — **Re-test:** `potter/l4`
-  moves against a base that draws by δ alone. (item 541)
-- **A shipped-data scan lives in test_identity** (tw-3, 11-25):
-  `tests/test_identity.py::test_every_committed_datasets_framing_reads_within_its_budget` — a repo-wide
-  scan of shipped data run as a test — the check runs at import in the registry that owns it
-  (`application/CLAUDE.md` § Registries complete at import), then the test goes — **Rides with:**
-  `area 14's chain` — **Re-test:** the test is gone and an over-budget framing refuses at import.
-  (item 200)
+  w11-tests5: 0.02 s on 4-core Linux, so the 3.08 s is a desk reading: re-test on the Windows desk;
+  the spinning reader's switch interval is the suspect.
+- **Nothing checks that an offline run reproduces the keys it wrote** (w11-tests5):
+  `scripts/offline_run.py::_CAMPAIGN_ID` knew only two benchmarks, so a third's inner ids reached the
+  estimator raw, and since those ids embed `cell_estimator` the key had no fixpoint (b118 → 816e →
+  c734) until w11-tests5 keyed them by benchmark. The gate's offline-run check reads "ok 2.0 s" on a
+  kept green whose key file the next run rewrites. Root: no key embeds an id cut from itself, and the
+  check proves the written `behaviour_keys.json` a fixpoint without a second full run. **Rides with:**
+  area 14's chain.
+  **Re-test:** a key that embeds itself fails the gate on its first run.
 - **A rule the suite reaches only through a round is decided where no table can reach it** (w10-tests
   link 1): the slowest `offline` facts walk a campaign to reach one decision, e.g.
   `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`

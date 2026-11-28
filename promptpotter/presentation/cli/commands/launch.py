@@ -158,13 +158,7 @@ def ctrl_c_pauses(
     dispatcher: CommandDispatcher, pauses: Sequence[PauseCyclePayload]
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
     """The first Ctrl+C sends *pauses* as the browser's press does, and nothing more; the second force-quits."""
-
-    async def _pause_each() -> None:
-        for pause in pauses:
-            with contextlib.suppress(PotterError):
-                await dispatcher.dispatch(CommandCall(pause, door=Door.TERMINAL))
-
-    return _ctrl_c(dispatcher, _pause_each)
+    return _ctrl_c(dispatcher, pauses)
 
 
 def ctrl_c_stops_pass(
@@ -172,28 +166,28 @@ def ctrl_c_stops_pass(
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
     """A paid pass's Ctrl+C: the `cancel` of *call*'s command, as every other door's; the second
     press force-quits."""
-
-    async def _stop() -> None:
-        with contextlib.suppress(PotterError):
-            cancel = CancelPayload(command_id=call.command_id)
-            await dispatcher.dispatch(CommandCall(cancel, door=Door.TERMINAL))
-
-    return _ctrl_c(dispatcher, _stop)
+    return _ctrl_c(dispatcher, [CancelPayload(command_id=call.command_id)])
 
 
 @contextlib.contextmanager
 def _ctrl_c(
-    dispatcher: CommandDispatcher, stop: Callable[[], Coroutine[Any, Any, None]]
+    dispatcher: CommandDispatcher, stops: Sequence[CommandPayload]
 ) -> Iterator[Callable[[CyclePayload], None]]:
+    """Each payload the run is handed, and the first Ctrl+C's *stops* in order, are sent as any
+    door's press; a refusal is said with its acts, and the run goes on."""
     loop = asyncio.get_running_loop()
     asked: set[asyncio.Task[None]] = set()
 
-    async def send(payload: CyclePayload) -> None:
+    async def send(payload: CommandPayload) -> None:
         try:
             await dispatcher.dispatch(CommandCall(payload, door=Door.TERMINAL))
         except PotterError as exc:
             for line in (refusal_words(exc), *acts_line(exc.next_acts)):
                 print(f"  {line}", flush=True)
+
+    async def stop() -> None:
+        for payload in stops:
+            await send(payload)
 
     def _spawn(coro: Coroutine[Any, Any, None]) -> None:
         task = loop.create_task(coro)

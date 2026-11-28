@@ -17,7 +17,7 @@ RUN_USER="${RUN_USER:-$USER}"
 # The data root, which the app's unit already carries (install-service.sh). The bot reads AND writes
 # the same identity tree, and `config/paths.py::user_data_root` falls back to the CHECKOUT's
 # `.promptpotter/` when this is unset — so a bot without it answers `/spend` with "No accounts on
-# this install" over a populated box, and lands a `/block` in a tree the app never reads, replying
+# this install" over a populated box, and lands a `/block-email` in a tree the app never reads, replying
 # success. Unset = the tree still lives under $INSTALL_DIR, which is where it began.
 DATA_DIR="${DATA_DIR:-}"
 # Both follow the root: the cwd because it is what the fallback above resolves from, and the write
@@ -116,7 +116,7 @@ useful commands:
 
 now message your bot:
   /blocked
-  /block someone@example.com
+  /block-email someone@example.com
 
 upgrading from the pre-blocklist unit? the old one is a DIFFERENT service and is
 still installed — retire it once, or it competes for the same getUpdates offset:

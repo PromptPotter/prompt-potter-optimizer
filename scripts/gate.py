@@ -1190,16 +1190,12 @@ def _doc_claims(_: Selection) -> Outcome:
     return 0, ""
 
 
-# `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
-_BBEH_DIR = "paper/bbeh-comparison"
-_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/", "notebooks/", _BBEH_DIR)
-
-
 def _ruff(*argv: str) -> Callable[[Selection], Outcome]:
     def check(sel: Selection) -> Outcome:
         # Staged, only its config or the gate moving lints the whole tree: others' files stay theirs.
+        # Either way ruff's own discovery and `pyproject.toml`'s excludes are the one file set.
         whole = not sel.staged or any(p in ("pyproject.toml", *_GATE) for p in sel.staged_paths)
-        paths = _RUFF_TARGETS if whole else sel.py_files
+        paths = (".",) if whole else sel.py_files
         if not paths:
             return 0, ""
         return run(_py("ruff", *argv, "--force-exclude", *paths), REPO)
@@ -1397,7 +1393,6 @@ _BELOW_PRESENTATION = (
     ),
     *(prefix for prefix in _ENGINE_RUNTIME if not prefix.startswith("promptpotter/")),
 )
-_RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 
 
 @dataclass(frozen=True)
@@ -1675,9 +1670,9 @@ CHECKS: tuple[Check, ...] = (
         _ruff("format", "--check"),
         mb=185,  # 146
         tier="commit",
-        reads=_RUFF_READS,
+        reads=_TREE,
     ),
-    Check("ruff-check", "py", _ruff("check"), mb=235, tier="commit", reads=_RUFF_READS),  # 186
+    Check("ruff-check", "py", _ruff("check"), mb=235, tier="commit", reads=_TREE),  # 186
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO), mb=50),  # 37
     Check("mypy", "py", _mypy, mb=715),  # 570
     Check(

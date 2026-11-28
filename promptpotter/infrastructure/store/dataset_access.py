@@ -14,7 +14,7 @@ import yaml
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from promptpotter import connectors
-from promptpotter.config.paths import install_datasets_root
+from promptpotter.config.paths import install_datasets_root, research_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import CampaignLayer
@@ -328,6 +328,14 @@ def read_dataset_framing(dataset: ResolvedDataset) -> DatasetFraming:
     """The dataset's own ``task.md``, else its nearest family's."""
     held = (d / FRAMING_FILE for d in reversed(definition_chain(dataset)))
     return read_framing_file(next((path for path in held if path.is_file()), None))
+
+
+def check_shipped_framings() -> None:
+    """Every shipped tier's committed ``task.md`` within its budget, checked where the registries
+    complete: one over it refuses every process, never a launch on its dataset at mint."""
+    for root in filter(None, (install_datasets_root(), research_datasets_root())):
+        for path in sorted(root.rglob(FRAMING_FILE)):
+            read_framing_file(path).framing.check_budget(source=path.relative_to(root).as_posix())
 
 
 def render_framing_file(description: str, framing: TaskDecomposition) -> str:

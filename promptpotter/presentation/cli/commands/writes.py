@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections import Counter
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -17,20 +16,23 @@ from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.datasets.startability import offer_extras
 from promptpotter.application.maintenance.archive_maintenance import (
-    ArchiveInventory,
-    ArchiveReport,
     inventory_measurement_archive,
     reindex_measurement_archive,
 )
 from promptpotter.application.maintenance.landing import (
-    LandedStamp,
     Landing,
     apply_landing,
     holding_landing,
     last_landing,
     plan_landing,
 )
-from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, plan_reset
+from promptpotter.application.maintenance.reset import apply_reset, plan_reset
+from promptpotter.application.views.render.maintenance import (
+    render_compaction,
+    render_inventory,
+    render_landing,
+    render_reset,
+)
 from promptpotter.config.paths import default_projects_root
 from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.command_kinds import (
@@ -95,25 +97,6 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
 REFUSED = 3
 
 
-def _render_summary(plan: ResetPlan) -> str:
-    lines = [f"reset under: {', '.join(str(root) for root in plan.roots)}"]
-    counts: Counter[str] = Counter()
-    sizes: Counter[str] = Counter()
-    for drop in plan.drops:
-        if drop.kind is not None:
-            counts[drop.kind.name] += 1
-            sizes[drop.kind.name] += drop.size
-    lines += [
-        f"  - {counts[name]:,} {name} file(s), {sizes[name] / 1_048_576:.1f} MiB"
-        for name in sorted(counts)
-    ]
-    lines += [f"  ? unknown {drop.path}" for drop in plan.drops if drop.kind is None]
-    lines.append(f"  kept: {plan.kept:,} survivor, cache and machine file(s)")
-    if plan.refusal is not None:
-        lines.append(f"  refused: {plan.refusal}")
-    return "\n".join(lines)
-
-
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     plan = plan_reset(
         default_projects_root(),
@@ -124,7 +107,7 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     )
     roots = [str(root) for root in plan.roots]
     drops = [str(drop.path) for drop in plan.drops]
-    summary = _render_summary(plan)
+    summary = render_reset(plan)
 
     if plan.refusal is not None:
         return CommandResult(
@@ -162,21 +145,6 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _render_landing(landing: Landing, *, written: bool, last: LandedStamp | None) -> list[str]:
-    lines = [] if last is None else [f"last landed {last.at}", *(f"  {s}" for s in last.said)]
-    # A reset's line is among them: `reset --dry-run` breaks it down by kind.
-    lines += landing.said
-    lines += [f"unknown {path}" for path in landing.unknown]
-    lines += [f"unloadable {one.said}" for one in landing.unloadable]
-    if landing.tally:
-        lines.append(f"in all: {landing.tally}")
-    if landing.refusal is None:
-        lines.append(f"{'landed' if written else 'would land'}: proven {landing.proven:,} file(s)")
-    else:
-        lines.append(f"refused, nothing written: {landing.refusal}")
-    return lines
-
-
 async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
     projects_root = default_projects_root()
     last = last_landing(projects_root)
@@ -200,64 +168,9 @@ async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
             "unknown": [str(path) for path in landing.unknown],
             "unloadable": [one.said for one in landing.unloadable],
         },
-        human="\n".join(_render_landing(landing, written=written, last=last)),
+        human=render_landing(landing, written=written, last=last),
         exit_code=REFUSED if landing.refused else 0,
     )
-
-
-_MB = 1024 * 1024
-
-
-def _render(mode: str, report: ArchiveReport, *, dataset: str | None) -> str:
-    scope = dataset or "every dataset"
-    if report.archive_writers:
-        return f"compact-archive[{mode}]: SKIPPED — {' '.join(report.notes)}"
-    verb = "did" if report.applied else "would"
-    lines = [
-        f"compact-archive[{mode}] over {scope}: {verb} touch {report.files_touched} cell file(s), "
-        f"{report.rows_moved} answer(s).",
-        f"  hot   {report.bytes_before / _MB:8.2f} MB -> {report.bytes_after / _MB:8.2f} MB",
-        f"  cold  {report.cold_bytes / _MB:8.2f} MB",
-        # `restore` puts fields BACK, so its net is negative by construction.
-        f"  {'cost ' if report.bytes_freed < 0 else 'freed'} "
-        f"{abs(report.bytes_freed) / _MB:8.2f} MB",
-    ]
-    lines += [f"  {note}" for note in report.notes]
-    for role, n in sorted(report.rows_skipped_by_role.items()):
-        lines.append(f"  skipped {n:5d} x {role}")
-    if not report.applied and report.files_touched:
-        lines.append("\nDry run. Re-run with --apply to write.")
-    if mode in ("purge-cold", "reclaim") and not report.applied and report.files_touched:
-        lines.append("This one is IRREVERSIBLE — the rows cost real money to measure again.")
-    return "\n".join(lines)
-
-
-def _render_inventory(inv: ArchiveInventory, *, dataset: str | None) -> str:
-    scope = dataset or "every dataset"
-    megabytes = (inv.total.hot_bytes + inv.total.cold_bytes) / _MB
-    lines = [
-        f"compact-archive[inventory] over {scope}: {inv.total.configurations} configuration(s), "
-        f"{inv.total.answers} answer(s), {megabytes:.2f} MB.",
-    ]
-    for axis, rows in (("dataset", inv.by_dataset), ("role", inv.by_role), ("age", inv.by_age)):
-        lines.append("")
-        lines.append(f"  {axis:<24}{'configs':>8}{'answers':>9}{'hot MB':>10}{'cold MB':>10}")
-        for row in rows:
-            lines.append(
-                f"  {row.key[:23]:<24}{row.configurations:>8}{row.answers:>9}"
-                f"{row.hot_bytes / _MB:>10.2f}{row.cold_bytes / _MB:>10.2f}"
-            )
-    if inv.orphan_index_rows:
-        lines.append(
-            f"\n{inv.orphan_index_rows} index row(s) have no answer behind them — a claim rather "
-            "than a measurement. `reindex --apply` clears them."
-        )
-    if inv.archive_writers:
-        lines.append(
-            f"\n{inv.archive_writers} cycle(s) can still append, so this is a snapshot of a store "
-            "that is moving. Nothing was written."
-        )
-    return "\n".join(lines)
 
 
 async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
@@ -270,7 +183,7 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
         inventory = inventory_measurement_archive(stores, dataset=dataset)
         return CommandResult(
             data=inventory.model_dump(mode="json"),
-            human=_render_inventory(inventory, dataset=dataset),
+            human=render_inventory(inventory, dataset=dataset),
         )
     payload = PayloadInvalidError.validating(
         CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
@@ -280,7 +193,8 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
     )
     report = sent.result
     return CommandResult(
-        data=report.model_dump(mode="json"), human=_render(mode, report, dataset=dataset)
+        data=report.model_dump(mode="json"),
+        human=render_compaction(payload.mode, report, dataset=dataset),
     )
 
 

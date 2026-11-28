@@ -27,9 +27,6 @@ const MODES: readonly Segment<Mode>[] = wordRows(ARCHIVE_MODE_INFO).map(
   }),
 );
 
-// The modes whose apply deletes for good.
-const DELETES: ReadonlySet<Mode> = new Set<Mode>(["purge-cold", "reclaim"]);
-
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [dataset, setDataset] = useState("");
@@ -40,6 +37,7 @@ export function ArchiveCompactionControl() {
   const held = useRead(archiveDatasetsRead());
   const maintains = useFiles("account")("compact-archive");
   const busy = dry.pending !== null || commit.pending !== null;
+  const { irreversible } = ARCHIVE_MODE_INFO[mode];
 
   // A preview must not stand as consent for another mode or another dataset.
   function pick(next: Mode, scope: string = dataset) {
@@ -104,13 +102,13 @@ export function ArchiveCompactionControl() {
           {busy && !preview ? "Checking…" : "Preview"}
         </Button>
         <Button
-          variant={DELETES.has(mode) ? "danger" : "primary"}
+          variant={irreversible ? "danger" : "primary"}
           onClick={() => void run(true)}
           disabled={
             busy || preview === null || blocked || preview.files_touched === 0
           }
         >
-          {DELETES.has(mode) ? "Delete permanently" : "Apply"}
+          {irreversible ? "Delete permanently" : "Apply"}
         </Button>
       </div>
 
