@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearReadCache } from "@/lib/read-cache";
 import { InWorkspace } from "@/lib/test-utils/in-workspace";
@@ -50,8 +50,8 @@ async function view(coupon: CouponStatus) {
 describe("ProviderKeys", () => {
   beforeEach(() => clearReadCache(true));
 
-  it("shows a held key by its last four alone, and removing it issues the command", async () => {
-    const sent = serve(() => Response.json({ command_id: "c1" }, { status: 202 }));
+  it("shows a held key by its last four alone, and removing it asks once before the command", async () => {
+    const sent = serve(() => Response.json({ provider: "anthropic" }));
     await view(
       couponStatus({
         routes: [providerRoute("anthropic", accountKey("anthropic", "ab12")), providerRoute("openai")],
@@ -65,6 +65,12 @@ describe("ProviderKeys", () => {
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove the anthropic key" }));
+    });
+    // One tap leaves the key held: the dialog names it, and only its own Remove sends.
+    expect(sent).toEqual([]);
+    const asking = screen.getByRole("dialog", { name: "Remove the anthropic key …ab12?" });
+    await act(async () => {
+      fireEvent.click(within(asking).getByRole("button", { name: "Remove" }));
     });
     expect(sent).toEqual([
       {

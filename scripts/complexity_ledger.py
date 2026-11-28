@@ -411,7 +411,9 @@ BASELINE = {
     # w11-jobs3 (+9): a job file (a SURVIVOR) re-held as one `hop` by its one-shot migration
     # (`migrations/job_hops.py`, +24), against `UNRESOLVED_HOP` and the mint's split land going.
     # w11-jobs3 (+1): `launch_preflight` resolves its config once and hands it to `sends_on`.
-    "package_lines": 114303,
+    # w11-web3 (+15): a key's removal answers the slot it emptied (`account.py::RemovedKey`) and
+    # replays it, and refuses a key not held, where it answered a bare 202 either way.
+    "package_lines": 114318,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

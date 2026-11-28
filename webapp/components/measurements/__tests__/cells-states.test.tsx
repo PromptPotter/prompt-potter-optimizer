@@ -34,11 +34,12 @@ describe("a cells read's answer, as its panes say it", () => {
     expect(screen.queryByText("Loading…")).toBeNull();
   });
 
-  it("says loading while the roster's read is idle: nothing answered it yet", async () => {
+  it("says an idle roster read names nothing to read, never that it loads", async () => {
     serveNoSlice();
     view(<RosterNote />);
     await act(async () => {});
-    expect(screen.getByText("Loading this campaign’s samples…")).toBeTruthy();
+    expect(screen.getByText("Open a campaign to see its samples.")).toBeTruthy();
+    expect(screen.queryByText("Loading this campaign’s samples…")).toBeNull();
     expect(screen.queryByText("No samples on this campaign’s dataset yet.")).toBeNull();
   });
 

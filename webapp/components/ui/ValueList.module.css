@@ -27,11 +27,6 @@
   border-color: var(--color-accent);
 }
 
-.trigger:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
 .triggerValue {
   flex: 1 1 auto;
   min-width: 0;
@@ -98,8 +93,8 @@ button.name:hover:not(:disabled) {
   color: var(--color-text-primary);
 }
 
-button.name:focus-visible {
-  outline: 2px solid var(--color-accent);
+/* Base's ring, drawn inside the list's scroller. */
+button.name {
   outline-offset: -2px;
 }
 

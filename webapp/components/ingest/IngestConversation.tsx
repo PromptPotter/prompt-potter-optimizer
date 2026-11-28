@@ -162,14 +162,15 @@ export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail:
 export function IngestComposer() {
   const flow = useIngest();
   const subject = useCheckinSubject();
-  const { open } = useWorkspace();
+  const { views, arrange } = useWorkspace();
   const [words, setWords] = useState("");
   const onRun = subject === null;
   const asking = !onRun && flow.awaitingContext;
+  // One act: the views named open beside what is open, newest last, each once.
   const say = () => {
     const named = familiesNamed(words);
     if (named === null) return;
-    for (const family of named) open(family);
+    arrange([...views.map((v) => v.family).filter((f) => !named.includes(f)), ...named]);
     setWords("");
   };
   return (

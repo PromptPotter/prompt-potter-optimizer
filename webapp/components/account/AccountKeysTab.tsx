@@ -1,6 +1,7 @@
 import { AccountSection } from "./AccountSection";
 import { ApiTokens } from "./ApiTokens";
-import { Button, CommitInput, Empty, FailureLine, ReadState } from "@/components/ui";
+import { useState } from "react";
+import { Button, CommitInput, Dialog, Empty, FailureLine, ReadState } from "@/components/ui";
 import { ACCOUNT, couponRead, deleteApiKey, putApiKey } from "@/lib/api";
 import {
   type AccountKey,
@@ -85,6 +86,7 @@ function KeyRow({
   onSave: ((secret: string) => void) | null;
   onRemove: (() => void) | null;
 }) {
+  const [asking, setAsking] = useState(false);
   return (
     <li className="account-key">
       <span className="account-key-provider">{provider}</span>
@@ -99,11 +101,33 @@ function KeyRow({
               variant="danger"
               disabled={busy}
               aria-label={`Remove the ${provider} key`}
-              onClick={onRemove}
+              onClick={() => setAsking(true)}
             >
               Remove
             </Button>
           )}
+          {/* Only the last four ever come back, so the one unrecoverable press asks once. */}
+          <Dialog
+            open={asking}
+            title={`Remove the ${provider} key …${held.last4}?`}
+            onClose={() => setAsking(false)}
+            footer={
+              <>
+                <Button onClick={() => setAsking(false)}>Cancel</Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setAsking(false);
+                    onRemove?.();
+                  }}
+                >
+                  Remove
+                </Button>
+              </>
+            }
+          >
+            <p>Adding it back means pasting the whole key again.</p>
+          </Dialog>
         </>
       ) : (
         <>

@@ -14873,6 +14873,21 @@
         "title": "RemoveApiKeyPayload",
         "type": "object"
       },
+      "RemovedKey": {
+        "additionalProperties": false,
+        "description": "What a removal answers, its retry too: the slot it emptied, whose key is gone for good.",
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "RemovedKey",
+        "type": "object"
+      },
       "RepairAttempt": {
         "additionalProperties": false,
         "description": "One attempt a call's repair ladder re-asked past: why it stopped, what it spent, never its text.",
@@ -23091,11 +23106,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/RemovedKey"
                 }
               }
             },

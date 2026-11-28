@@ -5160,6 +5160,12 @@ export interface TermsConsent {
   terms_accepted_version: string | null;
 }
 
+/** What a removal answers, its retry too: the slot it emptied, whose key is gone
+ * for good. */
+export interface RemovedKey {
+  provider: string;
+}
+
 export interface MintedToken {
   token: TokenEntry;
   /** The bearer's text, served by this answer alone: copy it now. */
@@ -5754,7 +5760,7 @@ export interface CommandResponses {
   "open-origin-draft": DraftCampaignWire;
   "pause": CommandAcceptedBody;
   "post-bulletin": CommandAcceptedBody;
-  "remove-api-key": CommandAcceptedBody;
+  "remove-api-key": RemovedKey;
   "rename-campaign": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
   "revoke-api-token": CommandAcceptedBody;
@@ -5823,7 +5829,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "44d5451bd7d089c2";
+export const SERVED_CONTRACT = "4f57bcb33a20aa40";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

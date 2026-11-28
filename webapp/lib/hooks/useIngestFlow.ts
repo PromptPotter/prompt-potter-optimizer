@@ -22,7 +22,13 @@ import { checkinThreadKey, useThreads } from "@/lib/state/chat-thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
-import { type ReadFailure, dropCachedRead, readResult } from "@/lib/read-cache";
+import {
+  type ReadFailure,
+  dropCachedRead,
+  readResult,
+  reaskRead,
+  retireRead,
+} from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type IngestPhase =
@@ -476,17 +482,18 @@ export function useIngestFlow({
       tail = draftWrites.current;
       await tail;
     } while (tail !== draftWrites.current);
+    // A mint consumes the draft: its read asks nothing while Start flies, and a Start that minted
+    // none (refused, queued) follows it again.
+    const read = draftRead(id).id;
+    retireRead(read);
     // Sparse, so the filed `CommandRecord` shows what the operator declared.
     const r = await starting.run("start", () =>
       commands["start-checkin"]({ draft_id: id, ...limits }),
     );
-    if (!r.ok || !alive()) {
-      setMinting(false);
-      return;
-    }
     // One launch answer: a head-to-head's arms never queue, and the view opens on the first job.
-    const [first] = r.value.launches;
-    if (first === undefined) {
+    const [first] = r.ok ? r.value.launches : [];
+    if (!first?.hop) reaskRead(read);
+    if (!r.ok || !alive() || first === undefined) {
       setMinting(false);
       return;
     }

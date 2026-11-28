@@ -15,6 +15,8 @@ export function RosterNote() {
     );
   }
   if ((shownData(read)?.samples.length ?? 0) > 0) return null;
+  // Idle names nothing to read: no campaign is viewed, so nothing is loading.
+  if (read.status === "idle") return <Empty>Open a campaign to see its samples.</Empty>;
   return read.status === "ready" ? (
     <Empty>No samples on this campaign’s dataset yet.</Empty>
   ) : (

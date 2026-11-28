@@ -483,7 +483,8 @@ def test_a_lost_box_key_is_never_replaced_while_a_seal_waits_and_an_account_can_
         lambda: put_account_key(newcomer, "groq", SecretStr("sk-groq-0123456789ab"))
     )
     assert not owner.api_keys.box_key.exists(), "a lost box key was replaced"
-    assert remove_account_key(owner, "openai"), "the account could not drop a key it lost"
+    # Refused `api_key_not_held` where it dropped none: the account can drop a key it lost.
+    assert remove_account_key(owner, "openai").provider == "openai"
     put_account_key(newcomer, "groq", SecretStr("sk-groq-0123456789ab"))
     assert newcomer.api_keys.load()["groq"].secret.get_secret_value() == "sk-groq-0123456789ab"
     monkeypatch.setattr(settings, "BOX_KEY_FILE", str(user_data_root() / "identity" / "box.key"))
