@@ -1371,8 +1371,6 @@ def cycle_result(
         wall_clock=WallClock(elapsed_s=None),
         rounds_to_separable=None,
         rounds_to_improved=None,
-        rounds_to_ceiling=None,
-        fitness_ceiling=None,
         prompt_hashes={},
         scorer_id="",
         spend=SpendRollup(

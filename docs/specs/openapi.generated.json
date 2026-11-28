@@ -2277,20 +2277,6 @@
             "title": "Exclude Nodes",
             "type": "array"
           },
-          "fitness_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Fitness Ceiling"
-          },
           "hard_sample_order": {
             "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `readout.log` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
             "enum": [
@@ -2567,20 +2553,6 @@
               }
             ],
             "title": "Exclude Nodes"
-          },
-          "fitness_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
             "anyOf": [
@@ -4555,20 +4527,6 @@
               }
             ],
             "title": "Exclude Nodes"
-          },
-          "fitness_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
             "anyOf": [
@@ -12424,11 +12382,6 @@
             "title": "Elimination N Min",
             "type": "integer"
           },
-          "enable_2pl_graduation": {
-            "description": "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-discriminating dataset wins held-out cross-validation. The switch is gated — cold/non-discriminating datasets stay 1PL — so this only ever changes the ruler where 2PL provably fits better out-of-sample; it can never regress a dataset. Off → always 1PL (the slice-2 behaviour).",
-            "title": "Enable 2Pl Graduation",
-            "type": "boolean"
-          },
           "halt_at_fitness": {
             "anyOf": [
               {
@@ -12442,15 +12395,6 @@
             ],
             "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Fitness"
-          },
-          "lift_reference": {
-            "description": "What each arm's lift is read against — member `a` of its `vs_reference` reading. ``best_so_far`` (default): the round's selected best-so-far individual, re-scored on the round's panel and paired with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, each re-measured on exactly the cells the arm measured; a crossover child is read against the better of its parents there, the bar it must clear to have added anything over what it recombined. An arm with no parent has no reference.",
-            "enum": [
-              "best_so_far",
-              "parents"
-            ],
-            "title": "Lift Reference",
-            "type": "string"
           },
           "lives": {
             "anyOf": [
@@ -12516,9 +12460,7 @@
           "degradation_fatal_fastpath",
           "elimination_n_min",
           "panel_gate",
-          "lift_reference",
-          "origin_gate",
-          "enable_2pl_graduation"
+          "origin_gate"
         ],
         "title": "OptimizationConfig",
         "type": "object"
@@ -12614,18 +12556,6 @@
             "description": "Minimum distinct samples before θ is read as ability: the δ ruler stays flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — the floor on n for a posterior to be meaningful.",
             "title": "Elimination N Min"
           },
-          "enable_2pl_graduation": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-discriminating dataset wins held-out cross-validation. The switch is gated — cold/non-discriminating datasets stay 1PL — so this only ever changes the ruler where 2PL provably fits better out-of-sample; it can never regress a dataset. Off → always 1PL (the slice-2 behaviour).",
-            "title": "Enable 2Pl Graduation"
-          },
           "halt_at_fitness": {
             "anyOf": [
               {
@@ -12639,22 +12569,6 @@
             ],
             "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Fitness"
-          },
-          "lift_reference": {
-            "anyOf": [
-              {
-                "enum": [
-                  "best_so_far",
-                  "parents"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What each arm's lift is read against — member `a` of its `vs_reference` reading. ``best_so_far`` (default): the round's selected best-so-far individual, re-scored on the round's panel and paired with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, each re-measured on exactly the cells the arm measured; a crossover child is read against the better of its parents there, the bar it must clear to have added anything over what it recombined. An arm with no parent has no reference.",
-            "title": "Lift Reference"
           },
           "lives": {
             "anyOf": [
@@ -19497,16 +19411,16 @@
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
         "properties": {
-          "composite_increment": {
+          "composite_difference": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Composite Increment"
+            "description": "`fresh` minus `recorded` on the composite, with its band under the same rule."
           },
           "fitness_difference": {
             "anyOf": [
@@ -19532,7 +19446,7 @@
                 "type": "null"
               }
             ],
-            "description": "Whether the fresh cells leave the recorded hit rate standing: the 95% band of fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads Welch's where both sides spread, else Newcombe's construction over each side's band, a constant side's being the one its support allows). `None`: `hard` picks sit below the level whatever the candidate is worth, and a side too short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there.",
+            "description": "Whether the fresh cells leave the recorded hit rate standing: the 95% band of fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads Welch's where both sides spread, else Newcombe's construction over each side's band, a constant side's SE floored at 1/(4n)). `None`: `hard` picks sit below the level whatever the candidate is worth, and a side too short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there.",
             "title": "Held"
           },
           "label": {
@@ -19569,7 +19483,7 @@
           "fresh",
           "recorded",
           "fitness_difference",
-          "composite_increment",
+          "composite_difference",
           "vs_origin",
           "held"
         ],

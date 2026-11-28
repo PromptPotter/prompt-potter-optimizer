@@ -11,7 +11,7 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskReading, MaskRecord
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, Eliminator
+from promptpotter.application.optimizer_contract import NODE_MEMBERS, Eliminator
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
     HierarchyCandidate,

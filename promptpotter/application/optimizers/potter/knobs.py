@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from promptpotter.application.optimizers.nodes import LengthKnobs
+from promptpotter.application.optimizer_contract import LengthKnobs
 from promptpotter.application.scoring.row_policy import RowKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.crowning_bar import CrowningStatistic, NextParent, Vote
@@ -275,7 +275,7 @@ class EscalationKnobs(StrictModel):
             "switch. ``full`` is the whole ladder. ``l1_l2`` lets L2 re-frame "
             "but never reaches L3, including the post-L2 layout-breach force-trigger. "
             "``l1`` is the L1-only arm: no escalation rule can return a fire, so "
-            "``escalate_l2`` is never called and neither the ``l2_context`` nor the "
+            "the ``escalation`` controller never acts and neither the ``l2_context`` nor the "
             "``l3_plan`` prompt is ever composed. A patience PACES a ladder and can "
             "never shorten one, so a large ``l1_patience`` is a deferral bounded by the "
             "round budget rather than a suppression. L1's own prompt is bit-for-bit "

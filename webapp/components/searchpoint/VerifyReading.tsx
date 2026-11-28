@@ -39,7 +39,7 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
           <dd>
             {fmtEstimate(recorded.composite) ?? PLACEHOLDER} →{" "}
             <strong>{fmtEstimate(fresh.composite) ?? PLACEHOLDER}</strong> (
-            {fmtSigned(reading.composite_increment, 2)})
+            {fmtSigned(reading.composite_difference?.value, 2)})
           </dd>
         </div>
         <div>

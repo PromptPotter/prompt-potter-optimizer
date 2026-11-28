@@ -86,13 +86,14 @@ from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.producer_lock import pass_held
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_bench_open,
-    scan_bench_passes,
-    scan_launch_clocks,
-    scan_ledger_spend,
-    scan_ledger_wall_clock,
+    BENCH_PASSES,
+    LAUNCH_CLOCKS,
+    LEDGER_SPEND,
+    TIMELINES,
+    BenchOpenFold,
+    wall_clock_of,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -741,8 +742,10 @@ def launch_clock_record(
     return LaunchClockRecord(
         started_at=clock.started_at,
         finished_at=finished_at,
-        clock=scan_ledger_wall_clock(
-            [stores.campaigns.ledger(h) for h in line],
+        clock=wall_clock_of(
+            read_line(
+                (LedgerSpan(p) for p in [stores.campaigns.ledger(h) for h in line]), TIMELINES
+            ),
             started_at=clock.started_at,
             finished_at=finished_at,
             optimizer_phases=phases,
@@ -752,7 +755,7 @@ def launch_clock_record(
 
 def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]:
     """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
-    return scan_launch_clocks(stores.campaigns.line_spans(campaign.root_hop))
+    return read_line(stores.campaigns.line_spans(campaign.root_hop), LAUNCH_CLOCKS)
 
 
 def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
@@ -764,8 +767,8 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
     line = stores.campaigns.line(campaign.root_hop)
     closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
     return LineOutlay(
-        search_usd=scan_ledger_spend(
-            stores.campaigns.line_spans(campaign.root_hop)
+        search_usd=read_line(
+            stores.campaigns.line_spans(campaign.root_hop), LEDGER_SPEND
         ).spend.search_incurred_usd,
         worked_s=worked_seconds([*line_launches(stores, campaign), closing]),
     )
@@ -774,7 +777,7 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
 def _bench_counted(stores: Stores, hop: CycleHop) -> Budget:
     """The cycle's bench bucket as its own ledger folds it: the run's rollup is a snapshot each
     bank replaces, so two reads of one never move."""
-    spend = scan_ledger_spend([LedgerSpan(stores.campaigns.ledger(hop))]).spend
+    spend = read_line([LedgerSpan(stores.campaigns.ledger(hop))], LEDGER_SPEND).spend
     bench = spend.by_kind["bench"]
     return Budget.amount(bench.incurred_usd, bench.input_tokens + bench.output_tokens)
 
@@ -839,7 +842,7 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
         selecting=attached and not passing,
         passing=passing,
         # The bracket, not the lock alone: `held-out` reads this under its own pass's lock.
-        pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
+        pass_open=attached and LedgerIndex.of(stores.campaigns.ledger(hop)).view(BenchOpenFold),
         ending=None if index is None else index.stop_reason,
         selection=None if standing is None else standing.selection,
         rounds_closed=0 if standing is None else standing.rounds_closed,
@@ -848,7 +851,7 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
 
 def line_passes(stores: Stores, campaign: Campaign) -> BenchPasses | None:
     """The line's OWN ledgers: a root cut from another tree graded its prefix in another epoch."""
-    return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
+    return read_line(stores.campaigns.line_spans(campaign.root_hop), BENCH_PASSES)
 
 
 def cycle_curve(stores: Stores, at: CampaignCycle, under: Resolution) -> BenchCurve | None:
@@ -892,7 +895,7 @@ def bench_line(
         held_out=len(drawn.bench_ids),
         instrument_id=drawn.instrument_id,
         run=run,
-        spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
+        spend=read_line(stores.campaigns.line_spans(campaign.root_hop), LEDGER_SPEND).spend,
         files=CommandKind.HELD_OUT in filable(stores.identity),
     )
 

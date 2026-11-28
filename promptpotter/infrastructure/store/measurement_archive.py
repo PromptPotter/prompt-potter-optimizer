@@ -614,7 +614,7 @@ class ReplayFeed:
         for answer in banked:
             cell = answer.cell
             key = cell.sample_key
-            if not key or cell.errored or not meets_grade(answer.provenance, REUSABLE_MIN_GRADE):
+            if not key or cell.hole or not meets_grade(answer.provenance, REUSABLE_MIN_GRADE):
                 continue
             rank = (is_deprecated(cell), answer.provenance, answer.created_at)
             if (served := self._served.get(key)) is None or rank < served:

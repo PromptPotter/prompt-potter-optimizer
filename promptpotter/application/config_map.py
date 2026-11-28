@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CountKnob
+from promptpotter.application.optimizer_contract import NODE_MEMBERS, CountKnob
 from promptpotter.domain.campaign import RunDeclaration
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
@@ -21,8 +21,8 @@ from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimizer_contract import MemberCoupling
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import MemberCoupling
 
 
 @dataclass(frozen=True)

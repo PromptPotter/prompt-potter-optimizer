@@ -60,8 +60,6 @@ class CycleResult(StrictModel):
     # `run_standing.py::round_clocks` over the cycle's own rounds past the origin.
     rounds_to_separable: int | None
     rounds_to_improved: int | None
-    rounds_to_ceiling: int | None
-    fitness_ceiling: float | None
     prompt_hashes: dict[str, str]
     scorer_id: str
     cycle_id: str | None = None

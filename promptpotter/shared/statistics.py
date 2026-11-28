@@ -96,22 +96,19 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
     return (normal.inv_cdf(1 - alpha / 2) + normal.inv_cdf(power)) * se
 
 
+def floored_se(values: Sequence[float]) -> float:
+    """THE rule for a constant side (decision 9): a mean's SE over two or more cells never falls
+    below ``1/(4n)``, so 4/4 hits (variance 0) is never a point mass."""
+    n = len(values)
+    return max(_sd(list(values)) / math.sqrt(n), 1.0 / (4.0 * n))
+
+
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
-    """The SE is floored at ``1/(4n)``: 4/4 hits has variance 0 and would be a point mass."""
     n = len(scores)
     if n == 0:
         return (0.0, 1.0)
-
-    import numpy as np
-
-    arr = np.asarray(scores, dtype=np.float64)
-    mean = float(arr.mean())
-    if n == 1:
-        return (mean, 0.5)
-    variance = float(arr.var(ddof=1))
-    se = math.sqrt(variance / n)
-    se_floor = 1.0 / (4.0 * n)
-    return (mean, max(se, se_floor))
+    mean = sum(scores) / n
+    return (mean, 0.5) if n == 1 else (mean, floored_se(scores))
 
 
 def paired_diff_posterior(
@@ -155,18 +152,14 @@ def difference_interval(
 
 
 def _side_band(values: Sequence[float], *, binary: bool, alpha: float) -> tuple[float, float]:
-    """Wilson's where DECLARED binary; a graded side's t where it spreads (Welch's own term beside a
-    constant side), else the support's (`bounded_mean_interval`), never the point."""
+    """Wilson's where DECLARED binary, else a graded side's t on its `floored_se`, never the point."""
     n, z = len(values), NormalDist().inv_cdf(1 - alpha / 2)
     if binary:
         p, z2 = sum(declared_two_valued(values)) / n, z * z
         center, half = p + z2 / (2 * n), z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
         return (center - half) / (1 + z2 / n), (center + half) / (1 + z2 / n)
-    if half := t_critical(n - 1, alpha) * _sd(list(values)) / math.sqrt(n):
-        return sum(values) / n - half, sum(values) / n + half
-    band = bounded_mean_interval(values, binary=False, alpha=alpha)
-    assert band is not None, "a graded side of two cells brackets its mean"
-    return band
+    half = t_critical(n - 1, alpha) * floored_se(values)
+    return sum(values) / n - half, sum(values) / n + half
 
 
 def bounded_mean_interval(

@@ -5,8 +5,8 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from promptpotter.application.config_map import check_couplings
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.optimizer_contract import unfit_pipeline
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
-from promptpotter.application.optimizers.nodes import unfit_pipeline
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import ArmSeat
 from promptpotter.domain.campaign_config import CampaignConfig

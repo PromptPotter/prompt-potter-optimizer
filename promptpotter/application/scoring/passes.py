@@ -40,7 +40,7 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import PASS_REFUSAL_INFO, BenchScore
+from promptpotter.domain.bench import COLUMN_GRADE, PASS_REFUSAL_INFO, BenchColumn, BenchScore
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
@@ -74,11 +74,8 @@ from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_verify,
-    scan_ledger_walks,
-)
-from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import VERIFY_LEDGER, line_walks
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError, NextAct
@@ -130,14 +127,16 @@ def pick_fresh(
     return [*placed, *rng.sample(unplaced, len(unplaced))][:n]
 
 
-def _difference(fresh: CellSheet, recorded: CellSheet, unit: MeasurandUnit) -> Estimate | None:
-    """Fresh − recorded in the fitness column, with the band of the difference of two
-    independent means (`difference_interval`); ``None`` where a side reads no cell."""
-    fitness = ROW_GRADES["fitness"]
-    a, b = (list(sheet.column(fitness).values()) for sheet in (fresh, recorded))
+def _difference(
+    fresh: CellSheet, recorded: CellSheet, column: BenchColumn, unit: MeasurandUnit
+) -> Estimate | None:
+    """Fresh − recorded in *column*, with the band of the difference of two independent means
+    (`difference_interval`); ``None`` where a side reads no cell."""
+    grade = COLUMN_GRADE[column]
+    a, b = (list(sheet.column(ROW_GRADES[grade]).values()) for sheet in (fresh, recorded))
     if not a or not b:
         return None
-    lo, hi = difference_interval(a, b, binary="fitness" in fresh.two_valued) or (None, None)
+    lo, hi = difference_interval(a, b, binary=grade in fresh.two_valued) or (None, None)
     value = sum(a) / len(a) - sum(b) / len(b)
     return Estimate(
         value=value, ci_lo=lo, ci_hi=hi, n=len(a) + len(b), se=None, unit=unit, form="lift"
@@ -189,8 +188,7 @@ def verify_reading(
     """Fresh beside recorded, never pooled: a pooled rate moves with how many cells each holds."""
     unit = scorer.fitness_unit
     fresh_level, recorded_level = own_level(fresh, unit), own_level(recorded, unit)
-    fresh_composite, recorded_composite = fresh_level.composite, recorded_level.composite
-    difference = _difference(fresh, recorded, unit)
+    difference = _difference(fresh, recorded, "fitness", unit)
     strategy = banked.strategy
     return VerifyReading(
         label=banked.arm.label,
@@ -199,9 +197,7 @@ def verify_reading(
         fresh=fresh_level,
         recorded=recorded_level,
         fitness_difference=difference,
-        composite_increment=None
-        if fresh_composite is None or recorded_composite is None
-        else fresh_composite.value - recorded_composite.value,
+        composite_difference=_difference(fresh, recorded, "composite", "score"),
         vs_origin=read_pair(
             a=origin,
             b=measured,
@@ -221,7 +217,7 @@ def verify_reading(
 def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Scorer) -> VerifyReading:
     chain = stores.campaigns.chain(hop)
     # A pass is read before it is banked, so it joins the walks whether or not the ledger holds it.
-    walks = [*scan_ledger_walks(chain), banked.walk()]
+    walks = [*line_walks(chain), banked.walk()]
 
     def rows(cells: list[WalkedCell]) -> CellSheet:
         return walked_rows(stores, cells, scorer)
@@ -322,7 +318,12 @@ async def verify_candidate(
         budget = derive_verify_samples(
             round_cell_budget=round_cells,
             rounds_unverified=rounds_since_verified(
-                (banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
+                (
+                    banked.arm.round
+                    for banked, _ in read_line(
+                        [LedgerSpan(ledger_path)], VERIFY_LEDGER
+                    ).graded.values()
+                ),
                 round_num=round_num,
             ),
             unmeasured=len(unmeasured),
@@ -346,7 +347,6 @@ async def verify_candidate(
             {sp_hash},
             objective_id=session.state.scoring.scorer.id,
             n_min=campaign_config.optimization.elimination_n_min,
-            enable_2pl=campaign_config.optimization.enable_2pl_graduation,
         ).ruler
         picked = pick_fresh(
             unmeasured,
@@ -426,7 +426,10 @@ async def verify_on_saturation(
     if budget_stop(require_spend_book("the saturation verify")) is not None:
         return
     ledger_path = stores.campaigns.ledger(at.hop)
-    mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
+    mine = [
+        banked.arm.round
+        for banked, _ in read_line([LedgerSpan(ledger_path)], VERIFY_LEDGER).graded.values()
+    ]
     if mine and rounds_since_verified(mine, round_num=round_num) < _VERIFY_LIFT_CAP:
         return
     try:

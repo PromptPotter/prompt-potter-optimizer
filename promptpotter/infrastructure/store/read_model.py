@@ -406,15 +406,42 @@ def folded[F: LedgerFold[Any, Any]](
     return made
 
 
-class Projected(Protocol):
-    """A fold that writes (`projections/base.py::Projection`), fed after its index's folds; it
-    `derives` the file its fault leaves stale."""
+# By name, so a handler's module may import its record for typing alone.
+_ARMS_BY_NAME = {arm.__name__: arm for arm in EVERY_ARM}
+_HANDLER = "_handle_"
 
+
+class Projection:
+    """A `LedgerFold` that writes, fed after its index's folds: its `records` are the arms its
+    `_handle_*(record: Arm)` methods annotate; it `derives` the file its fault leaves stale."""
+
+    #: The ``Cut`` folded to, stamped by its feeder. ``-1`` = nothing folded yet.
+    at_offset: int = -1
+    records: ClassVar[RecordClasses] = ()
     derives: ClassVar[str]
+    _routes: ClassVar[dict[type[CycleRecord], Callable[[Any, Any], None]]] = {}
 
-    def feed(self, record: CycleRecord) -> None: ...
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        routes = dict(cls._routes)
+        for name, handler in vars(cls).items():
+            if not name.startswith(_HANDLER):
+                continue
+            named = handler.__annotations__["record"]
+            if named not in _ARMS_BY_NAME:
+                raise RuntimeError(f"{cls.__name__}.{name} handles {named}, no CycleRecord arm")
+            routes[_ARMS_BY_NAME[named]] = handler
+        cls._routes = routes
+        cls.records = tuple(routes)
+        LedgerIndex.readers(cls)
 
-    def drain(self) -> None: ...
+    def feed(self, record: CycleRecord) -> None:
+        handler = self._routes.get(type(record))
+        if handler is not None:
+            handler(self, record)
+
+    def drain(self) -> None:
+        """Settle buffered state on teardown; a no-op where every event already flushes."""
 
 
 class Projecting:
@@ -424,7 +451,7 @@ class Projecting:
         self._index = index
         self._kinds: list[type[Any]] | None = []
 
-    def add[P: Projected](self, projection: P) -> P:
+    def add[P: Projection](self, projection: P) -> P:
         assert self._kinds is not None, "a closed Projecting holds nothing more"
         held = self._index._join(projection)
         self._kinds.append(type(projection))
@@ -478,10 +505,10 @@ class LedgerIndex(_LedgerTail):
         self._starts: dict[_Make, LedgerFold[Any, Any] | None] = {}
         self._feeder = _Feeder(path, {})
         # A projection by its type, with how many hold it; the lines it waits on, in append order.
-        self._held: dict[type[Any], tuple[Projected, int]] = {}
+        self._held: dict[type[Any], tuple[Projection, int]] = {}
         # The held types whose fault is reported: one warning per projection while it is held.
         self._stale: set[type[Any]] = set()
-        self._queue: deque[tuple[int, bytes, list[Projected], CycleRecord | None]] = deque()
+        self._queue: deque[tuple[int, bytes, list[Projection], CycleRecord | None]] = deque()
         self._draining = threading.Lock()
         self._drainer: int | None = None
         self._until = -1
@@ -494,7 +521,7 @@ class LedgerIndex(_LedgerTail):
     def projecting(self) -> Projecting:
         return Projecting(self)
 
-    def _join[P: Projected](self, projection: P) -> P:
+    def _join[P: Projection](self, projection: P) -> P:
         """A type held already is the held instance; a new one is fed from the line the index stands at."""
         with self._lock:
             held, holders = self._held.get(type(projection), (projection, 0))
@@ -504,7 +531,7 @@ class LedgerIndex(_LedgerTail):
             self._held[type(projection)] = (held, holders + 1)
             return cast("P", held)
 
-    def _leave(self, kind: type[Any]) -> Projected | None:
+    def _leave(self, kind: type[Any]) -> Projection | None:
         """The projection its last holder left, to drain: no line feeds it again."""
         with self._lock:
             held, holders = self._held[kind]
@@ -515,7 +542,7 @@ class LedgerIndex(_LedgerTail):
             return held
 
     def shielded(
-        self, projection: Projected, call: Callable[[], None], at: int | None = None
+        self, projection: Projection, call: Callable[[], None], at: int | None = None
     ) -> None:
         """Every call into a projection: a derived file that cannot land is one `derived_file_stale` warning,
         never a raise into the landed append, nothing held for a later one; io refuses it a gone cycle."""
@@ -746,13 +773,51 @@ class LastOf:
         return _Last(self.records)
 
 
-def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
-    """The last *record* the spans hold, a later span's over an earlier one's."""
-    found: R | None = None
+@dataclass(frozen=True)
+class Line[V, L]:
+    """A fold read over a line of ledgers, its composition stated once: *fold* folds each span,
+    *then* lays a span's value onto what the spans before it held, from *start*."""
+
+    fold: Callable[[], LedgerFold[Any, V]]
+    start: Callable[[], L]
+    then: Callable[[L, V, LedgerSpan], L]
+
+
+def read_line[V, L](spans: Iterable[LedgerSpan], line: Line[V, L]) -> L:
+    """The one read of a fold over spans, the earliest first."""
+    held = line.start()
     for span in spans:
-        own = LedgerIndex.of(span.path).view(LastOf(record), span.until)
-        found = found if own is None else cast("R", own)
-    return found
+        held = line.then(held, LedgerIndex.of(span.path).view(line.fold, span.until), span)
+    return held
+
+
+def last[R: StrictModel](record: type[R]) -> Line[R | None, R | None]:
+    """The last *record* the spans hold, a later span's over an earlier one's."""
+    return Line(
+        cast("Callable[[], LedgerFold[Any, R | None]]", LastOf(record)),
+        lambda: None,
+        lambda held, own, _: held if own is None else own,
+    )
+
+
+def each_last[R: StrictModel](record: type[R]) -> Line[R | None, list[R | None]]:
+    """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
+    return Line(
+        cast("Callable[[], LedgerFold[Any, R | None]]", LastOf(record)),
+        lambda: list[R | None](),
+        lambda held, own, _: [*held, own],
+    )
+
+
+def line_concat[T](fold: Callable[[], LedgerFold[Any, list[T]]]) -> Line[list[T], list[T]]:
+    """Every span's values, oldest first."""
+    return Line(fold, lambda: list[T](), lambda held, own, _: [*held, *own])
+
+
+def line_union[T](
+    fold: Callable[[], LedgerFold[Any, frozenset[T]]],
+) -> Line[frozenset[T], frozenset[T]]:
+    return Line(fold, lambda: frozenset[T](), lambda held, own, _: held | own if held else own)
 
 
 class LineIndex(_LedgerTail):
@@ -1030,7 +1095,7 @@ class Money(NamedTuple):
         return Budget.amount(sum(u for u, _ in roots), sum(t for _, t in roots))
 
 
-class _Money:
+class MoneyFold:
     """THE fold of money: a hold opens under its parent, each bill closes a call's and draws on
     every hold above it, a release closes one, a lapse closes a call's and draws what it may have
     cost, a replay is priced and charges nothing. It keeps aggregates and the holds still named:
@@ -1207,12 +1272,12 @@ class _Money:
         return self._view
 
 
-LedgerIndex.readers(_Money)
+LedgerIndex.readers(MoneyFold)
 
 
 def money_on(subject: Path, until: int | None = None) -> Money:
     """*subject* is a ledger, or an account's charge book (`ChargeBook.path`)."""
-    return LedgerIndex.of(subject).view(_Money, until)
+    return LedgerIndex.of(subject).view(MoneyFold, until)
 
 
 _CHARGE_LINE: TypeAdapter[ChargeLine] = TypeAdapter(ChargeLine)
@@ -1223,7 +1288,7 @@ def charge_book_fold(raw: bytes) -> Money:
     (`data_root.py::Folded`). A settle another writer's line split refuses, which a book written
     before each fact landed in one append can hold: folded on, its late Bill draws nothing and its
     late Lapse raises."""
-    fold = _Money()
+    fold = MoneyFold()
     seen: set[str] = set()
     for line in complete_lines(BytesIO(raw)):
         if not line.strip():

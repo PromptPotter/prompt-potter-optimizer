@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application import optimizer_contract
 from promptpotter.application.bench.node_context import (
     Children,
     Lineage,
@@ -15,14 +16,13 @@ from promptpotter.application.bench.node_context import (
     Replay,
     Target,
 )
-from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     CycleRead,
     PromptArity,
     Proposals,
     Proposing,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
@@ -38,9 +38,6 @@ class Cross(NamedTuple):
 
     main: OptSearchPoint
     donor: OptSearchPoint
-
-
-CROSS_ARITY = len(Cross._fields)
 
 
 class MatingKnobs(StrictModel):
@@ -72,7 +69,7 @@ def _fittest(
     return drawn[0] if rank is None else max(drawn, key=rank)
 
 
-class Mating(nodes.Proposer):
+class Mating(optimizer_contract.Proposer):
     """Parent choice: each child is its main's copy naming the main, then the donor, added after the
     arms it is handed; the recombining nodes after it write it."""
 
@@ -107,7 +104,7 @@ class Mating(nodes.Proposer):
                 drawn = rng.sample(rivals, min(knobs.tournament, len(rivals)))
                 pairs.append(Cross(main, _fittest(drawn, by)))
         children = ctx.read(Children)
-        return nodes.Proposals(
+        return optimizer_contract.Proposals(
             [
                 *proposals.proposals,
                 *(
@@ -151,7 +148,7 @@ def donor_take(cross: Cross, schema: PipelineSchema, rng: random.Random) -> dict
     return dict.fromkeys(rng.sample(loci, rng.randint(1, most)), 1)
 
 
-class LocusCrossover(nodes.Proposer):
+class LocusCrossover(optimizer_contract.Proposer):
     """Crossover of each child naming a main and a donor, every other passed on untouched: the donor
     gives a minority of loci (`donor_take`), each value a parent's, so it invents nothing."""
 
@@ -166,17 +163,18 @@ class LocusCrossover(nodes.Proposer):
         rng = ctx.read(Replay).rng()
         lineage, children = ctx.read(Lineage), ctx.read(Children)
         schema = ctx.read(Target).schema
-        out, clones = [], []
+        out = []
         for proposal in proposals.proposals:
-            if len(proposal.individual.lineage.parent_ids) != CROSS_ARITY:
+            # Only a child `mating` drew and nothing has written since: a recombination it receives
+            # (a host's, a measured member rejoining) keeps its id.
+            written = [v.node.rpartition(":")[2] for v in proposal.individual.lineage.variations]
+            if written != [Mating.name]:
                 out.append(proposal)
                 continue
             cross = Cross(*lineage.parents(proposal.individual))
-            if (take := donor_take(cross, schema, rng)) is None:
-                clones.append(proposal.individual.lineage.changes_description)
-                continue
-            out.append(children.edit(proposal, take=take))
-        return nodes.Proposals(out)
+            if (take := donor_take(cross, schema, rng)) is not None:
+                out.append(children.edit(proposal, take=take))
+        return optimizer_contract.Proposals(out)
 
 
 class SurvivalKnobs(StrictModel):
@@ -188,7 +186,7 @@ class SurvivalKnobs(StrictModel):
     )
 
 
-class Survival(nodes.Survivor):
+class Survival(optimizer_contract.Survivor):
     """Top-μ survival over whatever the selector ranks: the selector orders, this node cuts."""
 
     name: ClassVar[str] = "survival"

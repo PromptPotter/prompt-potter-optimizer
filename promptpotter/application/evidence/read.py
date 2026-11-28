@@ -109,17 +109,17 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LEDGER_SPEND,
+    SPEND_BY_ROUND,
+    STANDING_ROUNDS,
     StandingArm,
     StandingRounds,
-    scan_ledger_spend,
-    scan_ledger_spend_by_round,
-    scan_ledger_walks,
-    scan_standing_rounds,
+    line_walks,
 )
 from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
 )
-from promptpotter.infrastructure.store.read_model import derived
+from promptpotter.infrastructure.store.read_model import derived, read_line
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.measurement_context import RoleScope
@@ -347,7 +347,7 @@ def _graded_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle |
     graded_under = resolved(stores, campaign.root_cycle).scorer
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
     chain = stores.campaigns.chain(hop)
-    return _Cycle(stores, hop, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
+    return _Cycle(stores, hop, read_line(chain, STANDING_ROUNDS), line_walks(chain), graded_under)
 
 
 class _Head(NamedTuple):
@@ -823,9 +823,9 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
 def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
     campaign, hop = at.campaign, at.hop
     chain = stores.campaigns.chain(hop)
-    scanned = scan_standing_rounds(chain)
+    scanned = read_line(chain, STANDING_ROUNDS)
     standing, series = scanned.rounds, scanned.level_series
-    spend_by_round = scan_ledger_spend_by_round(chain)
+    spend_by_round = read_line(chain, SPEND_BY_ROUND)
     instrument_id = drawn_partition(stores.campaigns, hop).instrument_id
     opt = cycle_config(stores, at).config.optimization
     scale = (
@@ -835,7 +835,6 @@ def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
             stores.ruler,
             series.stamp,
             n_min=opt.elimination_n_min,
-            enable_2pl=opt.enable_2pl_graduation,
         )
     )
     return _CycleFacts(
@@ -843,7 +842,7 @@ def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
         instrument_id=instrument_id,
         scale=scale,
         # No bill at all priced nothing (`None`); bills summing to 0 measured it.
-        spend_usd=scan_ledger_spend(chain).spend.total_used_usd if spend_by_round else None,
+        spend_usd=read_line(chain, LEDGER_SPEND).spend.total_used_usd if spend_by_round else None,
         rounds_scored=max(len(standing) - 1, 0),
         spend_to_round=_spend_to_round(spend_by_round),
     )

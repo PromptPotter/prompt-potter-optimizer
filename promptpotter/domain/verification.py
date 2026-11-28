@@ -149,7 +149,9 @@ class VerifyReading(FrozenModel):
         description="`fresh` minus `recorded`, hit rate, with the band `held` reads. Unpaired — "
         "the two are different cells."
     )
-    composite_increment: float | None
+    composite_difference: Estimate | None = Field(
+        description="`fresh` minus `recorded` on the composite, with its band under the same rule."
+    )
     vs_origin: PairedReading = Field(
         description="This candidate over the campaign origin, on every cell the cycle measured "
         "both on outside the bench — the fresh ones and the overlap pass's included. "
@@ -159,7 +161,7 @@ class VerifyReading(FrozenModel):
         description="Whether the fresh cells leave the recorded hit rate standing: the 95% band of "
         "fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads "
         "Welch's where both sides spread, else Newcombe's construction over each side's band, a "
-        "constant side's being the one its support allows). "
+        "constant side's SE floored at 1/(4n)). "
         "`None`: `hard` picks sit below the level whatever the candidate is worth, and a side too "
         "short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there."
     )

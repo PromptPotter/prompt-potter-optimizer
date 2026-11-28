@@ -13,8 +13,8 @@ from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.optimizer_contract import RoundSamples
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.nodes import RoundSamples
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare

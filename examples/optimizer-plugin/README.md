@@ -14,7 +14,7 @@ The smallest optimizer the bench runs, registered through entry points alone —
 
 ```bash
 pip install -e .
-python -c "from promptpotter.application.optimizers import MANIFESTS; print(MANIFESTS.origins['example'])"
+python -c "from promptpotter.application.optimizer_contract import MANIFESTS; print(MANIFESTS.origins['example'])"
 ```
 
 It prints `example-optimizer: example_optimizer.members:MANIFEST`, the distribution and entry point
@@ -39,7 +39,7 @@ Everything `members.py` and `prompts.py` use, and nothing else:
 | You write | Against |
 |---|---|
 | A knobs model per member | `StrictModel`, each field `Annotated[T, Knob(Estimand, …)]`. The manifest's `nodes.{name}.config` is validated as it. |
-| A member per manifest node | The Protocol of its node type in `promptpotter/application/optimizers/nodes.py` — here `Sampler`, `Proposer`, `Selector`. Each subclasses that Protocol, states `name` and `kind`, and overrides only the declarations it uses (`knobs`, `sees`, `reads` …) and its type's own members. |
+| A member per manifest node | The Protocol of its node type in `promptpotter/application/optimizer_contract.py` — here `Sampler`, `Proposer`, `Selector`. Each subclasses that Protocol, states `name` and `kind`, and overrides only the declarations it uses (`knobs`, `sees`, `reads` …) and its type's own members. |
 | The round, inside a member | `ctx: NodeContext` (`promptpotter/application/bench/node_context.py`): `ctx.knobs(YourKnobs)`, typed; `ctx.round_num`; `ctx.read(Kind)` for each read the member names under `sees`, refused at load where the member cannot hold it — `Lineage` holds the parent and `population`, the individuals the run carries, which a selector replaces through `Selection.ranked`, best first, a `survival` node after it keeping the top μ; `Replay` its `rng()` for a draw a resume repeats and `decide(inputs, outcome)` to put a decision on the record; `Calls` its `fill(**values)` for the node's template and `ask_each({idx: prompt})` for its llm calls. |
 | What a member returns | `nodes.RoundSamples`, `nodes.Proposals`, `nodes.Selection`; a selector reads `nodes.MeasuredRound`. |
 | An arm, from a reply | `paper_templates.child(ctx, node, parents, raw, changes)`, which writes it through `Children.child` — the one writer of an individual, which stamps this node's variation and has the bench admit the child as it is made (`promptpotter/application/bench/children.py`); a node later in the walk changes one through `Children.edit`. A knobs model subclassing `nodes.RewriteKnobs` declares in its one `rewrites` knob whether the reply replaces the node's whole prompt (`prompt`, landing in the field the node declares as `prompt_info.rewrite_field`) or names the one field it replaces; the member's `prompt_arity` (`none` / `one` / `each`) says how many prompt nodes it writes, and both are checked against the pipeline before a mint spends. A member of arity `one` reads its node as `ctx.read(Target).prompt_node`. `paper_templates.task_description(ctx, node)` is the campaign's framing for a template. |

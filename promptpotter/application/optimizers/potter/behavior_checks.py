@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.application.optimizers.nodes import CheckResult
+from promptpotter.application.optimizer_contract import CheckResult
 from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
     HELD_PROMPT_FIELD_MARK,
 )

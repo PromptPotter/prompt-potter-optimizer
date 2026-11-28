@@ -321,6 +321,12 @@ class MeasuredCell:
         return self.error_category is not None and ERROR_CATEGORY_INFO[self.error_category].charged
 
     @property
+    def hole(self) -> bool:
+        """Errored for a reason the configuration does not answer for: the one error a later walk
+        fills. A charged error is the configuration's answer, replayed and never bought again."""
+        return self.errored and not self.charged
+
+    @property
     def verifier_graded(self) -> bool:
         return is_verifier_graded(self.ground_truth)
 

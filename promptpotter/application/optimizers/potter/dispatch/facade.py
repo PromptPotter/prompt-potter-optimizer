@@ -18,7 +18,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
-from promptpotter.application.optimizers.nodes import CycleRead
+from promptpotter.application.optimizer_contract import CycleRead
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     PoolParent,

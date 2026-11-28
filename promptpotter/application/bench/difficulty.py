@@ -41,14 +41,12 @@ from promptpotter.shared.measurement_context import RoleScope
 _RULER_GRADE = "A"
 
 
-def calibrate_delta_ruler(
-    obs: list[Observation], n_min: int, *, enable_2pl: bool
-) -> DeltaRuler | None:
+def calibrate_delta_ruler(obs: list[Observation], n_min: int) -> DeltaRuler | None:
     """``None`` is cold and reads FLAT."""
     # ≥2 ARMS: with one, the anchor pins θ and δ collapses to that arm's own hit pattern.
     if len({o.key for o in obs}) < n_min or len({o.candidate_id for o in obs}) < 2:
         return None
-    fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
+    fitted, post = graduate_ruler_model(obs)
     if len(post.delta) < n_min:
         return None
     return post.anchored(fitted)
@@ -99,20 +97,19 @@ def judging_ruler(
     *,
     objective_id: str,
     n_min: int,
-    enable_2pl: bool,
 ) -> JudgingRuler:
     """The ONE anchoring fit: the tenant ruler within *reach* less every row of *judged*, the
     parent line, so no election reads a δ the individual it judges against moved."""
     rows = store.rows(scope, reach)
     excluded = tuple(sorted({address for address, _, _ in rows} & set(judged)))
     held = [Observation(a, key, y) for a, key, y in rows if a not in excluded]
-    key = ("judging_ruler", store.path, scope, reach, excluded, n_min, enable_2pl)
+    key = ("judging_ruler", store.path, scope, reach, excluded, n_min)
     # A version is a prefix of an append-only file, so its fit never moves under the key.
     ruler = (
         derived(
             key,
             sig=reach.version,
-            compute=lambda: calibrate_delta_ruler(held, n_min, enable_2pl=enable_2pl),
+            compute=lambda: calibrate_delta_ruler(held, n_min),
         )
         if held
         else None
@@ -127,9 +124,7 @@ def judging_ruler(
     return JudgingRuler(ruler, stamp)
 
 
-def restamped(
-    store: RulerStore, stamp: RulerStamp, *, n_min: int, enable_2pl: bool
-) -> JudgingRuler:
+def restamped(store: RulerStore, stamp: RulerStamp, *, n_min: int) -> JudgingRuler:
     """The scale a banked reading was taken on, re-fit off its stamp."""
     return judging_ruler(
         store,
@@ -138,7 +133,6 @@ def restamped(
         stamp.excluded,
         objective_id=stamp.scope.scorer,
         n_min=n_min,
-        enable_2pl=enable_2pl,
     )
 
 
@@ -177,7 +171,6 @@ class DifficultyView:
 
     session: Session
     n_min: int
-    enable_2pl: bool
     judged: frozenset[str]
     judging: JudgingRuler
 
@@ -186,9 +179,9 @@ class DifficultyView:
         """Round 0's view: the origin is the one individual it judges."""
         opt = config.optimization
         judged = frozenset({origin})
-        n_min, enable_2pl = opt.elimination_n_min, opt.enable_2pl_graduation
-        judging = _session_ruler(session, ruler_clock(session), judged, n_min, enable_2pl)
-        return cls(session, n_min, enable_2pl, judged, judging)
+        n_min = opt.elimination_n_min
+        judging = _session_ruler(session, ruler_clock(session), judged, n_min)
+        return cls(session, n_min, judged, judging)
 
     @property
     def ruler(self) -> DeltaRuler | None:
@@ -199,7 +192,7 @@ class DifficultyView:
         return self.judging.stamp
 
     def _read(self, reach: RulerReach, judged: Collection[str]) -> JudgingRuler:
-        return _session_ruler(self.session, reach, judged, self.n_min, self.enable_2pl)
+        return _session_ruler(self.session, reach, judged, self.n_min)
 
     def open_round(self, rounds: Sequence[RoundResult], reach: RulerReach) -> None:
         """At the round's open, before its draw: the parent line is what the round judges so far."""
@@ -231,7 +224,6 @@ class DifficultyView:
             ruler_clock(session),
             lines,
             n_min=self.n_min,
-            enable_2pl=self.enable_2pl,
         )
 
 
@@ -242,13 +234,10 @@ def level_series_of(
     lines: Sequence[Sequence[RoundResult]],
     *,
     n_min: int,
-    enable_2pl: bool,
 ) -> list[LevelSeries]:
     """ONE fit less every line's parents, so lines' levels sum; each level caveats on its own cells."""
     judged = frozenset(a for rounds in lines for a in parent_line(rounds))
-    scale = judging_ruler(
-        store, scope, reach, judged, objective_id=scope.scorer, n_min=n_min, enable_2pl=enable_2pl
-    )
+    scale = judging_ruler(store, scope, reach, judged, objective_id=scope.scorer, n_min=n_min)
     return [
         LevelSeries(
             stamp=scale.stamp,
@@ -286,7 +275,7 @@ def ruler_clock(session: Session) -> RulerReach:
 
 
 def _session_ruler(
-    session: Session, reach: RulerReach, judged: Collection[str], n_min: int, enable_2pl: bool
+    session: Session, reach: RulerReach, judged: Collection[str], n_min: int
 ) -> JudgingRuler:
     return judging_ruler(
         session.store.ruler,
@@ -295,5 +284,4 @@ def _session_ruler(
         judged,
         objective_id=session.state.scoring.scorer.id,
         n_min=n_min,
-        enable_2pl=enable_2pl,
     )

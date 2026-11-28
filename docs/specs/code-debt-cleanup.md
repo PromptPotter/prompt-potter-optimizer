@@ -32,8 +32,8 @@ settle before L4 spends.
     narrower parameter cannot close these, so each part needs the protocol it reads in a module of
     its own;
   - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`;
-  - bench ↔ optimizers: bench still reads `nodes.py`'s `CycleRead`, member protocols and
-    `NODE_MEMBERS`, because the plugin contract and the round types share that module. Moving
+  - bench ↔ the plugin contract: bench reads `optimizer_contract.py`'s `CycleRead`, member
+    protocols and `NODE_MEMBERS`, which name the bench's `NodeContext` and `RoundContext`. Moving
     `CycleRead` alone re-formed runtime cycles.
 
   Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
@@ -94,20 +94,18 @@ A line's fold is stated once and read by one keyed read `(hop, scope, fold)`. Su
 else is wiped at a landing. The store holds no money rule and no served shape.
 
 **Unexamined:** `store/campaign_store/store.py`, `store/stores.py`, `store/layout.py`,
-`maintenance/archive_maintenance.py`, `maintenance/built_key.py`, `store/io.py`, `store/data_root.py`
+`maintenance/archive_maintenance.py`, `maintenance/landing_key.py`, `store/io.py`, `store/data_root.py`
 
-- **The feed's version spans a whole store**: the writers stamp one version per subject
-  (`io.py::stamp`), but a store is the finest subject: a campaign subtree's version
-  (`hierarchy_subtree.py::subtree_version`) and every evidence and cells view read their store's
-  stamps (`Stores.stamps`), so any run's append or archive write re-asks every mounted tree and view;
-  the feed's tick still lists each store's cycle hops to find its sandboxes
-  (`cycle_reads.py::_store_stats`), and a `store:`-subject read re-runs `feed_versions` over all
-  stores (`presentation/api/routers/reads.py::_endpoint`); `reads.ts::draftRead` follows bare
-  `store:` beside `account`, since Start's refusal reads the wallet every ledger's bill moves, so an
-  inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is one lock over every account's
-  walk. Action: a campaign is a subject its writers stamp, and a sandbox is found off its owner's
-  stamp, never a walk. **Rides with:** a version chain of its own. **Re-test:** a mounted subtree
-  holds its ETag while another campaign of its store appends; `draftRead`'s subject is not `store:`.
+- **The feed's version spans a whole store**: a campaign is a subject its writers stamp
+  (`io.py::stamp`), and a subtree reads its family's campaigns alone (`Stores.stamps`), but every
+  evidence and cells view still reads its store's whole stamp; the feed's tick lists each store's cycle
+  hops to find its sandboxes (`cycle_reads.py::_store_stats`), and a `store:`-subject read re-runs
+  `feed_versions` over all stores (`presentation/api/routers/reads.py::_endpoint`);
+  `reads.ts::draftRead` follows bare `store:` beside `account`, since Start's refusal reads the wallet
+  every ledger's bill moves, so an inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is
+  one lock over every account's walk. Action: a view keys on its campaign's stamp, and a sandbox is
+  found off its owner's stamp, never a walk. **Rides with:** a version chain of its own.
+  **Re-test:** `draftRead`'s subject is not `store:`.
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
@@ -133,20 +131,15 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **A line's fold is stated once and read by one keyed read**: `infrastructure/store/campaign_store/ledger_scan.py`
-  holds 21 `scan_` functions; `for span in spans` is spelled 17/7; `scan_cell_formula` hand-merges the
-  fold `scan_cycle_facts` reads on one ledger. Which ledgers answer for a hop (its cycle, its line,
-  its campaign) is decided at each reader. Root: one read `(hop, scope, fold)`, the fold stating how its
-  values compose. Sits under the launch-steer row and the sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:**
-  `git grep -c "for span in spans" -- promptpotter` falls from 16.
+- **Which ledgers answer for a hop is decided at each reader**: a fold over a line is one
+  `read_model.py::read_line` of a `Line`, but its spans are built at each caller (`CampaignStore.chain`,
+  `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
+  fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
+  sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
 - **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
-  `_Money`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
+  `MoneyFold`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
   its own beside the spend book. **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:**
   `git grep -n "^class Spent\|^def money_on" -- promptpotter/infrastructure/store/read_model.py` is empty.
-- **A protocol with one implementation**: `read_model.py:409 Projected` exists so the index need not import
-  `infrastructure/projections/base.py::Projection`, its only implementer. Root: the index takes `Projection`
-  or the protocol moves to `base.py`. **Rides with:** the money-fold row above.
-  **Re-test:** `git grep -n "class Projected" -- promptpotter` is empty.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -158,43 +151,26 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   run folder stays indented; only `dashboard.json`, which nothing reads back, is a candidate for compact. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
-- **A landing key re-derives per call** (tw-v, tw-v2): `shared/import_walk.py::import_closure`
-  normalizes each module from its own parse (`hashing.py::normalized_tree`), beside
-  `hashing.py::normalized_module`'s memo. That costs 2.16 s for the 329-module closure. On top,
-  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over 90 kinds (0.6–0.85 s), and a
-  memo keyed by the model class is keyed by identity. tw-v2's fix (`arc/tw-v2` 604b03eb2) was not
-  taken: +47 production lines, because a text-keyed memo held 10.5 MB, so it went sha-keyed and
-  zlib-compressed, to save ~2 s on one fact. **Rides with:** after wave 6. **Re-test:** a second
-  `scripts/build_ts_types.py::derived_landing_key()` in one process takes under 0.2 s, with
-  production no larger.
-- **A cell file's version keys on (mtime, size)** (w8-store2, 11-27; items 32, 35):
-  `promptpotter/infrastructure/store/measurement_archive.py::_CellFile.refresh` — it and
-  `_live_rows` key on `(st_mtime_ns, st_size)`, so a same-size rewrite within one tick goes
-  unseen — a per-file version only a writer moves (the stamp's channel) — **Rides with:**
-  `area 02's chain` — **Re-test:** `git grep -n "st_mtime_ns, st_size" -- promptpotter/infrastructure/store/measurement_archive.py` is empty.
+- **A landing key's first derivation costs ~2.3 s per code version** (tw-v, tw-v2): it is derived
+  once per process and filed by the package's bytes in the data root (`landing_key.py::landing_key`),
+  but `shared/import_walk.py::import_closure` normalizes each module from its own parse
+  (`hashing.py::normalized_tree`), beside `hashing.py::normalized_module`'s memo, and
+  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over every kind, so the first
+  entry after a code edit, and a child in a fresh data root, pays it. tw-v2's memo (`arc/tw-v2`
+  604b03eb2) was not taken: +47 production lines. **Rides with:** after wave 6. **Re-test:**
+  `landing_key.py::derived_landing_key()` takes under 0.5 s cold, with production no larger.
 - **The landing key over-keys by module** (bkeys-4, 11-19; items 451, 456, 462):
-  `scripts/build_ts_types.py::loading_modules` — keys the whole import closure of every reader,
+  `promptpotter/application/maintenance/landing_key.py::loading_modules` — keys the whole import closure of every reader,
   so a prose-free edit to any module a load could import re-lands every root, a cost not a
   wipe — key the functions a load calls, not their modules — **Rides with:**
   `area 02's chain` — **Re-test:** an edit to an unreached function in
   `promptpotter/domain/paired_reading.py` leaves `derived_landing_key()` unchanged.
-- **A sandbox delete names its owner twice** (spend-tomb, 11-25):
-  `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.delete_inner_sandbox`
-  — it takes `owner=` while `delete_campaign` and `reaper.py::reclaim_orphan_sandboxes` each
-  read `read_sandbox_owner` first — it reads its own owner file — **Rides with:**
-  `area 02's chain` — **Re-test:** one `read_sandbox_owner` per sandbox delete.
 - **A replay feed spells the prefix-chain keys beside `file_keys`** (store-5a, 11-19):
   `promptpotter/infrastructure/store/measurement_archive.py::ReplayFeed.__init__` — builds
   `config_key(node_configs[:n])` per prefix, beside `file_keys(entry)` and without its
   `entry.config_key` fallback — the file-key chain is a function of `node_configs` alone, one
   spelling — **Rides with:** `area 02's chain` — **Re-test:**
   `git grep -c "config_key(.*\[:n\])" -- promptpotter/infrastructure/store/measurement_archive.py` is 1.
-- **`last_landing` reads an unreadable stamp as none** (land-order, 11-18):
-  `promptpotter/application/maintenance/landing.py::last_landing` — a `ValidationError` returns
-  `None`, so older code reading a reshaped `LandedStamp` lands again and bypasses the
-  newer-version refusal — the stamp's version is read apart from its strict model —
-  **Rides with:** `area 02's chain` — **Re-test:** a stamp with an unknown field still yields its
-  `version`.
 - **`list_campaigns` drops an unreadable manifest into a log** (hubs-2, 11-18):
   `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.list_campaigns` —
   `logger.warning` then `continue`: the account holds a campaign no surface reports — the
@@ -205,18 +181,25 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   is a shallow merge beside `merge_node_blocks` — `source` folds through `fold_layers` —
   **Rides with:** `area 02's chain` — **Re-test:**
   `git grep -c "source |=" -- promptpotter/infrastructure/store/dataset_access.py` is 0.
-- **The capability override's fate is RUN, though it is authored** (lite, 11-14):
-  `promptpotter/infrastructure/store/data_root.py::KINDS` — row "model capability override" is
-  `_RUN` (the landing drops what no model types) while its reader refuses a bad file as
-  operator config (`FileKind.STORED_CONFIG`) — decide whether an authored workspace file is a
-  SURVIVOR (migrated) or RUN — **Rides with:** `area 02's chain` — **Re-test:** the row's
-  `Fate`.
 - **An authored dataset definition has no writer** (w7-ver, 11-27):
   `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — an install or
   research definition edit moves no stamp (those tiers sit off the data root's subjects), so reads
   that depend on it stand until the store's next write or a restart — the definition loader stamps
   its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
   cells ETag moves.
+- **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
+  `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
+  index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
+  ledger's `MoneyFold` meters in a loop of its own — each is a `read_model.py::Line` over its fold —
+  **Rides with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def (fold_cycle_index|_ledger_meters)" -- promptpotter/infrastructure/store/campaign_store/store.py` is 0.
+- **The `Stores` hub holds a cycle's stop machine and the definition writer** (w11-store, 11-28):
+  `promptpotter/infrastructure/store/stores.py::Stores.declare_ended` (with `declare_stop`,
+  `mark_superseded`, `mark_producer_vanished`) runs the producer-lock ending on the hub every
+  bench import reaches, and `Stores.write_own_definition` is the dataset tier's writer — the
+  ending belongs to the campaign store's append door, the writer to the dataset store — **Rides
+  with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def (declare_ended|write_own_definition)" -- promptpotter/infrastructure/store/stores.py` is 0.
 
 ## 03 · Runner, round, bench
 
@@ -264,9 +247,13 @@ read standing rounds off the ledger.
   cancel leaves the thread minting. Root: the cut completes or names its child before the await can be
   cancelled. **Rides with:** area 03's chain. **Re-test:** a cancel injected during the cut leaves no
   child cycle its parent's stop does not name.
-- **The runner is imported from above** (map pass): `scoring/passes.py` and `evidence/head_to_head.py`
-  import `runner/bench.py`, and `jobs/launcher/run_job.py` imports `runner/entry.py` while `runner/`
-  imports `jobs/` at 11 sites. Root: what both sides read moves down. **Rides with:** area 03's chain.
+- **The runner is imported from above** (map pass, w11-plugin): `scoring/passes.py` imports nine
+  `runner/bench.py` functions (`bench_origin`, `line_passes`, `live_cycle_run`, `read_cycle_bench`…) and
+  `runner/output.py::ExportProjection`, `evidence/head_to_head.py` seven (`bench_line`, `pair_on_bench`,
+  `read_bench`…), and `jobs/launcher/run_job.py` imports `runner/entry.py::run_optimization` and
+  `runner/run_init.py::enter_cycle` while `runner/` imports `jobs/` at 11 sites (bench 1, entry 1,
+  `inner/spawn.py` 6, run_init 3); the contract's move made none trivial. Root: the bench pass's lines
+  move below scoring and evidence, and the launch's seam below both runner and jobs. **Rides with:** area 03's chain.
   **Re-test:** `git grep -n "^from promptpotter.application.runner" -- promptpotter/application/scoring
   promptpotter/application/evidence promptpotter/application/jobs` is empty.
 - **The embedded fresh door probes its backend after its session opens** (w7-open, not re-tested):
@@ -297,6 +284,11 @@ read standing rounds off the ledger.
   **Rides with:** `area 03's chain` — **Re-test:** `git grep -n "to_thread, resume_with_divergence_check" --
   promptpotter/application/runner/run_init.py` is empty. (item 79)
 
+- **A line's spent rounds are spelled at three sites** (w11-store, 11-28):
+  `promptpotter/application/runner/bench.py::line_round_budget`, `runner/entry.py` and
+  `runner/inner/spawn.py` each sum or flatten `LineSpan.own` over a line — one function of the
+  line's spans — **Rides with:** `area 03's chain` — **Re-test:**
+  `git grep -c "span.own" -- promptpotter` is 1.
 ## 04 · Scoring, fitness, statistics
 
 **Target:** One scoring gateway (`search_point_scorer.py`); a cell is a fact, never a grade; fitness is
@@ -325,15 +317,6 @@ optimizer node.
   the archive (`measurements_for_config`) and fits the ruler (`judging_ruler`); a warm verify entered
   in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
   verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
-- **A lift is read two ways**: `paired_reading.py::Estimate` is the one level and lift every surface
-  renders, and `paired.py::_lift`'s test is the measurand's (exact sign where it is declared binary,
-  paired t where graded), but a θ lift is a bare `Estimate` (`ruler.py::theta_lift`), never a
-  `MeasuredLift`, so rk-dec's bar and rk-opt's lift test read two shapes. Action: θ returns
-  `MeasuredLift` beside the paired kinds; θ and paired t stay distinct measurands (θ is unpaired and
-  model-based, which PoBB's truncation needs); CAPO, GEPA and LEVI keep their papers' bars. No
-  `EstimatorSpec.kind`: the measurand's declaration already picks the paired test, and a kind would be
-  a second door to it. **Rides with:** rk-dec. **Re-test:** the chain's census lists the estimate
-  readings; one remains.
 - **The warm gate counts no se_δ**: θ now reads each δ under its SE (`DeltaRuler.entries`), but the
   young-ruler joint MAP still shrinks δ̂ inward (slope 0.30 at 3 individuals per cell) and the warm
   gate warms on row counts alone.
@@ -346,31 +329,14 @@ optimizer node.
   `max(0.0, min(1.0, env_reward))` still fits φ. Root: a connector declares the shape of its
   observation keys (per panel where it varies), and the scorer compiles with the campaign's
   connector. **Re-test:** the clamp under harbor reads two-valued in `Scorer.two_valued`.
-- **The paired SE floor is its own rule** (readings-6's report): `statistics.py::_normal_posterior`
-  floors the SE at `1/(4n)` beside `bounded_mean_interval`'s support bound, the rule a constant
-  graded side now reads in `difference_interval`. Folding it moves CAPO's paired t race (via
-  `paired_mean_t`) and `read_arms`' SEs, so it needs an offline-run attribution of every moved pick
-  first. The support bound is an interval, not an SE, and over a paired difference's
-  support [−1, 1] it is far wider than the floor (n = 20: all ties ±0.42 against ±0.026; all wins
-  [0.64, 1] against [0.97, 1]). **Decided 2026-11-27:** one rule for a constant paired side: an exact
-  bound on the share of cells where the pair disagrees (0/1 grades at n = 20: about ±0.17 for all ties,
-  about [0.66, 1] for all wins; its bounded-variable form for graded scores), replacing both the `1/(4n)`
-  floor and the support bound; the offline run names every moved pick. **Re-test:** one rule for a constant side
-  in `statistics.py`, each moved pick named.
-- **The composite step has no band beside the fitness difference**: `domain/verification.py::VerifyReading.composite_increment`
-  (`:152`) is a bare float while `fitness_difference` (`:148`) is an `Estimate`. Root: both columns'
-  fresh − recorded are one shape. **Re-test:** one shape for both columns' fresh − recorded.
-- **`domain/cell_fold.py::repairable_holes` counts a charged error** (tw-p): every errored non-HALTED cell
-  counts, a charged one a re-walk pays again included, since `ErrorCategory` does not say which errors
-  are fillable. With the repair gone, name each reader and what it should count. **Rides with:** wave 6.
-  **Re-test:** `repairable_holes` excludes a charged error, or has no reader.
-- **A resumed walk buys a charged errored cell again** (tw-j2): `infrastructure/store/measurement_archive.py::ReplayFeed.advance`
-  skips `cell.errored`, so a pass that a charged error stopped is sent again on resume and paid twice.
-  The crossed legs compare deduplicated `passes_graded` and read the repeat as spend. **Decided 2026-11-27:** an errored,
-  charged cell on resume replays its error, never retries (§0: no retry of a (sample, candidate) pair). The root is
-  shared with `repairable_holes`'s row: `ErrorCategory` does not say which errors are fillable.
-  **Rides with:** wave 6. **Re-test:** `offline_run.py --charged` crossed-resumed
-  `harness.backend_cells` equals crossed's, or the retry is a decision in `docs/decisions.md`.
+- **A constant paired side reads the `1/(4n)` floor, not the decided exact bound** (w11-scoring):
+  `statistics.py::floored_se` is now the one constant-side rule (`_normal_posterior` and
+  `difference_interval`'s graded side read it; the support bound is gone from differences), as the
+  w11-scoring brief states decision 9. `briefs/decisions.md`'s 2026-11-27 header instead decides an
+  exact bound on the share of cells where the pair disagrees (0/1 grades at n = 20: about ±0.17 for
+  all ties, about [0.66, 1] for all wins), replacing the floor. Action: the operator names which;
+  if the bound, it replaces `floored_se`'s body and the offline run names every moved pick.
+  **Rides with:** area 04's chain. **Re-test:** `statistics.py` holds one constant-side rule, the one decided.
 - **"Which benchmark a row measures" is spelled twice**: `BenchScope` partitions by benchmark under
   the word `RulerScope` owns. Action: `BenchScope` takes a benchmark name. **Held:** l4-runs owns
   `runner/bench.py`. **Re-test:** `git grep -n "BenchScope" -- promptpotter` is empty.
@@ -433,7 +399,7 @@ bill.
   **Re-test:** `factories.spend_book` takes no `enclosing`; `InstrumentMode` carries no `depth`; the
   nested-replay fact calls the production nesting.
 - **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**:
-  `hierarchy.py:302-308` builds the cycle row from `scan_ledger_spend` and passes `None` as
+  `hierarchy.py:302-308` builds the cycle row from `ledger_scan.py::LEDGER_SPEND` and passes `None` as
   unreported (`_spend_row("spend", …, None)`). A send a pause cuts is already filed at the cut as a
   `Lapse` (`spend_book.py::admitted`), but on the charge book, and for a nested run under the ROOT's
   ledger (`Admission`: `held_on((root.ledger or ledger).path)`), so neither the inner row nor the
@@ -732,22 +698,29 @@ selection explicit.
 
 **Target:** Every optimizer is a manifest whose knobs are its nodes' `config`, registered in the one
 entry-point registry, so a third party ships one with no edit here; its working state rides the round as
-`optimizer_state`; potter's bad prompt is fixed in the dispatch hub; no fourth layer. `optimizers/nodes.py`
-holds the member protocols, the round types, the review readings, the knob types and `BehaviourKeys`, and 13
-modules outside `optimizers/` import it.
+`optimizer_state`; potter's bad prompt is fixed in the dispatch hub; no fourth layer. The plugin contract
+(`application/optimizer_contract.py`) sits below the bench; outside `optimizers/` only the landing's loader
+imports an optimizer package.
 
-**Unexamined:** `dispatch/facade.py`,
-`validators.py`, `dispatch/bundle.py`, `dispatch/layout.py`, `knobs.py`, `dispatch/injections/layer_state.py`,
-`l1.py`, `behavior_checks.py`, `optimizer_manifest.py`, `potter/members.py`, `dispatch/injections/panels.py`
-
+- **Potter's dispatch spells a rule twice and a cap inline** (w11-plugin census):
+  `potter/dispatch/layout.py::unplaceable_edit` refuses an edit placed twice and
+  `potter/dispatch/layout.py::coerce_l1_layout` asserts it again; `potter/behavior_checks.py`'s
+  `_REBUT_SIGNALS` must match the words `potter/dispatch/injections/panels.py` tells the model to write;
+  `panels.py` and `potter/dispatch/injections/layer_state.py` cut text at inline literals (`[:70]`,
+  `char_cap=400`, `char_cap=2400`) beside `potter/dispatch/bundle.py`'s caps, and `layer_state.py`'s
+  `_r_l1_layout` re-derives `potter/dispatch/prompts.py::node_layout`; `potter/validators.py` books its
+  no-op, duplicate and repeat verdicts under the placeholder axis `variant`, no locus, which
+  `domain/wounds.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
+  whole-candidate verdict names no axis. **Rides with:** area 09's chain. **Re-test:**
+  `git grep -c 'axis="variant"' -- promptpotter` is 0 and `layer_state.py` names no `char_cap=` literal.
 - **Selection and the race are written once per peer, not in the backbone** (w10-survey):
   `capo/members.py::PopulationSelector.select`, `gepa/members.py::Pareto.select` and
   `levi/members.py::MapElites.select` each re-derive the leader, a tie rule and the `RoundEnding` /
   `Selection`; `capo/members.py::PairedTRace.decide` and `gepa/members.py::_GateRace.decide` are one
   `scoring/race_protocol.py::next_block` body and both build the `eliminated` `StopSignal`;
   `kind == "eliminated"` is counted in `capo/members.py`, `gepa/members.py` and
-  `potter/dispatch/injections/panels.py`; the shared-cell mean is written four times
-  (`capo/members.py::_rank_survivors`, `capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
+  `potter/dispatch/injections/panels.py`; the shared-cell mean is written three times
+  (`capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
   `gepa/members.py::_aggregate`) beside `optimizers/descriptors.py::cell_objectives`. Root: the backbone
   takes a score map and owns crown, hold and the stop signal; a peer supplies the ranking. **Rides with:**
   area 09's chain. **Re-test:** `git grep -n "next_block(" -- promptpotter/application/optimizers` is 0 in
@@ -765,10 +738,6 @@ modules outside `optimizers/` import it.
   on the fitness column, yet the pipeline node, its knobs and `row_policy.py` still spell
   `theta_election`. Action: rename it to what it decides (with its doc row; a behaviour-key move).
   **Rides with:** area 09's chain. **Re-test:** `git grep -c theta_election -- promptpotter` is 0.
-- **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
-  `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
-  fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
-  `git grep -n "class EscalationLayer" -- promptpotter` is empty.
 - **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
@@ -782,21 +751,6 @@ modules outside `optimizers/` import it.
   names `mechanism` and `claim` before `sample_ids` in the layout and `schemas.py::FailureCluster`'s
   order, and each id appears once in the whole reply. Open: the paid proof. **Re-test:** the banked
   inputs (`.scratch/wave-2/bank/row111/`) re-asked under `l1_critique/1` as it now renders finish `stop`.
-- **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
-  a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
-  id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it
-  receives. **Rides with:** the next variation chain. **Re-test:** a hosted recombination keeps its id.
-- **An over-budget crossover child books its verdict under axis `variant`**: `bench/children.py`'s
-  one length check cannot tell which mutation minted the child. Action: the verdict names the
-  mutation kind. **Rides with:** the row above. **Re-test:** a crossover child's OVER_CEILING names
-  crossover.
-- **The plugin contract lives inside `optimizers/`** (map pass): `optimizers/nodes.py` holds the member
-  protocols, the round types, the review readings, the knob types and `BehaviourKeys`, and 13 modules
-  outside `optimizers/` import it (`bench/cycle.py`, `bench/node_context.py`, `runner/round.py`…), against
-  §0's "the bench never imports an optimizer". **Decided 2026-11-27:** the contract moves below the
-  bench; the bench ↔ optimizers knot of **The layering is fictional at runtime** closes with it.
-  **Rides with:** the 09 + 03 chain. **Re-test:** no module under `runner/` or `bench/` imports
-  `application/optimizers/`.
 - **A held round's words are the election match's fall-through** (w8-round, 11-27):
   `promptpotter/application/optimizers/potter/election.py::_verdict_reason` — a HELD round (and
   ADOPTED) reaches the closing `return` of the `match`, since `RoundDecision.ending` is typed
@@ -843,7 +797,7 @@ AUC.
   `UntakenBoughtRecord`. tw-j's e2e L4 fixture discarded 0 outer cells at press depth 4 and at 6
   seats: the path is unreached, not refuted. **Rides with:** wave 6 (L4). **Re-test:** an L4 leg
   pressed past one outer cell discards one, and its ledger names it untaken.
-- **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the
+- **The estimator has no golden corpus**: its key (`optimizer_contract.py::BehaviourKeys.cell_estimator`) reads the
   L4 leg's trace on the offline world, not its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Decided 2026-11-27:** the corpus is the offline world's L4 leg outputs, committed under 1 MB. **Re-test:** the
@@ -1200,10 +1154,16 @@ budgets.
   desk beside its pytest.
   Second case (w10-tests' landing): `touch` phone-412 "every view fits its viewport" failed in
   `webapp/e2e/harness.ts::drawn`, with a read still open past `expect.timeout` (15 s), while
-  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Root: playwright,
-  the gate's critical path, shares the desk with its two heaviest checks. Fix it in `gate.py`'s
-  schedule, or make `drawn` wait on what the page serves rather than on a clock. **Rides with:**
-  area 14's chain.
+  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Third case
+  (w11-store/plugin/scoring): `touch` landscape-844 the same, plus `cold` onboarding-signed-in's
+  `fake_issuer.ts::waitForHealth` past its 60 s. Playwright took 962 s against 290 s alone, and pytest
+  1194 s against 638 s, yet the desk was not CPU-bound: playwright ran at 0.74 cpu/wall against 1.83
+  alone, pytest at 0.49, and the checks running together summed about 5 of 16 cores. The schedule
+  packed them up to `free_mb` (3817 MB free; playwright 1680 + offline-run 1240 + pytest 435 MB
+  declared). Suspected root: memory or disk, not cores. Measure first: page faults and disk queue
+  sampled across one full gate. Then budget the schedule against the resource that binds, or make
+  `drawn` and `waitForHealth` wait on what the server says rather than on a clock. **Rides with:**
+  area 14's chain, as its first link.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
@@ -1274,20 +1234,11 @@ budgets.
   decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
   A green rerun is a gate or desk defect, never a pass: a twin's pause point or its replay depends on
   something the leg does not pin. **Re-test:** five desk runs of the leg read UNMOVED.
-- **Tests seat what a world door should make** (w9-entry, w9-pass): `tests/test_security.py` hand-seats a
-  `ForkCut`, and no offline leg exercises CAPO's `locked_in` path, so w9-pass's catch-up is proven by
-  unit tests alone. **Rides with:** area 14's chain. **Re-test:** a world leg settles a CAPO race
-  `locked_in`; `git grep -c "ForkCut(" -- tests/test_security.py` is 0.
+- **Tests seat what a world door should make** (w9-entry): `tests/test_security.py` hand-seats a
+  `ForkCut`. **Rides with:** area 14's chain. **Re-test:** `git grep -c "ForkCut(" -- tests/test_security.py` is 0.
 - **`gate.py --changed` proves nothing for a committed link** (w7-ver2, HO1063): on a clean tree it runs 0
   checks, and its `specs` go red when their generator rewrites. **Rides with:** area 14's chain.
   **Re-test:** `--changed` after a commit checks that commit's files, and a regenerated spec reads green.
-- **walk-world reads the built key absent while ts-types rewrites it** (w7-open): a gate's walk-world fails
-  with `FileNotFoundError` on `application/maintenance/built_key.py` when ts-types regenerates it
-  mid-gate. The key stays committed: computed where read, it would cost every process start ~2.8 s
-  (`landing.py::_landed` reads it at entry; the closure 2.16 s, `row_schema` 0.6–0.85 s), and the other
-  generated files conflict at a merge the same way (orchestrator, 2026-11-27, withdrawing map D-0).
-  Root: a generated file is replaced whole, never absent between two writes. **Rides with:** area 14's
-  chain. **Re-test:** a gate whose ts-types rewrites the key beside walk-world reads it present.
 - **The trace's canonical labels move on a resume into the end pass** (w8-tests3): `offline_run.py::decided`
   reads C0 as `parent@R1` there. **Rides with:** area 14's chain. **Re-test:** a resumed leg's labels
   match its straight twin's.
@@ -1299,11 +1250,6 @@ budgets.
   `gate.py::_branch_base` already names it for `--changed` — **Rides with:** `area 14's chain` —
   **Re-test:** `python scripts/gate.py --only surface-ledger` on a branch off an unlanded
   `release/next` reads green when the chain raised nothing.
-- **The gate stages the landing key in two places** (w8-gate, 11-27): `scripts/gate.py::_ts_types`
-  and `scripts/gate.py::_proven_in` both `git add` the landing key, one in the index's own tree and
-  one copying back from its checkout, following `--staged`'s two modes — one mode, one stage —
-  **Rides with:** `area 14's chain` — **Re-test:** `git grep -c "_LANDING_KEY" -- scripts/gate.py`
-  names one `git add`.
 - **The offline world reports no cached_tokens** (usage-2, 11-19): `scripts/offline_world.py::USAGE`
   — `prompt_tokens_details` holds only `cache_write_tokens`, so every offline prefix reads
   "unreported" where OpenRouter reports a cold 0 — the world's usage carries `cached_tokens` as the

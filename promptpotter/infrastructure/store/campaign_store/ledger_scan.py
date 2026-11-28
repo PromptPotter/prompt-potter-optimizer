@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
+from typing import Any, ClassVar, NamedTuple, assert_never, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore
@@ -62,11 +61,9 @@ from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.spend import (
     Budget,
-    CeilingMeter,
     SpendRollup,
     spend_slot,
 )
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import (
     BenchPass,
     BenchPasses,
@@ -76,12 +73,16 @@ from promptpotter.domain.verification import (
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LastOf,
-    LedgerFold,
     LedgerIndex,
     LedgerSpan,
+    Line,
+    Money,
+    MoneyFold,
     RecordClasses,
-    money_on,
-    scan_last,
+    last,
+    line_concat,
+    line_union,
+    read_line,
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -157,7 +158,7 @@ class _LaunchClocks:
         return list(self._found)
 
 
-class _StandingBudget:
+class StandingBudgetFold:
     records: ClassVar[RecordClasses] = (StandingBudgetRecord,)
 
     def __init__(self) -> None:
@@ -210,7 +211,7 @@ def _init_formula(record: PhaseRecord) -> str | None:
     return None
 
 
-class _CycleFactsFold:
+class CycleFactsFold:
     records: ClassVar[RecordClasses] = get_args(_CycleFact)
 
     def __init__(self) -> None:
@@ -549,7 +550,7 @@ def moves_index(record: CycleRecord) -> bool:
     """Whether *record* moves a cycle's index (`store.py::fold_cycle_index`): a fact its fold takes, or a round that stands."""
     if isinstance(record, PhaseRecord):
         return _init_formula(record) is not None
-    return isinstance(record, (*_CycleFactsFold.records, *_MOVES_ROUNDS))
+    return isinstance(record, (*CycleFactsFold.records, *_MOVES_ROUNDS))
 
 
 _Naming = SampleScoredRecord | RoundClosedRecord | RaceCatchUpRecord | PassGradedRecord
@@ -558,7 +559,7 @@ _Naming = SampleScoredRecord | RoundClosedRecord | RaceCatchUpRecord | PassGrade
 class _Answers:
     """Every answer a ledger names — a slotted walk's, a close's rows, a catch-up's, a verify
     pass's — displaced rounds included: what a campaign has walked, read through the extractors
-    `scan_ledger_walks` reads what STANDS through, so memory holds all evidence."""
+    `line_walks` reads what STANDS through, so memory holds all evidence."""
 
     records: ClassVar[RecordClasses] = get_args(_Naming)
 
@@ -612,7 +613,7 @@ class _Verification:
         return list(self._graded)
 
 
-class _ClosedBench:
+class ClosedBenchFold:
     """The last bench a run declared: its close's, which carries the run's own word on its ending."""
 
     records: ClassVar[RecordClasses] = (BenchScoredRecord,)
@@ -627,24 +628,13 @@ class _ClosedBench:
         return self._bench
 
 
-def scan_closed_bench(ledger_path: Path) -> BenchScore | None:
-    return _view(ledger_path, _ClosedBench)
-
-
-def _graded(spans: Iterable[LedgerSpan], kind: MeasurementRole) -> Iterator[PassGradedRecord]:
-    for span in spans:
-        for view in LedgerIndex.of(span.path).view(_Verification, span.until):
-            if view.verification.kind == kind:
-                yield view
-
-
 class LedgerSpend(NamedTuple):
     spend: SpendRollup
     calls: int
     worked_s: float
 
 
-class _BenchOpen:
+class BenchOpenFold:
     """A bench pass's bracket: entered and not yet exited, the dashboard's running bench mark."""
 
     records: ClassVar[RecordClasses] = (PhaseRecord,)
@@ -736,67 +726,42 @@ LedgerIndex.readers(
     _ResolvedRun,
     _ArmActs,
     _LaunchClocks,
-    _StandingBudget,
-    _CycleFactsFold,
+    StandingBudgetFold,
+    CycleFactsFold,
     _StandingFold,
     _Answers,
     _Verification,
-    _BenchOpen,
+    BenchOpenFold,
     _PricedKeys,
     _Timeline,
 )
 
 
-def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
-    return LedgerIndex.of(ledger_path).view(fold)
+def _resolved_then(held: ResolvedRun, own: ResolvedRun, span: LedgerSpan) -> ResolvedRun:
+    if own.experiment is not None:
+        own = replace(own, experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
+    return held.then(own)
 
 
-def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> list[R | None]:
-    """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
-    return [
-        cast("R | None", LedgerIndex.of(span.path).view(LastOf(record), span.until))
-        for span in spans
-    ]
+RESOLVED_RUN = Line(_ResolvedRun, ResolvedRun, _resolved_then)
+# Every act that ran the line off its declared comparison, oldest first.
+ARM_ACTS = line_concat(_ArmActs)
+LAUNCH_CLOCKS = line_concat(_LaunchClocks)
+# The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none.
+CAMPAIGN_CEILING: Line[CampaignCeilingRecord | None, CampaignCeilingRecord] = Line(
+    last(CampaignCeilingRecord).fold,
+    lambda: CampaignCeilingRecord(budget=Budget(), asked=Budget()),
+    lambda held, own, _: held if own is None else own,
+)
+GRADED_PASSES = line_concat(_Verification)
 
 
-def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
-    resolved = ResolvedRun()
-    for span in spans:
-        own = LedgerIndex.of(span.path).view(_ResolvedRun, span.until)
-        if own.experiment is not None:
-            own = replace(own, experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
-        resolved = resolved.then(own)
-    return resolved
-
-
-def scan_arm_acts(spans: Iterable[LedgerSpan]) -> list[ArmAct]:
-    """Every act that ran the line off its declared comparison, oldest first."""
-    return [act for span in spans for act in LedgerIndex.of(span.path).view(_ArmActs, span.until)]
-
-
-def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
-    return [
-        clock
-        for span in spans
-        for clock in LedgerIndex.of(span.path).view(_LaunchClocks, span.until)
-    ]
-
-
-def scan_campaign_ceiling(root_ledger: Path) -> CampaignCeilingRecord:
-    """The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none."""
-    held = scan_last([LedgerSpan(root_ledger)], CampaignCeilingRecord)
-    return CampaignCeilingRecord(budget=Budget(), asked=Budget()) if held is None else held
-
-
-def scan_standing_budget(ledger_path: Path) -> StandingBudgetRecord:
-    """The cycle's own patches, folded in order of arrival."""
-    return _view(ledger_path, _StandingBudget)
-
-
-def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
-    held: BenchPasses | None = None
-    for view in _graded(spans, MeasurementRole.BENCH):
-        if not isinstance(taken := view.verification, BenchPass):
+def _bench_then(
+    held: BenchPasses | None, own: list[PassGradedRecord], _: LedgerSpan
+) -> BenchPasses | None:
+    for view in own:
+        taken = view.verification
+        if taken.kind != MeasurementRole.BENCH or not isinstance(taken, BenchPass):
             continue
         if view.subject == "selected":
             if held is not None:
@@ -814,41 +779,33 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     return held
 
 
-def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, ArmKey], BenchReading]:
-    return {
-        (view.reading.round, view.verification.arm.key): view.reading
-        for view in _graded(spans, MeasurementRole.BENCH)
-        if isinstance(view.reading, BenchReading)
-    }
+BENCH_PASSES: Line[list[PassGradedRecord], BenchPasses | None] = Line(
+    _Verification, lambda: None, _bench_then
+)
+BENCH_READINGS: Line[list[PassGradedRecord], dict[tuple[int, ArmKey], BenchReading]] = Line(
+    _Verification,
+    dict,
+    lambda held, own, _: (
+        held
+        | {
+            (view.reading.round, view.verification.arm.key): view.reading
+            for view in own
+            if view.verification.kind == MeasurementRole.BENCH
+            and isinstance(view.reading, BenchReading)
+        }
+    ),
+)
+CELL_FORMULA: Line[CycleFacts, str | None] = Line(
+    CycleFactsFold, lambda: None, lambda held, own, _: own.formula or held
+)
+STANDING_ROUNDS: Line[StandingRounds, StandingRounds] = Line(
+    _StandingFold, StandingRounds.none, lambda held, own, _: held.then(own)
+)
 
 
-def scan_bench_open(ledger_path: Path) -> bool:
-    """Own ledger only."""
-    return _view(ledger_path, _BenchOpen)
-
-
-def scan_cycle_facts(ledger_path: Path, until: int | None = None) -> CycleFacts:
-    return LedgerIndex.of(ledger_path).view(_CycleFactsFold, until)
-
-
-def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
-    formula: str | None = None
-    for span in spans:
-        held = LedgerIndex.of(span.path).view(_CycleFactsFold, span.until)
-        formula = held.formula or formula
-    return formula
-
-
-def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:
-    standing = StandingRounds.none()
-    for span in spans:
-        standing = standing.then(LedgerIndex.of(span.path).view(_StandingFold, span.until))
-    return standing
-
-
-def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[WalkedCell]]:
+def line_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[WalkedCell]]:
     chain = list(spans)
-    standing = scan_standing_rounds(chain)
+    standing = read_line(chain, STANDING_ROUNDS)
     closed = standing.rounds
     walks = [walk for held in closed.values() for walk in held.close.walks()]
     # Per round: one individual walked in two open rounds is two walks.
@@ -863,7 +820,11 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
         if round_num not in closed
     ]
     # The whole chain: a fork inherits its parent's verify CELLS, though not its assurance.
-    walks += [view.verification.walk() for view in _graded(chain, MeasurementRole.VERIFY)]
+    walks += [
+        view.verification.walk()
+        for view in read_line(chain, GRADED_PASSES)
+        if view.verification.kind == MeasurementRole.VERIFY
+    ]
     return walks
 
 
@@ -871,16 +832,21 @@ _Span = tuple[float, float]
 _CallSpan = tuple[str, str, float, float]
 
 
-def scan_ledger_verify(ledger_path: Path) -> VerifyLedger:
-    """Own ledger only: a fork inherits its parent's measurements, not its assurance."""
-    graded: dict[ArmKey, tuple[VerificationPass, VerifyReading]] = {}
-    passes: list[VerificationPass] = []
-    for view in _graded([LedgerSpan(ledger_path)], MeasurementRole.VERIFY):
+def _verify_then(held: VerifyLedger, own: list[PassGradedRecord], _: LedgerSpan) -> VerifyLedger:
+    for view in own:
         # A refused pass sent nothing: it verified no round.
-        if isinstance(view.reading, VerifyReading):
-            graded[view.verification.arm.key] = view.verification, view.reading
-            passes.append(view.verification)
-    return VerifyLedger(graded, passes)
+        if view.verification.kind == MeasurementRole.VERIFY and isinstance(
+            view.reading, VerifyReading
+        ):
+            held.graded[view.verification.arm.key] = view.verification, view.reading
+            held.passes.append(view.verification)
+    return held
+
+
+# Read on a cycle's own ledger: a fork inherits its parent's measurements, not its assurance.
+VERIFY_LEDGER: Line[list[PassGradedRecord], VerifyLedger] = Line(
+    _Verification, lambda: VerifyLedger({}, []), _verify_then
+)
 
 
 def _phase_spans(
@@ -992,51 +958,42 @@ def _launched[F: tuple[Any, ...]](
     )
 
 
-def scan_ledger_answers(spans: Iterable[LedgerSpan]) -> frozenset[str]:
-    held = [LedgerIndex.of(span.path).view(_Answers, span.until) for span in spans]
-    return held[0] if len(held) == 1 else frozenset().union(*held)
+WALKED_ANSWERS = line_union(_Answers)
+PRICED_KEYS = line_union(_PricedKeys)
 
 
-def scan_ledger_priced_keys(ledger_paths: Iterable[Path]) -> set[str]:
-    return {key for path in ledger_paths for key in _view(path, _PricedKeys)}
+def _spend_then(held: LedgerSpend, own: Money, _: LedgerSpan) -> LedgerSpend:
+    for rollup in own.by_round.values():
+        held.spend.absorb(rollup)
+    return LedgerSpend(held.spend, held.calls + own.calls, held.worked_s + own.worked_s)
 
 
-def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
-    spend = SpendRollup()
-    calls, worked_s = 0, 0.0
-    for span in spans:
-        own = money_on(span.path, span.until)
-        for held in own.by_round.values():
-            spend.absorb(held)
-        calls += own.calls
-        worked_s += own.worked_s
-    return LedgerSpend(spend, calls, worked_s)
+LEDGER_SPEND: Line[Money, LedgerSpend] = Line(
+    MoneyFold, lambda: LedgerSpend(SpendRollup(), 0, 0.0), _spend_then
+)
 
 
-def scan_ledger_metered(ledger_path: Path) -> dict[CeilingMeter, Budget]:
-    """This ledger's OWN appends, never a fork's walked prefix, in every ceiling meter."""
-    return money_on(ledger_path).metered
+def _by_round_then(
+    held: dict[int, SpendRollup], own: Money, _: LedgerSpan
+) -> dict[int, SpendRollup]:
+    for n, rollup in own.by_round.items():
+        spend_slot(held, n, SpendRollup).absorb(rollup)
+    return dict(sorted(held.items()))
 
 
-def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRollup]:
-    """Not clamped by a rewind: a round measured twice cost money both times."""
-    by_round: dict[int, SpendRollup] = {}
-    for span in spans:
-        own = money_on(span.path, span.until)
-        for n, held in own.by_round.items():
-            spend_slot(by_round, n, SpendRollup).absorb(held)
-    return dict(sorted(by_round.items()))
+# Not clamped by a rewind: a round measured twice cost money both times.
+SPEND_BY_ROUND: Line[Money, dict[int, SpendRollup]] = Line(MoneyFold, dict, _by_round_then)
+TIMELINES: Line[Timeline, list[Timeline]] = Line(_Timeline, list, lambda held, own, _: [*held, own])
 
 
-def scan_ledger_wall_clock(
-    ledger_paths: Sequence[Path],
+def wall_clock_of(
+    timelines: list[Timeline],
     *,
     started_at: str,
     finished_at: str,
     optimizer_phases: frozenset[str],
 ) -> WallClock:
     """The endpoints are the RUNNER's: the ledger's first record is already past ``init_services``."""
-    timelines = [_view(ledger_path, _Timeline) for ledger_path in ledger_paths]
     opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
     phases = _phase_spans(_launched(timelines, lambda t: t.phases, opened), optimizer_phases)

@@ -14,13 +14,13 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.optimizer_contract import BehaviourKeys
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
     fired_on,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import BehaviourKeys
 from promptpotter.domain.campaign_config import (
     ArmGateMode,
     CampaignConfig,
@@ -338,8 +338,6 @@ def inner_instrument_config(
         # Each gate's await is unbounded, and an instrument cannot ask a human anything.
         "origin_gate": "off",
         "arm_gate": INNER_ARM_GATE,
-        # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
-        "enable_2pl_graduation": False,
     }
     if not solver:
         raise ValueError("the inner pipeline declares no prompt node: no solver to pin")

@@ -1,35 +1,29 @@
+"""The built-in optimizers' loader: each package's `members.MEMBERS`, registered from above into
+`optimizer_contract.py::NODE_MEMBERS` where every registry completes."""
+
 from __future__ import annotations
 
-import typing
+import importlib
+import pkgutil
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-from promptpotter.config.paths import optimizers_root
-from promptpotter.shared.plugin_registry import Registry
+from promptpotter.application.optimizer_contract import NodeMember
 
-MANIFEST_ENTRY_POINT_GROUP = "promptpotter.optimizer_manifests"
-"""Published, keyed by manifest name: renaming it un-registers every plugin at once."""
+BUILTIN_PACKAGES = frozenset(pkg.name for pkg in pkgutil.iter_modules(__path__) if pkg.ispkg)
 
 
-class ManifestDir(typing.NamedTuple):
-    # What `optimization.optimizer` selects.
-    name: str
-    directory: Path
+def builtin_members() -> Iterator[tuple[str, object]]:
+    for package in sorted(BUILTIN_PACKAGES):
+        module = importlib.import_module(f"{__name__}.{package}.members")
+        for obj in module.MEMBERS:
+            yield module.__name__, obj
 
 
-def _validate_manifest(obj: object, origin: str) -> ManifestDir:
-    if not isinstance(obj, ManifestDir) or not obj.name or not obj.directory.is_dir():
-        raise RuntimeError(
-            f"[{origin}] resolved to {obj!r}: an optimizer manifest is a `ManifestDir` naming "
-            "what `optimization.optimizer` selects and the directory holding its pipeline.yaml."
-        )
-    return obj
-
-
-def _manifests() -> Iterator[tuple[str, object]]:
-    for directory in sorted(optimizers_root().iterdir()):
-        if (directory / "pipeline.yaml").is_file():
-            yield str(directory), ManifestDir(directory.name, directory)
-
-
-MANIFESTS = Registry(MANIFEST_ENTRY_POINT_GROUP, _manifests, _validate_manifest)
+def member_package_dir(member: NodeMember) -> Path:
+    """The built-in optimizer package declaring *member*, or the top package of a plugin's."""
+    package = type(member).__module__.removeprefix(f"{__name__}.").split(".")[0]
+    builtin = package in BUILTIN_PACKAGES
+    top = f"{__name__}.{package}" if builtin else type(member).__module__.split(".")[0]
+    return Path(str(sys.modules[top].__file__)).parent

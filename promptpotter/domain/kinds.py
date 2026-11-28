@@ -41,7 +41,7 @@ class KindTable[M: BaseModel]:
         return dict(sorted(self._held.items()))
 
     def schemas(self) -> dict[str, object]:
-        """Every kind's shape, so a reshape of any moves what hashes them (`build_ts_types.py::derived_landing_key`)."""
+        """Every kind's shape, so a reshape of any moves what hashes them (`landing_key.py::derived_landing_key`)."""
         return {kind: model.model_json_schema() for kind, model in self.registered().items()}
 
     def parse(self, kind: str, raw: object) -> M:

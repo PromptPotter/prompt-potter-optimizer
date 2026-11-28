@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import functools
 import json
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from promptpotter.application import optimizers
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     BEHAVIOUR_KEYS_FILE,
+    MANIFESTS,
     NODE_MEMBERS,
     BehaviourKeys,
     CountKnob,
@@ -19,7 +20,6 @@ from promptpotter.application.optimizers.nodes import (
     Reviewer,
     RoundWalk,
     llm_nodes,
-    member_package_dir,
 )
 from promptpotter.config.paths import (
     PACKAGE_ROOT,
@@ -77,7 +77,7 @@ from promptpotter.shared.hashing import normalized_module, stable_hash
 from promptpotter.shared.import_walk import import_closure, package_imports
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import (
+    from promptpotter.application.optimizer_contract import (
         Adapter,
         Controller,
         Eliminator,
@@ -750,7 +750,7 @@ def _carrying_knobs(schema: PipelineSchema, declared: PipelineManifest) -> Pipel
 
 def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     try:
-        shipped = optimizers.MANIFESTS.get(name).directory
+        shipped = MANIFESTS.get(name).directory
     except PayloadInvalidError as exc:
         raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
@@ -1055,14 +1055,18 @@ def behaviour_key(name: str, members: Sequence[NodeMember], manifests: Sequence[
     """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
     world's version, so a rename on a line the world ran re-keys nothing, an edit to one it never
     ran does. A manifest outside the package has no trace, so it keys by all it can run: its
-    members' packages and its manifest directories as they stand, and the package code their
-    imports and this module's reach (the run every optimizer takes), so an edit to code a plugin
-    can reach re-keys it and an edit to a built-in it never imports never does. A built-in
+    plugin members' top packages and its manifest directories as they stand, and the package code
+    their imports and this module's reach (the run every optimizer takes), so an edit to code a
+    plugin can reach re-keys it and an edit to a built-in it never imports never does. A built-in
     missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a second
     identity."""
     keys = BehaviourKeys.held()
     if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
-        roots = {*map(member_package_dir, members), *manifests}
+        tops = {
+            Path(str(sys.modules[type(m).__module__.split(".")[0]].__file__)).parent
+            for m in members
+        }
+        roots = {*(top for top in tops if not top.is_relative_to(PACKAGE_ROOT)), *manifests}
         plugin_files = (
             p for r in roots if not r.is_relative_to(PACKAGE_ROOT) for p in r.rglob("*.py")
         )

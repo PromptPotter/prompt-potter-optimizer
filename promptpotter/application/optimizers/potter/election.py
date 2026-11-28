@@ -5,7 +5,7 @@ from typing import NamedTuple, cast
 
 from promptpotter.application.bench.node_context import Bounds, Lineage, NodeContext, Replay
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizers.nodes import MeasuredRound, Selection
+from promptpotter.application.optimizer_contract import MeasuredRound, Selection
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
 from promptpotter.application.scoring.paired import RoundPairs
 from promptpotter.application.scoring.selection import crowned, ranked_first

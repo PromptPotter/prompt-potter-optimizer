@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import math
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -26,7 +25,7 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import (
+from promptpotter.application.optimizer_contract import (
     OPERATOR_SEAT,
     MeasuredRound,
     Proposals,
@@ -82,7 +81,7 @@ from promptpotter.domain.arms import (
     is_leader_eligible,
     walked_short,
 )
-from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
+from promptpotter.domain.cell_fold import measured_cells, repairable_holes
 from promptpotter.domain.command_kinds import SubmittedArm
 from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
@@ -148,8 +147,7 @@ from promptpotter.shared.errors import SendRefusedError, fault_said
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import RoundPlan
-    from promptpotter.application.optimizers.nodes import (
+    from promptpotter.application.optimizer_contract import (
         Controller,
         Eliminator,
         Proposer,
@@ -157,6 +155,7 @@ if TYPE_CHECKING:
         Selection,
         Selector,
     )
+    from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.scoring.race_protocol import Decider
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 
@@ -635,11 +634,13 @@ async def measure_population(
         ctx,
         arms,
         pairs,
-        declared=[cell.key for cell in parent.rows]
-        if cycle.config.optimization.lift_reference == "best_so_far"
-        else [sample.key for sample in panel.read_on(rows)],
+        declared=[cell.key for cell in parent.rows],
     )
-    readings = await _reference_readings(ctx, arms, rows, scored, parent, pair)
+    readings = {
+        key: pair.read(ReadArm(key, arm, rows[key]), parent.key, parent)
+        for key, arm in arms.items()
+        if key in rows
+    }
     rejects = eliminator is not None and eliminator.stop_disqualifies
     electable: list[ArmKey] = []
     for key in scored:
@@ -677,66 +678,6 @@ async def measure_population(
         raced=raced,
         pairs=pairs,
     )
-
-
-async def _reference_readings(
-    ctx: RoundContext,
-    arms: Mapping[ArmKey, Concluded],
-    rows: Mapping[ArmKey, CellSheet],
-    scored: Sequence[ArmKey],
-    parent: ReadArm,
-    pair: ReferencePairs,
-) -> dict[ArmKey, PairedReading]:
-    """Only a SCORED arm buys its parents a cell; any other is read on what those already bought."""
-    cycle = ctx.cycle
-    read = {key: ReadArm(key, arm, rows[key]) for key, arm in arms.items() if key in rows}
-    if cycle.config.optimization.lift_reference == "best_so_far":
-        return {key: pair.read(arm, parent.key, parent) for key, arm in read.items()}
-
-    cells_of = {key: {cell.key for cell in sheet} for key, sheet in rows.items()}
-    needed: dict[str, set[str]] = {}
-    for key in scored:
-        for pid in arms[key].individual.lineage.parent_ids:
-            needed.setdefault(pid, set()).update(cells_of[key])
-    # This round's individuals are not banked yet; every earlier one is, in a closed round.
-    populated = {arm.individual.id: arm.individual for arm in arms.values()}
-    for pid, keys in needed.items():
-        if ArmKey(pid) == parent.key:
-            continue
-        individual = populated.get(pid) or cycle.measured(pid).individual
-        await measure_as_parent(
-            ctx,
-            individual,
-            cycle.points.job(individual),
-            [s for s in ctx.panel.read_on(rows) if s.key in keys],
-            role=MeasurementRole.PARENT,
-        )
-    walks = ctx.walks
-
-    def reference(pid: ArmKey, key: ArmKey) -> ReadArm | None:
-        if (walk := walks.get(pid)) is None:
-            return None
-        rows = walk.arm.rows.where(lambda cell: cell.key in cells_of[key])
-        return ReadArm(pid, walk.arm.state, rows)
-
-    def against_better(key: ArmKey) -> tuple[ArmKey, PairedReading] | None:
-        by_parent = {
-            ArmKey(pid): pair.read(read[key], ArmKey(pid), reference(ArmKey(pid), key))
-            for pid in read[key].individual.lineage.parent_ids
-        }
-        if not by_parent:
-            return None
-
-        def level(pid: ArmKey) -> float:
-            lift = by_parent[pid].lift("fitness")
-            return -math.inf if lift is None else lift.rate_a
-
-        # `max` keeps the first of a tie, so a tie falls to `parent_ids` order.
-        better = max(by_parent, key=level)
-        return better, by_parent[better]
-
-    read_against = {key: against for key in read if (against := against_better(key)) is not None}
-    return {key: reading for key, (_, reading) in read_against.items()}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1024,13 +965,13 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopLoop | No
     unbought = {
         key: _unbought_cells(arm, round_result.rows(key), cut) for key, arm in proposed.items()
     }
-    holes = {key: unscoreable_cells(round_result.rows(key)) + unbought[key] for key in proposed}
+    holes = {key: repairable_holes(round_result.rows(key)) + unbought[key] for key in proposed}
     # A broken arm also carries error rows, but its own outcome already charges it.
     holed = sorted(key for key, arm in proposed.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
     append_record(decision(PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num))
     tripped = panel_gate_tripped(
-        [cell for key in holed for cell in round_result.rows(key) if cell.facts.errored],
+        [cell for key in holed for cell in round_result.rows(key) if cell.facts.hole],
         cut if any(unbought[cid] for cid in holed) else None,
         ctx.cycle.config.optimization.panel_gate,
     )

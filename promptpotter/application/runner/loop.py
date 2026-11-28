@@ -193,7 +193,7 @@ async def walk_round_zero(ctx: RoundContext, dataset: list[Sample]) -> None:
     """Round 0's ONE walk, inside its door and past the divergence check, so a resume it refuses
     pays nothing. An unclosed origin is walked: a seated one on its scoring set, one whose rows
     another launch measured (inherited, or a fork cut at round 0) on its own cells, the archive
-    replaying all but the errored. A closed origin no round has read re-walks only what it lost.
+    replaying all but its holes (`MeasuredCell.hole`). A closed origin no round has read re-walks only what it lost.
     The criterion locks at the walk's close (`origin.py::lock_criterion`)."""
     cycle, session = ctx.cycle, ctx.cycle.session
     origin, head = cycle.origin_round, cycle.origin_round.head

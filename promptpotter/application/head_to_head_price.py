@@ -26,13 +26,12 @@ from promptpotter.domain.command_kinds import MintHeadToHeadPayload
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.spend import Budget, CellPrice
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_spend_by_round,
-)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import SPEND_BY_ROUND
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
     runnable_definition,
 )
+from promptpotter.infrastructure.store.read_model import read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NextAct, PayloadInvalidError
 
@@ -116,7 +115,7 @@ def optimizer_round_price(stores: Stores, optimizer: str) -> OptimizerRoundPrice
     usd = seconds = 0.0
     rounds = campaigns = 0
     for campaign in ran[:_PRICED_CAMPAIGNS]:
-        by_round = scan_ledger_spend_by_round(stores.campaigns.line_spans(campaign.root_hop))
+        by_round = read_line(stores.campaigns.line_spans(campaign.root_hop), SPEND_BY_ROUND)
         # The origin opens no round: what its init sent is no round's price.
         paid = [
             spent

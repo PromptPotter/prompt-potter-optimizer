@@ -59,7 +59,8 @@ from promptpotter.domain.spend import HeldBudget, SpendRollup
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import TIMELINES, wall_clock_of
+from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 from promptpotter.shared.clock import utcnow_iso
 
 
@@ -73,7 +74,6 @@ def build_cycle_result(
     spend: SpendRollup | None,
     bench: BenchScore,
     selected: SelectedOptimizer,
-    fitness_ceiling: float | None,
 ) -> CycleResult:
     picked = cycle.selection if cycle is not None else None
     picked_sp = cycle.selected_sp if cycle is not None else None
@@ -107,13 +107,15 @@ def build_cycle_result(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
-        wall_clock=scan_ledger_wall_clock(
-            [session.store.campaigns.ledger(session.hop)],
+        wall_clock=wall_clock_of(
+            read_line(
+                (LedgerSpan(p) for p in [session.store.campaigns.ledger(session.hop)]), TIMELINES
+            ),
             started_at=started_at,
             finished_at=finished_at,
             optimizer_phases=selected.phases,
         ),
-        **round_clocks(cycle_rounds, fitness_ceiling=fitness_ceiling)._asdict(),
+        **round_clocks(cycle_rounds)._asdict(),
         prompt_hashes=selected.prompt_hashes(),
         scorer_id=session.state.scoring.scorer.id,
         cycle_id=session.cycle_id,
@@ -157,7 +159,6 @@ def close_cycle(
             spend=observers.dashboard.spend,
             bench=bench,
             selected=selected,
-            fitness_ceiling=config.fitness_ceiling,
         )
         _finalize_run(
             session,

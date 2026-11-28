@@ -3184,6 +3184,13 @@
         "type": "object"
       }
     },
+    "landing key": {
+      "fate": "CACHE",
+      "patterns": [
+        ".cache/landing-keys/*"
+      ],
+      "shape": null
+    },
     "ledger fold snapshot": {
       "fate": "CACHE",
       "patterns": [

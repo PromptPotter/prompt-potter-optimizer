@@ -40,7 +40,6 @@ from promptpotter.domain.records.run_records import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import AbilityReading, LevelSeries
-from promptpotter.domain.run_standing import CEILING_FRACTION
 from promptpotter.shared.errors import NextAct
 
 
@@ -314,15 +313,12 @@ def render_cycle_final(final: CycleResult) -> list[str]:
     def rounds(n: int | None) -> str:
         return "—" if n is None else f"{n} ({_minutes(clock.round_ended_s.get(str(n)))})"
 
-    ceiling = final.fitness_ceiling
-    basis = "no ceiling declared" if ceiling is None else f"{CEILING_FRACTION:.0%} of {ceiling:.2f}"
     phases = sorted(clock.phase_s.items(), key=lambda kv: -kv[1])
     # `None` (no fresh cell measured) and 0.0 are opposite readings.
     unworked = "no fresh cell measured" if clock.unworked_s is None else _minutes(clock.unworked_s)
     lines = [
         f"rounds_to_separable {rounds(final.rounds_to_separable)} · rounds_to_improved (a new "
-        f"best selected, no interval) {rounds(final.rounds_to_improved)} · rounds_to_ceiling "
-        f"({basis}) {rounds(final.rounds_to_ceiling)}",
+        f"best selected, no interval) {rounds(final.rounds_to_improved)}",
         " · ".join(
             [
                 f"wall clock: elapsed {_minutes(clock.elapsed_s)}",

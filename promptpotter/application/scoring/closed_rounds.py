@@ -9,15 +9,20 @@ from promptpotter.domain.records.run_records import RoundClosedRecord, RoundEnte
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer, WalkedCell
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.archive_queries import walked_answers
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    STANDING_ROUNDS,
     StandingRound,
-    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import unlink_robust, write_json
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
+from promptpotter.infrastructure.store.read_model import (
+    LedgerSpan,
+    Moment,
+    Projection,
+    derived,
+    read_line,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
 
@@ -130,7 +135,7 @@ class RoundFileProjection(Projection):
     def _check_out(self, round_num: int) -> None:
         wanted = {round_num}
         if not self._synced:
-            own = scan_standing_rounds([LedgerSpan(self._ledger)]).rounds
+            own = read_line([LedgerSpan(self._ledger)], STANDING_ROUNDS).rounds
             wanted |= {n for n in own if not self._layout.round_file(n).exists()}
             self._synced = True
         scorer = self._state.scoring.scorer

@@ -38,8 +38,8 @@ from promptpotter.application.free_tier import (
 )
 from promptpotter.application.initialization.session import Session, drawn_partition
 from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.optimizer_contract import MintFacts
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.optimizers.nodes import MintFacts
 from promptpotter.application.pipeline_responses import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,
@@ -130,8 +130,8 @@ from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    RESOLVED_RUN,
     ResolvedRun,
-    scan_resolved_run,
 )
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
@@ -145,7 +145,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     with_node_templates,
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
-from promptpotter.infrastructure.store.read_model import derived
+from promptpotter.infrastructure.store.read_model import derived, read_line
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -762,7 +762,7 @@ def resolved(stores: Stores, at: CampaignCycle) -> RunResolution:
     return RunResolution(
         cycle.config,
         drawn_partition(stores.campaigns, hop).verifier_graded,
-        recorded=_recorded_read(scan_resolved_run(stores.campaigns.chain(hop)), hop),
+        recorded=_recorded_read(read_line(stores.campaigns.chain(hop), RESOLVED_RUN), hop),
         cycle=cycle,
         workspace=stores.base_dir,
         menu_at=None,
@@ -1194,7 +1194,7 @@ def line_config(stores: Stores, at: CampaignCycle) -> LineConfig:
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     cycle = cycle_config(stores, campaign.root_cycle)
-    read = scan_resolved_run(stores.campaigns.chain(campaign.root_hop)).read
+    read = read_line(stores.campaigns.chain(campaign.root_hop), RESOLVED_RUN).read
     return (
         stable_hash(cycle.config.model_dump(mode="json")),
         stable_hash(cycle.start_overlay),

@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable, Sequence
 
 from promptpotter.application.bench.node_context import Children, Lineage, NodeContext, Target
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizer_contract import RewriteKnobs
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING

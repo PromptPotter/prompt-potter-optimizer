@@ -82,6 +82,7 @@ from pydantic import SecretStr, ValidationError
 from world import Shared, World, serving, shared_run
 
 from promptpotter import connectors
+from promptpotter.application import optimizer_contract as node_contract
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import (
@@ -131,8 +132,8 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.record import SpineCycle
+from promptpotter.application.optimizer_contract import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import (
     seed_instructions,
 )
@@ -141,7 +142,6 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1Edit,
@@ -157,13 +157,13 @@ from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
     LadderAsk,
     NextAction,
-    _rebase_request,
     as_read_by,
     ask_l2_escalation,
     bank_and_route,
     decide_escalation,
     l2_fired,
     l3_fired,
+    rebase_request,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationLadder, PoBBKnobs
 from promptpotter.application.optimizers.potter.l1 import applied_edits
@@ -273,7 +273,6 @@ from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_prior_dominated,
     repairable_holes,
-    unscoreable_cells,
 )
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_events import CommandAckRecord
@@ -406,9 +405,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 )
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_walks,
-)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import line_walks
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -2586,13 +2583,13 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
 
     timed_out = {
         "predicted": "ERROR",
-        "error_category": "UNKNOWN",
-        "error": "ran past its deadline",
+        "error_category": "SERVER",
+        "error": "504: no reply in 164s",
     }
     holed = [hole_row(i) for i in range(4)] + [hole_row(4, **timed_out), hole_row(5, **timed_out)]
-    assert unscoreable_cells(sheet(holed)) == 2, "two holes"
-    assert unscoreable_cells(sheet(hole_row(i) for i in range(5))) == 0
-    assert unscoreable_cells([]) == 0
+    assert repairable_holes(sheet(holed)) == 2, "two holes"
+    assert repairable_holes(sheet(hole_row(i) for i in range(5))) == 0
+    assert repairable_holes([]) == 0
     # A fatal-classified transient with NO error_category: the retry left nothing extractable.
     deprecated = hole_row(
         22,
@@ -2612,7 +2609,7 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
         },
     )
     assert is_deprecated(deprecated.facts), "fixture drift — this row must classify as deprecated"
-    assert unscoreable_cells(sheet([hole_row(0), hole_row(1), hole_row(2), deprecated])) == 0, (
+    assert repairable_holes(sheet([hole_row(0), hole_row(1), hole_row(2), deprecated])) == 0, (
         "a classifier-deprecated sample was counted as a hole — the gate would halt a "
         "healthy cycle on a transient retry the loop already handles"
     )
@@ -2628,6 +2625,9 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
 
     assert holes(ErrorCategory.HALTED) == 0, (
         "a cell a declared bound CUT is settled: the same bound cuts the next attempt"
+    )
+    assert holes(ErrorCategory.PIPELINE) == 0, (
+        "a charged error is the configuration's answer: a re-walk replays it, never buys it again"
     )
     assert holes(ErrorCategory.UNSCOREABLE) == 1, (
         "a cell that ran to its own end can answer differently on a re-measure"
@@ -3758,10 +3758,11 @@ def test_a_level_recorded_on_four_cells_is_a_wide_band_never_a_point() -> None:
     )
 
 
-def test_a_constant_graded_side_keeps_the_band_its_support_allows() -> None:
+def test_a_constant_graded_side_reads_its_se_floored_at_a_quarter_over_n() -> None:
+    # Five cells a side: each SE floored at 1/20, so the band of the difference is about ±0.196.
     rig = _verify_rig()
     graded = dataclasses.replace(rig.scorer, two_valued=frozenset({"hit"}))
-    for level, n, held in ((0.79, 5, True), (0.30, 5, True), (0.30, 6, False)):
+    for level, n, held in ((0.79, 5, True), (0.65, 5, True), (0.30, 5, False)):
         fell, stood = (
             graded.graded(_keyed(row, f"k{row.key}") for row in measurements([value] * n, keys))
             for value, keys in ((level, range(100, 100 + n)), (0.80, range(n)))
@@ -3853,7 +3854,7 @@ def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds
                 strict=True,
             ),
         )
-        return scan_ledger_walks(built_stores.campaigns.chain(cycle_hop))
+        return line_walks(built_stores.campaigns.chain(cycle_hop))
 
     first = filed_cycle("cycle_a", dict(enumerate(asks_one_thing)))
     assert len(individual_cells(first, "c0", RoleScope.REPORT)) == 2, "one query, two cells"
@@ -4455,7 +4456,10 @@ async def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stand
             carried = [ind.id for ind in cycle.population]
             assert len(carried) == 3 and short not in carried, f"{case}: elected below the floor"
             full = next(key for key in list(rows)[3:] if key != short)
-            assert full in carried, f"{case}: an offspring the budget paid for in full was dropped"
+            # Every arm answers alike, so the full offspring ties the carried; a tie keeps draw order.
+            assert len(rows[full]) == len(rows[ArmKey(carried[0])]) and (
+                closed.folds[full].fitness == closed.folds[ArmKey(carried[0])].fitness
+            ), f"{case}: an offspring the budget paid for in full was read short"
             assert cycle.rounds[-1].round == cut_round
             cycle.unwind_unclosed()
             assert [rr.round for rr in cycle.rounds] == list(range(cut_round)) and (
@@ -4901,7 +4905,6 @@ async def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_co
             spend=None,
             bench=bench,
             selected=select_optimizer(cycle.config.optimization),
-            fitness_ceiling=None,
         )
         assert result.result_round == bench.selected.round == 1, "the result names the round graded"
 
@@ -5210,9 +5213,7 @@ async def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             "an arm two rounds list kept the layer's prompt from composing"
         )
         standing = fork_proposal_model(tuple(offer))
-        refork = _rebase_request(
-            forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
-        )
+        refork = rebase_request(forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer)
         assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
             "a fork standing on a round-1 arm cuts at round 2"
         )
@@ -5228,7 +5229,7 @@ async def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
             and hangs_from.election.verdict_reason == line[1].election.verdict_reason
         ), "a re-election is not told apart from the selector's own verdict"
-        stood_on_pick = _rebase_request(
+        stood_on_pick = rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
         )
         assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (

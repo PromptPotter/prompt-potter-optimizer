@@ -8,9 +8,8 @@ from typing import Annotated, ClassVar
 from pydantic import Field
 
 from promptpotter.application.bench.node_context import NodeContext, Target
+from promptpotter.application.optimizer_contract import CycleRead, Initializer, MintFacts
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.nodes import CycleRead, MintFacts
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.optimizer_state import StatePart
@@ -51,7 +50,7 @@ class BlockPoolKnobs(PoolKnobs):
     )
 
 
-class _PoolInitializer(nodes.Initializer):
+class _PoolInitializer(Initializer):
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     knobs: ClassVar[type[StrictModel]] = PoolKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Target})

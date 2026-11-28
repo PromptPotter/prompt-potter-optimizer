@@ -378,7 +378,7 @@ BASELINE = {
     # its format and key and binds its account, slot and date, a tag binds the whole file, and a
     # lost key refuses with its remedy (`FileKind.SEALED_KEYS`) instead of being made anew.
     # Set to the measured count at the w10 landing.
-    "package_lines": 114047,
+    "package_lines": 114204,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -1039,11 +1039,13 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.config_map import KNOBS, member_knob_count
-    from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
+    from promptpotter.application.maintenance.landing import complete_registries
+    from promptpotter.application.optimizer_contract import NODE_MEMBERS, CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.record_kinds import RECORDS
 
+    complete_registries()
     py_files = _package_files("*.py")
     source = _source_counts(py_files)
     sites = _sites()

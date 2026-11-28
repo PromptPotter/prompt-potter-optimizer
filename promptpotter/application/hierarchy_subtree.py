@@ -11,6 +11,7 @@ from dataclasses import InitVar, dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cached_property, lru_cache
+from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.hierarchy import (
@@ -774,7 +775,12 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     """Every store the TOP campaign's family spans: the body is built from all of them, a scoring
     pass on one among its live jobs (`store_version`)."""
     top = (stores.campaigns.campaign(Subject.parse_address(address).root_campaign_id).root_hop,)
-    return entries_version([c.store for c in iter_family_cycles(stores, top)])
+    family = iter_family_cycles(stores, top)
+    campaigns: dict[Path, frozenset[str]] = {}
+    for cycle in family:
+        held = campaigns.get(cycle.store.base_dir, frozenset())
+        campaigns[cycle.store.base_dir] = held | {cycle.path[-1].campaign_id}
+    return entries_version([c.store for c in family], campaigns)
 
 
 def subtree_cycle(stores: Stores, path: CyclePath) -> SubtreeCycle:

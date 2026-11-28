@@ -91,12 +91,14 @@ def main() -> int:
         f"rates cache = {cache_path()}, expected under {home_path}"
     )
 
+    from promptpotter.application.maintenance.landing import complete_registries
     from promptpotter.application.optimizer_manifest import (
         bench_choice,
         checkin_manifest,
         select_optimizer,
     )
 
+    complete_registries()
     potter = select_optimizer(bench_choice("potter"))
     assert potter.llm_nodes, "the potter manifest declares no llm node"
     assert potter.resolved_schemas, "the potter schema registry is empty"

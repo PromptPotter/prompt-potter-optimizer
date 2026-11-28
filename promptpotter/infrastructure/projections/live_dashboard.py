@@ -87,13 +87,13 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
+    Projection,
 )
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -812,9 +812,10 @@ class LiveDashboardProjection(Projection):
         )
 
 
-class DashboardCheckout:
+class DashboardCheckout(Projection):
     """`dashboard.json`: its ledger index's `LiveDashboardProjection`, written out at a boundary or
-    settled; a write that cannot land is its ledger's warning (`LedgerIndex.shielded`)."""
+    settled; a write that cannot land is its ledger's warning (`LedgerIndex.shielded`). It routes no
+    arm: every line it is fed only times the write."""
 
     derives: ClassVar[str] = "dashboard.json"
 

@@ -89,7 +89,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import Race
+    from promptpotter.application.optimizer_contract import Race
 
 
 _BUDGET_STOPS = frozenset(
@@ -499,13 +499,13 @@ class Walk:
         if stop is not None:
             raise StopLoop(stop, unmeasured=n - idx, detail=taken.facts.error or "")
 
-        if acq.fresh:
-            if taken.facts.errored:
-                if reason := self._abort_reason(taken):
-                    # The untouched tail is counted, never written as rows, which would keep the denominator full.
-                    return QueryLoopResult(self.results, ended_on=reason)
-            else:
-                self.consecutive_errors = 0
+        # Bought or replayed alike: a replayed charged error ends the walk where its purchase did.
+        if taken.facts.errored:
+            if reason := self._abort_reason(taken):
+                # The untouched tail is counted, never written as rows, which would keep the denominator full.
+                return QueryLoopResult(self.results, ended_on=reason)
+        else:
+            self.consecutive_errors = 0
 
         ctx.sample_scored(taken, acq.sample, idx, n)
         return None

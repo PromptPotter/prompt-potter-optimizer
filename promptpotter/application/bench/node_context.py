@@ -31,8 +31,8 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
+from promptpotter.application.optimizer_contract import NODE_MEMBERS, CycleRead
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
 from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
@@ -91,7 +91,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle, RoundContext
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.optimizers.nodes import (
+    from promptpotter.application.optimizer_contract import (
         Controller,
         NodeMember,
         Proposer,
@@ -163,7 +163,7 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
 
 
 async def walk_origin(round_: RoundContext, cells: list[Sample]) -> ReadArm:
-    """Round 0's ONE walk of the origin over *cells*; the archive never replays an errored cell."""
+    """Round 0's ONE walk of the origin over *cells*; the archive never replays a hole (`MeasuredCell.hole`)."""
     cycle = round_.cycle
     append_record(PhaseRecord(phase=CampaignPhase.ORIGIN, step="enter", round=0))
     try:

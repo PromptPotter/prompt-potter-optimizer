@@ -153,6 +153,13 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.optimizer_contract import (
+    NODE_MEMBERS,
+    MintFacts,
+    Proposals,
+    RoundSamples,
+    unfit_pipeline,
+)
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
@@ -163,13 +170,6 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import (
-    NODE_MEMBERS,
-    MintFacts,
-    Proposals,
-    RoundSamples,
-    unfit_pipeline,
-)
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
     clustered_sample_ids,
@@ -300,7 +300,13 @@ from promptpotter.domain.layer_fold import (
     patch_between,
     rules_of,
 )
-from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
+from promptpotter.domain.opt_search_point import (
+    IndividualLineage,
+    Locus,
+    NodePrompt,
+    OptSearchPoint,
+    Variation,
+)
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_manifest import resolved_key
@@ -362,14 +368,13 @@ from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.producer_lock import cycle_held
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     fold_at,
 )
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import RESOLVED_RUN
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -398,7 +403,13 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    Projection,
+    derived,
+    file_sig,
+    read_line,
+)
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
 from promptpotter.presentation.cli import main as cli_main
@@ -2553,7 +2564,7 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    read = scan_resolved_run(stores.campaigns.chain(root.hop)).read
+    read = read_line(stores.campaigns.chain(root.hop), RESOLVED_RUN).read
     assert read is not None
     recorded = read.knob_layers["l1_generate"]
     sources = {
@@ -3244,7 +3255,7 @@ def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(
         campaigns.write_resolved_run(
             hop, opened.pipeline_read, experiment=panel, model_capabilities={}
         )
-        resolved = scan_resolved_run(campaigns.chain(hop))
+        resolved = read_line(campaigns.chain(hop), RESOLVED_RUN)
         assert resolved.experiment == measured.model_dump(mode="json"), (
             "a later launch's roster displaced the one every round measured"
         )
@@ -4705,6 +4716,10 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
     # Every child is minted through `Children.child`, which books this rule: grown or trimmed alike.
     n = 10
     main = prompted(instruction="x" * (2 * n), persona="r" * n)
+    # The verdict names the variation that last wrote the child: a crossover's, never one axis.
+    wrote = "potter:locus_crossover"
+    steps = [Variation(node=node, mode="deterministic") for node in ("potter:mating", wrote)]
+    crossed = IndividualLineage(variations=steps)
     for instruction, persona, refused in (
         ("x" * (3 * n), "r" * n, False),
         ("x" * n, "", True),
@@ -4712,9 +4727,11 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
         ("x" * (n - 1), "r" * n, True),
         ("x" * (3 * n), "r" * (n // 2), False),
     ):
-        child = prompted(instruction=instruction, persona=persona)
-        booked = [f.reason for f in length_failures(child, main, n)]
-        assert booked == ([ValidationReason.OVER_CEILING] if refused else []), (
+        child = prompted(instruction=instruction, persona=persona).model_copy(
+            update={"lineage": crossed}
+        )
+        booked = [(f.reason, f.axis) for f in length_failures(child, main, n)]
+        assert booked == ([(ValidationReason.OVER_CEILING, wrote)] if refused else []), (
             f"a child of {len(instruction)}+{len(persona)} chars over a 30-char main was judged wrong"
         )
     assert length_failures(prompted(instruction="x" * 99), main, None) == [], "None bounds nothing"

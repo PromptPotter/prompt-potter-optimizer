@@ -5,30 +5,19 @@ from __future__ import annotations
 import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, NamedTuple, Protocol, Self
-
-from pydantic import BaseModel
+from typing import Any, Self
 
 from promptpotter.application.bench.node_context import (
-    Calls,
     Lineage,
     NodeContext,
-    Progress,
-    Replay,
 )
 from promptpotter.application.mask.backprop import ForkDecline
-from promptpotter.application.optimizers.nodes import OptimizerPhase
-from promptpotter.application.optimizers.potter.dispatch.facade import (
-    DispatchHub,
-    PotterView,
-)
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     ForkProposal,
     StandingForkProposal,
     TerminateProposal,
 )
 from promptpotter.application.optimizers.potter.knobs import (
-    EscalationKnobs,
     EscalationLadder,
     L1GenerateKnobs,
 )
@@ -38,11 +27,9 @@ from promptpotter.application.optimizers.potter.records import (
     LayerCounters,
     Recombination,
 )
-from promptpotter.application.run_stop import StopLoop
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.origin_panel import StallEffect
 from promptpotter.domain.paired_reading import RoundArm
-from promptpotter.domain.phase_acts import StepClosed, StepOpened, TextFact
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.records.run_records import (
@@ -51,13 +38,10 @@ from promptpotter.domain.records.run_records import (
     ForkTrigger,
     RebaseRequest,
     RoundStatement,
-    RoundWarningRecord,
 )
 from promptpotter.domain.results import Reelection, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.identity import Principal
 
 
@@ -300,102 +284,7 @@ class Fire:
     ask: LadderAsk | None
 
 
-class EscalationLayer(Protocol):
-    """Fired by the `escalation` controller, under its own node context: it writes its own memory, never the ladder; its patience is the controller's knob."""
-
-    name: ClassVar[str]
-    layer_id: ClassVar[Literal["L2", "L3"]]
-    phase: ClassVar[OptimizerPhase]
-
-    def reply_model(self, view: PotterView) -> type[BaseModel]: ...
-
-    def parse(self, ctx: NodeContext, raw: Any) -> TransitionResult: ...
-
-    def land(self, ctx: NodeContext, result: TransitionResult) -> None:
-        """Puts its memory and restates it onto the closed round, since a resume or fork starts from there."""
-
-    def record(self, ladder: Ladder, fire: Fire) -> Ladder: ...
-
-    def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened: ...
-
-    def exit_act(self, ctx: NodeContext, result: TransitionResult) -> StepClosed: ...
-
-
-class LayerCall(NamedTuple):
-    """A layer the controller fires, with the context it runs under (`NodeContext.fire`)."""
-
-    layer: EscalationLayer
-    ctx: NodeContext
-
-
-async def _run_transition(
-    fired: LayerCall, fire: Fire
-) -> tuple[TransitionResult, RebaseRequest | ForkDecline | None] | None:
-    """With the fork its proposal asks, or why none may; ``None`` when the output never parsed."""
-    layer, ctx = fired
-    ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_act(ctx, fire))
-    ladder = ctx.slice(Ladder)
-    # The prompt reports the verdict that asked for it, which lands only if this fire does.
-    view = PotterView(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
-    calls = ctx.read(Calls)
-    filled = DispatchHub.fill(calls.prompt(), view)
-    try:
-        result = layer.parse(ctx, await calls.answer(layer.reply_model(view), filled))
-    except OptimizerPromptParseError as parse_err:
-        # Unhandled it kills the cycle, and under L4 that voids a whole outer sample.
-        append_record(
-            RoundWarningRecord(
-                kind="layer_parse_failure",
-                severity="error",
-                message=(
-                    f"{layer.name} returned unusable output "
-                    f"({'empty/truncated' if parse_err.is_empty else 'schema-noncompliant'}) "
-                    "— the prior framing was kept and the loop continues."
-                ),
-                round=current_round(),
-                detail={
-                    "node": layer.name,
-                    "layer": layer.layer_id,
-                    **parse_err.warning_detail(),
-                },
-            )
-        )
-        ctx.read(Progress).phase(layer.phase.phase, "exit", StepClosed(facts={}, audit=None))
-        return None
-
-    layer.land(ctx, result)
-    proposal = result.fork_proposal
-    fork = (
-        _rebase_request(ctx, layer.layer_id, proposal, view.reelect_offer)
-        if proposal is not None
-        else None
-    )
-    closed = layer.exit_act(ctx, result)
-    if isinstance(fork, ForkDecline):
-        assert proposal is not None
-        # The step's own record names the proposal and why no node took it; the readout prints it.
-        declined = TextFact(value=f"{proposal.reason} — {fork.value}")
-        closed = StepClosed(facts={**closed.facts, "fork declined": declined}, audit=closed.audit)
-    ctx.read(Progress).phase(layer.phase.phase, "exit", closed)
-    return result, fork
-
-
-def _layer_control(
-    fired: LayerCall, result: TransitionResult, fork: RebaseRequest | ForkDecline | None
-) -> None:
-    """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
-    # Present only where the reply schema offered it (`PotterView.terminate_offer`); never a
-    # stand-in reason: a blank stop is not a decision.
-    if result.terminate_proposal is not None and (
-        reason := result.terminate_proposal.reason.strip()
-    ):
-        raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{fired.layer.layer_id}: {reason}")
-    if isinstance(fork, RebaseRequest):
-        # The runner words its stop once the fork is cut (`fork_siblings.py::ForkCut.said`).
-        raise StopLoop(StopReason.REBASED, fork=fork)
-
-
-def _rebase_request(
+def rebase_request(
     ctx: NodeContext, layer_id: str, proposal: ForkProposal, offer: Mapping[str, RoundArm]
 ) -> RebaseRequest | ForkDecline:
     round_num = ctx.round_num
@@ -436,18 +325,6 @@ def _rebase_request(
     )
 
 
-async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> TransitionResult | None:
-    """The ladder is the controller's: it banks the fire once the layer landed, before the layer's control channel."""
-    landed = await _run_transition(fired, fire)
-    if landed is None:
-        return None
-    result, fork = landed
-    ctx.put(fired.layer.record(ctx.slice(Ladder), fire))
-    ctx.restate(Ladder)
-    _layer_control(fired, result, fork)
-    return result
-
-
 class EscalationReading(FrozenModel):
     patience: int | Unbounded
     fires: int
@@ -477,83 +354,3 @@ class L3EscalationTrigger(DecisionInputs, kind="l3_escalation_trigger"):
     reading: EscalationReading
     heal: bool
     l2_guard_breaches: list[str]
-
-
-async def escalate_l2(
-    ctx: NodeContext, *, cause: str, l2: LayerCall, l3: LayerCall
-) -> StopReason | None:
-    opt = ctx.knobs(EscalationKnobs)
-
-    ask = ask_l2_escalation(
-        ctx.slice(Ladder),
-        rounds=ctx.read(Lineage).rounds,
-        escalation_ladder=opt.escalation_ladder,
-        l2_patience=opt.l2_patience,
-        l3_patience=opt.l3_patience,
-    )
-
-    # Recorded fired or not.
-    replay = ctx.read(Replay)
-    replay.decide(
-        L2EscalationTrigger(
-            reading=EscalationReading.read(
-                ask.l2, patience=opt.l2_patience, fires=ctx.slice(Ladder).l2.fires, rule=cause
-            )
-        ),
-        ask.next_action == NextAction.FIRE_L2,
-    )
-
-    if ask.next_action == NextAction.FIRE_L2:
-        result = await _fire_layer(ctx, l2, Fire(cause, ask))
-        heal = decide_heal(
-            LadderInputs(
-                escalation_ladder=opt.escalation_ladder,
-                l2_stall_count=ask.l2.stall_count,
-                l2_patience=opt.l2_patience,
-                l3_stall_count=ask.l3.stall_count,
-                l3_patience=opt.l3_patience,
-                l1_layout_refused=result is not None and result.l1_layout_refused,
-            )
-        )
-        if heal.next_action is NextAction.FIRE_L3:
-            assert result is not None
-            # A heal reads no gate, so its record banks the counters the ladder holds.
-            held_l3 = ctx.slice(Ladder).l3
-            held = LayerReading(held_l3.stall_count, held_l3.entered_round)
-            replay.decide(
-                L3EscalationTrigger(
-                    reading=EscalationReading.read(
-                        held,
-                        patience=opt.l3_patience,
-                        fires=held_l3.fires,
-                        rule=L1_LAYOUT_REFUSED,
-                    ),
-                    heal=True,
-                    l2_guard_breaches=[o.validator_id for o in result.l2_guard_breaches],
-                ),
-                True,
-            )
-            await _fire_layer(ctx, l3, Fire(L1_LAYOUT_REFUSED, None))
-        return None
-    if ask.next_action is NextAction.CONTINUE:
-        return None
-
-    replay.decide(
-        L3EscalationTrigger(
-            reading=EscalationReading.read(
-                ask.l3,
-                patience=opt.l3_patience,
-                fires=ctx.slice(Ladder).l3.fires,
-                rule=L2_PATIENCE_SPENT,
-            ),
-            heal=False,
-            l2_guard_breaches=[],
-        ),
-        ask.next_action == NextAction.FIRE_L3,
-    )
-
-    if ask.next_action == NextAction.FIRE_L3:
-        await _fire_layer(ctx, l3, Fire(L2_PATIENCE_SPENT, ask))
-        return None
-
-    return ask.stop_reason

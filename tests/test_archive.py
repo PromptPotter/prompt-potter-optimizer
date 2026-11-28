@@ -165,6 +165,7 @@ from promptpotter.domain.records.run_records import (
     ForkSpec,
     ForkTrigger,
     OriginGatePass,
+    PricedKeyRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -179,7 +180,6 @@ from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store import io as store_io
@@ -192,9 +192,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
     sample_fold_rows,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_answers,
-)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import WALKED_ANSWERS
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import (
     Appended,
@@ -217,7 +215,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
-from promptpotter.infrastructure.store.read_model import LedgerIndex, Moment
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Moment, Projection, read_line
 from promptpotter.infrastructure.store.session_pointer import (
     cleanup_stub_fork_if_empty,
     read_active_pointer,
@@ -709,7 +707,7 @@ def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
     assert forks.before < after, (
         "a cycle the campaign forked after the arm's scope opened is not its own"
     )
-    assert after <= scan_ledger_answers(walks.spans()), (
+    assert after <= read_line(walks.spans(), WALKED_ANSWERS), (
         "the arm remembers an answer it never walked"
     )
     with scoped(memory=arm):
@@ -1405,7 +1403,7 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
             ),
             [RoundEnding.CROWNED, unwalked],
         ),
-        (PopulationKept(objective=objective, survivors=[unwalked]), [unwalked]),
+        (PopulationKept(survivors=[unwalked], earlier={}), [unwalked]),
     ):
         [gone] = replay_all_mismatches(
             _round(round=3, cells={}),
@@ -1414,18 +1412,19 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
         assert gone.current_outcome in (False, None, [], [RoundEnding.HELD, None]), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
-    # Two survivors walked on disjoint cells share no reading: neither is ranked above the other.
+    # The reference's reading: each survivor on every cell it was read on, earlier rounds' included,
+    # so an incumbent's deeper blocks outrank an offspring's one lucky block.
     chars = {"target_prompt_chars": 10}
-    apart = sheet(measurements([1.0] * 4, sample_ids=[10, 11, 12, 13], pipeline_data=chars))
-    bar = sheet(measurements([0.0] * 4, pipeline_data=chars))
-    survived = PopulationKept(objective=objective, survivors=[unwalked, bar_arm])
-    [disjoint] = replay_all_mismatches(
-        _round(round=3, cells={unwalked: apart, bar_arm: bar}),
-        [decision(survived, [unwalked], node=None)],
+    lucky = sheet(
+        measurements([1.0, 1.0, 0.0, 0.0], sample_ids=[10, 11, 12, 13], pipeline_data=chars)
     )
-    assert disjoint.current_outcome == [], (
-        "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
-    )
+    rows = {unwalked: lucky, bar_arm: sheet(measurements([0.0] * 4, pipeline_data=chars))}
+    for earlier, ranked in (
+        ({bar_arm: {f"e{i}": 1.0 for i in range(8)}}, [bar_arm, unwalked]),
+        ({}, [unwalked, bar_arm]),
+    ):
+        survived = PopulationKept(survivors=[unwalked, bar_arm], earlier=earlier)
+        assert survived.rank(rows) == ranked, f"population_kept on {earlier} ranked otherwise"
 
 
 def _selected(stores: Stores, hop: CycleHop) -> set[str]:
@@ -2177,6 +2176,25 @@ def test_an_archive_write_moves_the_subtrees_validator_and_the_feeds_store_versi
         "the feed's store version did not move forward on an archive write"
     )
     assert feed_versions(stores, feed_jobs)["store:"] == moved, "an unmoved store moved its version"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_subtrees_validator_stands_while_another_campaign_of_its_store_appends(
+    world: World, displaced: Shared
+) -> None:
+    # A tree re-asked on every append of its store rebuilds behind each other run's beat.
+    stores, (_, parent, mounted, _) = world.adopt(displaced).stores, displaced.made
+    address = _listed(stores, mounted.campaign_id).address
+    family = {mounted.campaign_id, parent.campaign_id}
+    other = next(c for c in stores.campaigns.list_campaign_ids() if c not in family)
+    validator = subtree_version(stores, address)
+    elsewhere = stores.campaigns.campaign(other).root_hop
+    stores.campaigns.append(elsewhere, PricedKeyRecord(priced_key="elsewhere"))
+    assert subtree_version(stores, address) == validator, (
+        "another campaign's append moved the mounted subtree's validator"
+    )
+    stores.campaigns.append(mounted, PricedKeyRecord(priced_key="here"))
+    assert subtree_version(stores, address) != validator, "its own append left it standing"
 
 
 def test_a_hand_edit_to_an_authored_definition_moves_the_hierarchy_and_the_feed(

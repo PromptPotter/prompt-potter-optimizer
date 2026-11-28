@@ -325,8 +325,6 @@ class RulerStanding(FrozenModel):
         return DeltaState.LINKED if carried else DeltaState.UNLINKED
 
 
-# The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
-FIT_SLACK = 1e-3
 _POWER_Z = NormalDist().inv_cdf(0.8)
 
 
@@ -335,29 +333,6 @@ def theta_lift(theta: float, se: float, bar_theta: float, bar_se: float) -> Esti
     return Estimate.normal(
         theta - bar_theta, math.hypot(se, bar_se), unit="theta", form="lift", n=None
     )
-
-
-def p_better(lift: Estimate) -> float:
-    """``P(θ > θ_bar)`` off a θ lift, unbounded: the election ranks on it."""
-    se = lift.se or 0.0
-    if se <= 1e-12:
-        return 1.0 if lift.value > 0.0 else 0.0
-    return NormalDist().cdf(lift.value / se)
-
-
-def clears(lift: Estimate, admission: float | None, *, support: float | None) -> bool:
-    """The election's one bar: past what a fit resolves, and ``p_better`` past *admission*, capped
-    by the discordant cells' sign posterior *support* (``None``: no cell pairs the two)."""
-    # No SE margin on the value: subtracting one turns a wide-posterior gain negative.
-    if admission is None or lift.value <= FIT_SLACK:
-        return False
-    p = p_better(lift)
-    if support is not None:
-        # The bound's mass on the SIDE θ read, not `|bound - 0.5|`, which reads 3 losses as 3 wins.
-        side = support if p > 0.5 else 1.0 - support
-        extent = min(abs(p - 0.5), max(0.0, side - 0.5))
-        p = 0.5 + extent if p > 0.5 else 0.5 - extent
-    return p > admission
 
 
 def detectable(se: float, admission: float) -> float:

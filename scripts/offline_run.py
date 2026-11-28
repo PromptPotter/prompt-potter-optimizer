@@ -37,6 +37,12 @@ from pathlib import Path
 from statistics import fmean
 from typing import TYPE_CHECKING, Any, NoReturn, get_args
 
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    STANDING_ROUNDS,
+    WALKED_ANSWERS,
+)
+from promptpotter.infrastructure.store.read_model import read_line
+
 # Its own tree, never the venv's editable one: a child's cwd is its workspace, so a relative
 # PYTHONPATH falls through to whichever tree installed the venv.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -92,19 +98,20 @@ from promptpotter.application.maintenance.landing import (
     check_every_treatment,
     complete_registries,
 )
+from promptpotter.application.optimizer_contract import (
+    BEHAVIOUR_KEYS_FILE,
+    MANIFESTS,
+    NODE_MEMBERS,
+    BehaviourKeys,
+)
 from promptpotter.application.optimizer_manifest import (
     bench_choice,
     manifest_directories,
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers import member_package_dir
 from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
-from promptpotter.application.optimizers.nodes import (
-    BEHAVIOUR_KEYS_FILE,
-    NODE_MEMBERS,
-    BehaviourKeys,
-    member_package_dir,
-)
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
@@ -163,10 +170,6 @@ from promptpotter.infrastructure.store.archive_queries import (
     CampaignWalks,
     list_populations,
     load_population,
-)
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_answers,
-    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.campaign_store.store import fold_cycle_index
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
@@ -257,6 +260,9 @@ HEALS: dict[str, tuple[Heal, ...]] = {
     "L2ContextOutput_0": (Heal.NONCOMPLIANT, Heal.NONCOMPLIANT),
 }
 WOUNDED = "wounded"
+# The optimizers whose race settles an arm FOR it once the survivors are known (CAPO's `locked_in`):
+# the straight run must settle one, so the catch-up a locked arm owes is walked by the real loop.
+LOCKS_IN = ("capo",)
 # Per optimizer, calls answered invalid on every send (by `requests/` name) and the mark its run
 # records: L1 no candidates, an L2 fire a warning, a text node's child its parse failure.
 WOUNDS: dict[str, dict[str, tuple[tuple[Heal, ...], str]]] = {
@@ -1607,7 +1613,7 @@ async def run_controlled(
         return CampaignWalks(stores.campaigns, campaign_id)
 
     def filed(campaign_id: str) -> frozenset[str]:
-        return scan_ledger_answers(walks(campaign_id).spans())
+        return read_line(walks(campaign_id).spans(), WALKED_ANSWERS)
 
     bank = stores.tenant_datasets.labelled(DATASET)
     assert bank is not None, "every arm ran on the labelled bank"
@@ -1981,7 +1987,6 @@ INDEX: Pick = {
     "stop_reason": "stop_reason",
     "rounds_to_separable": "final.rounds_to_separable",
     "rounds_to_improved": "final.rounds_to_improved",
-    "rounds_to_ceiling": "final.rounds_to_ceiling",
     "mode": "final.mode",
     "prompt_fields": "final.result_prompt_fields",
     "pipeline_params": "final.result_pipeline_params",
@@ -2090,7 +2095,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 def digests() -> dict[str, str]:
     check_every_treatment()
     out = {"estimator": BehaviourKeys.held().cell_estimator}
-    for name in sorted(optimizers.MANIFESTS.table):
+    for name in sorted(MANIFESTS.table):
         selected = select_optimizer(bench_choice(name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
@@ -2099,11 +2104,11 @@ def digests() -> dict[str, str]:
 
 
 def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
-    """Regenerates `nodes.py::BEHAVIOUR_KEYS_FILE` from each built-in's straight-run trace in
+    """Regenerates `optimizer_contract.py::BEHAVIOUR_KEYS_FILE` from each built-in's straight-run trace in
     *home*, naming it on a `wrote` or `unchanged` line (`gate.py::_rewrote`); `True` where it moved."""
     builtin = {
-        n for n in optimizers.MANIFESTS.table
-        if optimizers.MANIFESTS.get(n).directory.is_relative_to(PACKAGE_ROOT)
+        n for n in MANIFESTS.table
+        if MANIFESTS.get(n).directory.is_relative_to(PACKAGE_ROOT)
     }  # fmt: skip
     held = BehaviourKeys.held()
     fingerprints = {n: f for n, f in held.fingerprints.items() if n in builtin}
@@ -2263,7 +2268,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
         for node, member in NODE_MEMBERS.table.items()
     }
     owners = {d for d in packages.values() if d} | {
-        d for n in optimizers.MANIFESTS.table if (d := owned(optimizers.MANIFESTS.get(n).directory))
+        d for n in MANIFESTS.table if (d := owned(MANIFESTS.get(n).directory))
     }
 
     def imports(files: Iterable[Path]) -> set[str]:
@@ -2411,8 +2416,8 @@ def crossed_legs(
         "l2_context": recombined(by_l2, "l2_context"),
     }
     twins = [decided(at, after=pause_after) for at in (straight, paused)]
-    # A move of the bill alone is spend, read beside the record: an errored cell never replays.
-    # A stopped pass the resume sends again is bought twice, so each reading counts once.
+    # A move of the bill alone is spend, read beside the record: a hole never replays.
+    # A stopped pass the resume sends again replays its cells and files again: each counts once.
     cells = [twin.pop("harness")["backend_cells"] for twin in twins]
     for twin in twins:
         passes = twin["ledger"]["passes_graded"]
@@ -2505,8 +2510,16 @@ def moved_against(home: Path, earlier: Path, names: Sequence[str]) -> list[str]:
 
 
 def read_straight(name: str, workspace: Path) -> int:
-    ran = BehaviourTrace.read(workspace).decisions["run"]
+    """Prints the straight run's reading; nonzero where its bench is ungraded, or a race that
+    settles arms `locked_in` (`LOCKS_IN`) settled none."""
+    decisions = BehaviourTrace.read(workspace).decisions
+    ran = decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
+    locked = sum(
+        arm["locked_at"] is not None for r in decisions["rounds"] for arm in r["arms"].values()
+    )
+    if name in LOCKS_IN:
+        print(f"{name}: its race settled {locked} arms locked_in{'' if locked else ' (owed 1+)'}")
     bench = ran["bench"]
     lift = None if bench is None else bench["vs_origin"]["lift"]
     headline = (
@@ -2517,7 +2530,7 @@ def read_straight(name: str, workspace: Path) -> int:
         else f"none ({bench['vs_origin']['read']})"
     )
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
-    return int(not _graded(bench))
+    return int(not _graded(bench) or (name in LOCKS_IN and not locked))
 
 
 def _the_record(workspace: Path) -> dict[str, Any]:
@@ -2803,7 +2816,7 @@ def skipped_leg(name: str, home: Path, straight: Future[int], twin: Future[int])
         print(f"{name}: a skip and its resumed twin: FAILED (exit {rcs}) -- {legs[0] / 'run.log'}")
         return False
     complete_registries()
-    skips = [scan_standing_rounds([LedgerSpan(leg_ledger_path(leg))]).skipped for leg in legs]
+    skips = [read_line([LedgerSpan(leg_ledger_path(leg))], STANDING_ROUNDS).skipped for leg in legs]
     cells = [
         (BehaviourTrace.read(leg).decisions["harness"]["backend_cells"], *bought(leg))
         for leg in legs
@@ -3135,11 +3148,7 @@ def main() -> int:
     home = named_home()
     check_every_treatment()
     arm_names = args.optimizer or ["potter", "capo", "gepa"]
-    names = (
-        list(CONTROLLED)
-        if args.controlled
-        else args.optimizer or sorted(optimizers.MANIFESTS.table)
-    )
+    names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(MANIFESTS.table)
     kept = LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = holds_run(home, run)

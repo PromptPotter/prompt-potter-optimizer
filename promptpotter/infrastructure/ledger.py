@@ -9,11 +9,17 @@ from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import CycleMintedRecord
 from promptpotter.infrastructure.store.io import WORKSPACE_STATE_DIR, append_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, Moment, scan_last
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    Moment,
+    last,
+    read_line,
+)
 
 
 def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
-    minted = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], CycleMintedRecord)
+    minted = read_line([LedgerSpan(CycleLayout(cycle_dir).ledger)], last(CycleMintedRecord))
     parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
     return None if minted is None or parent is None else (minted, parent)
 
