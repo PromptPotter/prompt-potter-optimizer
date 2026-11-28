@@ -69,7 +69,6 @@ from promptpotter.domain.arms import (
     Measuring,
     Proposed,
     arm_elimination,
-    arm_name,
 )
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
@@ -396,20 +395,14 @@ class ReadoutProjection(Projection):
         self._series[record.round] = record.series
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        """A round already closed here is stated again: a restatement announces nothing."""
-        restated = record.round in self._closed
+        """A restatement (`Narration.restates`) is one line, never a round's block."""
+        restated = self._narration.restates(record)
         self._closed[record.round] = record
-        if not restated:
-            self._narration.read(self.at_offset, record)
-            self.on_round_complete(record)
+        if restated:
+            self._say(record)
             return
-        election = record.election
-        if election is not None and election.selected and (stated := election.reelection):
-            picked = arm_name(election.selected, record.arms[election.selected], record.round)
-            self._write(
-                f"  {DIM}· r{record.round} re-elected {picked.label} by {stated.by.display}: "
-                f"{stated.reason}{RESET}"
-            )
+        self._narration.read(self.at_offset, record)
+        self.on_round_complete(record)
 
     def _say(self, record: NarratedRecord) -> None:
         """The narration's row as one line: its tone's glyph, its label, then its detail."""

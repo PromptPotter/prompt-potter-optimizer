@@ -67,8 +67,8 @@ from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.pipeline_resolve import cycle_config, resolved
 from promptpotter.application.scoring.closed_rounds import (
+    LineCells,
     cycle_bank,
-    walked_rows,
 )
 from promptpotter.application.scoring.formula.compiler import CompiledExpression
 from promptpotter.application.scoring.paired import MemberRows, as_family
@@ -97,14 +97,11 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     level_text,
 )
-from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import (
     NO_CELLS,
     CellSheet,
-    Scorer,
     ScoringFormulaError,
-    WalkedCell,
 )
 from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -312,8 +309,7 @@ class _Cycle(NamedTuple):
     stores: Stores
     hop: CycleHop
     walked: StandingRounds
-    walks: list[IndividualWalk[WalkedCell]]
-    scorer: Scorer
+    cells: LineCells
 
     def mask(self, samples: frozenset[int] | None) -> frozenset[str] | None:
         """A `;samples=` mask names slots in the bank the cycle drew; rows pair on keys."""
@@ -323,8 +319,7 @@ class _Cycle(NamedTuple):
         return frozenset(k for k, s in position_of.items() if s in samples)
 
     def sheet(self, individual_id: str, scope: RoleScope = RoleScope.REPORT) -> CellSheet:
-        measured = individual_cells(self.walks, individual_id, scope)
-        return walked_rows(self.stores, measured, self.scorer).standing()
+        return self.cells.sheet(individual_id, scope)
 
     def point(self, round_num: int | None, *, candidate_id: str = "") -> _ChainPoint | None:
         for (rnd, found), arm in self.walked.arms.items():
@@ -347,7 +342,8 @@ def _graded_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle |
     graded_under = resolved(stores, campaign.root_cycle).scorer
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
     chain = stores.campaigns.chain(hop)
-    return _Cycle(stores, hop, read_line(chain, STANDING_ROUNDS), line_walks(chain), graded_under)
+    cells = LineCells(stores, line_walks(chain), graded_under)
+    return _Cycle(stores, hop, read_line(chain, STANDING_ROUNDS), cells)
 
 
 class _Head(NamedTuple):

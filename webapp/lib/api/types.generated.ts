@@ -528,8 +528,7 @@ export interface HierarchyResponse {
   docked: string[];
 }
 
-/** A campaign as the listing serves it: its state and line stats are its line
- * cycle's. */
+/** A campaign as the listing serves it, with the Delete its row offers. */
 export interface HierarchyCampaign {
   /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -1253,7 +1252,9 @@ export interface StepFacts {
   arm: string | null;
 }
 
-/** A campaign as the subtree read serves it: every level under it. */
+/** A campaign as the subtree read serves it: every level under it, and no act of
+ * a listed row's (an inner campaign is deleted with its outer, never on its
+ * own). */
 export interface SubtreeCampaign {
   /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -1274,7 +1275,6 @@ export interface SubtreeCampaign {
   span: HierarchySpan;
   entry_kind: 'campaign';
   facts: SubtreeCampaignFacts;
-  delete: DeleteAct;
   /** Its cycles, root first. */
   children: SubtreeCycle[];
 }
@@ -2468,13 +2468,11 @@ export interface LineArm {
   open_cells: number[];
 }
 
-/** The scoring walk of the arm being measured, on its own order, plus a cursor.
- * Its cells taken lead, so a race that re-chooses its rows at a decision
- * never moves a taken cell; past the cursor is chosen, never promised — an
- * eliminator can stop the arm before its tail. */
+/** The scoring walk of the arm being measured, plus a cursor: the cells it took,
+ * then those out. A race re-chooses its untaken rows at each decision, so
+ * nothing past the cells out is served as promised. */
 export interface SampleWalk {
-  /** The arm's rows through its budget as its last turn filed them: those it took,
-   * in the order it took them, then its untaken in the order its race chose. */
+  /** The arm's rows it took, in the order it took them, then those out now. */
   ids: number[];
   /** Where the walk stands in `ids`: the cell in flight, else the one after the
    * last taken. */
@@ -5824,7 +5822,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "e22924451edb8f1e";
+export const SERVED_CONTRACT = "618095ddd02a7894";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

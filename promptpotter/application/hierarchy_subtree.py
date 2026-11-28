@@ -431,8 +431,11 @@ def unplaced_reason(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
     return f"No candidate holds it: {asked}, so it hangs under the cycle."
 
 
-def _fields(entry: FrozenModel) -> dict[str, Any]:
-    return {name: getattr(entry, name) for name in type(entry).model_fields}
+def _fields(entry: FrozenModel, into: type[FrozenModel]) -> dict[str, Any]:
+    """What `into` declares of the listed `entry`: a listed row's acts stay on the listing."""
+    return {
+        name: getattr(entry, name) for name in into.model_fields if name in type(entry).model_fields
+    }
 
 
 def _standing(c: _Candidate, *, stood_on: bool) -> CandidateStanding:
@@ -476,11 +479,11 @@ class _Build:
         cleans = CommandKind.CLEANUP_EMPTY_CYCLES in kinds
         children = [self._cycle(cycle, cycles) for cycle in cycles]
         return SubtreeCampaign(
-            **_fields(entry)
+            **_fields(entry, SubtreeCampaign)
             | {
                 "children": children,
                 "facts": SubtreeCampaignFacts(
-                    **_fields(entry.facts),
+                    **_fields(entry.facts, SubtreeCampaignFacts),
                     deletable_stubs=len(deletable_stubs(stores, campaign.root_hop))
                     if cleans
                     else 0,
@@ -615,11 +618,11 @@ class _Build:
             )
         hung = cycle.hangs_from
         return SubtreeCycle(
-            **_fields(cycle.entry)
+            **_fields(cycle.entry, SubtreeCycle)
             | {
                 "children": [*rounds, *cycle.unplaced],
                 "facts": SubtreeCycleEntryFacts(
-                    **_fields(cycle.entry.facts),
+                    **_fields(cycle.entry.facts, SubtreeCycleEntryFacts),
                     origin=head.crown(0) if 0 in head.owner.candidates else None,
                     from_candidate=None
                     if cycle.index.fork is None or hung is None

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { groupByRoot } from "@/lib/derivations";
 import type { HierarchyCampaign } from "@/lib/api/types";
-import { subtreeCampaign } from "@/lib/test-fixtures";
+import { LISTED_DELETE, subtreeCampaign } from "@/lib/test-fixtures";
 
 function rootedAt(address: string, rootCycle: string): HierarchyCampaign {
   const c = subtreeCampaign({ address });
-  return { ...c, facts: { ...c.facts, root: `${address}::${rootCycle}` } };
+  return { ...c, delete: LISTED_DELETE, facts: { ...c.facts, root: `${address}::${rootCycle}` } };
 }
 
 describe("groupByRoot", () => {

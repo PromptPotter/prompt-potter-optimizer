@@ -136,9 +136,9 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     if reading is not None and reading.state is ReadingState.READ:
         lift = reading.headline
         verdict = (
-            f"{YELLOW}spans 0 — not separated from its reference{RESET}"
-            if lift.side == "spans"
-            else "clears 0"
+            "clears 0"
+            if lift.separated
+            else f"{YELLOW}spans 0 — not separated from its reference{RESET}"
         )
         lines.append(
             f"lift vs reference: {lift.estimate.text} on {fmt_coverage(reading.coverage)}  |  {verdict}"

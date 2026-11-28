@@ -398,7 +398,9 @@ BASELINE = {
     # (`commands.py::_CommandRoute`), where the app's handler dug it out of `request.scope`.
     # w11-records2 (+113): `run_records.py` splits into ten record families and four non-record
     # modules, each with its own header and imports (+139); the spend rollups' module (+23).
-    "package_lines": 114104,
+    # w11-reads (+56): a line's cells keyed once per individual (`LineCells`), one pair read per
+    # head-to-head request, a restatement's narration, and a follower's tail ending at its switch.
+    "package_lines": 114160,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -1,15 +1,20 @@
 import { VendorLogo } from "@/components/ui";
 import {
-  type HierarchyCampaign,
-  type HierarchyCycle,
+  type HierarchyCandidate,
+  type RowEntry,
   type ListedCampaign,
+  type SubtreeCampaign,
   STATUS_MARK_INFO,
 } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { fmtAgo } from "@/lib/format";
 import { figureOf, tagLabel } from "@/lib/derivations";
 
-export function PhaseMark({ entry }: { entry: HierarchyCampaign | HierarchyCycle }) {
+export function PhaseMark({
+  entry,
+}: {
+  entry: Exclude<RowEntry, HierarchyCandidate>;
+}) {
   const mark = STATUS_MARK_INFO[entry.state.status.mark];
   return (
     <span
@@ -22,7 +27,7 @@ export function PhaseMark({ entry }: { entry: HierarchyCampaign | HierarchyCycle
   );
 }
 
-export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign }) {
+export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign | SubtreeCampaign }) {
   const vendors = campaign.tags.filter((t) => t.kind === "vendor");
   const started = campaign.entry_kind === "campaign" ? campaign : null;
   // An unstarted campaign has no run: its lifecycle word stands where the rounds would.

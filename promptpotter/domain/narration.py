@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
-from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed
+from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO
@@ -124,6 +124,17 @@ def _joined(bits: Iterable[str | None]) -> str | None:
     return " · ".join(b for b in bits if b) or None
 
 
+def _restated(record: RoundClosedRecord) -> _Line | None:
+    """A close of a round already closed, worded as the round it restates: only a re-election
+    says anything (a member banking its state restates the round in silence)."""
+    election = record.election
+    if election is None or not election.selected or (stated := election.reelection) is None:
+        return None
+    picked = arm_name(election.selected, record.arms[election.selected], record.round).label
+    said = f"re-elected {picked} by {stated.by.display}: {stated.reason}"
+    return _Line("quiet", f"Round {record.round} restated", said, round=record.round)
+
+
 class Narration:
     """The ledger narrated once: each record kind's row, and the arms, labels and holds every row reads.
 
@@ -146,6 +157,12 @@ class Narration:
         self._declared = 0
         self._launched = 0
         self._entered = 0
+        self._closed: set[int] = set()
+
+    def restates(self, record: RoundClosedRecord) -> bool:
+        """A close of a round this ledger already closed, or of one it never entered (a fork's
+        branch round): the round it restates, never a round of its own."""
+        return record.round in self._closed or record.round != self.round
 
     def read(self, sequence: int, record: NarratedRecord) -> Narrated | None:
         key = f"{record.record_type}-{sequence}"
@@ -182,6 +199,10 @@ class Narration:
                 self.enter(record.round)
                 return None
             case RoundClosedRecord():
+                restated = self.restates(record)
+                self._closed.add(record.round)
+                if restated:
+                    return _restated(record)
                 lead = record.run_standing.lead_line
                 return _Line("success", f"Round {record.round}", lead, round=record.round)
             case RoundProposedRecord():

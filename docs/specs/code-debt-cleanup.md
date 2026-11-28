@@ -154,6 +154,12 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   that depend on it stand until the store's next write or a restart — the definition loader stamps
   its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
   cells ETag moves.
+- **A line's walks are a flat list every reader re-scans per individual** (w11-reads, 11-28):
+  `campaign_store/ledger_scan.py::line_walks` returns `list[IndividualWalk]`. `closed_rounds.py::LineCells` keys it
+  once for the reads, but `passes.py:220` and `domain/results.py:329` still filter it per individual.
+  Root: `line_walks` serves the walks keyed by individual. **Rides with:** area 02's chain (with 01's
+  `results.py`). **Re-test:** `git grep -n "individual_id ==" -- promptpotter/application/scoring
+  promptpotter/domain/results.py` is empty.
 - **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
   `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
   index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
@@ -867,38 +873,23 @@ never a copy of history.
 **Unexamined:** `views/render/phase.py`, `render/export.py`,
 `render/primitives.py`, `domain/narration.py`, `served_dashboard.py`, `hierarchy.py`, `hierarchy_subtree.py`
 
-- **Head-to-head re-reads every pair's bench per GET** (w10-survey): `evidence/head_to_head.py::head_to_head`
-  picks the reference by `_agree` over every pair of graded rows and re-guards each row, and `_contrasts`
-  guards every arm pair; each `_guard` reaches `bench/line.py::pair_on_bench`, a full `read_pair`, so a
-  request costs O(n²) reads (O(k²·m²) in `_contrasts`), and `_read` re-folds `standing_rounds` and the spend
+- **Head-to-head re-reads every pair's bench per GET** (w10-survey): `evidence/head_to_head.py::_read_apart`
+  reads each pair of graded rows once per request (every guard looks its pairs up), still a full
+  `bench/line.py::pair_on_bench` per pair per GET, and `_read` re-folds `standing_rounds` and the spend
   scan per campaign. Root: "the same bench set read alike" is a banked fact of two passes, served from the
-  line's ledger. **Rides with:** area 11's chain, beside **The live reads re-serve history per poll**.
-  **Re-test:** `git grep -c "pair_on_bench" -- promptpotter/application/evidence/head_to_head.py` is 0 (2 now).
-- **The consumer spells the lift's verdict** (w10-survey): `views/evidence.py::_contrast_row` and
-  `views/evidence.py::_pair_row` compute `lift.p_value <= lift.p_floor`; `views/evidence.py::_ranking_lines`,
-  `evidence/head_to_head.py::_read_alike` and `views/render/phase.py` each spell `side == "spans"`.
-  `domain/paired_reading.py::MeasuredLift` serves the floor and the side but not "the floor binds" or "the
-  interval excludes zero". Root: every score is served; the verdict is a field of the lift. Also
-  `evidence/metric_catalogue.py::CHANNELS` is a second word for `domain/fitness_fold.py::CELL_CHANNELS`:
-  delete it. **Rides with:** area 11's chain. **Re-test:**
-  `git grep -cE "p_floor|\.side == \"spans\"" -- promptpotter/application/views promptpotter/application/evidence`
-  is 0 (5 now).
-- **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `_cycle_cells`
-  and `_campaign_edits` cost O((R·A)²) per request, `snapshot_frame` re-folds per connect, and a ray
-  page re-folds per "older". Root: a value is its aggregate plus the live round, never a copy of its
-  history. The wire half is closed (a frame naming the closed series' `series_version` it holds re-sends
-  no closed round, `served_dashboard.py::ServedDashboard.series_held`); the server still folds and
-  hashes every closed round per poll to decide it. **Re-test:** `_cycle_cells` per request is O(R·A).
+  line's ledger: a record kind. **Rides with:** a lineage-fold chain after w11-records2.
+  **Re-test:** `git grep -c "pair_on_bench" -- promptpotter/application/evidence/head_to_head.py` is 0 (1 now).
+- **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `snapshot_frame`
+  re-folds per connect, a ray page re-folds per "older", and the server folds and hashes every closed
+  round per poll to decide `served_dashboard.py::ServedDashboard.series_held` (the wire half is closed:
+  a held series re-sends no closed round). `_cycle_cells` and `_campaign_edits` read each walk once
+  (`scoring/closed_rounds.py::LineCells`). Root: a value is its aggregate plus the live round, never a
+  copy of its history. **Re-test:** a poll naming the series it holds reads no closed round.
 - **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::earlier_measured`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
   ~90 candidates (`hierarchy_subtree.py:242-318`). Action: "closer to" and descent are folded once per
   candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def earlier_measured" -- promptpotter/application/hierarchy_subtree.py` is empty.
-- **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
-  subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
-  `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is
-  not a listed entry; it shares a base, not the listed one's acts. **Re-test:** the deep read's
-  inner campaign serves no `delete`.
 - **The account feed never re-asks an exhibit's reads when the host's store moves**: a follower's
   view stands still. Action: the feed's subject includes the exhibit's. **Re-test:** the host's
   round closes; the follower's dashboard moves without a reload.
@@ -912,11 +903,11 @@ never a copy of history.
   descent, the moment and the root are refused off the exhibit (landing 89's fix pass), each a
   check. Action: a `Stores` narrowed to the exhibit's campaign, so no read can name another, and the
   served files carry no principal a follower may not see. **Rides with:** the next access chain.
-  **Re-test:** the exhibit's hierarchy ETag holds while the host edits a draft.
-- **A follower's live tail outlives its switch**: `cycle_reads.py`'s SSE stream re-checks the carrier
-  alone, so turning "Try & learn" off keeps the exhibit's tail open until a reconnect (a block ends it).
-  Action: the stream re-reads `exhibit_stores` per frame batch. **Re-test:** switch off mid-stream;
-  the stream ends.
+  **Re-test:** the exhibit's hierarchy ETag holds while the host edits a draft. w11-reads (11-28): this
+  row is the root of the two above it. `exhibit.py::read_stores` hands the follower the host's
+  `Stores`, so the feed, the session's shape and the follow check are each spelled per reader. The
+  narrowed `Stores` lives in `infrastructure/store/stores.py`, and the three rows ride it (areas 13
+  and 02).
 - **`cycle_reads.py` copies the live round's candidates into a second shape** (w7-line):
   `application/cycle_reads.py:136` copies `current_round.candidates` whole. Door: its reader takes
   the served line. **Re-test:** no copy of `current_round.candidates` outside the fold. Blocked
@@ -930,26 +921,12 @@ never a copy of history.
   **Held:** unreproduced at `2c7dff34e` (w7-small: `/campaigns/gone/pipeline` answers 404 with and
   without `at=`, over every hop shape); if the 400 recurs, capture the exact `at` the stale tab sent.
   **Re-test:** each campaign read of a deleted campaign answers 404.
-- **A restatement reads as a round** (w9-pass): the narration emits a "Round N" line for a restatement,
-  and a fork child's readout may print a full block for the restated branch round. Root: a restatement
-  is a close of the round it restates, worded as one. **Rides with:** area 11's chain. **Re-test:** a
-  resumed offline leg's narration and readout name the restatement as one.
-- **The served walk axis is a declared order** (ml-5, 11-25):
-  `promptpotter/application/served_dashboard.py::_walk` — the walk's axis is
-  `LiveDashboardState.walk_orders`, the declared row order a walk re-files at each decision, not the
-  cells taken — the root: the axis derives from the cells taken — **Rides with:** `area 11's chain`
-  — **Re-test:** `git grep -n "walk_orders" -- promptpotter` reads no declared list in `_walk`.
 - **Readout words every look-ahead press as expiring** (readings-4/flight-ux, 11-18): `promptpotter/application/views/readout.py::_handle_sample_started`
   — an every-round depth is narrated "(armed — expires when this round finishes scoring)" because
   `SampleStartedRecord` carries `sample_lookahead`/`sample_abreast` but no `auto` — the record
   should carry whether the press expires, so the narration reads a fact — **Rides with:** `area 11's
   chain` — **Re-test:** `git grep -n "expires when this round" -- promptpotter`; still one hit means
   it stands.
-- **Closed rounds folded twice per readout** (w7-text, 11-26): `promptpotter/application/scoring/measurement_log.py::cycle_hard_samples`
-  — `closed_rounds` is folded in `cycle_hard_samples` and again in the readout's own fold
-  (`views/readout.py` line ~348) — the projection has no round fold of its own to share — **Rides
-  with:** `area 11's chain` — **Re-test:** `git grep -n "closed_rounds(" -- promptpotter/application/views/readout.py
-  promptpotter/application/scoring/measurement_log.py` shows two folds per readout.
 
 ## 12 · Surfaces: CLI, REST API, MCP, webapp
 
@@ -1113,6 +1090,12 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+- **CI's touch walk finds the upload control under the remote control at landscape-844** (w11-reads,
+  11-28): `e2e/walk/responsive.spec.ts:26` has been red on Linux since `0c6f59846`, CI and the cloud
+  gate both: `"Attach a dataset file" is under div.remote-control`. It is green on the Windows desk,
+  where that shell draws no dock and the attach button sits at y 385–429 of 390. The range changed no
+  `webapp/` file, so on Linux the zero-campaign shell is viewing a cycle. **Rides with:** w11-ci-touch
+  (dispatched). **Re-test:** the spec is green on Linux, and the report names why a cycle is viewed.
 - **The build stamp hashes from an empty index** (w11-tests3, 11-28): `webapp/vite.config.ts::webappTree`
   still adds every `webapp/` file into an empty scratch index on each build, while
   `health.py::webapp_bundle` now seeds from the checkout's. Same root, on the build side. **Rides

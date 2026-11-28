@@ -25,9 +25,9 @@ from promptpotter.application.pipeline_resolve import (
     resolved,
 )
 from promptpotter.application.scoring.closed_rounds import (
+    LineCells,
     closed_rounds,
     cycle_bank,
-    walked_rows,
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Measuring, Proposed, arm_name
@@ -47,7 +47,6 @@ from promptpotter.domain.cells import (
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.fitness_fold import pooled_band
-from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.results import RoundResult
@@ -80,7 +79,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import Moment, derived, read_line
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
-from promptpotter.shared.measurement_context import RoleScope
 
 _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_time"})
 
@@ -468,7 +466,7 @@ def _cycle_cells(
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
     chain = stores.campaigns.chain(hop, moment=moment)
-    walks = line_walks(chain)
+    line = LineCells(stores, line_walks(chain), scorer)
     standing = read_line(chain, STANDING_ROUNDS)
     elected = max(standing.elections, default=None)
     ended_on = None if elected is None else standing.elections[elected].ended_on
@@ -495,8 +493,7 @@ def _cycle_cells(
             cycle_id=hop.cycle_id,
             live=live,
         )
-        measured = individual_cells(walks, individual_id, RoleScope.REPORT)
-        sheet = walked_rows(stores, measured, scorer).standing()
+        sheet = line.sheet(individual_id)
         cells.extend(
             (_row_cell(cell, key=key, position=wanted[cell.key]), cell)
             for cell in sheet

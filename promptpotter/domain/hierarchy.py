@@ -536,10 +536,15 @@ class HierarchyCycle(_RunEntry):
     )
 
 
-class HierarchyCampaign(_RunEntry):
-    """A campaign as the listing serves it: its state and line stats are its line cycle's."""
+class _CampaignEntry(_RunEntry):
+    """A campaign at any depth: its state and line stats are its line cycle's."""
 
     entry_kind: Literal["campaign"] = "campaign"
+
+
+class HierarchyCampaign(_CampaignEntry):
+    """A campaign as the listing serves it, with the Delete its row offers."""
+
     facts: CampaignFacts
     delete: DeleteAct = DeleteAct.of(CommandKind.DELETE_CAMPAIGN)
     children: Sequence[HierarchyCycle] = Field(
@@ -575,8 +580,9 @@ class SubtreeCycle(HierarchyCycle):
     )
 
 
-class SubtreeCampaign(HierarchyCampaign):
-    """A campaign as the subtree read serves it: every level under it."""
+class SubtreeCampaign(_CampaignEntry):
+    """A campaign as the subtree read serves it: every level under it, and no act of a listed
+    row's (an inner campaign is deleted with its outer, never on its own)."""
 
     facts: SubtreeCampaignFacts
     children: Sequence[SubtreeCycle] = Field(description="Its cycles, root first.")

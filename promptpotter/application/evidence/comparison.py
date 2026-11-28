@@ -154,7 +154,7 @@ class EvidencePower(StrictModel):
 
     ``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject
     it would take to resolve the biggest gap the roster already shows. What a pair's WIDTH permits
-    at any effect size is that pair's own ``estimate.p_floor``.
+    at any effect size is that pair's own lift's floor (`MeasuredLift.floor_binds`).
     """
 
     paired_se: float

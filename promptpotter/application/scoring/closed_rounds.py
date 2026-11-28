@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 
 from promptpotter.application.initialization.session import LaunchState, drawn_partition
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.records.rounds import RoundClosedRecord, RoundEnteredRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.sample import Bank
@@ -25,6 +26,7 @@ from promptpotter.infrastructure.store.read_model import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
+from promptpotter.shared.measurement_context import RoleScope
 
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:
@@ -47,6 +49,24 @@ def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> 
         sig=stores.archive.files_signature({answer.partition(".")[0] for answer in replayed}),
         compute=grade,
     )
+
+
+class LineCells:
+    """A line's graded cells per individual: its walks keyed once at the read, so a reader asking
+    every individual visits each walk once, never every walk per individual."""
+
+    def __init__(
+        self, stores: Stores, walks: Iterable[IndividualWalk[WalkedCell]], scorer: Scorer
+    ) -> None:
+        self._stores, self._scorer = stores, scorer
+        self._walks: dict[str, list[IndividualWalk[WalkedCell]]] = {}
+        for walk in walks:
+            self._walks.setdefault(walk.individual_id, []).append(walk)
+
+    def sheet(self, individual_id: str, scope: RoleScope = RoleScope.REPORT) -> CellSheet:
+        walks = self._walks.get(individual_id, [])
+        measured = individual_cells(walks, individual_id, scope)
+        return walked_rows(self._stores, measured, self._scorer).standing()
 
 
 def cycle_bank(stores: Stores, hop: CycleHop) -> Bank:

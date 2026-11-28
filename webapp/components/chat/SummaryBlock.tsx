@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Said } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api/types";
+import type { RowEntry, UnstartedCampaign } from "@/lib/api/types";
 import { Figure, FigureRow } from "@/components/shell/FigureRow";
 
 // An entry's served lines under its title, then its figures.
@@ -10,7 +10,7 @@ export function SummaryBlock({
   dense = false,
   actions,
 }: {
-  entry: HierarchyEntry | UnstartedCampaign;
+  entry: RowEntry | UnstartedCampaign;
   dense?: boolean;
   actions?: ReactNode;
 }) {

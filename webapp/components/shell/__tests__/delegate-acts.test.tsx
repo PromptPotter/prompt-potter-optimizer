@@ -5,7 +5,7 @@ import { useFiles } from "@/lib/hooks/useFiles";
 import { clearReadCache } from "@/lib/read-cache";
 import { ThreadProvider } from "@/lib/state/chat-thread";
 import { IngestFlowProvider } from "@/lib/state/ingest-flow";
-import { OWNER_FILABLE, subtreeCampaign } from "@/lib/test-fixtures";
+import { LISTED_DELETE, OWNER_FILABLE, subtreeCampaign } from "@/lib/test-fixtures";
 import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { CampaignMenu } from "../sidebar/CampaignMenu";
 
@@ -36,7 +36,7 @@ async function view() {
   const { facts: f, ...entry } = subtreeCampaign({ address: "camp-1" });
   const { label, short_label, root, root_label, live_cycle, lifecycle, runs_with } = f;
   const facts = { label, short_label, root, root_label, live_cycle, lifecycle, runs_with };
-  const listed: ListedCampaign = { ...entry, children: [], facts };
+  const listed: ListedCampaign = { ...entry, delete: LISTED_DELETE, children: [], facts };
   render(
     <InWorkspace>
       <ThreadProvider>

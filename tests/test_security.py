@@ -149,6 +149,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.read_params import (
     CampaignPipelineParams,
     CycleDashboardParams,
+    CycleEventsParams,
     HierarchyParams,
     HierarchySubtreeParams,
 )
@@ -1518,6 +1519,20 @@ def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(
     assert viewed(inner), "a follower could not open the exhibit's own inner run"
     with pytest.raises(NotFoundError):
         viewed(private, inner)
+
+
+async def test_a_followers_live_tail_ends_at_the_tick_its_switch_goes_off(
+    exhibit: _Exhibit,
+) -> None:
+    hop, follower = exhibit
+    frames = CycleEventsParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id).answer(
+        Caller(follower)
+    )
+    await anext(frames)  # the snapshot, read off the host's stores
+    off = account.UserSettings(demo_mode_enabled=False)
+    await asyncio.to_thread(account.set_user_settings, follower, off)
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(anext(frames), timeout=5)
 
 
 def test_a_blocked_account_one_with_its_switch_off_or_a_box_naming_none_reads_no_exhibit(

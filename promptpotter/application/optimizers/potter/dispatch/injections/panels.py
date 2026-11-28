@@ -795,7 +795,7 @@ class _Edit:
     def verdict(self) -> bool:
         """A lift off the noise on the parent's whole set: what an idea is judged on."""
         whole = None if self.reading is None else self.reading.on_whole_set
-        return whole is not None and whole.side != "spans"
+        return whole is not None and whole.separated
 
     def flipped(self) -> FlippedCells[str]:
         reference = self.round.reference_rows(self.key)
