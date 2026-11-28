@@ -17,8 +17,10 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_readiness,
 )
 from promptpotter.application.hierarchy import draft_starts
+from promptpotter.application.jobs.mint import route_refusal
 from promptpotter.application.jobs.quota import account_wallet, launch_bound, launch_refusal
 from promptpotter.application.pipeline_resolve import (
+    DraftPipeline,
     ServedPipeline,
     draft_pipeline,
     draft_sends,
@@ -276,7 +278,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
     declared = pipeline.config.optimization.budget
     active = list(pipeline.chain.active_steps)
     modes = _modes(served, draft, pipeline.declared)
-    refusal, launch = _launch(stores, draft, declared)
+    refusal, launch = _launch(stores, draft, pipeline)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
@@ -308,10 +310,23 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
     )
 
 
-def _launch(stores: Stores, draft: DraftFile, declared: Budget) -> tuple[Refusal | None, Budget]:
-    """``admit_launch``'s refusal of this Start, then the most it may declare."""
+def _launch(
+    stores: Stores, draft: DraftFile, pipeline: DraftPipeline
+) -> tuple[Refusal | None, Budget]:
+    """The refusal this Start's press meets, ``admit_launch``'s then its mint's routes', then the
+    most it may declare."""
     wallet, sends = account_wallet(stores), draft_sends(stores, draft)
-    refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None)
+    declared = pipeline.config.optimization.budget
+    refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None) or (
+        route_refusal(
+            pipeline.config,
+            pipeline.optimizer,
+            pipeline.params,
+            pipeline.chain,
+            stores=stores,
+            connector=pipeline.connector,
+        )
+    )
     return (None if refused is None else Refusal.of(refused)), launch_bound(wallet, sends)
 
 

@@ -549,9 +549,18 @@ class CommandDispatcher:
     ) -> Opened[Any, DraftPayload]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
-        owned_draft(self.stores, call.payload.draft_id)
-        claim = self.stores.drafts.claim(call.payload.draft_id)
+        draft_id = owned_draft(self.stores, call.payload.draft_id).draft_id
+        claim = self.stores.drafts.claim(draft_id)
         try:
+            # A queued Start's claim is its job on disk, its asker gone (`JobRegistry.draft_starts`).
+            if draft_id in self.job_registry.draft_starts(
+                user_id=str(self.stores.identity.user_id)
+            ):
+                raise ConflictError(
+                    f"draft {draft_id!r} is held by a Start waiting for a slot; withdraw it or "
+                    "retry once it ran.",
+                    code="draft_held",
+                )
             applier = await self._applier(
                 DispatchedToDraft(self, call.payload, call.command_id, claim, door=call.door)
             )

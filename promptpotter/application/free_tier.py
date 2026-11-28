@@ -192,9 +192,9 @@ def outside_free_tier(
     return list(dict.fromkeys(out))
 
 
-def refuse_outside_free_tier(outside: Sequence[str]) -> None:
+def outside_free_tier_refusal(outside: Sequence[str]) -> PayloadInvalidError | None:
     if outside:
-        raise PayloadInvalidError(
+        return PayloadInvalidError(
             "\n".join(
                 f"{what} is not part of the free tier yet. To ask for it, open an issue: "
                 f"{settings.BRAND_DOCS_URL}/issues or message us on LinkedIn: "
@@ -203,3 +203,4 @@ def refuse_outside_free_tier(outside: Sequence[str]) -> None:
             ),
             code="not_on_free_tier",
         )
+    return None

@@ -3917,8 +3917,7 @@ def test_start_refuses_on_the_free_tier_what_its_fence_leaves_outside(
             run, selected, PipelineParams.model_validate(params), schema, fence
         )
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
-    with pytest.raises(PayloadInvalidError):
-        free_tier.refuse_outside_free_tier(off)
+    assert isinstance(free_tier.outside_free_tier_refusal(off), PayloadInvalidError)
 
 
 @pytest.mark.usefixtures("run_bound")

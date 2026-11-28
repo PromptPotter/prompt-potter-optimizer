@@ -120,16 +120,23 @@ class RunAdmission(FrozenModel):
         "fork."
     )
 
+    @staticmethod
+    def launches(run: RunState) -> bool:
+        """The verb *run*'s phase names files a launch: a resume files what a start does."""
+        action = RUN_PHASE_INFO[run.run_phase].action
+        return action is not None and RUN_VERB_KIND[action] is RUN_VERB_KIND["start"]
+
     @classmethod
     def of(
         cls,
         run: RunState,
         *,
-        campaign_refusal: Refusal | None,
+        launch_refusal: Refusal | None,
         filable: tuple[CommandKind, ...],
     ) -> RunAdmission:
-        """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
-        campaign's own, and *filable*, its reader's: a verb either refuses is not offered."""
+        """Read only through `admission.py::admitted`, which joins *launch_refusal*, what a launch
+        on the cycle meets (`admission.py::launch_preflight`), and *filable*, its reader's: a verb
+        either refuses is not offered."""
         info = RUN_PHASE_INFO[run.run_phase]
         pausing = info.action == "pause"
         declined = run.pause_refusal if pausing else run.start_refusal
@@ -141,11 +148,11 @@ class RunAdmission(FrozenModel):
             # line moved on say their own refusal.
             own = pausing or run.inner or run.runs_on is not None
             refusal = worded_refusal("run_declined", declined) if own else info.refusal
-        # A resume files what a start does: the launch a campaign or a moved line may refuse.
-        launches = info.action is not None and RUN_VERB_KIND[info.action] is RUN_VERB_KIND["start"]
-        refuses_launch = launches and (campaign_refusal is not None or run.runs_on is not None)
+        refuses_launch = cls.launches(run) and (
+            launch_refusal is not None or run.runs_on is not None
+        )
         if refuses_launch and refusal is None:
-            refusal = campaign_refusal
+            refusal = launch_refusal
         if refusal is None:
             # The run asks its verb alone: a reader who may not file it reads the run.
             if info.action and RUN_VERB_KIND[info.action] not in filable:

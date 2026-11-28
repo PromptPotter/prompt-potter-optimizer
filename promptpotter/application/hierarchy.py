@@ -319,7 +319,7 @@ def cycle_entry(
     task = None if index.spawned_by is None else index.spawned_by.task or None
     # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
     state = HierarchyState.of(
-        run, head, lifecycle=campaign.lifecycle_status, admission=admitted(stores, campaign, run)
+        run, head, lifecycle=campaign.lifecycle_status, admission=admitted(stores, at, run)
     )
     facts = CycleEntryFacts(
         mint=mint,
@@ -464,7 +464,7 @@ def campaign_entry(
             held_run,
             None,
             lifecycle=campaign.lifecycle_status,
-            admission=admitted(stores, campaign, held_run),
+            admission=admitted(stores, live_at, held_run),
         )
     else:
         state = live.state
