@@ -81,7 +81,7 @@ USAGE: dict[str, Any] = {
     "completion_tokens": 200,
     "total_tokens": 1200,
     # The parts a provider breaks out, reported as it reports them: a zero is a reported zero.
-    "prompt_tokens_details": {"cache_write_tokens": 0},
+    "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
     "completion_tokens_details": {"reasoning_tokens": 0},
 }
 

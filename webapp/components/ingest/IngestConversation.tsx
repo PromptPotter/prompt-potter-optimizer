@@ -67,10 +67,8 @@ function EntryList({
   const drafts = useRegistry().unstarted;
   // What a fresh campaign starts from, read only while the list is on screen: a run viewed never
   // waits on, or polls, either. The open check-ins are the registry's unstarted campaigns.
-  const { status } = useAuth();
   const datasets = useRead(datasetIndexRead());
   const origins = useRead(originsRead());
-  if (status === "unauthed") return null;
   const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const counts =
     datasets.status === "ready" && origins.status === "ready"
@@ -141,9 +139,11 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
 export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail: BlockItem[] } {
   const flow = useIngest();
   const { navigate } = useWorkspace();
+  const { status } = useAuth();
   const openDraft = (draftId: string) => navigate({ draftId });
+  // An anon page mounts no entry, so it reads nothing for one (I5).
   const head: BlockItem[] =
-    flow.phase.stage === "idle"
+    flow.phase.stage === "idle" && status !== "unauthed"
       ? [
           {
             id: "ingest-entry",

@@ -23,6 +23,7 @@ import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl, Term } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
+import type { EditSubject } from "./PromptFieldsEditor";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
 
@@ -44,6 +45,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   const flow = useIngest();
   const draft = useCheckinDraft();
   const onPromptApply = draft ? flow.applyPatch : undefined;
+  const writtenIn: EditSubject | null = draft ? { checkin: draft.draft_id } : null;
   const read = useConnector();
   const served = shownData(read);
   // A check-in's draft is the connector read's transport, so its params are the read's.
@@ -145,6 +147,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             origin={origin}
             modelCapabilities={modelCapabilities}
             onPromptApply={onPromptApply}
+            writtenIn={writtenIn}
           />
         ) : (
           <TargetProgram
@@ -155,6 +158,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             modelCapabilities={modelCapabilities}
             isLive={isLive}
             onPromptApply={onPromptApply}
+            writtenIn={writtenIn}
           />
         )}
 
@@ -189,6 +193,7 @@ function OptimizerProgram({
   origin,
   modelCapabilities,
   onPromptApply,
+  writtenIn,
 }: {
   id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
@@ -196,6 +201,7 @@ function OptimizerProgram({
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   // A check-in's: its optimizer prompt is edited here, as `nodes.<node>.config.<field>`.
   onPromptApply: ((patch: DraftPatch) => void) | undefined;
+  writtenIn: EditSubject | null;
 }) {
   return (
     <>
@@ -208,6 +214,7 @@ function OptimizerProgram({
         promptScope="optimizer"
         edited={origin?.edited}
         onApply={onPromptApply}
+        writtenIn={writtenIn}
       />
       {origin && origin.versions_declared > 1 && (
         <p className="inspector-note">
@@ -226,6 +233,7 @@ function TargetProgram({
   modelCapabilities,
   isLive,
   onPromptApply,
+  writtenIn,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
   authoring: NodeAuthoring | undefined;
@@ -234,6 +242,7 @@ function TargetProgram({
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
   onPromptApply: ((patch: DraftPatch) => void) | undefined;
+  writtenIn: EditSubject | null;
 }) {
   const { setObserve } = useSelection();
   if (authoring) {
@@ -246,6 +255,7 @@ function TargetProgram({
         modelCapabilities={modelCapabilities}
         mode={scoped ? "search-space" : "values"}
         onApply={scoped ? onPromptApply : undefined}
+        writtenIn={writtenIn}
       />
     );
   }

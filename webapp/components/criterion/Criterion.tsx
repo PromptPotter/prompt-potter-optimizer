@@ -192,7 +192,7 @@ export function Criterion({
               <label className="criterion-field">
                 <span className="cmp-expr-label">Score it as…</span>
                 <CommitInput
-                  className={cx("cmp-expr-input", invalid && "cmp-expr-bad")}
+                  className="cmp-expr-input"
                   value={mask.lens}
                   placeholder="score:fitness * (1 - 0.1 * degraded)"
                   aria-invalid={invalid ? true : undefined}

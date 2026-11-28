@@ -30,7 +30,7 @@ function Read() {
   return useFiles("account")("mint-campaign") ? <p>read</p> : null;
 }
 
-// The session's probe adopts the identity, which re-asks every read: the kinds stand after it.
+// The session's one probe answers the kinds too: they stand once it lands.
 async function view() {
   // The listing's entry: the subtree's, less the facts only the deep read serves.
   const { facts: f, ...entry } = subtreeCampaign({ address: "camp-1" });
@@ -47,8 +47,9 @@ async function view() {
       </ThreadProvider>
     </InWorkspace>,
   );
-  await waitFor(() => expect(probes).toBeGreaterThan(1));
+  await waitFor(() => expect(probes).toBe(1));
   expect(await screen.findByText("read")).toBeTruthy();
+  expect(probes).toBe(1);
 }
 
 describe("a delegate is offered only the campaign acts its grant files", () => {

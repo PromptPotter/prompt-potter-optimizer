@@ -65,7 +65,7 @@
 .rsv-tally-score{color:var(--color-text-secondary)}
 .rsv-rejected{color:var(--color-danger)}
 .rsv-why{padding:var(--space-4) var(--space-8) 0;display:flex;flex-direction:column;gap:2px}
-.rsv-why > p{margin:0;font-size:var(--text-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsv-why > p{margin:0;font-size:var(--text-xs);overflow-wrap:anywhere}
 .rsv-changes{color:var(--color-text-secondary)}
 .rsv-reject-reason{color:var(--color-danger)}
 

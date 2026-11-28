@@ -61,7 +61,6 @@
 .sidebar-filter-panel{width:230px;padding:var(--space-6) var(--space-8) var(--space-8)}
 .sidebar-filter-search{width:100%;margin:var(--space-6) 0;font-size:var(--text-sm)}
 .sidebar-filter-search::placeholder{color:var(--color-text-secondary)}
-.sidebar-filter-search:focus-visible{outline:none;border-color:var(--color-accent)}
 .sidebar-filter-datasets{max-height:220px;overflow-y:auto;padding:0}
 .sidebar-filter-empty{font-size:var(--text-xs);color:var(--color-text-secondary);padding:2px 0}
 .sidebar-tree-active-filter{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap;padding:2px var(--space-8) var(--space-6)}

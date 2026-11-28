@@ -6,6 +6,8 @@ import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 let fake: FakeIssuer;
 
 test.beforeAll(async () => {
+  // Its server answers or exits (`waitForHealth`); a start the desk's load slows is no failure.
+  test.setTimeout(0);
   fake = await startFakeIssuer();
 });
 

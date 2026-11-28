@@ -115,7 +115,7 @@ export function MeasurementRun({
                 type="button"
                 className="rsv-group-head"
                 onClick={() => onSelectCandidate(isCandSelected ? null : c)}
-                title="Click to anchor lineage + fitness on this candidate"
+                aria-pressed={isCandSelected}
               >
                 <span className="rsv-cand-label">{arm.label}</span>
                 <span className="rsv-tally">
@@ -155,22 +155,16 @@ export function MeasurementRun({
               </button>
               {(changes !== "" || failures.length > 0) && (
                 <div className="rsv-why">
-                  {changes !== "" && (
-                    <p className="rsv-changes" title={changes}>
-                      {changes}
-                    </p>
-                  )}
+                  {changes !== "" && <p className="rsv-changes">{changes}</p>}
                   {failures.map((f, i) => (
-                    <p
-                      key={`${f.reason}-${i}`}
-                      className="rsv-reject-reason"
-                      title={
-                        f.allowed.length > 0
-                          ? `${f.axis} — wanted ${f.allowed.join(", ")}`
-                          : f.axis
-                      }
-                    >
-                      {f.value}
+                    <p key={`${f.reason}-${i}`} className="rsv-reject-reason">
+                      <Term
+                        content={
+                          f.allowed.length > 0 ? `${f.axis} — wanted ${f.allowed.join(", ")}` : f.axis
+                        }
+                      >
+                        {f.value}
+                      </Term>
                     </p>
                   ))}
                 </div>

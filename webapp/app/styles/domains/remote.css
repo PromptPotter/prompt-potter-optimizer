@@ -56,9 +56,10 @@
 /* Wraps inside the pill: a note beside the button breaks onto its own line, never clips. */
 .run-ctl{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);min-width:0;max-width:100%}
 .remote-cells-group{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4);width:100%;padding:var(--space-6) 0}
-.remote-cells-group .remote-cells{display:flex;flex:1 1 100%;min-width:0}
+/* Each segment keeps the touch floor and the row wraps: sixteen depths and `Max` never squeeze to a clip. */
+.remote-cells-group .remote-cells{display:flex;flex-wrap:wrap;flex:1 1 100%;min-width:0}
 /* A hinted segment sits in its HoverCard's span: the span takes the share, its button fills it. */
-.remote-cells-group .remote-cells > *{display:flex;flex:1 1 0;min-width:0}
+.remote-cells-group .remote-cells > *{display:flex;flex:1 0 var(--touch-target-min);min-width:0}
 .remote-cells-group .remote-cells button{flex:1 1 0;min-width:0;padding-inline:0;font-variant-numeric:tabular-nums}
 /* A quiet served line under a control: what it holds now, or why it holds no more. */
 .remote-note{flex-basis:100%;margin:0 0 var(--space-4);color:var(--color-text-secondary);font-size:var(--text-xs)}

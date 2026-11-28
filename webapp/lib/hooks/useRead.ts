@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/state/auth";
+import { useBusyMark } from "@/lib/state/busy";
 import {
   readResult,
   subscribe,
@@ -52,6 +53,11 @@ export function useRead<T, B = T>(read: ReadDescriptor<T, B> | null): ReadResult
   );
   const snapshot = useCallback(() => readResult(live), [live]);
   const result = useSyncExternalStore(listen, snapshot, snapshot);
+
+  // A read in flight marks its pane, whatever the pane draws meanwhile (`lib/state/busy.tsx`).
+  const mark = useBusyMark();
+  const flying = live !== null && !live.held && result.status === "loading";
+  useEffect(() => (flying ? mark() : undefined), [flying, mark]);
 
   // A 401 re-probes the session, so one that died mid-run halts the polls.
   const lapsed = live?.auth === true && result.status === "failed" && result.failure.kind === "auth";

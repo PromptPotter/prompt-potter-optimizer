@@ -331,17 +331,27 @@ export function dropCachedRead(id: string): void {
   ask(slot, true);
 }
 
-// An identity flip: every body, kept body, verdict, flight and feed version belongs to the last
-// identity. A mounted read is re-asked under the new one; signed out, an auth read is left to
-// `useRead`'s gate. The account's feed is the signed-in identity's alone: an anon page opens none (I5).
-export function clearReadCache(signedIn: boolean): void {
-  keeps.clear();
+// The account's feed is the signed-in identity's alone: an anon page opens none (I5).
+function followFeed(signedIn: boolean): void {
   closeFeedStream?.();
   closeFeedStream =
     signedIn && typeof EventSource !== "undefined"
       ? openLiveStream<StampedFeedFrame>(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved })
       : null;
+}
+
+// Whose the cached bodies are: `undefined` until the session's probe names it.
+let identity: string | null | undefined;
+
+// Every body, kept body, verdict, flight and feed version belongs to the last identity but *said*'s
+// (the answer naming the new one). A mounted read is re-asked under the new one; signed out, an auth
+// read is left to `useRead`'s gate. The cache forgets whose it was: the next adoption is a first one.
+export function clearReadCache(signedIn: boolean, said?: string): void {
+  identity = undefined;
+  keeps.clear();
+  followFeed(signedIn);
   for (const slot of [...slots.values()]) {
+    if (slot.id === said) continue;
     supersede(slot);
     if (slot.subs.size === 0) {
       slots.delete(slot.id);
@@ -356,6 +366,15 @@ export function clearReadCache(signedIn: boolean): void {
     if (signedIn || !descriptorOf(slot).auth) ask(slot, false);
   }
   settleReached();
+}
+
+// The probe *said* names the session's identity. The first adoption keeps every body: each was read
+// under the session it names, and an auth read waited in `useRead`'s gate. A flip forgets the last's.
+export function adoptIdentity(next: string | null, said: string): void {
+  if (next === identity) return;
+  if (identity === undefined) followFeed(next !== null);
+  else clearReadCache(next !== null, said);
+  identity = next;
 }
 
 function mounted(): Slot[] {

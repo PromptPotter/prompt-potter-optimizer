@@ -384,14 +384,18 @@ export async function hideSidebar(page: Page) {
 
 /** The page has drawn every answer it asked for: no request open two frames after the last one closed
  *  (an answer's render asks the next read), and no lazy pane still `aria-busy`. A layout check reads
- *  after this, or a row its read has not yet answered is never checked. */
+ *  after this, or a row its read has not yet answered is never checked. An open read is the server
+ *  still answering, so it is waited out on no clock of its own: a desk's load slows an answer, and
+ *  only the test's own timeout says one never comes. */
 async function drawn(page: Page) {
   const open = () => page.evaluate(() => (window as unknown as { __openReads: number }).__openReads);
   do {
-    await expect.poll(open, { message: "a read is still open" }).toBe(0);
+    await page.waitForFunction(() => (window as unknown as { __openReads: number }).__openReads === 0, null, {
+      timeout: 0,
+    });
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   } while (await open());
-  await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0);
+  await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0, { timeout: 0 });
 }
 
 // The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.

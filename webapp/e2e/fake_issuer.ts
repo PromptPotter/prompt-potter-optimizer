@@ -100,13 +100,10 @@ export async function startFakeIssuer(
   };
 }
 
-async function waitForHealth(
-  url: string,
-  exitCode: () => number | null,
-  timeoutMs = 60_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+/** Up once its health answers, down once its process exits: a server still starting is waited on no
+ *  clock of its own, since a desk's load slows a start; the caller's hook timeout says one never comes. */
+async function waitForHealth(url: string, exitCode: () => number | null): Promise<void> {
+  for (;;) {
     const code = exitCode();
     if (code !== null) throw new Error(`e2e/serve.mjs exited ${code} — see its output above`);
     try {
@@ -117,5 +114,4 @@ async function waitForHealth(
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  throw new Error(`fake-issuer server never answered ${url}`);
 }

@@ -3,7 +3,8 @@
     python scripts/complexity_ledger.py            # print the ledger
     python scripts/complexity_ledger.py --check    # the gate's `surface-ledger` check
 
-A row fails only where it rose above its count at the merge-base with ``origin/main``, counted by
+A row fails only where it rose above its count at the merge-base with the line the branch was cut
+from (``processes.py::branch_base``, as ``gate.py --changed`` reads it), counted by
 that commit's own script over its own tree, so a fall edits nothing and slack a cut left can't be
 refilled. A raise edits its ``BASELINE`` row, the ceiling it may reach, with a written reason in the
 COMMIT BODY (root ``CLAUDE.md`` § Working).
@@ -29,7 +30,7 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-from processes import REPO, clone_cache, git, replace_changed, run
+from processes import REPO, branch_base, clone_cache, git, replace_changed, run
 
 from promptpotter.shared.import_walk import import_statements
 
@@ -392,7 +393,10 @@ BASELINE = {
     # queued Start's job holds its draft against a second command (+9).
     # w11-connectors2 (+9): Harbor's harness fault typed at its door, and the connector's roster-pin
     # declaration.
-    "package_lines": 113967,
+    # w11-tests3 (+2): the bundle check's scratch index seeds from the checkout's own.
+    # w11-web2 (+22): a command route refuses its body by the model it declares
+    # (`commands.py::_CommandRoute`), where the app's handler dug it out of `request.scope`.
+    "package_lines": 113991,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -1118,7 +1122,6 @@ def _format(ledger: dict[str, int]) -> str:
     return "complexity ledger (count / ceiling)\n" + "\n".join(rows)
 
 
-_MAIN = "origin/main"
 # What the ledger reads, so a commit's own script counts that commit's tree.
 _COUNTED = (
     "promptpotter",
@@ -1188,7 +1191,7 @@ def check(ledger: dict[str, int], base: dict[str, int], ceilings: dict[str, int]
     if not risen:
         return []
     return [
-        f"the cost of the next change grew (dimension: here vs the merge-base with {_MAIN}): "
+        "the cost of the next change grew (dimension: here vs the merge-base with the branch's line): "
         f"{risen}. Subtract instead, or raise its ceiling with a reason in the commit body."
     ]
 
@@ -1198,15 +1201,18 @@ if __name__ == "__main__":
     if "--check" not in sys.argv[1:]:
         print(_format(counted))
         raise SystemExit(0)
-    main = _git("rev-parse", _MAIN)
-    merge_base = _git("merge-base", "HEAD", main)
+    line, merge_base = branch_base()
     risen = check(counted, _counted_at(merge_base), _baseline_at(merge_base))
     if risen:
         print(
             "\n".join(risen)
-            + f"\nMeasured at {_MAIN} {main[:12]}, merge-base {merge_base[:12]}; BASELINE lives in scripts/complexity_ledger.py."
+            + f"\nMeasured against {line}, merge-base {merge_base[:12]}; BASELINE lives in scripts/complexity_ledger.py."
         )
-        # A stale ref reads red only, for growth main itself made: so a red, never a green, asks origin.
-        if (held := _git("ls-remote", "origin", "refs/heads/main").split()[0]) != main:
-            raise SystemExit(f"surface-ledger: {_MAIN} is stale, origin holds {held[:12]}: fetch.")
+        # A stale ref reads red only, for growth its line itself made: so a red, never a green, asks origin.
+        tip, held = (
+            _git("rev-parse", line),
+            _git("ls-remote", "origin", line.removeprefix("origin/")),
+        )
+        if held and held.split()[0] != tip:
+            raise SystemExit(f"surface-ledger: {line} is stale, origin holds {held[:12]}: fetch.")
     raise SystemExit(bool(risen))

@@ -1,6 +1,7 @@
 import { Activity, useEffect, useRef, useState, type RefObject } from "react";
 import { Button, IconClose } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
+import { BusyPane } from "@/lib/state/busy";
 import { useWorkspace } from "@/lib/state/workspace";
 import { FAMILIES, openColumns } from "./families";
 
@@ -63,7 +64,7 @@ export function Views() {
       {columns.map(({ family, key }) => {
         const { label, pane } = FAMILIES[family];
         return (
-          <div key={family} id={`view-${family}`} data-family={family} className="view">
+          <BusyPane key={family} id={`view-${family}`} data-family={family} className="view">
             {columns.length > 1 && (
               <div className="view-head">
                 <span>{label}</span>
@@ -81,7 +82,7 @@ export function Views() {
                 </div>
               )}
             </Activity>
-          </div>
+          </BusyPane>
         );
       })}
     </div>

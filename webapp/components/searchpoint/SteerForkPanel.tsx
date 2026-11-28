@@ -140,6 +140,7 @@ export function SteerForkPanel({
         overlay={overlay}
         pipelineAt={pipelineAt}
         mode="values"
+        writtenIn={{ path }}
         onApply={(p) => {
           // The editor writes fields; each node's shots ride the start unchanged.
           const fields = p.origin_prompts ?? {};

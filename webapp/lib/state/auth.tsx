@@ -10,7 +10,7 @@ import {
 import { failureKind, failurePasses, meRead } from "@/lib/api";
 import { type MeResponse, SIGN_IN_REFUSAL_INFO } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
-import { clearReadCache, readThrough } from "@/lib/read-cache";
+import { adoptIdentity, readThrough } from "@/lib/read-cache";
 
 type AuthStatus = "loading" | "authed" | "unauthed";
 export type SignInRefusal = keyof typeof SIGN_IN_REFUSAL_INFO;
@@ -39,8 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authPrompt, setAuthPrompt] = useState<AuthPrompt>(PROMPT_CLOSED);
   const [nonce, setNonce] = useState(0);
   const probeIdRef = useRef(0);
-  // Every cached read belongs to one identity; `undefined` is "not probed yet".
-  const identityRef = useRef<string | null | undefined>(undefined);
+  // Whether a probe has named the session yet; the cache keeps whose its bodies are.
+  const probedRef = useRef(false);
 
   const refresh = useCallback(() => {
     setNonce((n) => n + 1);
@@ -51,13 +51,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     probeIdRef.current = probeId;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    const probe = meRead();
     const adopt = (identity: string | null) => {
-      if (identityRef.current === identity) return;
-      identityRef.current = identity;
-      clearReadCache(identity !== null);
+      probedRef.current = true;
+      adoptIdentity(identity, probe.id);
     };
     // The probe `useRead`'s own gate stands on, so it cannot ride the hook; it shares the cache.
-    readThrough(meRead(), new AbortController().signal)
+    readThrough(probe, new AbortController().signal)
       .then((data) => {
         if (cancelled || probeIdRef.current !== probeId) return;
         adopt(`${data.tenant_id}\x1f${data.user_id}`);
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // cache; an unprobed one stays `loading` (never anon, so a signed-in reload during an
         // outage or a throttle is not signed out) and re-probes on the reconnect beat (I7).
         if (failurePasses(kind)) {
-          if (identityRef.current === undefined) {
+          if (!probedRef.current) {
             retry = setTimeout(refresh, RECONNECT_POLL_MS);
           }
           return;

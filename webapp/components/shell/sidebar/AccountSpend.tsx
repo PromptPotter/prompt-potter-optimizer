@@ -11,7 +11,7 @@ export function AccountSpend() {
   const data = shownData(read);
   if (data == null) {
     return (
-      <div className="account-spend" aria-busy={read.status === "loading"}>
+      <div className="account-spend">
         <span className="account-spend-label">Spend</span>
         <span className="account-spend-muted">
           {read.status === "loading" ? "…" : "unavailable"}

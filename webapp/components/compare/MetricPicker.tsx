@@ -1,6 +1,5 @@
 import { CommitInput, FailureLine, Menu, MenuRadioGroup } from "@/components/ui";
 import type { MetricReading } from "@/lib/api/types";
-import { cx } from "@/lib/cx";
 import type { ReadFailure } from "@/lib/read-cache";
 
 const EXPR_PREFIX = "expr:";
@@ -73,7 +72,7 @@ export function MetricExpression({
       </label>
       <CommitInput
         id="cmp-expr-input"
-        className={cx("cmp-expr-input", invalid && "cmp-expr-bad")}
+        className="cmp-expr-input"
         value={expression}
         placeholder="lift / latency"
         aria-invalid={invalid ? true : undefined}

@@ -88,8 +88,8 @@ const eslintConfig = defineConfig([
         "error",
         {
           selector:
-            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/][arguments.0.value=/^@\\/lib\\/(hooks|state)\\//]",
-          message: "Mount the real provider (lib/test-utils/in-workspace.ts), never a mock of a hook or a state module.",
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/]",
+          message: "Mount the real provider (lib/test-utils/in-workspace.ts) and serve its reads off `fetch`: a mock silently misses a module another file loaded.",
         },
       ],
     },

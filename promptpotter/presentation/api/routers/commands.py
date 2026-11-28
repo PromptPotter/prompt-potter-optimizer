@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable, Coroutine
 from dataclasses import replace
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, Header, Response, UploadFile
+from fastapi import APIRouter, File, Form, Header, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
 
 from promptpotter.application.commands import workspace_edits
 from promptpotter.application.commands.dispatcher import (
@@ -40,7 +43,39 @@ from promptpotter.presentation.api.deps import (
 )
 from promptpotter.shared.errors import PayloadInvalidError
 
-commands_router = APIRouter(prefix="/commands", tags=["Commands"])
+
+def refused_payload(
+    exc: RequestValidationError, model: type[BaseModel] | None = None
+) -> PayloadInvalidError:
+    """Located in the payload, as every other entry point's refusal of the same model is; *model*
+    names the form a union field refuses in at every door (`validating`)."""
+    located = (
+        {**error, "loc": error["loc"][1:]} if error["loc"][:1] == ("body",) else error
+        for error in exc.errors()
+    )
+    return PayloadInvalidError.refusing(located, model=model)
+
+
+class _CommandRoute(APIRoute):
+    """A command's route refuses its body by the payload model it declares."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handle = super().get_route_handler()
+        # FastAPI sets `dependant` on the instance outside `APIRoute`'s declared attributes.
+        bodies = [p.field_info.annotation for p in vars(self)["dependant"].body_params]
+        body = bodies[0] if len(bodies) == 1 else None
+        model = body if isinstance(body, type) and issubclass(body, BaseModel) else None
+
+        async def refusing(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except RequestValidationError as exc:
+                raise refused_payload(exc, model) from exc
+
+        return refusing
+
+
+commands_router = APIRouter(prefix="/commands", tags=["Commands"], route_class=_CommandRoute)
 
 
 @commands_router.post(

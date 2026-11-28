@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -182,13 +183,14 @@ def webapp_bundle() -> Reading | None:
     checkout, served = source_checkout_root(), webapp_static_root()
     if checkout is None or not served.is_dir():
         return None
-    # The worktree's bytes as `webapp/vite.config.ts::webappTree` stamps them, in an index of its own.
+    # The worktree's bytes as `webapp/vite.config.ts::webappTree` stamps them, in an index of its own
+    # copied from the checkout's, so only a file whose stat moved is hashed.
     with tempfile.TemporaryDirectory() as scratch:
-        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
-        git = partial(
-            subprocess.run, cwd=checkout, env=env, capture_output=True, text=True, timeout=10
-        )
+        index, at = Path(scratch) / "index", ("--path-format=absolute", "--git-path", "index")
+        git = partial(subprocess.run, cwd=checkout, capture_output=True, text=True, timeout=10)
         try:
+            shutil.copyfile(git(["git", "rev-parse", *at], check=True).stdout.strip(), index)
+            git = partial(git, env={**os.environ, "GIT_INDEX_FILE": str(index)})
             git(["git", "add", "-A", "--", "webapp"], check=True)
             tree = git(["git", "write-tree", "--prefix=webapp/"], check=True).stdout.strip()
         except subprocess.CalledProcessError as exc:
