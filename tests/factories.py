@@ -14,8 +14,8 @@ from statistics import fmean
 from types import EllipsisType
 from typing import Any, cast
 
-from offline_run import ByCallIdentity, cited_panel, text_templates
-from offline_world import FakeBackend, Router
+from offline_run import text_templates
+from offline_world import ByCallIdentity, FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle, RoundContext
 from promptpotter.application.bench.line import BenchLine
@@ -590,7 +590,7 @@ _SEAT_NODES: dict[str, dict[str, Any]] = {
 def l4_panel(stores: Stores, world: Router, scratch: Path) -> None:
     """`L4_PANEL` installed in *stores*: `promptpotter-self/e2e`'s outer over one potter and one
     CAPO seat, each on a copy of `LAUNCHED_DATASET`'s family selecting its optimizer, the offline
-    *world* answering both optimizers' calls (`offline_run.py::ByCallIdentity`)."""
+    *world* answering both optimizers' calls (`offline_world.py::ByCallIdentity`)."""
     root = stores.install_datasets_root
     family, leaf = LAUNCHED_DATASET.split("/")
     seats = {name: f"{family}-{name}/{leaf}" for name in _SEAT_NODES}
@@ -617,11 +617,8 @@ def l4_panel(stores: Stores, world: Router, scratch: Path) -> None:
                 for name, dataset in seats.items()
             ]
         write_yaml(outer / layer.replace("e2e/", "mixed/"), held)
-    config = CampaignConfig.model_validate(
-        dataset_campaign_block(resolve_dataset(stores, L4_PANEL))
-    )
     scratch.mkdir(parents=True, exist_ok=True)
-    world.llm.says = ByCallIdentity(scratch, templates, cites=cited_panel(config))
+    world.llm.says = ByCallIdentity(scratch, templates)
 
 
 def declaration_of(session: Session, config: CampaignConfig, purpose: Purpose) -> RunDeclaration:

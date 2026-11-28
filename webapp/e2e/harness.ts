@@ -28,8 +28,8 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/evidence\b/, 400],
   // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
   [/\/rounds\/\d+(\?|$)/, 404],
-  // The throwaway world holds no provider key, so a check-in's resolver turn is refused `no_api_key`.
-  [/\/commands\/resolve-origin\b/, 422],
+  // Start closes its draft: the open check-in's read meets it gone (I7) and stops asking.
+  [/\/drafts\/d_[0-9a-f]+$/, 404],
 ];
 
 type Problem = { kind: string; text: string };
@@ -44,25 +44,7 @@ function faultLog(baseURL: string | undefined): string | null {
 let richest: Promise<Campaign | null> | null = null;
 
 // `provide`, not `use`: `react-hooks/rules-of-hooks` reads `use` as React's hook and fails the lint.
-export const test = base.extend<{ problems: Problem[]; rich: Campaign; reads: void }>({
-  // Counted in the document, so a reload starts at none: a `fetch` (every read, `lib/api/client.ts`),
-  // never the feed's stream nor a lazy pane's chunk (its `aria-busy` says that).
-  reads: [
-    async ({ page }, provide) => {
-      await page.addInitScript(() => {
-        const w = window as unknown as { __openReads: number; fetch: typeof fetch };
-        const send = w.fetch.bind(window);
-        w.__openReads = 0;
-        w.fetch = (...args) => {
-          w.__openReads++;
-          return send(...args).finally(() => w.__openReads--);
-        };
-      });
-      await provide();
-    },
-    { auto: true },
-  ],
-
+export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
   rich: async ({ request }, provide, testInfo) => {
     richest ??= richestCampaign(request);
     const found = await richest;
@@ -382,19 +364,12 @@ export async function hideSidebar(page: Page) {
   if (await row.isVisible()) await press(row);
 }
 
-/** The page has drawn every answer it asked for: no request open two frames after the last one closed
- *  (an answer's render asks the next read), and no lazy pane still `aria-busy`. A layout check reads
- *  after this, or a row its read has not yet answered is never checked. An open read is the server
- *  still answering, so it is waited out on no clock of its own: a desk's load slows an answer, and
- *  only the test's own timeout says one never comes. */
+/** The page has drawn every answer it asked for: two frames, then no pane `aria-busy`, which every
+ *  read in flight marks (`lib/state/busy.tsx`). A layout check reads after this, or a row its read has
+ *  not yet answered is never checked. An open read is the server still answering, so it is waited out
+ *  on no clock of its own: only the test's own timeout says one never comes. */
 async function drawn(page: Page) {
-  const open = () => page.evaluate(() => (window as unknown as { __openReads: number }).__openReads);
-  do {
-    await page.waitForFunction(() => (window as unknown as { __openReads: number }).__openReads === 0, null, {
-      timeout: 0,
-    });
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  } while (await open());
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0, { timeout: 0 });
 }
 

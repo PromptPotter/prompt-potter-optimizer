@@ -12,13 +12,13 @@ import argparse
 import ast
 import asyncio
 import atexit
+import collections.abc
 import contextlib
 import copy
 import dataclasses
 import functools
 import hashlib
 import inspect
-import itertools
 import json
 import os
 import random
@@ -35,7 +35,16 @@ from dataclasses import dataclass
 from math import isclose
 from pathlib import Path
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, NoReturn, get_args
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    NoReturn,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     STANDING_ROUNDS,
@@ -47,25 +56,24 @@ from promptpotter.infrastructure.store.read_model import read_line
 # PYTHONPATH falls through to whichever tree installed the venv.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import httpx
 import yaml
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from offline_world import (
+    L2_STEER,
     LABELS,
-    MARKER,
     NOT_A_KEY,
     PROVIDER_KEYS,
+    WORDS,
     WORLD,
+    ByCallIdentity,
     FakeBackend,
     FakeLLM,
     Heal,
     Router,
-    Said,
-    completion,
     draw,
+    inner_cell,
     install_network,
-    invalid,
-    shown_text,
+    rendered,
 )
 from processes import (
     REPO,
@@ -75,6 +83,7 @@ from processes import (
     queue_behind_siblings,
     replace_changed,
 )
+from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
@@ -112,7 +121,6 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers import member_package_dir
 from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
-from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.entry import run_watched
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
@@ -128,6 +136,7 @@ from promptpotter.config.paths import (
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.arm_reading import ScoreboardRow
+from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -155,6 +164,7 @@ from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.records import RECORDS
 from promptpotter.domain.records.decision import OriginGatePass
 from promptpotter.domain.records.lineage import ArmAct, CycleStart
 from promptpotter.domain.results import RoundOutcome
@@ -167,7 +177,7 @@ from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
-from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope, scoped
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -216,8 +226,6 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
-# What the rebase leg's L2 steers L1 onto (`L2Memory.steered_onto`): no other leg's L2 steers.
-L2_STEER = {"temperature": 0.5}
 # Each optimizer's warm straight run, the same pressed, and paused inside a walk then resumed: the
 # press and the resume move the bill, never the record (`docs/developer/offline-run.md`).
 WARM = "warm"
@@ -326,359 +334,6 @@ SCALED: dict[str, dict[str, Any]] = {
     "levi_seed": {"config": {"n_diverse_seeds": 2}},
     "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
 }
-LISTED = 15
-
-WORDS = [
-    "premise", "claim", "negation", "quantifier", "conditional", "chain", "derive", "verify",
-    "contrapositive", "modus", "ponens", "tollens", "entail", "contradict", "universal", "scope",
-    "track", "rewrite", "restate", "isolate", "compare", "check", "each", "step", "atoms", "map",
-    "literals", "resolve", "disjunction", "conjunction", "implication", "assume", "refute",
-    "confirm", "consistent", "evidence", "symbol", "table", "audit", "trace", "backward", "goal",
-    "lemma", "case", "split", "exhaust", "enumerate", "count", "parity", "order", "strict",
-    "commit", "label", "decide", "final", "answer", "stated", "facts", "closed", "open", "proven",
-]  # fmt: skip
-
-
-_ROW_MARK = re.compile(r"\[#(\d+)\]")
-
-
-def _marks(text: str) -> list[int]:
-    return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
-
-
-_AXIS_MENU = re.compile(r"(?:EXACTLY one of|VERBATIM from): (.+)")
-# A cited panel, by the heading it opens on: the framing where the leg's config renders one.
-FRAMING = "TASK CONTEXT:\n"
-TALLY = "ANSWER DISTRIBUTION ("
-
-
-def cited_panel(config: CampaignConfig) -> str:
-    return FRAMING if config.task_framing == "committed" else TALLY
-
-
-def _axis_menu(prompt: str) -> list[str]:
-    """Empty where an L4 arm rewrote the instruction stating it away."""
-    if (menu := _AXIS_MENU.search(prompt)) is None:
-        return []
-    return menu.group(1).split(". ", 1)[0].removesuffix(".").split(", ")
-
-
-def _variant(tag: str, rng: random.Random) -> str:
-    return f"Variant {tag}: " + " ".join(rng.sample(WORDS, 18)) + "."
-
-
-class SchemaFiller:
-    def __init__(self, schema: dict[str, Any], *, node: str, call: str) -> None:
-        self.node = node
-        self.call = call
-        self.defs: dict[str, Any] = {**schema.get("$defs", {}), **schema.get("definitions", {})}
-
-    def resolve(self, s: dict[str, Any]) -> dict[str, Any]:
-        while "$ref" in s:
-            ref = self.defs[s["$ref"].split("/")[-1]]
-            s = {**ref, **{k: v for k, v in s.items() if k != "$ref"}}
-        if "allOf" in s and len(s["allOf"]) == 1:
-            s = {**self.resolve(s["allOf"][0]), **{k: v for k, v in s.items() if k != "allOf"}}
-        return s
-
-    def said(self, s: dict[str, Any]) -> dict[str, Any]:
-        """A nullable schema's other arm: what a model with something to say writes."""
-        s = self.resolve(s)
-        return next((self.resolve(o) for o in s.get("anyOf", ()) if o.get("type") != "null"), s)
-
-    def fill(self, s: dict[str, Any], path: tuple[str, ...]) -> Any:
-        s = self.resolve(s)
-        if "const" in s:
-            return s["const"]
-        if "enum" in s:
-            return s["enum"][0]
-        for key in ("anyOf", "oneOf"):
-            if key in s:
-                opts = [self.resolve(o) for o in s[key]]
-                # As a model with nothing to say: a nullable property is left unsaid.
-                if any(o.get("type") == "null" for o in opts):
-                    return None
-                return self.fill(opts[0], path)
-        t = s.get("type")
-        if isinstance(t, list):
-            t = next(x for x in t if x != "null")
-        if t == "object" or (t is None and "properties" in s):
-            props = s.get("properties", {})
-            return {n: self.fill(props.get(n, {}), (*path, n)) for n in s.get("required", [])}
-        if t == "array":
-            items = s.get("items", {})
-            return [self.fill(items, (*path, str(i))) for i in range(s.get("minItems", 0))]
-        if t == "string":
-            text = f"{'.'.join(path) or 'value'} {self.node} {self.call}".ljust(
-                s.get("minLength", 0), "x"
-            )
-            return text[: s["maxLength"]] if "maxLength" in s else text
-        if t == "integer":
-            return int(s.get("minimum", 0))
-        if t == "number":
-            return float(s.get("minimum", 0.0))
-        if t == "boolean":
-            return False
-        return None
-
-
-def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller, call: str) -> None:
-    """Where the slot is offered, as many children as it takes, each the next main given one locus
-    by the next donor apart from it."""
-    if "recombinations" not in props:
-        return
-    slot = filler.said(props["recombinations"])
-    spec = filler.resolve(slot["items"])["properties"]
-    mains = filler.resolve(spec["main"])["enum"]
-    ids = filler.resolve(spec["donor"])["enum"]
-    loci = filler.resolve(spec["from_donor"]["items"])["enum"]
-    children = []
-    for i in range(slot["maxItems"]):
-        main = mains[i % len(mains)]
-        donors = [d for d in ids if d != main]
-        children.append(
-            {
-                "main": main,
-                "donor": donors[i % len(donors)],
-                "from_donor": [loci[i % len(loci)]],
-                "changes_description": f"Recombine (call {call}, child {i}).",
-            }
-        )
-    obj["recombinations"] = children
-
-
-def _asker() -> str:
-    """Empty for the run's own call; an L4 cell's inner campaign by its seat's `run_seed` and the
-    arm laid into its overlay, so two seats of one arm never share a turn, never by its id, which hashes the code."""
-    if not run_scope().depth:
-        return ""
-    scope = run_scope()
-    spawn, stores = scope.spawn, scope.account
-    assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
-    config = cycle_config(stores, stores.campaigns.campaign_cycle(spawn.inside[-1])).config
-    overlay = {node: dict(o.config) for node, o in sorted(config.optimization.nodes.items())}
-    held = json.dumps([config.run_seed, overlay], sort_keys=True, default=str)
-    return hashlib.sha256(held.encode()).hexdigest()[:8]
-
-
-class ByCallIdentity:
-    """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
-    prompt's wording nor the arrival order. *rebasing*, every L2 fire steers L1 and proposes a
-    fork. *crossing*,
-    every variant rewrites a second field, so any two arms differ on two loci a crossover swaps."""
-
-    def __init__(
-        self,
-        capture: Path,
-        templates: dict[str, str],
-        *,
-        cites: str,
-        rebasing: bool = False,
-        crossing: bool = False,
-    ) -> None:
-        self.capture = capture
-        self.templates = templates
-        self.cites = cites
-        self.rebasing = rebasing
-        self.crossing = crossing
-        self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
-        self.calls: dict[str, int] = {}
-        self.turns: dict[tuple[str, str, int | None], int] = {}
-        # Scripted invalid answers by call (`node_call`), one per send before the call heals.
-        self.heals: dict[str, tuple[Heal, ...]] = {}
-        # Scripted invalid answers by call on its every send: a structured call fails each rung.
-        self.wounds: dict[str, tuple[Heal, ...]] = {}
-        self.sends: Counter[str] = Counter()
-        # A structured node's call a heal left open, by asker: its next send retries it.
-        self.healing: dict[tuple[str, str], tuple[str, int]] = {}
-        # The captured requests an L4 cell's inner campaign sent, by file name.
-        self.inner: set[str] = set()
-
-    def _text_node(self, prompt: str) -> str:
-        opened = [node for node, prefix in self.prefixes.items() if prompt.startswith(prefix)]
-        if not opened:
-            raise KeyError(f"offline run: no llm node's template opens {prompt[:80]!r}")
-        return max(opened, key=lambda node: len(self.prefixes[node]))
-
-    def __call__(self, body: dict[str, Any]) -> Said:
-        # A retry re-sends the call's own turns, then the failed answer and the ask to mend it.
-        asked = itertools.takewhile(lambda m: m["role"] != "assistant", body["messages"])
-        prompt = "\n".join(str(m["content"]) for m in asked)
-        schema = body.get("response_format", {}).get("json_schema")
-        node = schema["name"] if schema else self._text_node(prompt)
-        self.calls[node] = self.calls.get(node, 0) + 1
-        asker = _asker()
-        if (asker, node) in self.healing:
-            call, turn = self.healing.pop((asker, node))
-        else:
-            # Concurrent text sends of one node land in any order; their seeds tell them apart. A
-            # structured node sends one at a time per asker, so its turn is the asker's count of it.
-            seed: int | None = None if schema else body.get("seed")
-            turn = self.turns.get((asker, node, seed), 0)
-            self.turns[asker, node, seed] = turn + 1
-            call = ".".join(str(p) for p in (asker, seed, turn) if p not in ("", None))
-        if schema:
-            filler = SchemaFiller(schema["schema"], node=node, call=call)
-            obj = filler.fill(schema["schema"], ())
-            content = json.dumps(
-                self._shape(node, call, turn, obj, filler, schema["schema"], prompt)
-            )
-        else:
-            content = self._text(node, call, prompt)
-        key = f"{node}_{call}"
-        attempt = self.sends[key]
-        self.sends[key] += 1
-        script = self.heals.get(key) or self.wounds.get(key, ())
-        said: Said = completion(content, model=body["model"], id=f"offline-{node}-{call}")
-        shown: Any = content
-        if attempt < len(script):
-            said = invalid(script[attempt], content, model=body["model"])
-            # Its bytes hash into the key, so a price (the rate table's, not the run's) stays off it.
-            shown = (
-                said.json()
-                if isinstance(said, httpx.Response)
-                else {k: v for k, v in said.items() if k != "usage"}
-            )
-            # A wound's last send leaves the client no rung to retry it on.
-            retried = key in self.heals or attempt + 1 < len(script)
-            if schema and script[attempt] is not Heal.REFUSED and retried:
-                self.healing[asker, node] = (call, turn)
-        sent = f"{key}{f'~{attempt}' if attempt else ''}.json"
-        if asker:
-            self.inner.add(sent)
-        (self.capture / sent).write_text(
-            json.dumps(
-                {"request": body, "response": shown}, indent=1, sort_keys=True, ensure_ascii=False
-            ),
-            encoding="utf-8",
-            # Its bytes are the request's hash in a behaviour key: one platform's newline.
-            newline="\n",
-        )
-        return said
-
-    def off_script(self) -> list[str]:
-        """Each scripted call not sent once per invalid answer, plus the send that healed it where
-        it heals; a refusal heals on its own send."""
-        healed = [
-            key
-            for key, script in self.heals.items()
-            if self.sends[key] != len(script) + (script[-1] is not Heal.REFUSED)
-        ]
-        return healed + [k for k, script in self.wounds.items() if self.sends[k] != len(script)]
-
-    def _text(self, node: str, call: str, prompt: str) -> str:
-        rng = random.Random(f"{node}:{call}")
-        fresh = _variant(f"{node}.{call}", rng)
-        template = self.templates[node]
-        if "<prompt>" in template:
-            # Rephrasing the individual's own instruction keeps its parent's marker, so its skill.
-            parents = MARKER.findall(prompt) if "{{instruction}}" in template else []
-            return f"<prompt>{_variant(parents[-1], rng) if parents else fresh}</prompt>"
-        if "```" in template:
-            return f"```\n{fresh}\n```"
-        if "array" in template:
-            return json.dumps([_variant(f"{node}.{call}.{i}", rng) for i in range(LISTED)])
-        raise KeyError(
-            f"offline run: llm node {node!r}'s template asks for no form the fake writes"
-        )
-
-    def _shape(
-        self,
-        node: str,
-        call: str,
-        turn: int,
-        obj: dict[str, Any],
-        filler: SchemaFiller,
-        schema: dict[str, Any],
-        prompt: str,
-    ) -> dict[str, Any]:
-        if node.startswith("L1Generate"):
-            props = filler.resolve(schema)["properties"]
-            item = filler.resolve(props["variants"])
-            obj["variants"] = [
-                self._variant_edit(turn, i, filler, filler.resolve(item["items"]), prompt)
-                for i in range(item.get("minItems") or item["maxItems"])
-            ]
-            _recombine(obj, props, filler, call)
-        elif node.startswith("L1Critique"):
-            # Read off the prompt as a model would: the rows a cluster may span are the `[#id]` marks.
-            # Pairs of them, then one row alone: the parse drops the lone row, and every pair where
-            # the detectable move is wider (`critique_response_model`), keeping the rest.
-            ids = _marks(prompt)
-            clusters = [*(ids[k : k + 2] for k in range(0, min(len(ids), 4) - 1, 2)), ids[4:5]]
-            obj["failure_highlights"] = [
-                {
-                    "sample_ids": rows,
-                    "mechanism": f"negation tracking {call}.{k}",
-                    "claim": f"critique {call}: the chain breaks at a negation; said and truth differ",
-                }
-                for k, rows in enumerate(clusters)
-                if rows
-            ]
-            # Read off the prompt's axis list, as a model naming its axis verbatim would.
-            axes = _axis_menu(prompt)
-            # Listing none, a model names the axis it guesses, which the parse drops.
-            guess = axes[0] if axes else "instruction"
-            lead = next((a for a in axes if a.endswith(".instruction")), guess)
-            obj["priority_fix"] = f"{lead}: track every negation explicitly (critique {call})"
-            obj["suggested_axes"] = axes[:2]
-        elif node.startswith("L2Context"):
-            obj["axis_targeted"] = "instruction"
-            obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
-            _recombine(obj, filler.resolve(schema)["properties"], filler, call)
-            obj.pop("fork_proposal", None)
-            if self.rebasing:
-                obj["l1_overrides"] = L2_STEER
-                obj["fork_proposal"] = {
-                    "reason": f"L2 fire {call}: the stall is the output schema's names.",
-                    "unlock_schema_field_rename": True,
-                }
-        elif node.startswith("L3Plan"):
-            obj["plan"] = (
-                f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
-            )
-            obj["note"] = f"l3 note {call}"
-            obj["rationale"] = f"L2 stalled twice (replan {call})"
-            obj.pop("fork_proposal", None)
-        return obj
-
-    def _variant_edit(
-        self, generation: int, i: int, filler: SchemaFiller, item: dict[str, Any], prompt: str
-    ) -> dict[str, Any]:
-        """*generation* is the call's turn whatever its seed: the `SKILL` trajectory is keyed on it."""
-        v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
-        # A citation quotes one panel's whole words, at an offset that is the call's, not the text's.
-        assert self.cites in prompt, f"offline run: no {self.cites!r} panel to cite"
-        start = prompt.index(self.cites) + len(self.cites) + draw("cite", generation, i) % 20
-        v["evidence_grounding"] = {"citation": " ".join(prompt[start : start + 40].split()[1:-1])}
-        # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
-        second = ("thinking_style",) if self.crossing else ()
-
-        def text(node: str, tag: str) -> str:
-            rng = random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}")
-            return _variant(f"g{generation}v{i}{node}{tag}", rng)
-
-        edits = filler.said(item["properties"]["edits"])
-        at = filler.resolve(edits["items"])["properties"]["at"]["enum"]
-        nodes = [locus.split(".")[0] for locus in at if locus.endswith(".instruction")]
-        v["edits"] = [
-            {
-                "at": f"{node}.{field}",
-                "op": "replace",
-                "anchor": shown_text(prompt, f"{node}.{field}"),
-                "text": text(node, tag),
-            }
-            for node in nodes
-            for field, tag in (("instruction", ""), *((f, f) for f in second))
-            if f"{node}.{field}" in at
-        ]
-        # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
-        clusters = [
-            ids for line in prompt.splitlines() if " rows: " in line and (ids := _marks(line))
-        ]
-        v["targets_rows"] = (clusters[i % len(clusters)] if clusters else _marks(prompt))[:2]
-        v["mechanism"] = f"Rewrite the instruction (generation {generation}, variant {i})."
-        return v
 
 
 def stand_in_fetch(stores: Stores, samples: list[Sample]) -> None:
@@ -761,11 +416,7 @@ def stated(config: CampaignConfig) -> CampaignLayer:
 
 
 def text_templates(config: CampaignConfig) -> dict[str, str]:
-    selected = select_optimizer(config.optimization)
-    return {
-        node: running_prompt(node, selected.node_config(node), selected.manifest).render()
-        for node in selected.llm_nodes
-    }
+    return rendered(select_optimizer(config.optimization))
 
 
 @contextlib.contextmanager
@@ -861,7 +512,6 @@ class Harness:
     def installed(
         cls,
         out: Path,
-        config: CampaignConfig,
         templates: dict[str, str],
         samples: list[Sample],
         *,
@@ -869,9 +519,7 @@ class Harness:
         hardness: int = 0,
     ) -> Harness:
         (out / "requests").mkdir(parents=True)
-        llm = ByCallIdentity(
-            out / "requests", templates, cites=cited_panel(config), crossing=crossing
-        )
+        llm = ByCallIdentity(out / "requests", templates, crossing=crossing)
         backend = FakeBackend(samples, hardness=hardness)
         router = Router(FakeLLM(llm), backend)
         install_network(router)
@@ -926,7 +574,6 @@ async def run_one(
     samples = synthetic_rows(rows)
     harness = Harness.installed(
         out,
-        config,
         text_templates(config),
         samples,
         crossing=crossover is not None,
@@ -1143,10 +790,13 @@ async def banked(
         call = CommandCall(HeldOutPayload(campaign_id=session.hop.campaign_id), door=Door.TERMINAL)
         bench = (await (await host_dispatcher(stores)).answer(held_out, call)).result
     decisions = extract(cycle, bench)
-    # An L4 outer's inner campaigns, as a set: cells measured at once land in any order.
-    nested = inner_sandboxes_dir(default_projects_root()).glob("*/*/campaigns/*/cycles/*")
-    if inner := sorted(json.dumps(extract(c, None), sort_keys=True) for c in nested):
-        decisions["inner"] = [json.loads(one) for one in inner]
+    # An L4 outer's inner campaigns, as a set keyed by each one's cell: cells measured at once land
+    # in any order, and what a campaign decided is never what orders it.
+    nested = list(inner_sandboxes_dir(default_projects_root()).glob("*/*/campaigns/*/cycles/*"))
+    if len(inner := {_inner_key(c): extract(c, None) for c in nested}) != len(nested):
+        raise SystemExit(f"offline run: {len(nested)} inner campaigns share {len(inner)} cells")
+    if inner:
+        decisions["inner"] = [inner[cell] for cell in sorted(inner)]
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
         "unrouted": sorted(harness.router.unrouted),
@@ -1154,11 +804,12 @@ async def banked(
         "backend_cells": searched_cells,
         "bench_cells_asked_for": backend.cells - searched_cells,
     }
+    capture = harness.llm.capture
+    assert capture is not None, "a harness captures every request it answers"
     captured = {
-        p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16]
-        for p in sorted(harness.llm.capture.iterdir())
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16] for p in sorted(capture.iterdir())
     }
-    if unfenced := outside_the_fence(harness.llm.capture, harness.backend.truth):
+    if unfenced := outside_the_fence(capture, harness.backend.truth):
         raise SystemExit(f"offline run: {name} sent a bank row outside the fence in {unfenced}")
     asked = harness.llm.inner
     BehaviourTrace(
@@ -1239,7 +890,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()
-    llm = ByCallIdentity(workspace / "requests", text_templates(config), cites=cited_panel(config))
+    llm = ByCallIdentity(workspace / "requests", text_templates(config))
     # A rewind lands on a round holding a θ level, which only a ruler spanning the rows gives.
     install_network(Router(FakeLLM(llm), FakeBackend(samples, hardness=REBASE_HARDNESS)))
     stores = build_stores(default_identity(), projects_root=default_projects_root())
@@ -1380,7 +1031,7 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
     config = config.model_copy(update={"optimization": gated})
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()
-    llm = ByCallIdentity(workspace / "requests", text_templates(config), cites=cited_panel(config))
+    llm = ByCallIdentity(workspace / "requests", text_templates(config))
     backend = FakeBackend(samples)
     install_network(Router(FakeLLM(llm), backend))
     stores = build_stores(default_identity(), projects_root=default_projects_root())
@@ -1453,7 +1104,7 @@ async def run_l4(workspace: Path, *, rows: int) -> None:
     opt = raw["optimization"]
     opt.update(budget={**opt["budget"], "usd": 1000.0}, determinism={"seed": 0})
     config = CampaignConfig.model_validate(raw)
-    harness = Harness.installed(workspace, config, text_templates(config), samples, crossing=False)
+    harness = Harness.installed(workspace, text_templates(config), samples, crossing=False)
     session, result = await run_campaign(
         L4_DATASET,
         stated(config),
@@ -1479,7 +1130,7 @@ def run_terminal(
     samples = synthetic_rows(rows)
     requests = workspace / f"requests-{verb}"
     requests.mkdir()
-    llm = FakeLLM(ByCallIdentity(requests, text_templates(config), cites=cited_panel(config)))
+    llm = FakeLLM(ByCallIdentity(requests, text_templates(config)))
     install_network(Router(llm, FakeBackend(samples, interrupts=interrupts)))
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
@@ -1558,9 +1209,7 @@ async def run_arms(
     templates = {
         node: t for config in configs.values() for node, t in text_templates(config).items()
     }
-    harness = Harness.installed(
-        workspace / "arms", configs[names[0]], templates, samples, crossing=False
-    )
+    harness = Harness.installed(workspace / "arms", templates, samples, crossing=False)
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     sent = {name: c.model_dump(mode="json", exclude_unset=True) for name, c in configs.items()}
@@ -1847,20 +1496,18 @@ def _proposed(ledger: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[str, str]:
-    """Each arm key by the label of its FIRST walk; a parent no round walked by the round reading it."""
+def _id_map(ledger: list[dict[str, Any]]) -> dict[str, str]:
+    """Each arm key by the position its first `arm` record names (`candidate_label`), off the ledger
+    a resume keeps, never the round checkouts it deletes; a parent no arm record places by the round
+    proposing off it."""
     ids: dict[str, str] = {}
-    for d in rounds:
-        for row in _ranked(d):
-            if row.reading.arm.label != "parent":
-                ids.setdefault(row.reading.arm.key, row.reading.arm.label)
+    for r in ledger:
+        if r.get("record_type") == "arm" and (at := r["state"].get("position")):
+            ids.setdefault(r["arm"], candidate_label(at["round"], at["idx"]))
     for r in _proposed(ledger):
         lineage = r["state"]["individual"].get("lineage") or {}
         for pid in lineage.get("parent_ids") or []:
             ids.setdefault(pid, f"parent@R{r.get('round')}")
-    for d in rounds:
-        for row in _ranked(d):
-            ids.setdefault(row.reading.arm.key, f"parent@R{d.get('round')}")
     return ids
 
 
@@ -2012,9 +1659,7 @@ LEDGER: dict[str, tuple[str, Pick]] = {
     "arm": ("arms", {"round": "round", "arm": "arm", "state": "state.state", "position": "state.position.idx"}),
     "phase": ("phases", {"round": "round", "phase": "phase", "step": "step"}),
     "round_entered": ("rounds_entered", {"round": "round"}),
-    "round_closed": ("rounds_closed", {
-        "round": "round", "ending": "election.ending", "ruler_excluded": "election.ruler.excluded",
-    }),
+    "round_closed": ("rounds_closed", {"round": "round", "ending": "election.ending"}),
     "level_series": ("level_series", {
         "round": "round",
         "levels": Each("series.levels", {"theta": "theta", "se": "se", "cells": "cells", "caveat": "caveat"}),
@@ -2037,6 +1682,65 @@ LEDGER: dict[str, tuple[str, Pick]] = {
 }  # fmt: skip
 
 
+def _arms(annotation: Any) -> list[Any]:
+    """The types a field's value can be: an alias's, an optional's, a union's and an `Annotated`'s arms."""
+    if isinstance(annotation, TypeAliasType):
+        return _arms(annotation.__value__)
+    if get_origin(annotation) in (Union, types.UnionType):
+        return [t for arm in get_args(annotation) for t in _arms(arm)]
+    if get_origin(annotation) is Annotated:
+        return _arms(get_args(annotation)[0])
+    return [annotation]
+
+
+def _items(annotation: Any) -> list[Any]:
+    """What a list, a tuple or a map's values hold, each arm of it read alike."""
+    out = []
+    for arm in _arms(annotation):
+        args = get_args(arm)
+        if get_origin(arm) in (dict, collections.abc.Mapping):
+            out += _arms(args[1])
+        elif get_origin(arm) in (list, tuple, set, frozenset, collections.abc.Sequence):
+            out += [t for a in args if a is not Ellipsis for t in _arms(a)]
+    return out
+
+
+def _walked(held: list[Any], path: str) -> list[Any]:
+    """The types *path* reaches from *held*, each step a field of one of them: a step no model
+    there names is a dead path, which the trace would read as absent on every run. Past a map of
+    `Any` (an `llm_call`'s payload) no model says what is live, so nothing there is checked."""
+    for step in path.split(".") if path else ():
+        if Any in held or any(Any in _items(t) for t in held):
+            return [Any]
+        models = [t for t in held if isinstance(t, type) and issubclass(t, BaseModel)]
+        fields = [m.model_fields[step] for m in models if step in m.model_fields]
+        if not fields:
+            raise SystemExit(f"offline run: trace path {path!r} names no field {step!r} of {held}")
+        held = [t for f in fields for t in _arms(f.annotation)]
+    return held
+
+
+def _checked(held: list[Any], pick: Pick) -> None:
+    if isinstance(pick, str):
+        _walked(held, pick)
+    elif isinstance(pick, One):
+        _checked(_walked(held, pick.path), pick.pick)
+    elif isinstance(pick, Each):
+        reached = _walked(held, pick.path)
+        _checked([t for a in reached for t in _items(a)] if pick.path else held, pick.pick)
+    else:
+        for each in pick.values():
+            _checked(held, each)
+
+
+@functools.cache
+def ledger_paths_live() -> None:
+    """Every `LEDGER` path names a field of its record's model (`domain/records/`)."""
+    models = RECORDS.registered()
+    for kind, (_, pick) in LEDGER.items():
+        _checked([models[kind]], pick)
+
+
 def _as_sets(o: Any) -> Any:
     # A decision lists the arms it raced in the order they ARRIVED (CAPO's `raced_against`).
     if isinstance(o, dict):
@@ -2047,6 +1751,7 @@ def _as_sets(o: Any) -> Any:
 
 
 def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
+    ledger_paths_live()
     out: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in LEDGER.values()}
     for r in ledger:
         if (kind := r.get("record_type")) in LEDGER:
@@ -2071,13 +1776,20 @@ def _ranked(d: dict[str, Any]) -> list[ScoreboardRow]:
     return RoundOutcome.model_validate({k: d[k] for k in RoundOutcome.model_fields}).ranked()
 
 
+def _inner_key(cycle: Path) -> str:
+    """An inner campaign's cycle (`.inner/<key>/<tenant>/campaigns/<id>/cycles/<cycle>`) by its
+    cell (`offline_world.py::inner_cell`)."""
+    stores = build_stores(default_identity(), projects_root=cycle.parents[4])
+    return inner_cell(stores, CycleHop(campaign_id=cycle.parents[1].name, cycle_id=cycle.name))
+
+
 def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     """The decisions *cycle* took, each by the trace's own name (`Pick`), canonical."""
     rounds = [
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
     ]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
-    ids = _id_map(ledger, rounds)
+    ids = _id_map(ledger)
     canon = Canon(ids, _fork_labels(cycle))
     run = picked(_cycle_index(cycle).model_dump(mode="json"), INDEX)
     run["bench"] = None if bench is None else picked(bench.model_dump(mode="json"), HELD_OUT)

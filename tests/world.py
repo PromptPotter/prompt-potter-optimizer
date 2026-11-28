@@ -21,9 +21,7 @@ import yaml
 from factories import ledger_records, workspace
 from offline_run import (
     DATASET,
-    ByCallIdentity,
     campaign_config,
-    cited_panel,
     stand_in_fetch,
     stated,
     synthetic_rows,
@@ -32,6 +30,7 @@ from offline_run import (
 from offline_world import (
     NOT_A_KEY,
     PROVIDER_KEYS,
+    ByCallIdentity,
     FakeBackend,
     Router,
     install_network,
@@ -180,9 +179,7 @@ class World:
         """The network answers *script*: every later run of this world, resumes and forks included."""
         capture = self.scratch / f"requests-{len(self.ran)}"
         capture.mkdir(parents=True, exist_ok=True)
-        self.net.llm.says = ByCallIdentity(
-            capture, script.templates, cites=cited_panel(script.config)
-        )
+        self.net.llm.says = ByCallIdentity(capture, script.templates)
         self.net.backend = FakeBackend(script.samples, hardness=script.hardness)
         self.script = script
 
@@ -324,9 +321,7 @@ class World:
         first = next(iter(configs.values()))
         self._lay(Script(first, rows, 0))
         templates = {n: t for c in configs.values() for n, t in text_templates(c).items()}
-        self.net.llm.says = ByCallIdentity(
-            self.scratch / f"requests-{len(self.ran)}", templates, cites=cited_panel(first)
-        )
+        self.net.llm.says = ByCallIdentity(self.scratch / f"requests-{len(self.ran)}", templates)
         sent = {key: c.model_dump(mode="json", exclude_unset=True) for key, c in configs.items()}
         request = HeadToHeadRequest(
             head_to_head_id=h2h_id,

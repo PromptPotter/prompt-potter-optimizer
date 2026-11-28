@@ -26,9 +26,10 @@ account agreed to the live terms, with the `offline` backend. Unset, `playwright
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
 without `spend` serves the throwaway world `offline`: `serve_app.py` answers every send of the server
-with `scripts/offline_world.py::Router` (`TERMNORM_ENDPOINTS` its `FakeBackend`, the model catalogue
-pinned empty) and resolves no name, so a check-in reads one world on every machine and a refusing
-proxy changes no walk. A desk
+with `scripts/offline_world.py::served` (`TERMNORM_ENDPOINTS` its `FakeBackend`, the model catalogue
+pinned empty, the optimizer `optimizer()`) and resolves no name, so a check-in reads one world on
+every machine and a refusing proxy changes no walk; a run Start launches holds the same world in its
+own process (`spawning.command`), so `cold/launch.spec.ts` watches, pauses, resumes and forks it. A desk
 TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 ## Three worlds, because the app has two populations
@@ -106,5 +107,5 @@ Each binds one helper in `harness.ts` and is argued where it binds:
 - **The console guard is the point** (`BENIGN`, `EXPECTED_4XX`) — it is `auto`, so no spec can
   forget it, and it stays empty of anything the app itself emits.
 - **A hash-only `goto` does not remount** (`open`) — navigate with it, never `page.goto`.
-- **A layout check reads what is drawn** (`drawn`, the `reads` fixture) — it waits until no read
-  the document sent is open, so a row its read has not yet answered can never pass unchecked.
+- **A layout check reads what is drawn** (`drawn`) — it waits until no visible surface is
+  `aria-busy`, so a row its read has not yet answered can never pass unchecked.

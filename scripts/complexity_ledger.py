@@ -400,7 +400,9 @@ BASELINE = {
     # modules, each with its own header and imports (+139); the spend rollups' module (+23).
     # w11-reads (+56): a line's cells keyed once per individual (`LineCells`), one pair read per
     # head-to-head request, a restatement's narration, and a follower's tail ending at its switch.
-    "package_lines": 114160,
+    # w11-tests4 (+7): `spawning.py::command`, the one door the offline world swaps so a launch's
+    # child runs in it (+5); `hierarchy.py::store_version` skips a launch not yet landed (+2).
+    "package_lines": 114167,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

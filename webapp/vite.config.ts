@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
@@ -75,15 +75,20 @@ export function defines(brand: Brand): Record<string, string> {
   return { __BRAND__: JSON.stringify(brand) };
 }
 
-// The `webapp/` bytes a build read, as a git tree of the worktree in an index of its own, which the
-// server compares with its checkout's (`application/health.py::webapp_bundle`); null outside git.
+// The `webapp/` bytes a build read, as a git tree of the worktree in an index of its own copied from
+// the checkout's, so only a file whose stat moved is hashed: the tree the server names
+// (`application/health.py::webapp_bundle`); null outside git.
 const BUILD_SOURCE = "build-source.json";
 function webappTree(): string | null {
   const scratch = mkdtempSync(path.join(tmpdir(), "pp-stamp-"));
-  const env = { ...process.env, GIT_INDEX_FILE: path.join(scratch, "index") };
+  const index = path.join(scratch, "index");
+  const git = (args: string[], env?: NodeJS.ProcessEnv) =>
+    execFileSync("git", args, { cwd: WEBAPP, env, encoding: "utf8" }).trim();
   try {
-    execFileSync("git", ["add", "-A", "--", "."], { cwd: WEBAPP, env });
-    return execFileSync("git", ["write-tree", "--prefix=webapp/"], { cwd: WEBAPP, env, encoding: "utf8" }).trim();
+    copyFileSync(git(["rev-parse", "--path-format=absolute", "--git-path", "index"]), index);
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    git(["add", "-A", "--", "."], env);
+    return git(["write-tree", "--prefix=webapp/"], env);
   } catch {
     return null;
   } finally {

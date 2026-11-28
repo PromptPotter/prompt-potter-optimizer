@@ -530,6 +530,11 @@ written under the gate.
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
+- **A launch not yet landed carries a hop of two empty strings** (w11-tests4, 11-28):
+  `domain/job.py::UNRESOLVED_HOP` stands for a job whose campaign and cycle do not exist yet, and 9
+  readers compare against it. A tenth (`application/hierarchy.py::store_version`) 500'd on it until w11-tests4
+  added the skip. Root: `Job.hop` is `None` until LAND, so a reader must ask. **Rides with:** area 06's
+  chain. **Re-test:** `git grep -c "UNRESOLVED_HOP" -- promptpotter` is 0.
 - **A fork's preview does not serve the refusal its launch meets** (w11-walk, 11-27): on the walk world
   with no key, Steer & fork's "Confirm steered fork" is enabled and its press answers 422
   `no_api_key`; the cycle's own Start serves it (`admission.py::launch_preflight`), the fork preview's
@@ -992,10 +997,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   **A hand-kept mirror of the served shapes**, **Served fields the browser never reads**. About 4,500
   TypeScript lines go. **Run data:** none. **Size:** large, a link per served fact. **Rides with:** webd.
   **Re-test:** `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
-- **The walk still counts fetches beside the pane's `aria-busy`**: every `useRead` in flight now marks
-  its pane (`webapp/lib/state/busy.tsx`, w11-web2), and the walk ran green with `drawn` reduced to two
-  frames and its `aria-busy` check, but `webapp/e2e/harness.ts::drawn` keeps its `__openReads` loop.
-  **Rides with:** w11-tests3. **Re-test:** `drawn` keeps only its `aria-busy` check and the walk stays green.
 - **Controls restate base's focus ring, and two acts stay hand-looped** (w11-web2, 11-28):
   - About 25 non-field controls (chat, dashboard, onboarding…) restate `base.css`'s focus ring in
     their domain CSS.
@@ -1038,7 +1039,9 @@ the served contract is generated and the browser derives nothing; mobile first.
   `command_target_not_found` 2–4 times, each a console error (`webapp/lib/hooks/useIngestFlow.ts`'s
   `draftRead`). A read's 404 is coded as a command's. Expected: Start's ack retires the draft's read,
   so a 404 on a GONE draft is asked once at most (I7), and coded as a read's. **Rides with:** `area 12's
-  chain`. **Re-test:** after Start, the console shows no `/drafts/` 404.
+  chain`. **Re-test:** after Start, the console shows no `/drafts/` 404. w11-tests4 (11-28): the
+  launch walk sees it too, and `harness.ts::EXPECTED_4XX` allows the 404, so the e2e spec hides it.
+  The allowance goes with the fix.
 
 ## 13 · Identity, accounts, access
 
@@ -1090,11 +1093,6 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
-- **The build stamp hashes from an empty index** (w11-tests3, 11-28): `webapp/vite.config.ts::webappTree`
-  still adds every `webapp/` file into an empty scratch index on each build, while
-  `health.py::webapp_bundle` now seeds from the checkout's. Same root, on the build side. **Rides
-  with:** the next chain touching `webapp/vite.config.ts`. **Re-test:** the stamp seeds from the
-  checkout's index, and both name one tree.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
@@ -1181,20 +1179,6 @@ budgets.
 - **A torn-bill fact takes 3.08 s** (w11-tests2):
   `test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill` runs over the 2 s budget.
   **Rides with:** area 14's chain. **Re-test:** `pytest --durations=10` does not list it.
-- **The trace's canonical labels move on a resume into the end pass** (w8-tests3): `offline_run.py::decided`
-  reads C0 as `parent@R1` there. **Rides with:** area 14's chain. **Re-test:** a resumed leg's labels
-  match its straight twin's.
-- **The offline trace reads a dead path and orders inner campaigns by their JSON** (w11-records2,
-  11-28):
-  - `scripts/offline_run.py::LEDGER`'s `round_closed` pick maps `"ruler_excluded"` to
-    `election.ruler.excluded`, but `Election.ruler` no longer exists, so that trace field is always
-    absent.
-  - The trace sorts an L4 leg's inner campaigns by their whole JSON (`offline_run.py:1148`). A ledger
-    reshape therefore reorders them, and that reads as moved decisions.
-
-  Root: every trace path names a live field, and the inner set is keyed by the inner cell's identity.
-  **Rides with:** area 14's chain. **Re-test:** a trace path naming no model field fails the check, and
-  records2's reshape reads `potter/l4` UNMOVED.
 - **No offline leg draws a mixed-benchmark round** (draw-strata, 11-18):
   `scripts/offline_run.py::run_l4` — the L4 leg (`L4_DATASET = "promptpotter-self/e2e"`) seats one
   search and one held-out cell on one benchmark, so `build_round_order`'s interleave and
@@ -1207,23 +1191,6 @@ budgets.
   (`application/CLAUDE.md` § Registries complete at import), then the test goes — **Rides with:**
   `area 14's chain` — **Re-test:** the test is gone and an over-budget framing refuses at import.
   (item 200)
-- **The offline world runs no launch a browser starts** (w11-walk, 11-27): `webapp/e2e/serve_app.py`
-  routes the server's own sends through `scripts/offline_world.py`'s `Router`, but a launch runs in
-  `promptpotter/application/jobs/launcher/run_job.py`'s child, which reads no `TERMNORM_ENDPOINTS` and
-  is released `backend_unreachable`; the world also holds no provider key (every run act 422
-  `no_api_key`) and its pricing and capability refreshes dial out (403 through a refusing proxy). So
-  no walk can watch a round live, pause, resume or fork on divergence. Root: the child inherits the
-  world's backend posture from the server that spawned it. **Rides with:** `area 14's chain` —
-  **Re-test:** Start on the cold world's email-tagging check-in closes round 0.
-  Walk #2 (11-28): still, so watch live, pause, resume, a self-pause and a cancel during a fork's cut
-  were not walked. With a key added, Start's job is released at `jobs/refused/<id>.json`:
-  `backend_unreachable`, "TERMNORM_ENDPOINTS is unset". The capability refresh still dials out (403).
-- **The offline world answers no check-in resolver turn** (w11-walk2, 11-28): on the cold world with a
-  key held, an upload's "Propose it from the rows" answers 503 `resolver_failed`, because the
-  `Router`'s optimizer reply fails the resolver's output schema twice. So no walk reaches an upload's
-  proposed origin. It does reach the Pipeline and Run bounds sections, which render beside the failure.
-  Root: `scripts/offline_world.py`'s fake optimizer answers each schema a check-in asks.
-  **Rides with:** `area 14's chain`. **Re-test:** Propose on a cold-world upload lands an origin.
 - **A rule the suite reaches only through a round is decided where no table can reach it** (w10-tests
   link 1): the slowest `offline` facts walk a campaign to reach one decision, e.g.
   `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`
