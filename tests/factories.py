@@ -23,7 +23,7 @@ from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
 )
-from promptpotter.application.datasets.loaders import definition_source
+from promptpotter.application.datasets.loaders import cut_identity, definition_source
 from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.held import HeldRun
@@ -569,7 +569,7 @@ def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None
     # The bank as the cut of the definition's own `source:`: no fetch reaches the hub.
     source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
     assert source is not None, f"{LAUNCHED_DATASET} names a source"
-    stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
+    stores.tenant_datasets.record_cut(cut_identity(source), Bank.of(bank))
 
 
 L4_PANEL = "promptpotter-self/mixed"

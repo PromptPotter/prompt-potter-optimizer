@@ -20,7 +20,6 @@ from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
 from promptpotter.domain.records.provider import BackendWarningRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import KeySource
-from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm import send_pacing
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
@@ -118,7 +117,6 @@ class CellSends:
 
 class MachineSlots:
     def __init__(self, jobs_dir: Path, name: str, capacity: int) -> None:
-        self._jobs_dir = jobs_dir
         self._root = jobs_dir / MACHINE_DIR / name
         self._capacity = capacity
 
@@ -143,8 +141,6 @@ class MachineSlots:
 
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
-        with machine_step():
-            claim_machine(self._jobs_dir)
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.
         turn = await self._wait(lambda: self._lock("turn"))
         try:

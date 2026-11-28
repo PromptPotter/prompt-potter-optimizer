@@ -17,4 +17,4 @@ No use case writes to disk or talks to a network except through one of these sea
 
 - Every recursive delete goes through `store/io.py::rmtree_robust` / `unlink_robust`. <!-- probe: git grep -cE "shutil\.rmtree" -- promptpotter/*.py <= 1 -->
 - Every notice this box posts (operator, CRM, trail) goes through `outbound.py::post_json`, the one reader of a non-2xx body as a refusal. <!-- probe: git grep -cE "status_code != 200|is_success" -- promptpotter/presentation/admin_bot.py == 0 -->
-- `docker_host.py` is the ONE `docker` CLI call <!-- probe: git grep -cE "^\s+.docker.,$" -- promptpotter/*.py <= 1 -->; taking a machine slot claims the machine (`backend.py::MachineSlots.hold`).
+- `docker_host.py` is the ONE `docker` CLI call <!-- probe: git grep -cE "^\s+.docker.,$" -- promptpotter/*.py <= 1 -->; a session whose cells hold the machine claims it once, off the loop, at its opening (`wiring.py::_session`).

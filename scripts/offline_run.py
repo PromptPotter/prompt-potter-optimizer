@@ -91,7 +91,7 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.measuring import held_out
 from promptpotter.application.datasets.authored import dataset_campaign_block
-from promptpotter.application.datasets.loaders import definition_source
+from promptpotter.application.datasets.loaders import cut_identity, definition_source
 from promptpotter.application.embedded_run import (
     CycleDashboardParams,
     answer_read,
@@ -342,7 +342,7 @@ def stand_in_fetch(stores: Stores, samples: list[Sample]) -> None:
     """The synthetic rows as the cut of the definition's own `source:`: no fetch reaches the hub."""
     src = definition_source(resolve_dataset(stores, DATASET))
     assert src is not None, f"{DATASET} names a source"
-    stores.tenant_datasets.record_cut(src.identity, Bank.of(samples))
+    stores.tenant_datasets.record_cut(cut_identity(src), Bank.of(samples))
 
 
 def synthetic_rows(n: int) -> list[Sample]:

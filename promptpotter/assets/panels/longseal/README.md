@@ -1,7 +1,7 @@
 # LongSeal task templates
 
 The layers a `harbor_tasks` source lays into each task directory, in the order its `template:` lists
-them (`application/datasets/harbor_panel.py`). Every file is formatted over the row: `{question}`,
+them (`connectors/harbor.py::_harbor_tasks`). Every file is formatted over the row: `{question}`,
 `{documents}` (the haystack rendered whole), and, in a file named `{n}`, one copy per document with
 `{n}` its two-digit number and `{document}` its page. This README sits above the layers and is never
 laid. A task's files are what its image hashes, so an edit here re-pins every task built from them.

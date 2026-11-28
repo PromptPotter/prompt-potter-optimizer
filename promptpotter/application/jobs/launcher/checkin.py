@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from pydantic import JsonValue
 
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
+from promptpotter.application.datasets.loaders import cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.mint_and_start import (
@@ -37,6 +37,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
+from promptpotter.domain.dataset_source import Source
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget

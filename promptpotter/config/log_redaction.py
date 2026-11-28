@@ -5,7 +5,7 @@ import re
 
 from pydantic import SecretStr
 
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import ENV_BLOCKS
 
 REDACTED = "***REDACTED***"
 
@@ -21,25 +21,22 @@ _KEY_PATTERNS: tuple[re.Pattern[str], ...] = (
 _TRACEBACK = logging.Formatter()
 
 
-def _snapshot_secret_values() -> tuple[str, ...]:
-    # A setting is secret by its TYPE: a `SecretStr` field is covered the moment it is declared, whatever its name.
+def _secret_values() -> tuple[str, ...]:
+    # A setting is secret by its TYPE, in any block: a `SecretStr` is covered once declared, whatever its name.
     return tuple(
         value
-        for name in type(settings).model_fields
-        if isinstance(held := getattr(settings, name), SecretStr)
+        for block in ENV_BLOCKS
+        for name in type(block).model_fields
+        if isinstance(held := getattr(block, name), SecretStr)
         and (value := held.get_secret_value().strip())
     )
 
 
 class SecretRedactionFilter(logging.Filter):
-    """Snapshots the settings' secrets at construction: re-instantiate if they rotate mid-process."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._values: tuple[str, ...] = _snapshot_secret_values()
+    """Reads the secrets per record: a connector's block loads after logging is configured."""
 
     def _redact(self, text: str) -> str:
-        for v in self._values:
+        for v in _secret_values():
             if v in text:
                 text = text.replace(v, REDACTED)
         for pat in _KEY_PATTERNS:

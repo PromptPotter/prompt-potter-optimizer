@@ -239,13 +239,12 @@ from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.scoring.query_loop import filed_entry
 from promptpotter.config import paths
-from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (
     block_packs_root,
     default_projects_root,
     install_datasets_root,
 )
-from promptpotter.connectors import CONNECTORS, upload_connector
+from promptpotter.connectors import CONNECTORS, termnorm, upload_connector
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.dbllmbench import DbllmbenchPanel
 from promptpotter.domain.arms import PointContext
@@ -290,6 +289,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
+from promptpotter.domain.dataset_source import Source
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.failures import (
@@ -1160,7 +1160,7 @@ def test_an_l4_launch_whose_inner_backend_is_unaddressed_is_refused_before_its_m
             },
         },
     )
-    monkeypatch.setattr(settings_mod.settings, "TERMNORM_ENDPOINTS", {})
+    monkeypatch.setattr(termnorm.env_block, "ENDPOINTS", {})
     with pytest.raises(BackendUnreachableError) as refused:
         asyncio.run(run_campaign("outer", stores=built_stores, budget=Budget(), mode=RunMode()))
     assert refused.value.details["connector"] == "termnorm", "the refusal named another backend"
@@ -1267,7 +1267,7 @@ def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
     hub_source = loaders.definition_source(hubcut)
     assert hub_source is not None
     hub_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
-    built_stores.tenant_datasets.record_cut(hub_source.identity, hub_bank)
+    built_stores.tenant_datasets.record_cut(loaders.cut_identity(hub_source), hub_bank)
     held_cut = loaders.held_bank(built_stores, hubcut)
     assert held_cut is not None and held_cut.dataset_hash == hub_bank.dataset_hash, (
         "a recorded cut was not held"
@@ -1706,7 +1706,7 @@ def test_a_paragraphs_row_renders_as_one_title_and_text_paragraph_per_entry(
         "truth": "answer",
         "paragraphs": {"column": "context", "title": "title", "text": "sentences"},
     }
-    src = loaders.Source.of(section)
+    src = Source.of(section)
     assert src is not None
     (sample,) = loaders.BANK_RECIPES["columns"](src).load()
     assert (sample.query, sample.ground_truth) == (

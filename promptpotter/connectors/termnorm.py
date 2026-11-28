@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import httpx
+from pydantic import Field, SecretStr
 
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import EnvBlock
 from promptpotter.connectors.protocol import (
     Connector,
     Endpoint,
@@ -19,6 +20,16 @@ from promptpotter.domain.sample import Sample
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
+
+
+class TermNormEnv(EnvBlock, env_prefix="TERMNORM_"):
+    # Each URL is the operator's alone, by the name a dataset's `pipeline.endpoint` gives, so the
+    # token never travels elsewhere.
+    ENDPOINTS: dict[str, str] = Field(default_factory=dict)
+    TOKEN: SecretStr = SecretStr("")
+
+
+env_block = TermNormEnv()
 
 # One match and its resends, a backend outage's wait included.
 _CELL_ENVELOPE_S = 600.0
@@ -128,7 +139,7 @@ _EXPECTED_REVISION: str | None = None
 
 
 def _termnorm_auth_token() -> str | None:
-    return settings.TERMNORM_TOKEN.get_secret_value() or None
+    return env_block.TOKEN.get_secret_value() or None
 
 
 CONNECTOR = Connector(
@@ -142,7 +153,7 @@ CONNECTOR = Connector(
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
-    endpoint=Endpoint("TERMNORM_ENDPOINTS", lambda: settings.TERMNORM_ENDPOINTS),
+    endpoint=Endpoint("TERMNORM_ENDPOINTS", lambda: env_block.ENDPOINTS),
     auth_token=_termnorm_auth_token,
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.
     max_cells_in_flight=16,

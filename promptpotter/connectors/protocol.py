@@ -21,6 +21,7 @@ from promptpotter.domain.connector import (
     bearer,
     data_envelope,
 )
+from promptpotter.domain.dataset_source import Source
 from promptpotter.domain.layer_fold import Rule, rules_of
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound
@@ -84,6 +85,9 @@ ExperimentResolver = Callable[["Stores", Mapping[str, Any]], BaseModel]
 
 # `(http, base_url) -> the backend's self-reported revision`, `None` where it is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
+
+# `(source, panel dir) -> tasks built`: the definition's `source:` laid as a panel into the tenant tier.
+PanelRecipe = Callable[[Source, Path], int]
 
 # `backend_url -> why the backend is down`, `None` where it is up; read through `Connector.unreachable`.
 PreflightFn = Callable[[str], Awaitable[str | None]]
@@ -190,6 +194,9 @@ class Connector:
     resolve_experiment: ExperimentResolver | None = None
     """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel, in place
     of ``experiment_model``'s parse."""
+
+    panel_recipes: Mapping[str, PanelRecipe] = field(default_factory=dict)
+    """Its own `source:` recipes by name, which build its panel (`loaders.py::build_panel`)."""
 
     pin_roster: Callable[[str, str], Path] | None = None
     """``(dataset, version) -> file``: the one fetch of a published panel's roster that

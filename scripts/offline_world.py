@@ -42,6 +42,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.config.settings import settings
+from promptpotter.connectors import termnorm
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.infrastructure.llm import send_pacing
@@ -1124,9 +1125,9 @@ def install_network(router: Router) -> Callable[[], None]:
 
     # `send_pacing.py::held_wait`, the one binding every sender reads, the backend's and an LLM's.
     wire = vars(send_pacing)
-    real = (wire["held_wait"], settings.TERMNORM_ENDPOINTS)
+    real = (wire["held_wait"], termnorm.env_block.ENDPOINTS)
     # The operator's TermNorm is this world's backend, its one endpoint.
-    settings.TERMNORM_ENDPOINTS = {"offline": FakeBackend.URL}
+    termnorm.env_block.ENDPOINTS = {"offline": FakeBackend.URL}
     # Every client above is answered before it resolves a name; one that is not fails there.
     doors = _swap_sends(handle_async_request, handle_request, urlopen, _refuse_resolve)
     # A refusal answered in-process costs no wall clock: the resend's wait is decided, not slept.
@@ -1134,7 +1135,7 @@ def install_network(router: Router) -> Callable[[], None]:
 
     def restore() -> None:
         doors()
-        wire["held_wait"], settings.TERMNORM_ENDPOINTS = real
+        wire["held_wait"], termnorm.env_block.ENDPOINTS = real
 
     return restore
 

@@ -23,7 +23,6 @@ from offline_world import Router
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.sample_measurement import cell_billing
-from promptpotter.config.settings import settings
 from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
@@ -258,7 +257,11 @@ def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
     resolve = harbor.CONNECTOR.resolve_experiment
     assert resolve is not None
     stores = workspace()
-    panel = {"harbor_dataset": "bench", "harbor_dataset_version": "1.0"}
+    panel = {
+        "harbor_dataset": "bench",
+        "harbor_dataset_version": "1.0",
+        "agent": {"name": "oracle", "environment": "docker"},
+    }
     for pinned in (["t1"], ["t2", "t3"]):
         tasks = [{"id": t, "path": t} for t in pinned]
         (tmp_path / "harbor-roster.bench@1.0.json").write_text(
@@ -277,7 +280,7 @@ def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
     assert harness is not None
     keys = []
     for url in ("https://n8n.example/webhook/eval", "https://n8n.example/webhook/eval/"):
-        monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"eval": url})
+        monkeypatch.setattr(n8n.env_block, "ENDPOINTS", {"eval": url})
         keys.append(harness(stores, None, n8n.CONNECTOR.base_url(None)))
     assert keys[0] == keys[1], "a trailing slash re-keyed every banked n8n cell"
 
@@ -288,9 +291,9 @@ def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(monkeypatch: pytest.M
     harness = n8n.CONNECTOR.identity_config
     assert harness is not None
     first, second = "https://n8n.example/webhook/classify", "https://n8n.example/webhook/route"
-    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": first})
+    monkeypatch.setattr(n8n.env_block, "ENDPOINTS", {"classify": first})
     alone = harness(stores, None, n8n.CONNECTOR.base_url(None))
-    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": first, "route": second})
+    monkeypatch.setattr(n8n.env_block, "ENDPOINTS", {"classify": first, "route": second})
     keyed = {
         name: harness(stores, None, n8n.CONNECTOR.base_url(name)) for name in ("classify", "route")
     }

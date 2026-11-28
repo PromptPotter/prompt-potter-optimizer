@@ -396,7 +396,10 @@ bill.
   sends, and `cells_paid_by` reads it as a library's. Symptom under it:
   `infrastructure/backend.py::BackendClient.cells_paid_by` asks for the bound account even for a remote backend,
   which never reads the keys. **Re-test:** `git grep -n "api_key_attr).get_secret_value\|ANTHROPIC_API_KEY.get_secret_value" -- promptpotter/connectors`
-  is empty.
+  is empty. w11-connectors3 found the door blocked upstream: `llm/registry.py::providers()` holds no
+  `anthropic`, so `host_key_attr("anthropic")` raises a `KeyError` and `wallet.py::cells_paid_by` would
+  raise on an anthropic cell. Root: the wallet's providers include every provider a connector's container
+  sends on, and the send is admitted in-module as `harbor.py::_installed_run` does.
 - **`StepUsage` re-declares `TokenAccount`'s parts** (usage-2, 11-19):
   `promptpotter/domain/spend.py::StepUsage` — its flat `reasoning`, `cache_read`, `cache_write`
   fields repeat the names `TokenAccount.model_fields` already rosters (`from_account` and `account`
@@ -563,13 +566,6 @@ sole route for a backend tunable.
   `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
   map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
   **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
-- **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
-  `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
-  connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
-  definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
-  `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
-  w11-config2 adds a code default of the same root: `connectors/harbor.py`'s
-  `(agent or {}).get("name") or "terminus-2"`.
 - **An origin finding with an unknown row is dropped unserved** (w11-config2, 11-28):
   `datasets/origin_resolve.py::raised_commands` drops through `_coerce` a finding whose row is unknown,
   whose evidence is empty or that names an absent header, and serves none of them, while a finding
@@ -615,14 +611,17 @@ selection explicit.
   reads `bound_account` for a backend that sends on its own keys, harmless while every sending entry
   binds one. Root: the payer is asked only of a connector that `holds_own_sends` or is host-paid
   (`wallet.py::cells_paid_by`). **Rides with:** area 05's chain. **Re-test:** a remote cell scored under
-  no bound account is admitted.
+  no bound account is admitted. w11-connectors3 cut it there: `cells_paid_by` takes `stores` eagerly,
+  where it should read `bound_account` itself, only for a `holds_own_sends` connector, as `sending_key` does.
+- **`Endpoint.setting` restates its env block's key** (w11-connectors3, 11-28): `connectors/protocol.py::Endpoint`
+  names `"TERMNORM_ENDPOINTS"` beside `TermNormEnv.ENDPOINTS`. Root: the refusal derives the name from the
+  block's prefix and field. **Rides with:** area 08's chain. **Re-test:** `git grep -c 'Endpoint("' --
+  promptpotter/connectors` is 0.
+- **The docker host's producer claim is a process global** (w11-connectors3, 11-28):
+  `infrastructure/docker_host.py::_claimed` stands in for a producer that `producer_lock.py::_tokens` keys
+  per `jobs_dir`, so two data roots in one process share one claim. Root: the claim is keyed by its jobs
+  dir. **Rides with:** area 08's chain. **Re-test:** no module-level claim flag in `docker_host.py`.
 
-- **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
-  Harbor's panel document and `application/datasets/loaders.py::_harbor_tasks` is its recipe, both in
-  core because what they read (`loaders.py::from_hub`, `Source`) sits above `connectors/`
-  (`scripts/gate.py::_LAYERING`). Root: a connector declares its panel recipe on `Connector`, over a hub
-  read and a `Source` moved below `connectors/`; core reads the declaration. **Rides with:** area 07's
-  chain. **Re-test:** `git grep -c "harbor" -- promptpotter/application/datasets/loaders.py` is 0 (3 now).
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -657,13 +656,6 @@ selection explicit.
   raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
   next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
   `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
-- **A machine slot claims its producer on the event loop** (w11-connectors2, 11-28):
-  `infrastructure/backend.py::MachineSlots.hold` calls `docker_host.py::claim_machine` inline. When the
-  producer is unclaimed, `producer_lock.this_producer` waits on a lock, and `io.py::refuse_on_event_loop`
-  raises. A cell is safe only where a launch claimed the producer earlier. Root: the claim is taken off
-  the loop at the async door, or at the launch that owns the process. **Rides with:** area 08's chain.
-  **Re-test:** a harbor cell through `BackendClient.run_query`, in a process that has not claimed a
-  producer, is measured, never refused.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 

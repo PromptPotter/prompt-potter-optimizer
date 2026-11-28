@@ -169,6 +169,7 @@ from promptpotter.config.paths import (
     user_data_root,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION, settings
+from promptpotter.connectors import termnorm
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -665,18 +666,18 @@ def test_a_secret_never_reaches_a_log_line_whatever_carries_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A configured key, a stray key-shaped value, a traceback's URL (httpx puts the bot token in
-    # it), and a `SecretStr` setting no release named yet.
-    class Grown(settings_mod.Settings):
+    # it), and a `SecretStr` no release named yet, in a block read after the filter was (a connector's).
+    class Grown(settings_mod.EnvBlock, env_prefix="GROWN_"):
         SOME_FUTURE_WEBHOOK_URL: SecretStr = SecretStr("")
 
     key, bot, hook = "gsk_redact_me_xxxxxxxxxxxxxxxxxxxxxxx", "123456:telegram-bot", "https://h/x"
     stray = "sk-leakedabcdefghijklmnopqrstuv"
-    grown = Grown(
-        GROQ_API_KEY=SecretStr(key),
-        ADMIN_BOT_TELEGRAM_TOKEN=SecretStr(bot),
-        SOME_FUTURE_WEBHOOK_URL=SecretStr(hook),
-    )
-    monkeypatch.setattr(log_redaction, "settings", grown)
+    blocks: list[settings_mod.EnvBlock] = []
+    monkeypatch.setattr(settings_mod, "ENV_BLOCKS", blocks)
+    monkeypatch.setattr(log_redaction, "ENV_BLOCKS", blocks)
+    redaction = log_redaction.SecretRedactionFilter()
+    settings_mod.Settings(GROQ_API_KEY=SecretStr(key), ADMIN_BOT_TELEGRAM_TOKEN=SecretStr(bot))
+    Grown(SOME_FUTURE_WEBHOOK_URL=SecretStr(hook))
     try:
         raise RuntimeError(f"404 for url 'https://api.telegram.org/bot{bot}/getUpdates'")
     except RuntimeError:
@@ -687,7 +688,7 @@ def test_a_secret_never_reaches_a_log_line_whatever_carries_it(
         (bot, logging.LogRecord("t", logging.WARNING, "", 0, "poll failed", None, failed)),
         (hook, logging.LogRecord("t", logging.INFO, "", 0, "posting to %s", (hook,), None)),
     ):
-        log_redaction.SecretRedactionFilter().filter(record)
+        redaction.filter(record)
         assert secret not in logging.Formatter().format(record), f"{secret} reached the log"
 
 
@@ -2220,7 +2221,7 @@ async def test_a_health_check_tells_no_secret_and_never_tells_an_unaddressed_bac
 ) -> None:
     # It asks the provider to redeem a code it never issued: its refusal's own words carry the
     # secret's fate. A box deployed green with its backend unaddressed: the roster dropped it unsaid.
-    monkeypatch.setattr(settings_mod.settings, "TERMNORM_ENDPOINTS", {})
+    monkeypatch.setattr(termnorm.env_block, "ENDPOINTS", {})
     offline.token_endpoints["oauth2.googleapis.com/token"] = (
         401,
         {"error": "invalid_client", "error_description": "secret is invalid"},

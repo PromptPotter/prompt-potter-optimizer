@@ -2939,7 +2939,9 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
         async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
             return await run_trial(
                 InProcessWorkload(
-                    experiment=harbor.HarborPanel(tasks=[], agent={"environment": "docker"}),
+                    experiment=harbor.HarborPanel(
+                        tasks=[], agent={"name": "terminus-2", "environment": "docker"}
+                    ),
                     experiment_dir=tmp_path,
                     program=None,
                     workspace=None,
@@ -2954,6 +2956,30 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     assert len(trials) == harbor.CONNECTOR.cell_attempts, (
         f"{len(trials)} trials: a container cell reran past the budget its connector sized"
     )
+
+
+@pytest.mark.usefixtures("run_bound")
+async def test_a_machine_held_cell_in_a_process_with_no_producer_yet_is_measured(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def ran(*_args: Any) -> dict[str, Any]:
+        return {"data": {"answer": docker_host.machine_producer(), "terminal_node": "agent"}}
+
+    monkeypatch.setattr(docker_host, "_claimed", None)
+    held = fake_connector(
+        "held",
+        execution="in_process",
+        in_process_run=ran,
+        endpoint=None,
+        cells_hold_the_machine=True,
+        pipeline_declaration=world.net.backend.declared,
+    )
+    async with world.opened(connector=held) as session:
+        with scoped(book=spend_book()):
+            row_ = await measure_sample(
+                Sample(id=0, query="10452", ground_truth=None), session, PipelineParams()
+            )
+    assert row_.error_category is None, f"a machine-held cell was refused: {row_!r}"
 
 
 @pytest.mark.usefixtures("run_bound")
@@ -2972,7 +2998,7 @@ def test_harbors_own_docker_fault_out_of_a_trial_ends_the_cell_on_the_machine_re
         raise RuntimeError("Docker compose command failed for environment task. Return code: 1.")
 
     monkeypatch.setattr(Trial, "create", compose_down)
-    # The machine claimed off the loop, as a launch claims it, and the producer its trials are
+    # The machine claimed off the loop, as a session's opening claims it, and the producer its trials are
     # labelled with: both restored after.
     monkeypatch.setattr(docker_host, "_claimed", None)
     monkeypatch.setenv(harbor._PRODUCER_ENV, "")
@@ -2983,7 +3009,7 @@ def test_harbors_own_docker_fault_out_of_a_trial_ends_the_cell_on_the_machine_re
         workload=InProcessWorkload(
             # Harbor's own agent, so no model of ours is bound before the trial is.
             experiment=harbor.HarborPanel(
-                tasks=[], agent={"environment": "docker", "name": "oracle"}
+                tasks=[], agent={"name": "oracle", "environment": "docker"}
             ),
             experiment_dir=tmp_path,
             program=None,

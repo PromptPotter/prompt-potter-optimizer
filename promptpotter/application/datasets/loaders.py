@@ -10,17 +10,18 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
-from enum import Enum
 from pathlib import Path
 from types import CodeType, FunctionType, ModuleType
 from typing import Any
 
-from promptpotter.application.datasets.harbor_panel import write_task_panel
 from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_kept_table
+from promptpotter.connectors.protocol import PanelRecipe
+from promptpotter.domain.dataset_source import Source, SourceKind
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.dataset_hub import from_hub
 from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
     ResolvedDataset,
@@ -32,124 +33,13 @@ from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.extras import Extra, require_extra
+from promptpotter.shared.extras import Extra
 from promptpotter.shared.hashing import ADDRESS_HEX, module_source_digest, stable_hash
 
 _PACKAGE = __name__.rpartition(".")[0]
 
 Row = dict[str, Any]
 Drawn = tuple[str, str]
-
-
-_HUB_EXTRA = Extra.BENCHMARKS
-
-
-class SourceKind(Enum):
-    HUB = "hub"
-    GITHUB = "github"
-    # A file this tenant uploaded, named by its own content: pinned without a `rev`.
-    UPLOAD = "upload"
-    # The rows' inputs are the `source:` section itself.
-    INLINE = "inline"
-
-    @property
-    def extra(self) -> Extra | None:
-        return _HUB_EXTRA if self is SourceKind.HUB else None
-
-    @property
-    def local(self) -> bool:
-        return self in (SourceKind.UPLOAD, SourceKind.INLINE)
-
-
-def _source_lacks(field: str, said: str) -> PayloadInvalidError:
-    return PayloadInvalidError(
-        f"the definition's `source:` names no `{field}`: {said}.",
-        code="source_incomplete",
-        details={"lacks": field},
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class Source:
-    """A definition's ``source:`` section: where the rows come from, at which commit, cut how."""
-
-    recipe: str
-    kind: SourceKind
-    repo: str
-    rev: str
-    params: Mapping[str, Any]
-
-    @classmethod
-    def of(cls, section: Mapping[str, Any]) -> Source | None:
-        if not section:
-            return None
-        params = dict(section)
-        recipe = str(params.pop("recipe", ""))
-        if not recipe:
-            raise _source_lacks("recipe", f"it names {sorted(section)}")
-        kind = next(
-            (
-                k
-                for k in (SourceKind.HUB, SourceKind.GITHUB, SourceKind.UPLOAD)
-                if k.value in params
-            ),
-            None,
-        )
-        if kind is None:
-            return cls(recipe, SourceKind.INLINE, "", "", params)
-        repo = str(params.pop(kind.value))
-        if kind is SourceKind.UPLOAD:
-            return cls(recipe, kind, repo, "", params)
-        # A moving ref re-cuts the bank on the next machine that fetches it, under the name it has.
-        rev = str(params.pop("rev", ""))
-        if not rev:
-            raise _source_lacks("rev", f"it fetches {repo} at no pinned commit")
-        return cls(recipe, kind, repo, rev, params)
-
-    @property
-    def identity(self) -> str:
-        """A new ``rev``, cut parameter or edit to its recipe's code cuts a bank of its own."""
-        return stable_hash(
-            [
-                recipe_code(self.recipe),
-                self.recipe,
-                self.kind.value,
-                self.repo,
-                self.rev,
-                dict(self.params),
-            ],
-            length=ADDRESS_HEX,
-        )
-
-    def __getitem__(self, key: str) -> Any:
-        try:
-            return self.params[key]
-        except KeyError:
-            raise ValueError(f"recipe {self.recipe!r} needs `source.{key}`") from None
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.params.get(key, default)
-
-
-def _load_dataset(*args: Any, **kwargs: Any) -> Any:
-    require_extra(_HUB_EXTRA)
-    from datasets import load_dataset
-
-    return load_dataset(*args, **kwargs)
-
-
-def from_hub(src: Source, *config: str, **kwargs: Any) -> Any:
-    return _load_dataset(src.repo, *config, revision=src.rev, **kwargs)
-
-
-def _github_raw(src: Source, path: str) -> str:
-    url = f"https://raw.githubusercontent.com/{src.repo}/{src.rev}/{path}"
-    with urllib.request.urlopen(url, timeout=60) as response:
-        return str(response.read().decode("utf-8"))
-
-
-def _configs(src: Source) -> tuple[str, ...]:
-    return (str(src["config"]),) if "config" in src.params else ()
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
@@ -270,7 +160,7 @@ def _columns(src: Source) -> BankLoader:
 
     def rows() -> list[Row]:
         files = {"data_files": src["data_files"]} if "data_files" in src.params else {}
-        ds = from_hub(src, *_configs(src), split=src["split"], **files)
+        ds = from_hub(src, split=src["split"], **files)
         named = getattr(ds.features[truth], "int2str", None)
         return [
             {**row, truth: row[truth] if named is None else named(row[truth])}
@@ -328,24 +218,21 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     "table": _table,
 }
 """A recipe is the code half of a cut; the ``source:`` section beside the definition is the data half
-— repo, commit and every cut parameter. ``Source.identity`` keys a held cut on both halves."""
+— repo, commit and every cut parameter. ``cut_identity`` keys a held cut on both halves."""
 
 
-def _harbor_tasks(src: Source, out_dir: Path) -> int:
-    """A hub split as Harbor task directories, each laid from the `template` layers and formatted
-    over its row's `question`, `answer` and `documents` columns, run by the `agent` in the
-    `environment` the source names."""
-    rows = list(from_hub(src, *_configs(src), split=src["split"]))
-    provenance = f"{src.repo} config={src['config']} split={src['split']} revision={src.rev}"
-    return write_task_panel(
-        rows,
-        out_dir,
-        layers=list(src["template"]),
-        columns={key: str(src[key]) for key in ("question", "answer", "documents")},
-        task_prefix=str(src["task_prefix"]),
-        provenance=provenance,
-        agent={"name": str(src["agent"]), "environment": str(src["environment"])},
+def cut_identity(src: Source) -> str:
+    """A new ``rev``, cut parameter or edit to its recipe's code cuts a bank of its own."""
+    return stable_hash(
+        [recipe_code(src.recipe), src.recipe, src.kind.value, src.repo, src.rev, dict(src.params)],
+        length=ADDRESS_HEX,
     )
+
+
+def _github_raw(src: Source, path: str) -> str:
+    url = f"https://raw.githubusercontent.com/{src.repo}/{src.rev}/{path}"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return str(response.read().decode("utf-8"))
 
 
 def _repo_file(src: Source, out_dir: Path) -> int:
@@ -356,11 +243,9 @@ def _repo_file(src: Source, out_dir: Path) -> int:
     return len(json.loads(text)[src["tasks"]])
 
 
-PANEL_RECIPES: dict[str, Callable[[Source, Path], int]] = {
-    "harbor_tasks": _harbor_tasks,
-    "repo_file": _repo_file,
-}
-"""A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant tier."""
+PANEL_RECIPES: dict[str, PanelRecipe] = {"repo_file": _repo_file}
+"""A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant
+tier; a connector declares its own beside these (`Connector.panel_recipes`)."""
 
 
 def _reached(value: object, seen: set[object]) -> set[ModuleType]:
@@ -386,9 +271,8 @@ def _reached(value: object, seen: set[object]) -> set[ModuleType]:
 
 @functools.cache
 def recipe_modules(recipe: str) -> tuple[ModuleType, ...]:
-    """What a recipe's code IS: this module and every module of this package it runs."""
-    run = (BANK_RECIPES | PANEL_RECIPES)[recipe]
-    imported = sorted(_reached(run, set()), key=lambda m: m.__name__)
+    """What a bank recipe's code IS: this module and every module of this package it runs."""
+    imported = sorted(_reached(BANK_RECIPES[recipe], set()), key=lambda m: m.__name__)
     return (sys.modules[__name__], *imported)
 
 
@@ -442,11 +326,11 @@ def builds_bank(dataset: ResolvedDataset) -> bool:
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
     """A panel recipe materializes into the tenant tier, never beside the definition — on demand,
     per account, so no account depends on another having built it."""
-    src = definition_source(dataset)
-    if src is None or src.recipe not in PANEL_RECIPES:
+    src, connector = definition_source(dataset), dataset_connector(dataset)
+    recipes = {**PANEL_RECIPES, **(connector.panel_recipes if connector else {})}
+    if src is None or (recipe := recipes.get(src.recipe)) is None:
         return False
-    out = stores.tenant_datasets.materialized_panel_dir(dataset.name)
-    PANEL_RECIPES[src.recipe](src, out)
+    recipe(src, stores.tenant_datasets.materialized_panel_dir(dataset.name))
     return True
 
 
@@ -468,7 +352,7 @@ def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
         raise DatasetUnstartableError(
             dataset.name, StartBlock.SOURCE_UNREACHABLE, source=asked
         ) from fault
-    stores.tenant_datasets.record_cut(src.identity, bank)
+    stores.tenant_datasets.record_cut(cut_identity(src), bank)
     return bank
 
 
@@ -485,7 +369,7 @@ def held_bank(stores: Stores, dataset: ResolvedDataset) -> Bank | None:
         return stores.tenant_datasets.labelled(dataset.name)
     if src.kind.local:
         return _cut(_loader(stores, src))
-    return stores.tenant_datasets.cut(src.identity)
+    return stores.tenant_datasets.cut(cut_identity(src))
 
 
 def resolve_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:

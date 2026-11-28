@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +35,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_wiring import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.docker_host import claim_machine
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -206,6 +208,8 @@ async def _session(
         panel = dataset_experiment(stores, dataset, connector)
     experiment = None if panel is None else panel.experiment
     _verify_package_cache_scope(connector, experiment, dataset_name)
+    if connector.cells_hold_the_machine:
+        await asyncio.to_thread(claim_machine, stores.jobs_dir)
     client = BackendClient(
         connector,
         endpoint=definition.endpoint,

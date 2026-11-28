@@ -16,9 +16,9 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import EnvBlock, settings
 from promptpotter.connectors.protocol import (
     Connector,
     InProcessWorkload,
@@ -99,6 +99,17 @@ _TURN_CAP = 1200
 
 # A tag is only a name: a rebuild under an old one would replay every cell banked on the old build.
 _COMMIT_LABEL = "org.promptpotter.db-llm-bench.commit"
+
+
+class DbllmbenchEnv(EnvBlock, env_prefix="DBLLMBENCH_"):
+    # The database the runner reaches, whose probe refuses an empty URL.
+    DB_URL: str = ""
+    DB_USERNAME: str = ""
+    DB_PASSWORD: SecretStr = SecretStr("")
+    DB_TLS: bool = False
+
+
+env_block = DbllmbenchEnv()
 
 
 class DbllmbenchPanel(BaseModel):
@@ -218,19 +229,19 @@ def harness_config(cfg: NodeCall, prompt: str) -> tuple[dict[str, Any], dict[str
     db = str(backend["db"])
     entry: dict[str, Any] = {
         "prompts": f"{_WORK}/template.txt",
-        "url": settings.DBLLMBENCH_DB_URL,
+        "url": env_block.DB_URL,
         "schema": _asset(cfg, "schema"),
     }
     if database := backend.get("database"):
         entry["database"] = database
     # The database's account is the operator's (`DBLLMBENCH_DB_*`): none set sends none.
-    if settings.DBLLMBENCH_DB_USERNAME:
+    if env_block.DB_USERNAME:
         auth: dict[str, Any] = {
-            "username": settings.DBLLMBENCH_DB_USERNAME,
-            "password": settings.DBLLMBENCH_DB_PASSWORD.get_secret_value(),
+            "username": env_block.DB_USERNAME,
+            "password": env_block.DB_PASSWORD.get_secret_value(),
         }
         if db == "typedb":
-            auth["tls"] = settings.DBLLMBENCH_DB_TLS
+            auth["tls"] = env_block.DB_TLS
         entry["auth"] = auth
     n_examples = int(backend["examples"])
     if n_examples:
@@ -351,7 +362,7 @@ def _outcome_note(first: list[dict[str, Any]]) -> str | None:
 
 
 async def _preflight(_backend_url: str) -> str | None:
-    if not settings.DBLLMBENCH_DB_URL:
+    if not env_block.DB_URL:
         return "DBLLMBENCH_DB_URL is unset: name the database the runner reaches in .env."
     return await docker_daemon_fault()
 

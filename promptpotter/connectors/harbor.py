@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, get_args
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import (
     Connector,
@@ -42,12 +43,14 @@ from promptpotter.connectors.protocol import (
     PricedPair,
     cell_envelope_of,
 )
+from promptpotter.domain.dataset_source import Source
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.backend import CellSends
+from promptpotter.infrastructure.dataset_hub import from_hub
 from promptpotter.infrastructure.docker_host import (
     HOST_ROUTE,
     PACKAGE_CACHE_PROXY,
@@ -77,6 +80,8 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import rate_priced_usd
 from promptpotter.infrastructure.llm.wallet import keyed_client, sending_key
+from promptpotter.infrastructure.store.dataset_access import MATERIALIZED_PANEL_FILE
+from promptpotter.infrastructure.store.io import rmtree_robust, write_bytes
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     CellInfrastructureError,
@@ -186,13 +191,10 @@ class HarborPanel(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
     tasks: list[dict[str, Any]]
-    agent: dict[str, Any] | None = None
+    # Names its `name` and `environment` (`_resolve_experiment`): no agent is this code's default.
+    agent: dict[str, Any]
     reward_key: str | None = None
     package_cache: str | None = None
-
-
-def _agent_name(agent: Mapping[str, Any] | None) -> str:
-    return (agent or {}).get("name") or "terminus-2"
 
 
 # `TmuxSession._detect_system_info`'s probe order, which decides the install command it runs.
@@ -346,13 +348,15 @@ def pin_roster(dataset: str, version: str) -> Path:
 
 def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> HarborPanel:
     agent = panel.get("agent") or {}
+    if missing := [key for key in ("name", "environment") if not agent.get(key)]:
+        raise PayloadInvalidError(f"harbor connector: the panel's `agent` declares no {missing}.")
     kwargs = set(agent.get("kwargs") or {})
     if owned := sorted(kwargs & AGENT_KWARG_KEYS):
         raise PayloadInvalidError(
             f"harbor connector: the panel sets {owned} under `agent.kwargs`, which "
             f"`pipeline.nodes.{AGENT_NODE}.config` owns and lays over it. Delete them here."
         )
-    seamed = _AGENTS.get(_agent_name(agent), _UNDECLARED).model_seam
+    seamed = _AGENTS.get(agent["name"], _UNDECLARED).model_seam
     if seamed and (discarded := sorted(kwargs & _DISCARDED_SENDER_KEYS)):
         raise PayloadInvalidError(
             f"harbor connector: the panel sets {discarded} under `agent.kwargs`, which configure "
@@ -397,10 +401,6 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _extract_experiment(_stores: Stores, panel: HarborPanel) -> list[dict[str, Any]]:
-    if not (panel.agent or {}).get("environment"):
-        raise PayloadInvalidError(
-            "harbor connector: the panel's `agent` declares no `environment`."
-        )
     tasks = [t for t in panel.tasks if t.get("id")]
     labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
     if labelled and len(labelled) != len(tasks):
@@ -477,7 +477,7 @@ def _sent_spend_bound(
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
     backend = cfg.model_extra or {}
-    _refuse_send_faults(_agent_name(workload.experiment.agent), cfg)
+    _refuse_send_faults(workload.experiment.agent["name"], cfg)
     if not cfg.model:  # an agent with no model seam sends nothing of ours
         return None
     where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
@@ -525,7 +525,7 @@ def _identity_config(
     # Narrow on purpose: a task rides its own sample (`_task_pin`), so a wider panel re-keys none.
     fingerprint = stable_hash(
         [
-            experiment.agent or {},
+            experiment.agent,
             experiment.reward_key or DEFAULT_TASK_REWARD_KEY,
             _AGENT_SENDER,
         ]
@@ -1077,7 +1077,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
             spent={},
         )
     panel: HarborPanel = workload.experiment
-    agent_cfg = panel.agent or {}
+    agent_cfg = panel.agent
     # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
     call = NodeCall.model_validate(payload["config"])
     backend = call.model_extra or {}
@@ -1085,7 +1085,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         **agent_cfg.get("kwargs", {}),
         **{k: backend[k] for k in _TERMINUS_KEYS if k in backend},
     }
-    agent_name = _agent_name(agent_cfg)
+    agent_name = agent_cfg["name"]
     declared = _AGENTS.get(agent_name)
     tools, logs = (declared or _UNDECLARED).tools, (declared or _UNDECLARED).logs
     return _Episode(
@@ -1491,6 +1491,106 @@ async def _in_process_run(
     return {"data": _episode_data(result, episode, reward, attempt_s, bill)}
 
 
+# The template layers a `harbor_tasks` source lays into each task directory, a later file replacing one.
+_PANEL_TEMPLATES = PACKAGE_ROOT / "assets" / "panels"
+# A template file named with this field is laid once per document.
+_PER_DOCUMENT = "{n}"
+
+
+def _doc(i: int, d: dict[str, Any]) -> tuple[str, str]:
+    title = str(d.get("title") or "").strip()
+    return (f"[{i}] {title}" if title else f"[{i}]"), str(d.get("text") or "").strip()
+
+
+def _template(layers: list[str]) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for layer in layers:
+        root = _PANEL_TEMPLATES / layer
+        if not root.is_dir():
+            raise ValueError(f"no panel template layer {layer!r} under {_PANEL_TEMPLATES}")
+        for path in sorted(p for p in root.rglob("*") if p.is_file()):
+            files[path.relative_to(root).as_posix()] = path.read_bytes().decode("utf-8")
+    return files
+
+
+def _write(path: Path, text: str) -> None:
+    # Bytes, so a task's files are LF on every machine: they are what the task image hashes.
+    write_bytes(path, text.encode("utf-8"))
+
+
+def _write_task(
+    task_dir: Path, template: dict[str, str], question: str, docs: list[dict[str, Any]]
+) -> None:
+    pages = [_doc(i, d) for i, d in enumerate(docs, start=1)]
+    fields = {
+        "question": question,
+        "documents": "\n\n".join(f"{head}\n{text}" if text else head for head, text in pages),
+    }
+    for rel, text in template.items():
+        if _PER_DOCUMENT not in rel:
+            _write(task_dir / rel, text.format_map(fields))
+            continue
+        for i, (head, body) in enumerate(pages, start=1):
+            page = {**fields, "n": f"{i:02d}", "document": f"{head}\n\n{body}" if body else head}
+            _write(task_dir / rel.format_map(page), text.format_map(page))
+
+
+def _panel_yaml(src: Source, tasks: list[dict[str, str]], dropped: list[int]) -> str:
+    """Paths are relative to this file, since a task's pin enters its sample key (`_task_pin`).
+    *dropped* is filed in its header: a source row no task was built from is said, never lost."""
+    provenance = f"{src.repo} config={src['config']} split={src['split']} revision={src.rev}"
+    # json.dumps every scalar: a question or gold may hold a colon, quote or newline.
+    lines = [
+        "# BUILT from the definition's `source:` — rebuilt whole, never hand-edited.",
+        f"# {provenance}",
+        *([f"# rows holding no documents, built into no task: {dropped}"] if dropped else []),
+        "",
+        "reward_key: reward",
+        "",
+        "agent:",
+        f"  name: {json.dumps(str(src['agent']))}",
+        f"  environment: {json.dumps(str(src['environment']))}",
+        # NO `kwargs:`: `pipeline.nodes.agent.config` is laid over it, always.
+        "",
+        "tasks:",
+    ]
+    for t in tasks:
+        lines += [f"  - id: {json.dumps(t['id'])}"]
+        lines += [f"    {key}: {json.dumps(t[key])}" for key in ("path", "question", "answer")]
+    return "\n".join(lines) + "\n"
+
+
+def _harbor_tasks(src: Source, out_dir: Path) -> int:
+    """A hub split as a panel of task directories, one per row holding documents (a hub row may
+    carry what no definition in this package may: SealQA's per-row `canary` GUID), each laid from
+    the `template` layers and formatted over the row's `question`, `answer` and `documents` (a list
+    of ``{title, text}``) columns, run by the `agent` in the `environment` the source names."""
+    template = _template(list(src["template"]))
+    column = {key: str(src[key]) for key in ("question", "answer", "documents")}
+    tasks_root = out_dir / "tasks"
+    # Rebuilt whole rather than merged into: a stale directory is a task Harbor still runs.
+    rmtree_robust(tasks_root)
+    tasks: list[dict[str, str]] = []
+    dropped: list[int] = []
+    for i, row in enumerate(from_hub(src, split=src["split"])):
+        if not (haystack := list(row.get(column["documents"]) or [])):
+            dropped.append(i)
+            continue
+        task_dir = tasks_root / f"{src['task_prefix']}-{i:03d}"
+        question = str(row[column["question"]]).strip()
+        _write_task(task_dir, template, question, haystack)
+        tasks.append(
+            {
+                "id": task_dir.name,
+                "path": task_dir.relative_to(out_dir).as_posix(),
+                "question": question,
+                "answer": str(row[column["answer"]]).strip(),
+            }
+        )
+    _write(out_dir / MATERIALIZED_PANEL_FILE, _panel_yaml(src, tasks, dropped))
+    return len(tasks)
+
+
 CONNECTOR = Connector(
     name="harbor",
     execution="in_process",
@@ -1509,6 +1609,7 @@ CONNECTOR = Connector(
     identity_config=_identity_config,
     resolve_experiment=_resolve_experiment,
     pin_roster=pin_roster,
+    panel_recipes={"harbor_tasks": _harbor_tasks},
     measured_unit="cell",
     prompt_delivery=_prompt_delivery,
     # Each cell holds a container: the ceiling is the MACHINE's, shared by every run on it.
