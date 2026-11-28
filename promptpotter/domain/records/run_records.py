@@ -718,7 +718,7 @@ class LLMCallRecord(CycleRecord):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-AccountEvent = Literal["uploaded", "request_refused"]
+AccountEvent = Literal["uploaded", "request_refused", "operator_notified"]
 
 HealthState = Literal["held", "broken", "unverified"]
 # Who read a standing: its probe, or the admin bot's poll, whose refusal stands until a poll answers.

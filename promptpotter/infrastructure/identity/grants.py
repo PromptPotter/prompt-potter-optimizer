@@ -20,10 +20,18 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind, FileUnreadableError
 from promptpotter.shared.identity import DELEGABLE_CAPABILITIES
 
+IDENTITY_DIR = "identity"
+
 
 @dataclass(frozen=True)
 class IdentityPaths:
-    root: Path
+    """The identity zone of the install *projects_root* belongs to, beside it as its jobs dir is."""
+
+    projects_root: Path
+
+    @property
+    def root(self) -> Path:
+        return self.projects_root.parent / IDENTITY_DIR
 
     @property
     def provider_config(self) -> Path:
@@ -58,16 +66,8 @@ class IdentityPaths:
         return self.root / "bulletins.json"
 
 
-IDENTITY_DIR = "identity"
-
-
 def default_identity_paths() -> IdentityPaths:
-    return identity_paths(default_projects_root())
-
-
-def identity_paths(projects_root: Path) -> IdentityPaths:
-    """The identity zone of the install *projects_root* belongs to, beside it as its jobs dir is."""
-    return IdentityPaths(root=projects_root.parent / IDENTITY_DIR)
+    return IdentityPaths(default_projects_root())
 
 
 logger = logging.getLogger(__name__)
@@ -93,20 +93,16 @@ class GrantsFile(FrozenModel):
     grants: dict[str, PrincipalGrant]
 
 
-def _grants(path: Path) -> dict[str, PrincipalGrant]:
+def list_grants(path: Path) -> dict[str, PrincipalGrant]:
     """Absent is no grants; a file that does not validate, an empty one included, raises."""
     held = read_file(path, GrantsFile.model_validate_json, FileKind.STORED_CONFIG)
     return {} if held is None else held.grants
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
-    try:
-        grants = _grants(path)
-    except FileUnreadableError:
-        # Deny-all: an invalid file promotes nobody to a delegate.
-        logger.warning("grants.json does not validate; no grant is read")
-        return None
-    return grants.get(sub_principal_user_id)
+    """A file that does not load refuses the identity asked for: read as none, a DENIED grant's
+    sub-principal would stand as an ordinary account holding the whole owner set."""
+    return list_grants(path).get(sub_principal_user_id)
 
 
 def resolve_effective_capabilities(
@@ -115,10 +111,6 @@ def resolve_effective_capabilities(
     """INTERSECTED with the delegator's own resolved set and with what a grant may carry: a
     hand-edited over-grant is clamped, not trusted, and a delegate never holds the account's keys."""
     return grant.capabilities & delegator_capabilities & DELEGABLE_CAPABILITIES
-
-
-def list_grants(path: Path) -> dict[str, PrincipalGrant]:
-    return _grants(path)
 
 
 def _append_audit(audit_path: Path, **row: str | int) -> None:
@@ -148,7 +140,7 @@ def grant_principal(
     # Read and rewritten under the file's write lock: two edits never both read it (bl2.B10). The
     # audit line lands first, so a crash leaves an intent on record, never an unrecorded effect.
     with write_lock(path):
-        grants = _grants(path)
+        grants = list_grants(path)
         if delegated_by_user_id in grants or any(
             held.delegated_by == sub_principal_user_id for held in grants.values()
         ):
@@ -180,7 +172,7 @@ def revoke_principal(
     path: Path, *, sub_principal_user_id: str, actor: str, audit_path: Path
 ) -> bool:
     with write_lock(path):
-        grants = _grants(path)
+        grants = list_grants(path)
         removed = sub_principal_user_id in grants
         _append_audit(
             audit_path,

@@ -68,7 +68,6 @@ from promptpotter.shared.errors import (
     ContentTooLargeError,
     PayloadInvalidError,
     PotterError,
-    UnauthorizedError,
     graceful,
 )
 
@@ -177,7 +176,8 @@ def _bank_refusal(request: Request, subject: str, status: int) -> None:
         return
     try:
         identity = resolve_identity(request)
-    except UnauthorizedError:
+    except PotterError:
+        # Who called was itself refused: a bearer, or an identity file that does not load.
         return
     # The person's response outranks the record of it; the log line still names the refusal.
     with graceful("could not bank the refusal on the account's trail"):

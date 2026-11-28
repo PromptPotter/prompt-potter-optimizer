@@ -4,7 +4,7 @@ one place that reads it, so an unheard notice is never reported as heard."""
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -30,8 +30,13 @@ def post_json(
     return resp.is_success
 
 
-def notify_operator(text: str, *, ring: bool) -> bool:
-    """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it.
+# What became of an operator notice: its caller files it where the operator reads it, never a log alone.
+NoticeOutcome = Literal["sent", "refused", "skipped"]
+
+
+def notify_operator(text: str, *, ring: bool) -> NoticeOutcome:
+    """Best-effort, never a raise, so a notice cannot fail the request behind it; ``skipped`` where
+    no admin bot is configured, ``refused`` where Telegram did not take it.
 
     ``ring`` is the sender's call: an alert sounds, a notice for the record arrives silently.
     """
@@ -39,12 +44,13 @@ def notify_operator(text: str, *, ring: bool) -> bool:
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     if not token or not chat_id:
         logger.info("Operator notice skipped (admin bot not configured): %s", text)
-        return False
-    return post_json(
+        return "skipped"
+    sent = post_json(
         f"https://api.telegram.org/bot{token}/sendMessage",
         {"chat_id": chat_id, "text": text, "disable_notification": not ring},
         what="Operator notice",
     )
+    return "sent" if sent else "refused"
 
 
 def forward_new_account_to_crm(

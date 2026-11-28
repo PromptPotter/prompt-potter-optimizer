@@ -35,6 +35,8 @@ from typing import Any, Literal, NamedTuple, cast, override
 import httpx
 import offline_world
 import pytest
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from factories import (
     archive_row,
     billed_call,
@@ -297,6 +299,7 @@ from promptpotter.infrastructure.identity.grants import (
     unblock_email,
 )
 from promptpotter.infrastructure.identity.oidc import (
+    GOOGLE_ISSUER,
     GoogleProviderClient,
     JWKSCache,
     OIDCProviderConfig,
@@ -1183,6 +1186,39 @@ def _writer(bundle: IdentityBundle) -> tuple[str, IdentityContext]:
     return session_id, identity_of_session(session_data, bundle)
 
 
+async def test_a_sign_up_files_whether_the_operator_was_told_on_the_trail_the_operator_reads(
+    sign_up: _SignUp, offline: Router, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No admin bot (the offline world's own), then one Telegram takes, then one it refuses.
+    monkeypatch.setattr(settings_mod.settings, "MAX_ACCOUNTS", 100)
+    flow = f"{auth.OAUTH_FLOW_COOKIE_NAME}=google.st.n".encode()
+    for who, bot, told in (("nobot", None, "skipped"), ("heard", 200, "sent"), ("unheard", 403, "refused")):  # fmt: skip
+        if bot is not None:
+            monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_TELEGRAM_TOKEN", SecretStr("t"))
+            monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_CHAT_ID", "1")
+            offline.token_endpoints["api.telegram.org/bott/sendMessage"] = (bot, {"ok": bot == 200})
+        after = BackgroundTasks()
+        await auth.callback(
+            Request(
+                {
+                    "type": "http",
+                    "app": app,
+                    "scheme": "https",
+                    "server": ("testserver", 443),
+                    "path": "/auth/callback/google",
+                    "query_string": f"state=st&code={who}".encode(),
+                    "headers": [(b"cookie", flow)],
+                }
+            ),
+            after,
+            "google",
+        )
+        await after()
+        lines = account.trail_by_email(sign_up.projects, f"{who}@x.com").lines
+        filed = [line.subject for line in lines if line.what == "operator_notified"]
+        assert filed == [told], f"{who}'s sign-up left {filed} for the operator's notice"
+
+
 async def test_the_ceiling_counts_accounts_on_disk_and_never_refuses_an_existing_one_or_the_host(
     sign_up: _SignUp,
 ) -> None:
@@ -1562,7 +1598,7 @@ class _Delegation(NamedTuple):
 @pytest.fixture
 def delegation(tmp_path: Path) -> _Delegation:
     """The identity files under *tmp_path*, the sign-in reading them, and owner-9's grant."""
-    grant_paths = IdentityPaths(root=tmp_path)
+    grant_paths = IdentityPaths(tmp_path / "projects")
     grants, audit = grant_paths.grants, grant_paths.grants_audit
     signed_in = build_identity_bundle(grant_paths)
 
@@ -1588,6 +1624,9 @@ def test_a_delegate_acts_in_its_delegators_tenant_on_its_grant_clamped_to_the_ow
     # delegate, which is not the host (bl4.B1).
     grant_paths, grants, audit, signed_in, grant = delegation
     monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "owner-9@x.com")
+    UserStore(tenant_workspace(grant_paths.projects_root, "owner-9")).save(
+        User(user_id="owner-9", tenant_id="owner-9", email="owner-9@x.com", created_at="2026")
+    )
     grant("sub-1", "owner-9", frozenset({CAMPAIGN_STEP_CAP, "admin.super", "datasets.read"}))
     grant("sub-keys", "owner-9", frozenset({CAMPAIGN_BUDGET_CAP, ACCOUNT_KEYS_CAP}))
     grant("sub-3", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
@@ -1610,9 +1649,6 @@ def test_a_delegate_acts_in_its_delegators_tenant_on_its_grant_clamped_to_the_ow
         ("owner-9", ("owner-9", "owner-9", OWNER_COMMAND_CAPABILITIES, True)),
     ):
         assert signed(who) == read, f"{who} signed in as {signed(who)}"
-    UserStore(tenant_workspace(default_projects_root(), "owner-9")).save(
-        User(user_id="owner-9", tenant_id="owner-9", email="owner-9@x.com", created_at="2026")
-    )
     block_email(
         grant_paths.blocklist, "owner-9@x.com", actor="h", audit_path=grant_paths.blocklist_audit
     )
@@ -1852,17 +1888,16 @@ def test_one_write_moves_a_subject_once_however_its_observers_interleave(
 def test_an_identity_file_that_does_not_validate_admits_nobody_and_no_edit_overwrites_it(
     delegation: _Delegation,
 ) -> None:
-    # The grants promote no delegate, the blocklist blocks everyone (empty is not absent), and
+    # The grants refuse whoever signs in, the blocklist blocks everyone (empty is not absent), and
     # the provider config refuses to load without its secret in the refusal: the box's fault.
     paths, grants, audit, signed_in, grant = delegation
     blocks = paths.blocklist
     write_json(grants, {"grants": {"sub-boss": {"capabilities": ["campaign.run"]}}})
-    assert read_grant(grants, "sub-boss") is None, "an invalid grants file promoted a delegate"
-    assert str(identity_of_session(_session_of("sub-boss"), signed_in).tenant_id) == "sub-boss"
     for torn in (b"", b'{"emails": "ada@x.com"}'):
         blocks.write_bytes(torn)
         assert check_blocklist(blocks, "anyone@x.com").blocked, f"{torn!r} admitted"
     edits: tuple[tuple[Path, Callable[[], object]], ...] = (
+        (grants, lambda: identity_of_session(_session_of("sub-boss"), signed_in)),
         (grants, lambda: list_grants(grants)),
         (grants, lambda: grant("sub-y", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))),
         (grants, lambda: revoke_principal(grants, sub_principal_user_id="s", actor="o", audit_path=audit)),
@@ -2141,6 +2176,38 @@ async def test_a_callback_is_honoured_only_in_the_browser_that_started_its_flow(
         refused_flow = await auth.callback(browser(started), BackgroundTasks(), "google")
         assert SESSION_COOKIE_NAME not in _cookies(refused_flow), why
     assert not paths.sessions_dir.exists(), "a refused flow left a session"
+
+
+async def test_an_id_token_naming_several_audiences_signs_in_only_where_we_are_its_party(
+    offline: Router, oidc: _Oidc
+) -> None:
+    # The real Google client behind the callback, its token endpoint and JWKS the world's.
+    _, _, _, bundle, browser = oidc
+    assert bundle.config.google is not None
+    bundle.clients = {"google": GoogleProviderClient(bundle.config.google, bundle.jwks_cache)}
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    numbers = key.public_key().public_numbers()
+
+    def b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    def word(n: int) -> str:
+        return b64(n.to_bytes((n.bit_length() + 7) // 8, "big"))
+
+    jwk = {"kty": "RSA", "kid": "k", "n": word(numbers.n), "e": word(numbers.e)}
+    offline.token_endpoints["www.googleapis.com/oauth2/v3/certs"] = (200, {"keys": [jwk]})
+    for azp, signed_in in (("other", False), ("c", True)):
+        claims: dict[str, object] = {"iss": GOOGLE_ISSUER, "aud": ["c", "other"], "azp": azp}
+        claims |= {"sub": "s1", "exp": int(time.time()) + 600, "nonce": "n"}
+        head = b64(json.dumps({"alg": "RS256", "kid": "k"}).encode())
+        body = f"{head}.{b64(json.dumps(claims).encode())}"
+        signature = key.sign(body.encode(), padding.PKCS1v15(), hashes.SHA256())
+        token = {"id_token": f"{body}.{b64(signature)}"}
+        offline.token_endpoints["oauth2.googleapis.com/token"] = (200, token)
+        answer = await auth.callback(
+            browser({auth.OAUTH_FLOW_COOKIE_NAME: "google.st.n"}), BackgroundTasks(), "google"
+        )
+        assert (SESSION_COOKIE_NAME in _cookies(answer)) is signed_in, f"azp {azp}"
 
 
 async def test_a_health_check_tells_no_secret_and_never_tells_an_unaddressed_backend_broken(
@@ -4860,6 +4927,68 @@ async def test_a_revoked_token_or_one_of_a_revoked_sub_principal_acts_on_nothing
         assert acted.status_code == status, f"a token {cut_off.__name__}d still acted"
         left = [frame async for frame in feed]
         assert len(left) < 8, f"a token {cut_off.__name__}d kept its stream past its tick"
+
+
+def test_a_grants_file_that_does_not_load_or_a_grant_onto_no_account_holds_no_campaign_rung(
+    token_box: _TokenBox,
+) -> None:
+    # A DENIED sub-principal under a truncated file, then a grant onto an account never opened.
+    paths, _, writer, browser = token_box
+
+    def granted(by: str) -> None:
+        write_json(
+            paths.grants,
+            {"grants": {writer.user_id: {"delegated_by": by, "capabilities": [], "note": ""}}},
+        )
+
+    def campaign_rungs() -> list[str]:
+        me = browser.get("/api/v1/auth/me")
+        held = me.json().get("capabilities", []) if me.status_code == 200 else []
+        return [cap for cap in held if cap.startswith("campaign.")]
+
+    granted("")
+    paths.grants.write_bytes(paths.grants.read_bytes()[:20])
+    assert campaign_rungs() == [], "a grants file that did not load let a denied grant act"
+    granted("never-opened")
+    assert campaign_rungs() == [], "a grant onto no standing account acted"
+
+
+def test_a_tokens_row_that_does_not_load_refuses_its_own_bearer_alone_and_a_rewrite_keeps_it(
+    token_box: _TokenBox,
+) -> None:
+    torn, whole = (_minted(token_box.browser, "step") for _ in range(2))
+    rows = json.loads(token_box.paths.tokens.read_text())["tokens"]
+    (digest,) = [d for d, row in rows.items() if row["id"] == torn["token"]["id"]]
+    rows[digest] = {**rows[digest], "scopes": ["admin"]}
+    write_json(token_box.paths.tokens, {"tokens": rows})
+    for secret, status in ((whole["secret"], 200), (torn["secret"], 401)):
+        assert _bearer(secret).get("/api/v1/auth/me").status_code == status, (
+            "one torn token row decided another bearer's answer"
+        )
+    _minted(token_box.browser, "step")
+    kept = json.loads(token_box.paths.tokens.read_text())["tokens"][digest]
+    assert kept == rows[digest], "a rewrite dropped or changed a row that does not load"
+
+
+@pytest.mark.usefixtures("token_box")
+def test_a_bearer_and_a_delegate_resolve_on_the_install_their_bundle_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An install off the default data root: its accounts, not the default's, are who a bearer is.
+    install = IdentityPaths(tmp_path / "elsewhere" / "projects")
+    monkeypatch.setattr(app.state, "identity_bundle", build_identity_bundle(install))
+    for who in ("owner-2", "sub-2"):
+        UserStore(tenant_workspace(install.projects_root, who)).save(
+            User(user_id=who, tenant_id=who, email=f"{who}@x.com", created_at="2026")
+        )
+    tokens = {who: mint_token(install.tokens, user_id=who, name="ci", scopes=frozenset({CAMPAIGN_STEP_CAP}))[0] for who in ("owner-2", "sub-2")}  # fmt: skip
+    write_json(install.grants, {"grants": {"sub-2": {"delegated_by": "owner-2", "capabilities": [CAMPAIGN_STEP_CAP], "note": ""}}})  # fmt: skip
+    for who, tenant in (("owner-2", "owner-2"), ("sub-2", "owner-2")):
+        me = _bearer(tokens[who]).get("/api/v1/auth/me")
+        assert (me.status_code, me.json().get("tenant_id")) == (200, tenant), (
+            f"{who}'s bearer read another install's accounts"
+        )
+        assert CAMPAIGN_STEP_CAP in me.json()["capabilities"], f"{who} lost its grant"
 
 
 def test_a_tokens_row_naming_a_scope_no_grant_may_carry_never_loads() -> None:

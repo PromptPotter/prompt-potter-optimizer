@@ -1089,40 +1089,14 @@ survivor.
 **Unexamined:** none (w10-identity read `application/account.py`, `app_visits.py` and
 `infrastructure/identity/` against the Target).
 
-- **A grants file that does not load reads as no grants, which fails OPEN for a denied one**
-  (`identity/grants.py::read_grant`): its `FileUnreadableError` is logged and read as no grant, so a
-  sub-principal whose grant was DENIED (empty `delegated_by`: own tenant, no command rungs) resolves in
-  `accounts.py::account_identity` as an ordinary account holding the whole owner set, while every live
-  delegate drops to its own tenant. The same reader takes a grant whose delegator holds no `user.json`
-  as active (`_delegated_identity` reads the blocklist with no email), and the delegate's first act
-  opens the delegator's account (`account.py::account_of`). Action: a grants file that does not load
-  refuses the identity it was asked for (503, the box's config broken), never reads as none; a grant
-  resolves only onto a delegator whose account stands. Both halves are reads that fail open, and
-  neither waits on the operator's open delegation questions (who edits grants, whether a delegate is
-  its own tenant), which govern only how a grant is written. **Rides with:** area 13's next chain,
-  first. **Re-test:** with `grants.json` truncated, a denied sub-principal's `/auth/me` lists no
-  `campaign.*` rung.
-- **One token row that fails validation blocks every bearer on the install** (w10-identity):
-  `identity/tokens.py::_tokens` refuses the whole file. Root: a per-row load where an unloadable row
-  reads as unknown (401 for that bearer alone), and a rewrite keeps the unloadable rows' bytes.
-  **Rides with:** area 13's next chain. **Re-test:** one corrupted row in the tokens file leaves
-  every other bearer's `/auth/me` answering.
-- **An ID token naming several audiences is accepted without its authorized party** (w10-identity):
-  `identity/oidc.py::verify_id_token` takes an `aud` list holding the client id without checking
-  `azp`, so a multi-audience token issued to another client passes. Root: when `aud` names several,
-  `azp` must equal the client id. **Rides with:** area 13's next chain, first. **Re-test:** a test
-  token with `aud` [client, other] and `azp` other is refused.
-- **The delegated identity reads the default data root, not the install's** (w10-identity):
-  `accounts.py::_delegated_identity` and `_token_identity` read `default_projects_root()` while the
-  bundle carries the install's paths: a global standing in for a keyed subject. **Rides with:** area
-  13's next chain. **Re-test:** `git grep -c default_projects_root -- promptpotter/infrastructure/identity/accounts.py` is 0.
-- **The box's own terminal opens no account's key** (w10-seal): the unit and `update.sh::as_unit` are
-  handed the box key as a systemd credential, but a verb the login user runs by hand names no
-  `BOX_KEY_FILE`, so one reading an account's keys (`wallet_store.py::TenantApiKeyStore.load`) refuses
-  `sealed_keys_unopened`. Root: the box's terminal is handed the same credential (one door every
-  hand-run verb takes, as `as_unit` is), never a copy of the key. **Rides with:** area 13's next
-  chain. **Re-test:** on the box, a hand-run verb reading an account that holds a key opens it.
-
+- **An operator notice with no account behind it leaves no readable outcome** (w11-access): a sign-up's
+  notice files its outcome on the new account's trail (`account.py::record_operator_notice`), but
+  `browser_sign_in.py::ring`'s refusal lines (a sign-up refused at the ceiling, a sign-in that could
+  not be recorded) and `notices.py`'s health and landing notices drop what `notify_operator` returns,
+  so a skipped or refused one is a log line alone. Root: a box-level notice log (one row per notice:
+  its text, outcome and time) that the admin bot's `/trail` or `health` reads, every caller filing
+  through it. **Rides with:** area 13's next chain. **Re-test:** with no admin bot configured, a
+  sign-up refused `accounts_full` leaves a `skipped` outcome an operator read serves.
 
 ## 14 · Gate, offline world, tests
 

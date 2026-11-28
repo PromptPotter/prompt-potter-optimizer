@@ -6,8 +6,9 @@ from __future__ import annotations
 import hashlib
 import secrets
 from pathlib import Path
+from typing import Any, NamedTuple
 
-from pydantic import field_serializer, field_validator
+from pydantic import ValidationError, field_serializer, field_validator
 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import write_json, write_lock
@@ -48,23 +49,38 @@ class ApiToken(FrozenModel):
 
 
 class TokensFile(FrozenModel):
-    # Keyed by the plaintext's SHA-256 hex.
-    tokens: dict[str, ApiToken]
+    """Keyed by the plaintext's SHA-256 hex, each row unread: a row loads alone (`_tokens`)."""
+
+    tokens: dict[str, dict[str, Any]]
 
 
 def _digest(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode()).hexdigest()
 
 
-def _tokens(path: Path) -> dict[str, ApiToken]:
-    """Absent is no tokens; a file that does not validate raises, so no bearer reads through it."""
-    held = read_file(path, TokensFile.model_validate_json, FileKind.STORED_CONFIG)
-    return {} if held is None else held.tokens
+class _Held(NamedTuple):
+    tokens: dict[str, ApiToken]
+    # The rows that do not load, as their bytes stood: each its own bearer's 401, kept by a rewrite.
+    torn: dict[str, dict[str, Any]]
 
 
-def _write(path: Path, tokens: dict[str, ApiToken]) -> None:
+def _tokens(path: Path) -> _Held:
+    """Absent is no tokens; an envelope that does not validate raises, so no bearer reads through
+    it; a row that does not is unknown, and only its bearer's."""
+    rows = read_file(path, TokensFile.model_validate_json, FileKind.STORED_CONFIG)
+    held = _Held({}, {})
+    for digest, row in ({} if rows is None else rows.tokens).items():
+        try:
+            held.tokens[digest] = ApiToken.model_validate(row)
+        except ValidationError:
+            held.torn[digest] = row
+    return held
+
+
+def _write(path: Path, held: _Held) -> None:
     """Each account's newest `_KEPT_REVOKED` revoked rows kept, older ones dropped: a dropped
     token reads unknown."""
+    tokens = held.tokens
     revoked = sorted(
         (t for t in tokens.items() if t[1].revoked_at is not None),
         key=lambda held: held[1].revoked_at or "",
@@ -75,12 +91,13 @@ def _write(path: Path, tokens: dict[str, ApiToken]) -> None:
         kept[token.user_id] = kept.get(token.user_id, 0) + 1
         if kept[token.user_id] > _KEPT_REVOKED:
             del tokens[digest]
-    write_json(path, TokensFile(tokens=tokens).model_dump(mode="json"))
+    loaded = {digest: token.model_dump(mode="json") for digest, token in tokens.items()}
+    write_json(path, {"tokens": {**held.torn, **loaded}})
 
 
 def account_tokens(path: Path, user_id: str) -> list[ApiToken]:
     return sorted(
-        (token for token in _tokens(path).values() if token.user_id == user_id),
+        (token for token in _tokens(path).tokens.values() if token.user_id == user_id),
         key=lambda token: token.created_at,
     )
 
@@ -96,7 +113,7 @@ def mint_token(
     )
     with write_lock(path):
         held = _tokens(path)
-        live = sum(t.user_id == user_id and t.revoked_at is None for t in held.values())
+        live = sum(t.user_id == user_id and t.revoked_at is None for t in held.tokens.values())
         if live >= MAX_LIVE_TOKENS:
             raise ConflictError(
                 f"Your account holds {live} live tokens, the most it may.",
@@ -109,38 +126,43 @@ def mint_token(
                     ),
                 ),
             )
-        _write(path, {**held, _digest(plaintext): token})
+        _write(path, held._replace(tokens={**held.tokens, _digest(plaintext): token}))
     return plaintext, token
 
 
 def revoke_token(path: Path, *, user_id: str, token_id: str) -> bool:
     """Whether a live token of *user_id*'s was revoked; another account's id reads as none."""
     with write_lock(path):
-        tokens = _tokens(path)
-        held = next(
+        held = _tokens(path)
+        found = next(
             (
                 (digest, token)
-                for digest, token in tokens.items()
+                for digest, token in held.tokens.items()
                 if token.id == token_id and token.user_id == user_id and token.revoked_at is None
             ),
             None,
         )
-        if held is None:
+        if found is None:
             return False
-        digest, token = held
-        _write(path, {**tokens, digest: token.model_copy(update={"revoked_at": utcnow_iso()})})
+        digest, token = found
+        revoked = token.model_copy(update={"revoked_at": utcnow_iso()})
+        _write(path, held._replace(tokens={**held.tokens, digest: revoked}))
     return True
 
 
 def drop_account(path: Path, user_id: str) -> int:
     """How many rows of *user_id*'s went, live and revoked: a deleted account's bearer reads unknown."""
     with write_lock(path):
-        tokens = _tokens(path)
-        kept = {digest: t for digest, t in tokens.items() if t.user_id != user_id}
-        if len(kept) != len(tokens):
+        held = _tokens(path)
+        kept = _Held(
+            {digest: t for digest, t in held.tokens.items() if t.user_id != user_id},
+            {digest: row for digest, row in held.torn.items() if row.get("user_id") != user_id},
+        )
+        gone = len(held.tokens) + len(held.torn) - len(kept.tokens) - len(kept.torn)
+        if gone:
             _write(path, kept)
-    return len(tokens) - len(kept)
+    return gone
 
 
 def token_of(path: Path, plaintext: str) -> ApiToken | None:
-    return _tokens(path).get(_digest(plaintext))
+    return _tokens(path).tokens.get(_digest(plaintext))

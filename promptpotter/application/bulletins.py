@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field
 
 from promptpotter.domain.bulletin import Bulletin
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import bulletin_board
-from promptpotter.infrastructure.identity.grants import default_identity_paths
+from promptpotter.infrastructure.identity.grants import IdentityPaths
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
@@ -24,8 +26,12 @@ class AccountBulletins(StrictModel):
     bulletins: list[ServedBulletin] = Field(description="Newest first.")
 
 
+def _board(stores: Stores) -> Path:
+    return IdentityPaths(stores.projects_root).bulletins
+
+
 def account_bulletins(stores: Stores) -> AccountBulletins:
-    board = bulletin_board.read_board(default_identity_paths().bulletins)
+    board = bulletin_board.read_board(_board(stores))
     dismissed = set(board.dismissed.get(str(stores.identity.user_id), ()))
     return AccountBulletins(
         bulletins=[
@@ -51,17 +57,16 @@ def _require_host(stores: Stores) -> None:
 
 def post_bulletin(stores: Stores, *, text: str, pops_up: bool) -> Bulletin:
     _require_host(stores)
-    return bulletin_board.post(default_identity_paths().bulletins, text=text, pops_up=pops_up)
+    return bulletin_board.post(_board(stores), text=text, pops_up=pops_up)
 
 
 def withdraw_bulletin(stores: Stores, bulletin_id: str) -> None:
     _require_host(stores)
-    if not bulletin_board.withdraw(default_identity_paths().bulletins, bulletin_id=bulletin_id):
+    if not bulletin_board.withdraw(_board(stores), bulletin_id=bulletin_id):
         raise NotFoundError(f"No bulletin {bulletin_id!r} was posted.", code="bulletin_unknown")
 
 
 def dismiss_bulletin(stores: Stores, bulletin_id: str) -> None:
     account_id = str(stores.identity.user_id)
-    paths = default_identity_paths()
-    if not bulletin_board.dismiss(paths.bulletins, account_id=account_id, bulletin_id=bulletin_id):
+    if not bulletin_board.dismiss(_board(stores), account_id=account_id, bulletin_id=bulletin_id):
         raise NotFoundError(f"No bulletin {bulletin_id!r} was posted.", code="bulletin_unknown")

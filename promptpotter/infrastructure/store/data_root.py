@@ -52,7 +52,6 @@ from promptpotter.domain.ruler import RulerFold
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, Bank, FiledAnswer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.identity.grants import (
-    IDENTITY_DIR,
     Blocklist,
     GrantsFile,
     IdentityPaths,
@@ -259,7 +258,7 @@ class Kind(NamedTuple):
 # The key of the record schema the data root last landed under (`maintenance/landing.py`).
 LANDED_SCHEMA_FILE = ".landed-schema"
 
-_IDENTITY = IdentityPaths(root=Path(IDENTITY_DIR))
+_IDENTITY = IdentityPaths(Path(PROJECTS_DIR))
 _BLOCK_PACK = f"{BLOCK_PACKS_DIR}/*/{PACK_FILE}"
 _INSTALL, _SURVIVOR = Scope.INSTALL, Fate.SURVIVOR
 

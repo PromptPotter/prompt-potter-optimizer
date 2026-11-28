@@ -125,7 +125,8 @@
           "event": {
             "enum": [
               "uploaded",
-              "request_refused"
+              "request_refused",
+              "operator_notified"
             ],
             "title": "Event",
             "type": "string"
