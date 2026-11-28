@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from promptpotter.application.views.render.primitives import (
     DIM,
-    RED,
     RESET,
     YELLOW,
     _step_tag,
@@ -12,7 +11,7 @@ from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import sample_tag
-from promptpotter.domain.scoring import Grade, MeasuredCell, StaleOutcome, graded_answer
+from promptpotter.domain.scoring import Grade, MeasuredCell, graded_answer
 
 
 def _ellide(s: str, n: int) -> str:
@@ -21,10 +20,6 @@ def _ellide(s: str, n: int) -> str:
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
     return line + f"\n{indent}{color}{emoji} {text}{RESET}"
-
-
-def _count_or_unknown(count: int | None) -> str:
-    return "?" if count is None else str(count)
 
 
 def _one_line(text: str) -> str:
@@ -90,8 +85,6 @@ def fmt_query_result(
     step = "" if (single_node and not cached) else f"{step}{cache_marker}"
 
     indent = prefix if prefix else ""
-    if facts.retry_of_deprecated_cache:
-        indent = f"{indent}\U0001f504 "
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
     sid_col = sample_tag(position)
@@ -135,62 +128,4 @@ def fmt_query_result(
         msg = w.message or w.code or w.step or "warning"
         line += f"\n{_ann_indent}{YELLOW}⚠ {w.step}: {msg}{RESET}"
 
-    match facts.stale_outcome:
-        case StaleOutcome.RETRIED | StaleOutcome.PERSISTENTLY_DEGRADED:
-            said = (
-                "reran" if facts.stale_outcome is StaleOutcome.RETRIED else "exhausted the ladder"
-            )
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                YELLOW,
-                "\U0001f504",
-                f"cache had pipeline warnings → {said}{_rerun_detail(facts)}",
-            )
-        case StaleOutcome.SWITCHED_OUT:
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                YELLOW,
-                "\U0001f500",
-                "query degrades ≥50% of the time historically → using cached answer "
-                "(resampling would likely degrade again)",
-            )
-        case StaleOutcome.CONFIG_SKIP:
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                RED,
-                "⚠",
-                "cached failure was token-budget exhaustion + rerun max_tokens "
-                "≤ cached output → skipped LLM rerun (would repeat); marked fatal",
-            )
-        case StaleOutcome.PAUSED:
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                DIM,
-                "⏸",
-                f"pause requested mid stale-data ladder → kept as it stood{_rerun_detail(facts)}",
-            )
-        case StaleOutcome.OBSERVED if not is_deprecated(facts):
-            obs = _count_or_unknown(facts.degraded_obs_count)
-            threshold = _count_or_unknown(facts.degraded_obs_threshold)
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                DIM,
-                "↩",
-                f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
-                f"trigger (not yet at threshold)",
-            )
-
     return line
-
-
-def _rerun_detail(facts: MeasuredCell) -> str:
-    comp = facts.rerun_comparison
-    detail = f"; result: {comp['hit_change']}" if comp and comp["hit_change"] else ""
-    if comp and comp["rank_change"]:
-        detail += f" (rank {comp['rank_change']})"
-    return detail

@@ -1314,7 +1314,7 @@ def _graded_ten(grades: Mapping[int, float | None]) -> CellSheet:
     return sheet(
         measurement(i, g, sample_key=_TEN[i].key)
         if g is not None
-        else measurement(i, None, sample_key=_TEN[i].key, error="boom", error_category="transient")
+        else measurement(i, None, sample_key=_TEN[i].key, error="boom", error_category="SERVER")
         for i, g in grades.items()
     )
 

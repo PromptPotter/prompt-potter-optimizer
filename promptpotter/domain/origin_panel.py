@@ -235,7 +235,7 @@ class OverlapReading(FrozenModel):
 class OriginPanel(FrozenModel):
     """The round's ONE origin-panel record: the line's reading there, and whose panel rows the
     election pooled; the rest of a round's panel rows `reading` bought after it
-    (`round.py::measure_overlap`), which the race never held."""
+    (`runner/measure.py::measure_overlap`), which the race never held."""
 
     reading: OverlapReading
     # By measured individual: `RoundResult.raced` reads their panel rows beside the draw.

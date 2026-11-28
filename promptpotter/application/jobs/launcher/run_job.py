@@ -1,38 +1,31 @@
-"""A held run's own process: its ``JobSpec`` rides stdin (`domain/job.py::LaunchedAs`)."""
+"""A held launch, handed to its run (`runner/entry.py::run_held`) here or to its own process,
+whose ``JobSpec`` rides stdin (`domain/job.py::LaunchedAs`)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import subprocess
-import sys
 import threading
-from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import refuse_campaign
-from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.jobs.spawning import adopted, start, tell_spawner
-from promptpotter.application.runner.entry import run_optimization
-from promptpotter.application.runner.run_init import enter_cycle
-from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import READOUT_POINTER, user_data_root
+from promptpotter.application.jobs.spawning import adopted, start
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.job import LaunchedAs, LaunchMove
-from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.job import LaunchedAs
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.spend import Budget, HeldBudget
-from promptpotter.infrastructure.store.io import open_append, write_text
+from promptpotter.domain.spend import HeldBudget
+from promptpotter.infrastructure.store.io import open_append
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+
+# The module a detached run's process runs (`runner/entry.py::run_job`): a name, never an import,
+# since the run sits above its launch.
+RUN_PROCESS = "promptpotter.application.runner.entry"
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -84,7 +77,7 @@ async def spawn_job(held: HeldLaunch) -> asyncio.Task[None]:
     held.opening.owns(hop)
     spec = held.job_spec()
     with open_append(log_path) as log:
-        child = start(__spec__.name, spec.model_dump_json().encode(), log)
+        child = start(RUN_PROCESS, spec.model_dump_json().encode(), log)
     if not await _adoption(loop, child, spec.job_id):
         raise RuntimeError(
             f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
@@ -172,103 +165,3 @@ class HeldRun(HeldLaunch):
         the one span it writes, a resume reads its line."""
         held = (opened.hop, budget, closing, mode, opened.session, opened.cycle, opened.optimizer)
         return cls(opening, *held)
-
-    async def run_inline(
-        self, *, readout_sink: Callable[[str], None] | None
-    ) -> tuple[Session, CycleResult]:
-        """A person's run: the readout pointer names its cycle first."""
-        session = self.session
-        readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
-        # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
-        with contextlib.suppress(OSError):
-            write_text(user_data_root() / READOUT_POINTER, f"{readout}\n")
-        return await self.run(readout_sink=readout_sink)
-
-    async def run(
-        self, *, readout_sink: Callable[[str], None] | None
-    ) -> tuple[Session, CycleResult]:
-        async with self.closing:
-            return await run_held_job(
-                self.opening,
-                self.session,
-                self.cycle,
-                mode=self.mode,
-                budget=self.budget,
-                optimizer=self.optimizer,
-                readout_sink=readout_sink,
-            )
-
-
-async def run_job(spec: JobSpec) -> StopOutcome | None:
-    stores = stores_of(spec)
-    job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
-    # The job, its claim with it, now lives and dies with THIS process: a run killed before it
-    # declares itself leaves the cycle free.
-    if (adopted := await asyncio.to_thread(job_registry.adopt, spec.job_id)) is None:
-        return None
-    opening = Opening.of(stores, job_registry, adopted)
-    tell_spawner()
-    try:
-        async with AsyncExitStack() as closing:
-            closing.push_async_exit(opening)
-            # Asked here alone, under the claim: the admitting process opened nothing of the cycle.
-            # A refusal is the job's, never the cycle's stop: the cycle keeps the one it had.
-            refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
-            opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(opening))
-            opening.owns(spec.hop)
-            _, result = await run_held_job(
-                opening,
-                opened.session,
-                opened.cycle,
-                mode=spec.mode,
-                budget=spec.budget,
-                optimizer=opened.optimizer,
-            )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        return StopOutcome.PAUSED
-    except Exception:  # noqa: BLE001 -- the opening's exit released the job with it
-        return StopOutcome.FAILED
-    return stop_reason_outcome(result.stop_reason)
-
-
-async def run_held_job(
-    opening: Opening,
-    session: Session,
-    cycle: CycleConfig,
-    *,
-    mode: RunMode,
-    budget: HeldBudget,
-    optimizer: SelectedOptimizer,
-    readout_sink: Callable[[str], None] | None = None,
-) -> tuple[Session, CycleResult]:
-    """THE run of a held launch at every door, an inner seat's too: START, the run, its END, the
-    END being *opening*'s exit, which its door's stack holds. Answers the session the run ENDED on
-    (`run_optimization`). Its START and its hold wait on gates, off the loop."""
-    # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
-    # own producer may still be running it.
-    opening.owns(None)
-    await asyncio.to_thread(opening.job_registry.move, opening.job_id, LaunchMove.START)
-    observers = await asyncio.to_thread(enter_cycle, session, readout_sink=readout_sink)
-    # Anything raised from here fired OUTSIDE the runner's try, an interrupt aside: it stamps.
-    opening.running_on(session.hop)
-    return await run_optimization(
-        list(session.bank.samples),
-        cycle,
-        session=session,
-        observers=observers,
-        mode=mode,
-        budget=budget,
-        optimizer=optimizer,
-    )
-
-
-if __name__ == "__main__":
-    # The detached run's entry alone lands: the landing completes the inner door's registry, which
-    # imports `run_held_job` from this module, so the module itself never imports the landing.
-    from promptpotter.application.maintenance.landing import land_at_entry
-
-    setup_logging()
-    _spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
-    land_at_entry(every_treatment=False)
-    if (_outcome := asyncio.run(run_job(_spec))) is not None and (_code := _outcome.exit_code):
-        sys.exit(_code)

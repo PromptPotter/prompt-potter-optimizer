@@ -13,6 +13,7 @@ from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.run_job import stores_of
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spawning import tell_spawner
+from promptpotter.application.runner.entry import run_held
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_events import QUEUED_LAUNCH, QueuedLaunch
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
@@ -37,7 +38,7 @@ async def act_queued(ask: QueuedLaunch, dispatcher: CommandDispatcher) -> StopOu
         acted = await dispatcher.act_claimed(record, ask.door)
         launch = await launched(acted, record.payload, dispatcher, ask.door)
         assert isinstance(launch, Launched) and launch.held is not None, "held here, alone"
-        _, result = await (await launch.held).run(readout_sink=None)
+        _, result = await run_held(await launch.held, readout_sink=None)
     except BaseException as exc:
         await asyncio.to_thread(dispatcher.job_registry.release, ask.job_id, exc)
         if isinstance(exc, KeyboardInterrupt | asyncio.CancelledError):

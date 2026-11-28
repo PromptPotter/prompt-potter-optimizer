@@ -26,11 +26,11 @@ from pydantic import BaseModel, Field
 
 from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.paired import RoundPairs
-from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
+from promptpotter.application.scoring.race_protocol import Race
 from promptpotter.config.paths import PACKAGE_ROOT, optimizers_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import ArmPosition, Concluded, Elimination, Proposal, Proposed
+from promptpotter.domain.arms import ArmPosition, Concluded, Proposal, Proposed
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -39,7 +39,7 @@ from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, PairedReading
-from promptpotter.domain.phase_acts import RowsRan, StepFact
+from promptpotter.domain.phase_acts import StepFact
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
     MEMBER_KINDS,
@@ -51,9 +51,8 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.plugin_registry import Registry
@@ -513,47 +512,6 @@ class RaceSnapshot:
     current: ArmKey
     n_samples: int
     paired_breakdown: dict[ArmKey, float]
-
-
-class Race(Decider[ArmKey], Protocol):
-    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``decide`` (`race_protocol.py`)
-    cuts and sends to every live walk at once. A race whose arms all walk one panel keeps no
-    prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
-
-    @property
-    def n_priors(self) -> int: ...
-
-    @property
-    def priors(self) -> Mapping[ArmKey, CellSheet]:
-        """Each prior a later arm is paired with, in prior order: the bench catches it up on a cell it lacks."""
-        return {}
-
-    @property
-    def top_up(self) -> Decider[ArmKey] | None:
-        """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
-        return None
-
-    def judge(
-        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
-    ) -> Elimination | None: ...
-
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
-        """A decided arm's rows: it joins the priors."""
-        return None
-
-    def catch_up(self, _key: ArmKey, _cells: Sequence[GradedCell]) -> None:
-        """A prior's caught-up cells, folded onto the rows it holds."""
-        return None
-
-    @property
-    def trigger(self) -> Trigger:
-        """``batch``: a race decides once no call it sent is out."""
-        return BATCH
-
-    @property
-    def rows_ran(self) -> RowsRan:
-        """The row choice it runs, which the round's measure record names."""
-        return "random"
 
 
 class Eliminator(NodeMember, Protocol):

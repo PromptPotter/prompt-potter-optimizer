@@ -73,6 +73,7 @@ from world import Shared, World, shared_run
 from promptpotter import connectors
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores, set_coupon
+from promptpotter.application.bench.line import cycle_bench, live_cycle_run
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.commands.dispatcher import (
     Applier,
@@ -139,8 +140,8 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.run_stop import StopLoop, panel_gate_tripped, run_stop_reason
+from promptpotter.application.runner import entry as run_entry
 from promptpotter.application.runner import loop
-from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
@@ -263,6 +264,7 @@ from promptpotter.infrastructure.llm.capabilities import (
     ensure_model_capabilities,
     resolve_model_capabilities,
 )
+from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, ReportedUsage
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
@@ -339,7 +341,6 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
     Projection,
     last,
-    money_on,
     read_line,
 )
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
@@ -1028,7 +1029,7 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
     )
     opened: list[object] = []
-    monkeypatch.setattr(run_job_mod, "enter_cycle", lambda *a, **_kw: opened.append(a))
+    monkeypatch.setattr(run_entry, "enter_cycle", lambda *a, **_kw: opened.append(a))
 
     def _refused(*_a: object, **_kw: object) -> NoReturn:
         raise MachineBusyError(holding="", holder_user="", started_at=None)
@@ -2128,11 +2129,11 @@ def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the
     book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
 
-    def held(node: str, billed: float) -> Budget:
+    def held(node: str, billed: float, on: SpendBook = book) -> Budget:
         """What a call of *node* is held at, which then bills *billed* on 100 tokens."""
-        with _billing_on(CycleEventLog(tmp_path / "calls.jsonl"), book):
+        with _billing_on(CycleEventLog(tmp_path / "calls.jsonl"), on):
             call = Admission(
-                book, CallLabel(node, "optimizer"), worst, model=None, provider=None, paid_by="host"
+                on, CallLabel(node, "optimizer"), worst, model=None, provider=None, paid_by="host"
             )
             bound = list(money_on(built_stores.charges.path).holds.values())[-1].bound
             call.settle(Billed(TokenAccount(input=60, output=40), billed))
@@ -2147,6 +2148,13 @@ def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the
     assert held("other", 0.01) == worst.budget, "another node's bills sized a node's first call"
     _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=False)
     assert held("judge", 0.01) == worst.budget, "overshoot off still held a call below its worst"
+    # An inner run arms no cycle of its own: its root's switch sizes its calls (decision 23).
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    inner = spend_book(5.0, enclosing=book)
+    held("judge", 0.02, inner)
+    assert held("judge", 0.04, inner) == Budget(usd=0.02, tokens=100), (
+        "an inner run held a call at its worst case under its root's overshoot switch"
+    )
 
 
 @pytest.mark.usefixtures("run_bound")

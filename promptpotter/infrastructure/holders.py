@@ -147,6 +147,12 @@ class _HoldFold:
 LedgerIndex.readers(_HoldFold)
 
 
+def claim_on(ledger: Path) -> str | None:
+    """The job whose hold *ledger* names last: its cycle's claim, live or ended."""
+    held = LedgerIndex.of(ledger).view(_HoldFold)
+    return None if held is None else held.hold.hold_id
+
+
 def holder_of(jobs_dir: Path, cycle_dir: Path) -> CycleHolder | None:
     """Who holds the cycle: the live job whose hold its ledger names last, until that job's run
     declares itself; from then on, while the cycle lock is held."""

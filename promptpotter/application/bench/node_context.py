@@ -208,7 +208,6 @@ async def measure_as_parent(
         cells,
         session,
         kind=role,
-        sample_index=cycle.sample_index,
         measured=individual.id,
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.

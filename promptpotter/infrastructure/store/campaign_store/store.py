@@ -41,6 +41,7 @@ from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.holders import CycleHolder, holder_of
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
@@ -96,7 +97,6 @@ from promptpotter.infrastructure.store.read_model import (
     Projection,
     each_last,
     last,
-    money_on,
     read_file,
     read_line,
 )
@@ -592,7 +592,7 @@ class CampaignStore:
         self.append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        """`runner/output.py::ExportProjection` writes it off the ledger as the run drains."""
+        """`bench/export.py::ExportProjection` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:

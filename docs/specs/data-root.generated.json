@@ -277,30 +277,6 @@
                 "title": "Cached",
                 "type": "boolean"
               },
-              "degraded_obs_count": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Degraded Obs Count"
-              },
-              "degraded_obs_threshold": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Degraded Obs Threshold"
-              },
               "error": {
                 "anyOf": [
                   {
@@ -354,36 +330,9 @@
                 "default": null,
                 "title": "Refused Parameter"
               },
-              "rerun_comparison": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/RerunComparison"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null
-              },
-              "retry_of_deprecated_cache": {
-                "default": false,
-                "title": "Retry Of Deprecated Cache",
-                "type": "boolean"
-              },
               "sample_key": {
                 "title": "Sample Key",
                 "type": "string"
-              },
-              "stale_outcome": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/StaleOutcome"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null
               }
             },
             "required": [
@@ -638,50 +587,6 @@
             },
             "title": "PipelineData",
             "type": "object"
-          },
-          "RerunComparison": {
-            "description": "What re-measuring a degraded cached cell changed, in the words the tape prints.",
-            "properties": {
-              "hit_change": {
-                "title": "Hit Change",
-                "type": "string"
-              },
-              "improved": {
-                "title": "Improved",
-                "type": "boolean"
-              },
-              "rank_change": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Rank Change"
-              }
-            },
-            "required": [
-              "hit_change",
-              "rank_change",
-              "improved"
-            ],
-            "title": "RerunComparison",
-            "type": "object"
-          },
-          "StaleOutcome": {
-            "description": "Where the stale-data ladder left a degraded cached cell: one exit, so one value.",
-            "enum": [
-              "observed",
-              "config_skip",
-              "retried",
-              "switched_out",
-              "persistently_degraded",
-              "paused"
-            ],
-            "title": "StaleOutcome",
-            "type": "string"
           },
           "StepUsage": {
             "properties": {

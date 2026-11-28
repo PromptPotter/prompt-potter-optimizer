@@ -71,7 +71,8 @@ def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
 @dataclass
 class ValueRecord:
     value_preview: str
-    mean_fitness: float
+    # Over the ARMS carrying the value, each its fold's level once: never a level of cells.
+    arm_mean: float
     sample_count: int
 
 
@@ -173,7 +174,7 @@ class AxisIndex:
             )
             if impact and impact.top_values:
                 top_vals_str = "; ".join(
-                    f"{r.value_preview} (fit={level_text(r.mean_fitness, self._fitness_unit)})"
+                    f"{r.value_preview} (fit={level_text(r.arm_mean, self._fitness_unit)})"
                     for r in impact.top_values[:2]
                 )
 
@@ -229,8 +230,8 @@ class AxisIndex:
         records = [
             ValueRecord(_value_preview(v), sum(a) / len(a), len(a)) for v, a in values.items() if a
         ]
-        records.sort(key=lambda r: -r.mean_fitness)
-        means = [r.mean_fitness for r in records]
+        records.sort(key=lambda r: -r.arm_mean)
+        means = [r.arm_mean for r in records]
         total = sum(r.sample_count for r in records)
         kind = self._axis_kinds[axis]
 

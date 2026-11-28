@@ -54,6 +54,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.pipeline_resolve import bind_resolution, laid_session, run_resolution
+from promptpotter.application.runner.entry import run_watched
 from promptpotter.config.paths import install_datasets_root, optimizer_manifest_path, user_data_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector
@@ -274,7 +275,7 @@ class World:
         )
         launched = dispatched.result
         assert isinstance(launched, Launched) and launched.held is not None, launched
-        session, result = await (await launched.held).run_inline(readout_sink=None)
+        session, result = await run_watched(await launched.held, readout_sink=None)
         return self._ran(session, result)
 
     def edit_proposer(self) -> None:

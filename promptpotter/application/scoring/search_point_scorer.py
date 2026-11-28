@@ -6,7 +6,6 @@ from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.query_loop import Walk, open_walk, run_walks
 from promptpotter.domain.arms import degradation_reading
@@ -79,7 +78,6 @@ async def score_search_point(
     session: Session,
     *,
     kind: MeasurementRole,
-    sample_index: SampleIndex | None = None,
     measured: str | None,
 ) -> ScoredWalk:
     """``measured`` has NO default on purpose: it decides what the numbers MEAN."""
@@ -88,7 +86,6 @@ async def score_search_point(
             {kind: (search_point, dataset, measured)},
             session,
             kind=kind,
-            sample_index=sample_index,
         )
     ).values()
     return scored
@@ -99,7 +96,6 @@ async def score_search_points[K: Hashable](
     session: Session,
     *,
     kind: MeasurementRole,
-    sample_index: SampleIndex | None = None,
     race: Decider[K] | None = None,
 ) -> dict[K, ScoredWalk]:
     """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum;
@@ -113,7 +109,6 @@ async def score_search_points[K: Hashable](
                 dataset,
                 session,
                 kind=kind,
-                sample_index=sample_index,
                 measured=measured,
             )
             for key, (search_point, dataset, measured) in points.items()

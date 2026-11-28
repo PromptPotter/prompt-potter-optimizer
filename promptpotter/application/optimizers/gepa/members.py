@@ -34,7 +34,7 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import child, shown
-from promptpotter.application.scoring.race_protocol import Decision, View, next_block
+from promptpotter.application.scoring.race_protocol import Decision, Race, View, next_block
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Measured
@@ -262,7 +262,7 @@ def minibatch_improves(
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class _GateRace(optimizer_contract.Race):
+class _GateRace(Race):
     gate = "not_improved"
 
     def __init__(

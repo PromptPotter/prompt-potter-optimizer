@@ -39,7 +39,7 @@ from promptpotter.application.optimizers.paper_templates import (
     unmarked,
 )
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
-from promptpotter.application.scoring.race_protocol import Decision, View, next_block
+from promptpotter.application.scoring.race_protocol import Decision, Race, View, next_block
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
@@ -297,7 +297,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace(optimizer_contract.Race):
+class PairedTRace(Race):
     gate = "outscored"
     settled = "settled"
 

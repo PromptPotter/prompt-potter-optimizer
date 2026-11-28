@@ -98,11 +98,11 @@ class NoiseBand(FrozenModel):
 
 
 class BenchPasses(FrozenModel):
-    """``runner/bench.py::read_bench`` is the one reading of these passes."""
+    """``bench/line.py::read_bench`` is the one reading of these passes."""
 
     tolerance: int
     origin: BenchPass
-    # Set aside so the selection's pass fits under the search's ceiling (``runner/bench.py::reserve_selection_pass``).
+    # Set aside so the selection's pass fits under the search's ceiling (``bench/line.py::reserve_selection_pass``).
     reserve_usd: float
     reserve_tokens: int
     # The latest pass of each individual the line selected, by its id: a pass measures an

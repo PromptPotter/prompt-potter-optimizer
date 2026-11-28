@@ -277,15 +277,25 @@ def materialize_round_values(
 _MEANED_CHANNELS: tuple[str, ...] = ("latency", "cost", "tokens")
 
 
-def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estimate | None:
-    values = list(sheet.column(ROW_GRADES[grade]).values())
+def pooled_band(
+    sheets: Iterable[CellSheet], grade: CellGrade, unit: MeasurandUnit
+) -> Estimate | None:
+    """THE level: each sheet's standing scored cells, pooled; one sheet is one individual's."""
+    held = tuple(sheets)
+    if len({(s.scorer_id, s.two_valued) for s in held}) > 1:
+        raise ValueError("a level pools only sheets graded under one scorer")
+    values = [v for s in held for v in s.column(ROW_GRADES[grade]).values()]
     if not values:
         return None
     level = sum(values) / len(values)
-    lo, hi = bounded_mean_interval(values, binary=grade in sheet.two_valued) or (None, None)
+    lo, hi = bounded_mean_interval(values, binary=grade in held[0].two_valued) or (None, None)
     return Estimate(
         value=level, ci_lo=lo, ci_hi=hi, n=len(values), se=None, unit=unit, form="level"
     )
+
+
+def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estimate | None:
+    return pooled_band((sheet,), grade, unit)
 
 
 def _channel_means(scoreable: Sequence[GradedCell], names: Iterable[str]) -> dict[str, float]:
@@ -300,7 +310,10 @@ def _channel_means(scoreable: Sequence[GradedCell], names: Iterable[str]) -> dic
 
 
 def fold_cells(sheet: CellSheet, fitness_unit: MeasurandUnit) -> CellFold:
-    fitness = level_band(sheet, "fitness", fitness_unit)
+    return _folded(sheet, level_band(sheet, "fitness", fitness_unit), fitness_unit)
+
+
+def _folded(sheet: CellSheet, fitness: Estimate | None, fitness_unit: MeasurandUnit) -> CellFold:
     composite = level_band(sheet, "objective", "score")
     return CellFold(
         total=len(sheet.scoreable),
@@ -318,7 +331,8 @@ def compute_composite_fitness(
     sheet: CellSheet, scorer: Scorer | FoldBasis, pipeline_schema: PipelineSchema
 ) -> ScoreSummary:
     """The MEAN of each cell's worth, folded and never re-scored: the same per-cell value θ is fit on."""
-    fold = fold_cells(sheet, scorer.fitness_unit)
+    band = level_band(sheet, "fitness", scorer.fitness_unit)
+    fold = _folded(sheet, band, scorer.fitness_unit)
     evaluator_values = materialize_round_values(pipeline_schema, sheet.cells)
     # A reading of the round, never a formula input: f(mean) is not mean(f). `fitness` is the fold's.
     terms = scorer.terms - {"fitness"}
@@ -331,7 +345,7 @@ def compute_composite_fitness(
         cached=sum(1 for cell in sheet if cell.facts.cached),
         evaluators=evaluator_values,
         fitness_terms=sorted(terms & evaluator_values.keys()),
-        fitness_band=level_band(sheet, "fitness", scorer.fitness_unit),
+        fitness_band=band,
         tokens=TokenAccount.from_measured_rows(cell.facts for cell in sheet),
     )
 

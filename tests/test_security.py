@@ -106,7 +106,6 @@ from promptpotter.application.jobs import mint as mint_module
 from promptpotter.application.jobs import quota, spawning
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
-from promptpotter.application.jobs.launcher import run_job as run_job_module
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     admitted,
@@ -154,6 +153,7 @@ from promptpotter.application.read_params import (
     HierarchySubtreeParams,
 )
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner import entry as run_entry
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
@@ -2557,8 +2557,8 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
         research_datasets_root=built_stores.research_datasets_root,
     )
     # Its handshake writes the spawner's pipe, which this process is not.
-    monkeypatch.setattr(run_job_module, "tell_spawner", lambda: None)
-    assert asyncio.run(run_job_module.run_job(spec)) is StopOutcome.FAILED, (
+    monkeypatch.setattr(run_entry, "tell_spawner", lambda: None)
+    assert asyncio.run(run_entry.run_job(spec)) is StopOutcome.FAILED, (
         "a detached run never adopted its job, or ran past its campaign's refusal"
     )
     handed_back = past.get(handed.job_id)
@@ -4400,6 +4400,10 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     spent = launch()
     registry.move(spent.job_id, LaunchMove.ADMIT)
     registry.release(spent.job_id)
+    # Refused at its release after admission: no campaign minted, so it spent nothing.
+    refused = launch()
+    registry.move(refused.job_id, LaunchMove.ADMIT)
+    registry.release(refused.job_id, PotterError("its launch was refused"))
     assert quota.campaigns_today(caller.stores, registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"
     )

@@ -113,6 +113,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers import member_package_dir
 from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
 from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.runner.entry import run_watched
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
 from promptpotter.config.paths import (
@@ -1675,7 +1676,7 @@ async def run_controlled(
     )
     launched = forked.result
     assert isinstance(launched, Launched) and launched.held is not None
-    await (await launched.held).run_inline(readout_sink=print)
+    await run_watched(await launched.held, readout_sink=print)
     after = subject_evidence(stores, [Subject(c) for c in subjects]).head_to_head
     assert after is not None
     row = next(r for r in after.rows if r.campaign_id == cid)

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from promptpotter.application.bench.line import own_level
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.pipeline_resolve import resolved
-from promptpotter.application.runner.bench import own_level
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.campaign import CampaignCycle

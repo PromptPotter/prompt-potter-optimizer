@@ -42,7 +42,6 @@ class SampleIndex:
         self._samples: dict[int, Sample] = {}
         self._hits: dict[int, list[bool]] = defaultdict(list)
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
-        self._degradation_counts: dict[int, int] = defaultdict(int)
         self._cache_records: list[SampleRecord] | None = None
 
     def register(self, sample: Sample) -> None:
@@ -80,12 +79,10 @@ class SampleIndex:
             if sid not in self._samples and sid in admitted:
                 self.register(Sample(id=sid, query=query, ground_truth=ground_truth))
 
-        for sid, hit, degraded, failure_mode in row.cells:
+        for sid, hit, _degraded, failure_mode in row.cells:
             if sid not in admitted:
                 continue
             self._hits[sid].append(hit)
-            if degraded:
-                self._degradation_counts[sid] += 1
             if failure_mode is not None:
                 self._failure_modes[sid].append(failure_mode)
 
@@ -95,15 +92,6 @@ class SampleIndex:
         self._reset()
         for row in (self._rows or {}).values():
             self.replay_row(row)
-
-    def degradation_count(self, sample_id: int) -> int:
-        return self._degradation_counts.get(sample_id, 0)
-
-    def degradation_rate(self, sample_id: int) -> float:
-        n = len(self._hits.get(sample_id, []))
-        if n == 0:
-            return 0.0
-        return self._degradation_counts.get(sample_id, 0) / n
 
     def records(self) -> list[SampleRecord]:
         if self._cache_records is not None:

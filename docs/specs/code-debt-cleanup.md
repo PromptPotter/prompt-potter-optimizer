@@ -136,10 +136,6 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
   fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
   sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
-- **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
-  `MoneyFold`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
-  its own beside the spend book. **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:**
-  `git grep -n "^class Spent\|^def money_on" -- promptpotter/infrastructure/store/read_model.py` is empty.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -209,15 +205,10 @@ runner only `Session.state`; one `RunScope`; a stop is a `StopReason` declared a
 read standing rounds off the ledger.
 
 **Unexamined:** `runner/round.py`, `initialization/scoring_scope.py`, `embedded_run.py`,
-`initialization/session.py`, `runner/output.py`, `domain/activity.py`, `bench/resume_and_fork/repair.py`,
+`initialization/session.py`, `bench/export.py`, `domain/activity.py`,
 `resume_and_fork/resume.py`, `origin.py`, `bench/node_context.py`, `run_observers.py`, `bench/cycle.py`,
-`runner/bench.py`
+`bench/line.py`
 
-- **Wave B — `application/runner/` names no concept per module.** lb collapsed it by phase (21 modules to
-  10) and deleted the ledger-scan forwarders. `inner/narrative.py` has since gone, and the stop
-  vocabulary moved to `domain/phases.py`; the count is 9. **Decided 2026-11-27:** the target names the
-  concepts that own a module, not a module count.
-  **Re-test:** each `runner/` module's docstring names the one concept it owns, and no two name the same.
 - **A resume's wait is unattributed**: on the box a resume takes up to 72 s to be applied, while
   offline its `open_launch`, `open_cycle` and `close_init` total about 0.3 s and the landing stamps once
   per schema, so the wait sits on the backend's network edges (every symbol is present, but the box
@@ -235,40 +226,16 @@ read standing rounds off the ledger.
   whatever the press. **Held:** unreproduced at ml-8 (4-core cloud: 0 of 3 moved at press 16, 0 of 3
   at 64); reproduce it first. **Re-test:** three runs at press max leave `capo/resumed` and
   `gepa/resumed` UNMOVED against each other.
-- **A stop's cause and error each have a second door** (l4-words 2026-11-18, w9-entry):
-  `run_observers.py::declare_run_stop` takes a paused stop's words from `take_pause() or
-  (interrupted_by, "")`, so a self-pause cannot say why, and requires an `interrupted_by` every
-  non-paused stop ignores; `run_observers.py::end_run_on` appends the stop's `ErrorRecord` through
-  `append_record` while `store/stores.py::Stores.declare_stop` takes an `error=` the run never passes.
-  Root: a stop carries its cause and its error through one door. **Rides with:** area 03's chain.
-  **Re-test:** `interrupted_by` reaches only the paused branch, and one door files a stop's error.
-- **A cancel during a rebase cut mints a fork its parent never names** (w9-entry):
-  `runner/entry.py::_run_single_cycle` and `_run_line` await `asyncio.to_thread(_cut_rebase_fork)`, and a
-  cancel leaves the thread minting. Root: the cut completes or names its child before the await can be
-  cancelled. **Rides with:** area 03's chain. **Re-test:** a cancel injected during the cut leaves no
-  child cycle its parent's stop does not name.
-- **The runner is imported from above** (map pass, w11-plugin): `scoring/passes.py` imports nine
-  `runner/bench.py` functions (`bench_origin`, `line_passes`, `live_cycle_run`, `read_cycle_bench`…) and
-  `runner/output.py::ExportProjection`, `evidence/head_to_head.py` seven (`bench_line`, `pair_on_bench`,
-  `read_bench`…), and `jobs/launcher/run_job.py` imports `runner/entry.py::run_optimization` and
-  `runner/run_init.py::enter_cycle` while `runner/` imports `jobs/` at 11 sites (bench 1, entry 1,
-  `inner/spawn.py` 6, run_init 3); the contract's move made none trivial. Root: the bench pass's lines
-  move below scoring and evidence, and the launch's seam below both runner and jobs. **Rides with:** area 03's chain.
-  **Re-test:** `git grep -n "^from promptpotter.application.runner" -- promptpotter/application/scoring
-  promptpotter/application/evidence promptpotter/application/jobs` is empty.
-- **The embedded fresh door probes its backend after its session opens** (w7-open, not re-tested):
-  `application/embedded_run.py`. **Rides with:** area 03's chain. **Re-test:** the probe precedes the
-  session's open, or the order is the design.
 - **`BenchStatus.state` spans `read`** (spine4, 11-27):
   `promptpotter/domain/bench.py::BenchStatus` — `state: ReadingState` includes `READ`, so
-  `runner/bench.py`'s unread branch asserts it away (`a read bench carries its pair`) — the
+  `bench/line.py`'s unread branch asserts it away (`a read bench carries its pair`) — the
   unread status is its own type without `READ` — **Rides with:** `area 03's chain` —
   **Re-test:** `git grep -n "a read bench carries its pair" -- promptpotter` is empty.
 - **A block race files an `ArmRecord` per arm per turn** (rk-dec, 11-13):
-  `promptpotter/application/runner/round.py::_walk_population` — its `on_turn` appends an
+  `promptpotter/application/runner/measure.py::_walk_population` — its `on_turn` appends an
   `ArmRecord` per arm per cell taken (block_size=1), so a block's ledger grows with cells — the
   root: an arm's state is filed at the decision that moves it, not at every turn — **Rides with:**
-  `area 03's chain` — **Re-test:** `git grep -n "ArmRecord(" -- promptpotter/application/runner/round.py`
+  `area 03's chain` — **Re-test:** `git grep -n "ArmRecord(" -- promptpotter/application/runner/measure.py`
   shows `on_turn` filing one; a block_size=1 race's ledger holds one per arm per cell.
 - **A refused send's stop and a banked hole's stop share one field** (l4-words, 11-18):
   `promptpotter/application/run_stop.py::panel_gate_tripped` — spells SERVER to `BACKEND_HOLE`
@@ -284,8 +251,34 @@ read standing rounds off the ledger.
   **Rides with:** `area 03's chain` — **Re-test:** `git grep -n "to_thread, resume_with_divergence_check" --
   promptpotter/application/runner/run_init.py` is empty. (item 79)
 
+- **An inner run's spawn is read off the ambient scope, so bench and init import `runner/inner/`**
+  (w11-runner census, 11-28): `promptpotter/application/bench/node_context.py::Target._inner_run`
+  finds a cell's sandbox through `run_scope().spawn`, answering `(None, None)` off an
+  `InnerSpawnContext`, and `initialization/scoring_scope.py::session_scope` builds `inner_spawn_of`
+  itself; `scoring_scope.py::run_memory` likewise prefers the ambient `ArmOf` — the root: the spawn
+  is a keyed field the runner hands its session, never a global read below it — **Rides with:**
+  `area 03's chain` — **Re-test:** `git grep -n "^from promptpotter.application.runner" --
+  promptpotter/application/bench promptpotter/application/initialization` is empty.
+- **A cycle's export skips a lost bank in silence** (w11-runner census, 11-28):
+  `promptpotter/application/bench/export.py::_render_export` returns when `bank(drawn.dataset_hash)`
+  is `None`, while `initialization/session.py` raises `ConflictError` on the same fact — the root:
+  one reader of a cycle's drawn bank, which refuses — **Rides with:** `area 03's chain` —
+  **Re-test:** `git grep -n "if bank is None" -- promptpotter/application/bench/export.py` is empty.
+- **`declare_line_bench` re-derives its scorer and patches the live reading** (w11-runner census,
+  11-28): `promptpotter/application/bench/line.py::declare_line_bench` builds
+  `Resolution(config, …).scorer` beside the seated `session.state.scoring.scorer`, falls back from
+  `passes` to `line_passes`, and `_replace`s `live_cycle_run`'s `selecting` / `ending` — the root:
+  the launch's word is a field of the run it reads, and the scorer is the session's — **Rides
+  with:** `area 03's chain` — **Re-test:** `git grep -n "Resolution(config" --
+  promptpotter/application/bench/line.py` is empty.
+- **An unbound session's address is two empty strings** (w11-runner census, 11-28):
+  `promptpotter/application/initialization/session.py::Session` defaults `cycle_id` to `""` and
+  `campaign_id` answers `""` unbound, so `hop` builds `CycleHop("", "")` where `bound_campaign`
+  raises — the root: an unbound session has no hop — **Rides with:** `area 03's chain` —
+  **Re-test:** `git grep -n 'cycle_id: str = ""' -- promptpotter/application/initialization/session.py`
+  is empty.
 - **A line's spent rounds are spelled at three sites** (w11-store, 11-28):
-  `promptpotter/application/runner/bench.py::line_round_budget`, `runner/entry.py` and
+  `promptpotter/application/bench/line.py::line_round_budget`, `runner/entry.py` and
   `runner/inner/spawn.py` each sum or flatten `LineSpan.own` over a line — one function of the
   line's spans — **Rides with:** `area 03's chain` — **Re-test:**
   `git grep -c "span.own" -- promptpotter` is 1.
@@ -339,11 +332,33 @@ optimizer node.
   **Rides with:** area 04's chain. **Re-test:** `statistics.py` holds one constant-side rule, the one decided.
 - **"Which benchmark a row measures" is spelled twice**: `BenchScope` partitions by benchmark under
   the word `RulerScope` owns. Action: `BenchScope` takes a benchmark name. **Held:** l4-runs owns
-  `runner/bench.py`. **Re-test:** `git grep -n "BenchScope" -- promptpotter` is empty.
-- **A round close re-resolves the config it holds** (tw-q): `scoring/measurement_log.py` calls
-  `cycle_config` inside the hard-sample view though its caller holds the cycle's config. Root: the
-  view is handed the config. **Rides with:** area 04's chain. **Re-test:**
-  `git grep -c cycle_config -- promptpotter/application/scoring/measurement_log.py` is 0.
+  `bench/line.py`. **Re-test:** `git grep -n "BenchScope" -- promptpotter` is empty.
+- **A hard-sample page resolves its own config** (tw-q; narrowed by w11-scoring2, 11-28): the round
+  close now hands `cycle_hard_samples` its config. The one `cycle_config` call left in
+  `scoring/measurement_log.py` is the page's own resolve. Root: the view is handed what its caller
+  resolved. **Rides with:** area 04's chain. **Re-test:** the hard-sample view resolves nothing.
+- **An L4 panel averages θ over its cells' own rulers** (w11-scoring2, 11-28):
+  `evidence/metric_catalogue.py::merge_cells` and the `promptpotter` connector's θ terms
+  (`domain/l4/proxies.py::INNER_CELL_TERMS`: `origin`, `final_lift`, `peak_lift`) pool θ across inner
+  cycles, though each cycle graduates 1PL or 2PL on its own ruler (`rasch.py::graduate_ruler_model`).
+  Root: `InnerCellFacts` carries its series' `calibration_model`, and a θ-unit merge or formula read
+  over cells of two models refuses. **Rides with:** area 10's chain. **Re-test:** a panel of one 1PL
+  and one 2PL inner cell serves no merged `final_lift`.
+- **`SampleIndex`'s fold row carries a `degraded` nobody reads** (w11-scoring2, 11-28):
+  `intelligence/indexes/sample.py::SampleIndex._derive` still writes it after the stale-data ladder
+  went. Root: the element leaves `SampleFoldRow.cells`, which wipes the persisted fold. **Rides with:**
+  area 04's chain. **Re-test:** `git grep -n "_degraded" -- promptpotter` is empty.
+- **An estimator spec every caller fixes** (w11-scoring2, 11-28): `ROUND_LIFT_SPEC` is passed at 12
+  sites and no other spec exists. `read_arms` now owns its own, and the other sites still pass it in.
+  Root: each reading owns its estimator. **Rides with:** area 04's chain. **Re-test:**
+  `git grep -c "ROUND_LIFT_SPEC" -- promptpotter` names only its definition and its readers' own use.
+- **Held re-tests need world legs** (w11-scoring2, 11-28):
+  - The PoBB false-cut rate (RM592) needs an A/A leg beside capo-pobb, with identical arms and the
+    cut rate read against ε.
+  - The origin panel under `vote: overlap` needs a leg asserting training rows ∩ measured rows = ∅.
+  - The edited-scorer refit needs a world resume after `world.family()` edits the formula.
+
+  **Rides with:** area 14's chain. **Re-test:** each leg exists and reads its claim.
 - **A freed slot waits on a poll** (flight-share, 11-18):
   `promptpotter/application/scoring/query_loop.py::_ScoringPhase` — `freed` polls at `HELD_POLL_S`
   while a run waits on another run's landing, so a freed slot can sit idle up to 0.25 s — the root:
@@ -355,16 +370,6 @@ optimizer node.
   always a read pair, so `scoring/selection.py` asserts `pair.state is READ` — the root: the field
   is typed `ReadPair | None`, and the assert goes — **Rides with:** `area 04's chain` —
   **Re-test:** `git grep -n "a crown is decided on a read pair" -- promptpotter` is empty.
-- **`read_arms` takes a spec its one caller fixes** (readings-3, 11-19):
-  `promptpotter/application/scoring/paired.py::read_arms` — `spec` is always `ROUND_LIFT_SPEC` from
-  `evidence/head_to_head.py` — the root: the one rule is the function's own, not a parameter —
-  **Rides with:** `area 04's chain` — **Re-test:** `git grep -n "read_arms(" -- promptpotter` shows
-  a caller passing any other spec, or the parameter goes.
-- **A noise-floor reading repeats `unread`'s condition** (small-7, 11-18):
-  `promptpotter/application/scoring/passes.py::measure_noise_floor` — `reading=` re-spells
-  `band is None or recorded.composite is None` beside `unread` since mypy narrows only the inline
-  test — the root: one narrowing, a helper returning the band or `None` — **Rides with:** `area
-  04's chain` — **Re-test:** the condition appears once in the function.
 
 ## 05 · Spend, wallet, quota
 
@@ -376,11 +381,6 @@ bill.
 **Unexamined:** `infrastructure/llm/pricing.py`, `jobs/shares.py`, `jobs/quota.py`, `spend_book.py`,
 `domain/spend.py`
 
-- **Money text has no sub-cent rule**: a cell's price at six places (`phase_acts.py::CapUnderRound.costing`,
-  `cli/commands/reads.py::_human`, and `potter/dispatch/injections/panels.py:1051-1052`) beside `domain/spend.py::usd_text`, which prints `$0.0000`
-  for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
-  **Decided 2026-11-27:** three significant digits under a dollar in `usd_text`, which feeds the webapp's `fmtUsd`. **Rides with:** forks 1.
-  **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host into every node config, and `bench/llm_call.py:231` pins the optimizer's
   own calls too. Decided: a model keeps its pin only where its
@@ -416,19 +416,35 @@ bill.
   **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
 - **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
-  `infrastructure/store/read_model.py:1132-1136` branches on it, and `store/CLAUDE.md` warns that money
-  "banks twice" where a reader forgets (`mirrored` 14/6). Root: the outer run's cost is a fold over its
-  inner ledgers. Under **A nested spend book is wired beside the cell that nests it** and
-  **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**. Reshapes run data.
-  **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
-- **A cycle's running job is found two ways**: `served_dashboard.py::spend_counts` (`:611`) takes this
-  cycle's `hold_id` from its caller (`run_scope().book` in `run_observers.py:59`, the held run's job in
-  `armed_caps`) and reads the siblings' through `_job_holding` (`:636`). Root: one reader of a cycle's
-  live job. **Re-test:** `spend_counts` takes no `hold_id`.
-- **`spend_counts` builds a full `SpendBook` per cycle to call `count()`**: `served_dashboard.py:617` fills
-  a zero-budget book per cycle; `jobs/quota.py:789` and `jobs/launcher/admission.py:595` build similar
-  zero-budget books. Root: `SpendBook` has no count-only constructor. **Re-test:**
-  `git grep -n "SpendBook(" -- promptpotter/application` names no zero-budget book.
+  the money fold branches on it, and `store/CLAUDE.md` warns that money "banks twice" where a reader
+  forgets (`mirrored` 14/6). The next row holds its root and its cut. Under **A nested spend book is
+  wired beside the cell that nests it** and **A cycle's sidebar spend reads its ledger alone, so a cut
+  send reads $0.000**. Reshapes run data. **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
+- **An outer run's cost is folded from copies its inner runs write onto its ledger** (w11-spend, 11-28):
+  `spend_book.py::SpendBook.mirror` copies every inner send onto the root's ledger (node `inner:…`, kind
+  `enclosed_as`, round `InstrumentMode.root_round`), and the inner ledger keeps its own as
+  `TokenUsageRecord.mirrored`. Every outer read takes the copy: the book's meter, `ledger_scan.py::LEDGER_SPEND`'s
+  by-kind, by-round and `by_nested_node`, the live dashboard projection, and `account_spend.py::billed_spend`.
+  The bill itself already lands once, on the charge book under the outer job's hold tree.
+
+  Root: the outer's ledger folds take its inner ledgers (`stores.py::inner_sandbox_store` lists them).
+  Each inner send is filed once and names how its root files it (kind and round), so the copy and
+  `mirrored` go. It closes the three rows above together.
+
+  It was cut by w11-spend, because its holders sit outside area 05: the live projection,
+  `ledger_scan.py`, `hierarchy.py`, `run_records.py`, `run_observers.py` and `runner/inner/tasks.py`.
+  **Rides with:** one chain owning areas 02, 05 and 11 at once. **Re-test:** `mirrored` is 0, and
+  pausing an outer run mid inner round makes the inner row read its cut sends as unreported.
+- **A landing that drops other accounts' run data refunds nobody** (w11-spend, 11-28). On 11-26 a
+  deploy wiped a stranger's campaign, and the operator granted their coupon again by hand. The landing's
+  run-data wipe (`store/data_root.py`) folds the dropped campaigns' charges nowhere. **Operator's
+  choice, pending:**
+  - (a) Refund and notify at the landing: release each dropped account's charges for those campaigns,
+    and post the notice through `outbound.py`.
+  - (b) Migrate their runs, which makes run data a SURVIVOR.
+
+  **Rides with:** area 05's chain, once decided. **Re-test:** a landing that drops an account's campaign
+  restores its coupon.
 - **dbllmbench's cells send on the box's key read off `settings`, not `sending_key`** (w9-payer):
   `connectors/dbllmbench.py:182,205` hand the container `settings.<KEY>`, so an account's own key never
   pays a dbllmbench cell, and `holds_own_sends=False` is what holds its payer at the box. Root: the
@@ -450,15 +466,6 @@ bill.
   is filed (one write, or a job without a share reads as zero) — **Rides with:** `area 05's chain` —
   **Re-test:** a sibling admitted on the campaign during a mint window reads a share, never raises.
   (items 68, 134)
-- **A launch refused after admission counts toward the day's campaigns** (w11-walk, 11-27):
-  `promptpotter/application/jobs/quota.py::campaigns_today` keeps a job that was admitted, so a Start
-  released refused (no campaign minted) counts its job id, against the function's own "a refused launch
-  spent nothing". Route: a signed-in account on the offline world (`serve.mjs --auth=on`), dataset
-  email-tagging, Start (refused 422 `not_on_free_tier`), then Account → Usage & limits. Expected
-  "Campaigns today 0 of 1000" (Storage: 0 campaigns); seen "1 of 1000". Root: the count reads the
-  release's refusal (`promptpotter/application/jobs/registry.py::JobRegistry`, its `refusal`) as no
-  mint. **Rides with:** `area 05's chain` — **Re-test:** after a refused Start, `GET
-  /auth/quota-status` serves `campaigns_today` 0.
 - **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
   `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
   `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with
@@ -477,6 +484,10 @@ written under the gate.
 `jobs/launcher/head_to_head.py`, `jobs/reaper.py`, `store/command_log.py`, `domain/command_kinds.py`,
 `jobs/launcher/admission.py`
 
+- **`jobs/launcher/run_job.py` no longer runs a job** (w11-runner, 11-28): the held run moved to
+  `runner/entry.py`, leaving `JobSpec`, `HeldLaunch` and `spawn_job`, so the module's name says what it
+  stopped doing. Root: rename it (e.g. `launcher/held.py`) with its doc and `CLAUDE.md` rows. **Rides
+  with:** area 06's chain. **Re-test:** no module under `jobs/` is named for a run it does not hold.
 - **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
   each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
@@ -820,7 +831,7 @@ never a copy of history.
 
 - **Head-to-head re-reads every pair's bench per GET** (w10-survey): `evidence/head_to_head.py::head_to_head`
   picks the reference by `_agree` over every pair of graded rows and re-guards each row, and `_contrasts`
-  guards every arm pair; each `_guard` reaches `runner/bench.py::pair_on_bench`, a full `read_pair`, so a
+  guards every arm pair; each `_guard` reaches `bench/line.py::pair_on_bench`, a full `read_pair`, so a
   request costs O(n²) reads (O(k²·m²) in `_contrasts`), and `_read` re-folds `standing_rounds` and the spend
   scan per campaign. Root: "the same bench set read alike" is a banked fact of two passes, served from the
   line's ledger. **Rides with:** area 11's chain, beside **The live reads re-serve history per poll**.
@@ -1238,8 +1249,9 @@ budgets.
   `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`
   (2.58 s, a CAPO campaign per case, `execute_round` / `post_round` driven by hand) and
   `tests/test_scoring.py::test_a_round_file_the_disk_refuses_is_one_warning_and_the_next_round_files_its_own`
-  (1.55 s); the cut's election, the round file's refusal and the formula re-read are decided inside
-  `promptpotter/application/runner/`, which exposes no pure function for them, and test_scoring's
+  (1.55 s); the cut's election is now `runner/round.py::panel_gate_on`, with its table, so the first
+  fact's walk is the tests chain's to delete; the round file's refusal (`scoring/closed_rounds.py`) and
+  the formula re-read expose no pure function, and test_scoring's
   hand-driven rounds (8 lines, 4681–5421 at `42bd9ca42`) are the same root. Root: each rule becomes a
   pure function in the module that decides it (`scoring/row_policy.py::send_rows` is the model), its
   facts a table, the walk left to a leg. **Rides with:** the chain owning `application/runner/` beside

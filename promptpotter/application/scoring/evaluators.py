@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import (
     EVAL_BUILTIN_NAMES,
     PIPELINE_BOUND_NAMES,
@@ -23,10 +22,8 @@ from promptpotter.domain.fitness_fold import (
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import (
-    ROW_GRADES,
     TURN_SCALAR_KEYS,
     TURN_STEP_SUFFIX,
-    GradedCell,
     JudgeReading,
     MeasuredCell,
 )
@@ -35,15 +32,6 @@ from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
-
-
-def compute_fitness(*, results: Sequence[GradedCell], **_: Any) -> float | None:
-    """``None``, never 0.0, with no scoreable row: a zero invents the worst measurement out of none."""
-    scoreable = scoreable_rows(results)
-    if not scoreable:
-        return None
-    fitness = ROW_GRADES["fitness"]
-    return sum(fitness.read(cell) for cell in scoreable) / len(scoreable)
 
 
 async def compute_retrieval_shortfall_per_sample(

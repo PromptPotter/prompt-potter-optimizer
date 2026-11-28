@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -495,8 +496,12 @@ assert list(CAP_AXIS_INFO) == list(Budget.model_fields) == list(get_args(CapAxis
 
 
 def usd_text(usd: float) -> str:
-    """THE money wording, `webapp/lib/format.ts::fmtUsd`'s: four places under a dollar, else two."""
-    return f"${usd:.4f}" if usd < 1 else f"${usd:.2f}"
+    """THE money wording, `webapp/lib/format.ts::fmtUsd`'s: three significant digits under a
+    dollar, so a cheap model's cent reads, else two places."""
+    if usd == 0 or abs(usd) >= 1:
+        return f"${usd:.2f}"
+    places = 2 - math.floor(math.log10(abs(usd)))
+    return f"${usd:.{places if abs(round(usd, places)) < 1 else 2}f}"
 
 
 def bill_text(usd: float, *, floor: bool) -> str:

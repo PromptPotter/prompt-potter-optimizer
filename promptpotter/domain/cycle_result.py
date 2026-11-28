@@ -48,7 +48,7 @@ class CycleResult(StrictModel):
     origin: OwnLevel | None
     # The individual each round ended on, never the proposals; `None` on a cycle that never started.
     level_series: LevelSeries | None
-    # The line's (`runner/bench.py::line_round_budget`), never the rounds that ran: `lives` stops a
+    # The line's (`bench/line.py::line_round_budget`), never the rounds that ran: `lives` stops a
     # cycle short. Uncapped, the rounds it spent.
     round_budget: int
     result_prompt_fields: dict[str, dict[str, str]]

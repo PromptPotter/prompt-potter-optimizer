@@ -69,7 +69,9 @@ from promptpotter.domain.spend import (
     usd_text,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.spend_book import SpendBook
+from promptpotter.infrastructure.holders import claim_on
+from promptpotter.infrastructure.llm.money_fold import money_on
+from promptpotter.infrastructure.llm.spend_book import SpendMeter
 from promptpotter.infrastructure.projections.live_dashboard import (
     ActiveNode,
     DashboardFacts,
@@ -83,7 +85,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.command_log import HeldLookahead, effective_lookahead
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import LedgerSpan, money_on, read_line
+from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words, epoch_seconds
 from promptpotter.shared.hashing import stable_hash
@@ -689,7 +691,7 @@ def armed_caps(
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
     started = None if job is None else epoch_seconds(job.started_at)
-    cycle, count = spend_counts(stores, hop, meter, hold_id=None if job is None else job.job_id)
+    cycle, count = spend_counts(stores, hop, meter)
     caps = _caps(
         limits,
         meter,
@@ -704,20 +706,16 @@ def armed_caps(
 
 
 def spend_counts(
-    stores: Stores, hop: CycleHop, meter: CeilingMeter, *, hold_id: str | None
+    stores: Stores, hop: CycleHop, meter: CeilingMeter
 ) -> tuple[SpendCount, SpendCount]:
-    """This cycle's book, its live run's job holding *hold_id*, and the count the caps bind on:
-    the campaign's bills (a deleted cycle's banked) and every cycle's book's other parts."""
+    """This cycle's count, under the job holding it, and the count the caps bind on: the
+    campaign's bills (a deleted cycle's banked) and every cycle's count's other parts."""
     books = {
-        cycle: SpendBook(
-            declared=Budget(),
-            share=Budget(),
+        cycle: SpendMeter(
             charges=stores.charges,
-            hold_id=(hold_id if cycle == hop else _job_holding(stores, cycle)) or "",
-            headroom=Budget(),
+            hold_id=claim_on(stores.campaigns.ledger(cycle)) or "",
             metered_on=stores.campaigns.ledger(cycle),
             meters=meter,
-            opened=0.0,
         ).count()
         for cycle in {hop, *stores.campaigns.campaign_cycle_hops(hop.campaign_id)}
     }
@@ -726,11 +724,6 @@ def spend_counts(
     return books[hop], SpendCount(
         billed=billed, unreported=parts.unreported, set_aside=parts.set_aside, out=parts.out
     )
-
-
-def _job_holding(stores: Stores, hop: CycleHop) -> str | None:
-    held = stores.campaigns.holder(hop)
-    return None if held is None or held.run is None else held.run.job_id
 
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:

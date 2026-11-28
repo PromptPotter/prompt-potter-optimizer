@@ -19,7 +19,7 @@ from promptpotter.application.intelligence.rasch import (
     responses_binary,
     responses_of,
 )
-from promptpotter.application.optimizer_contract import Race, RoundSamples
+from promptpotter.application.optimizer_contract import RoundSamples
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
@@ -27,7 +27,13 @@ from promptpotter.application.optimizers.potter.pobb import (
     PoBBStop,
     field_p_best,
 )
-from promptpotter.application.scoring.race_protocol import Decision, Trigger, View, WalkView
+from promptpotter.application.scoring.race_protocol import (
+    Decision,
+    Race,
+    Trigger,
+    View,
+    WalkView,
+)
 from promptpotter.application.scoring.row_policy import RowGround, send_rows
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
@@ -90,7 +96,7 @@ def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
 
 class PoBBRace(Race):
     """A block race cut on the family-wise p_best (`PoBBCheck.check`) at each checkpoint the arms share;
-    its top-up onto the origin panel is one more stretch of it (`runner/round.py::measure_population`)."""
+    its top-up onto the origin panel is one more stretch of it (`runner/measure.py::measure_population`)."""
 
     def __init__(self, ctx: NodeContext, panel: RoundSamples) -> None:
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.

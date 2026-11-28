@@ -17,6 +17,7 @@ import random
 import re
 import shutil
 import sys
+import threading
 import time
 import zipfile
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
@@ -74,6 +75,7 @@ from promptpotter.application.bench.children import (
     overlay_failures,
 )
 from promptpotter.application.bench.cycle import RoundContext
+from promptpotter.application.bench.line import cycle_bench
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
@@ -141,6 +143,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     OriginIncompleteError,
     commit_upload_definition,
 )
+from promptpotter.application.jobs.launcher.opening import claim_cycle
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
@@ -217,8 +220,7 @@ from promptpotter.application.run_observers import (
     declare_run_stop,
     declare_run_wiring,
 )
-from promptpotter.application.runner.bench import cycle_bench
-from promptpotter.application.runner.entry import run_optimization
+from promptpotter.application.runner.entry import completing, run_optimization
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.spawn import (
     CONNECTOR,
@@ -3549,9 +3551,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     )
     # A pause filed between the stop's declaration and the drain dies at the release (B16): only a
     # producer that stops on a pause takes it, so none reads "answered" on a run that never paused.
-    declare_run_stop(
-        opened, observers, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT
-    )
+    declare_run_stop(opened, observers, StopReason.ROUNDS_BUDGET)
     late = launch.pause("late")
     # The drain, then the run's `finally`: draining alone keeps the cycle held.
     observers.drain_all()
@@ -3718,6 +3718,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     observers = enter_cycle(opened)
     with scoped(account=stores):
         book = spend_book(1.0, metered_on=ledger.path)
+    claim_cycle(stores, opened.hop, book.hold_id)
     bound = Budget(usd=0.25, tokens=0)
     for cell, parent, on in (
         ("lapsed-cell", book.hold_id, ledger.path),
@@ -3737,7 +3738,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
         )
     book.set_aside(0.125, 0, paid_by="host")
     with scoped(book=book):
-        declare_run_stop(opened, observers, StopReason.PAUSED, interrupted_by=PauseCause.INTERRUPT)
+        declare_run_stop(opened, observers, StopReason.PAUSED, cause=PauseCause.INTERRUPT)
     observers.drain_all()
     observers.release()
     stop = stores.campaigns.last(opened.hop, RunPhaseRecord)
@@ -3761,6 +3762,26 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     assert usd_text(counted.counted.usd_amount) in cycle_line, (
         f"the stop record's cycle line set the bills alone against its share: {cycle_line}"
     )
+
+
+def test_a_cancel_during_a_rebase_cut_waits_the_cut_out_and_stays_owed() -> None:
+    # The cut mints off the loop: a cancel that let it run on would mint a child no stop names.
+    async def cancelled_mid_cut() -> tuple[str, asyncio.CancelledError | None]:
+        cutting = threading.Event()
+
+        def cut() -> str:
+            cutting.wait()
+            return "child"
+
+        task = asyncio.ensure_future(completing(asyncio.to_thread(cut)))
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        cutting.set()
+        return await task
+
+    child, owed = asyncio.run(cancelled_mid_cut())
+    assert child == "child" and isinstance(owed, asyncio.CancelledError)
 
 
 def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
@@ -3789,7 +3810,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
 
     first, r0 = launch()
     late = pause("late")
-    declare_run_stop(opened, r0, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT)
+    declare_run_stop(opened, r0, StopReason.ROUNDS_BUDGET)
     r0.drain_all()
     r0.release()
     _, r1 = launch()

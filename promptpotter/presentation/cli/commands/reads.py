@@ -211,7 +211,7 @@ def _human(price: HeadToHeadPrice) -> str:
     timed = "untimed" if cell.seconds is None else f"{cell.seconds:.1f}s"
     head = (
         f"bank {price.dataset_hash[:12]} · {price.search_rows} search rows, {price.bench_rows} "
-        f"held out · a cell ${cell.usd:.5f} and {timed}, over the archive's {cell.cells} newest "
+        f"held out · a cell {usd_text(cell.usd)} and {timed}, over the archive's {cell.cells} newest "
         f"rows · {price.cells_in_flight} cells in flight"
     )
     optimizers = [

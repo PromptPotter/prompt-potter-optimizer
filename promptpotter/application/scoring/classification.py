@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.domain.arms import degradation_reading
@@ -21,11 +21,6 @@ def terminal_ranking(pipeline_data: Mapping[str, Any], schema: PipelineSchema | 
         if node.emits_ranking and (ranking := node.ranking_in(pipeline_data)) is not None:
             return ranking
     return []
-
-
-def scoreable_rows(results: Iterable[GradedCell]) -> list[GradedCell]:
-    """A DEPRECATED row stays: dropping a refusal pays the prompt fitness for the cells it could not answer."""
-    return [cell for cell in results if cell.scored]
 
 
 class DegradationCheck:

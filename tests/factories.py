@@ -18,6 +18,7 @@ from offline_run import ByCallIdentity, cited_panel, text_templates
 from offline_world import FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle, RoundContext
+from promptpotter.application.bench.line import BenchLine
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
@@ -42,7 +43,6 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
-from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.entry import launch_scope, open_line
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import cell_optimizer

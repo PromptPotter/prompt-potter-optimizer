@@ -42,6 +42,7 @@ from promptpotter.application.bench.difficulty import (
     ruler_clock,
     session_ruler_scope,
 )
+from promptpotter.application.bench.line import LineSpan, own_level
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
@@ -56,7 +57,6 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graduate_ruler_model,
 )
-from promptpotter.application.runner.bench import LineSpan, own_level
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.fitness_fold import compute_composite_fitness
@@ -766,7 +766,7 @@ def test_an_inner_cells_theta_lift_is_its_parent_levels_mean_over_the_round_budg
 
 
 def test_an_inner_cell_scores_its_held_out_curve_and_excludes_what_it_cannot_read() -> None:
-    # The scored term is the held-out curve's area (`runner/bench.py::read_curve`): churn on the
+    # The scored term is the held-out curve's area (`bench/line.py::read_curve`): churn on the
     # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
     churn = (

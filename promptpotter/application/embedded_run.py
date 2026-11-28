@@ -23,6 +23,7 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.maintenance import landing
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
+from promptpotter.application.runner.entry import run_held
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
@@ -141,7 +142,7 @@ async def run_campaign(
     launched = (await dispatcher.dispatch(CommandCall(payload, door=Door.HOST))).result
     assert isinstance(launched, Launched) and launched.held is not None, "a hosted launch is held"
     held = await launched.held
-    return await held.run(readout_sink=readout_sink)
+    return await run_held(held, readout_sink=readout_sink)
 
 
 async def run_head_to_head(
@@ -162,7 +163,7 @@ async def run_head_to_head(
     stores = await enter(stores)
 
     async def _run(arm: HeldArm) -> tuple[str, Session, CycleResult]:
-        ended, result = await arm.held.run(readout_sink=readout_sink)
+        ended, result = await run_held(arm.held, readout_sink=readout_sink)
         return arm.arm_key, ended, result
 
     payload = MintHeadToHeadPayload(

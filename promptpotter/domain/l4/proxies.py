@@ -248,7 +248,7 @@ def abort_owner(rounds: Sequence[RoundResult]) -> AbortOwner:
 
 def floor_reason(result: CycleResult, rounds: Sequence[RoundResult]) -> str | None:
     """Optimizer-prompt-OWNED, so FLOORED rather than excluded: it is reproducible, hence evidence.
-    *rounds* are the rounds its line spent (`runner/bench.py::LineSpan.own`)."""
+    *rounds* are the rounds its line spent (`bench/line.py::LineSpan.own`)."""
     if result.stop_reason is StopReason.OPTIMIZER_ABORT:
         if abort_owner(rounds) is AbortOwner.UPSTREAM:
             return None
