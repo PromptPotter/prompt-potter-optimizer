@@ -17,6 +17,8 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
     DEGENERATE_TRACE_CAP,
+    GROUND_TRUTH_CAP,
+    JUDGE_REASON_CAP,
     LOOP_NOVELTY,
     LOST_CELL_MIN,
     MEMORY_FIELD_CAP,
@@ -31,9 +33,11 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     MISS_TIED_CAP,
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
+    SAMPLE_QUERY_CAP,
     SAMPLE_RENDER_CAP,
     TRANSCRIPT_PREDICTED_CAP,
     TRANSCRIPT_QUERY_CAP,
+    WIDE_REBUT,
     InjectionKind,
     Item,
     signal,
@@ -42,7 +46,7 @@ from promptpotter.application.optimizers.potter.dispatch.facade import PotterVie
 from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.domain.arms import Concluded, Cut, Measured
+from promptpotter.domain.arms import Concluded, Cut, Measured, arm_end
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -97,7 +101,7 @@ def _r_escalation_panel(b: PotterView) -> list[Item]:
         "an empty citation is rejected",
         ExplorationBudget.NORMAL: "stalling — an empty citation is permitted",
         ExplorationBudget.WIDE: "explore freely, an empty citation permitted — a PEAKED axis "
-        "may be mutated with an exploration_budget=wide rebut",
+        f"may be mutated with an {WIDE_REBUT} rebut",
     }[ExplorationBudget(budget)]
     return [
         Item(
@@ -177,8 +181,8 @@ def _r_diagnostics(b: PotterView) -> list[Item]:
                 extras.append(f"gt_in_ranked={s.gt_in_ranked}")
             extra_str = f" | {', '.join(extras)}" if extras else ""
             s_lines.append(
-                f"  MISS [{s.terminal_node}] {s.query[:70]} → {s.predicted}"
-                f" (GT: {s.ground_truth[:60]}, {rank_str}{extra_str})"
+                f"  MISS [{s.terminal_node}] {s.query[:SAMPLE_QUERY_CAP]} → {s.predicted}"
+                f" (GT: {s.ground_truth[:GROUND_TRUTH_CAP]}, {rank_str}{extra_str})"
             )
         parts.append("\n".join(s_lines))
 
@@ -466,7 +470,7 @@ def _r_sample_transcripts(b: PotterView) -> list[Item]:
         else:
             scored, reply = _answer_read(r, TRANSCRIPT_PREDICTED_CAP)
             lines = [] if scored is None else [f"SCORED: {scored}"]
-            lines.append(f"GROUND TRUTH: {r.facts.ground_truth[:60]}")
+            lines.append(f"GROUND TRUTH: {r.facts.ground_truth[:GROUND_TRUTH_CAP]}")
             if reply is not None:
                 lines.append(f"REPLY ENDS: {reply}")
             parts.append("\n".join(lines))
@@ -492,7 +496,7 @@ def _judge_verdict(cell: GradedCell) -> str:
     if not readings:
         return ""
     name, label, why = readings[0]
-    return f"JUDGE ({name}): {label} — {why[:200]}"
+    return f"JUDGE ({name}): {label} — {why[:JUDGE_REASON_CAP]}"
 
 
 def clustered_sample_ids(b: PotterView) -> list[int]:
@@ -892,7 +896,7 @@ def _r_mutation_memory(b: PotterView) -> list[Item]:
         elif whole is not None:
             # Inside the noise says nothing of the idea, so no cell it gained or lost is shown.
             row = f"{edit.candidate.label} inside the noise · {_mutation_text(edit)}"
-        elif isinstance(edit.candidate, Cut) and edit.candidate.kind == "eliminated":
+        elif arm_end(edit.candidate) == "eliminated":
             row = f"{edit.candidate.label} eliminated short of its set · {_mutation_text(edit)}"
         elif isinstance(edit.candidate, Measured):
             row = f"{edit.candidate.label} unread against its parent · {_mutation_text(edit)}"

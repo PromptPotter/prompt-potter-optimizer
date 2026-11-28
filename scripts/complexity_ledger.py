@@ -214,7 +214,7 @@ BASELINE = {
     # 8 (+11): `host_surface.py::ListTools`, the MCP listing as its session's identity files it.
     # 9 (+13): `filable`'s docstring names what stands outside the map; `holding` -> `worded_refusal`
     # wraps `RUN_PHASE_INFO`'s detached row (+6); the launch test reads `RUN_VERB_KIND`.
-    # vote (+98): `theta_election.vote`, the bar's paired cells chosen once (`election.py::seated`)
+    # vote (+98): `paired_election.vote`, the bar's paired cells chosen once (`election.py::seated`)
     # and banked on `RoundWinner`; `origin_panel_cells`, the panel's own size, refused past the origin.
     # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
     # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
@@ -406,7 +406,9 @@ BASELINE = {
     # landing key's import walk and the hub's definition writer going (−45).
     # w11-config2 (+80): an unreachable source refuses typed, a refused finding is served with its
     # reason, a second pick reopens its check-in, and a chain's modes fold to one name.
-    "package_lines": 114252,
+    # w11-optim2 (+41): the backbone crowns and races (`optimizer_contract.py::RankingSelector`,
+    # `race_protocol.py::BlockRace`, +120) where each peer spelled its own (capo, gepa, levi -56).
+    "package_lines": 114293,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -420,13 +422,15 @@ BASELINE = {
     # the one bound on a proposal's length, replacing a 3,200-char cap and a 35% rewrite floor.
     # l4-outer-6 (+4): `discretionary_chars` on the four layout nodes, the panel share a family
     # sizes, replacing a `NODE_LAYOUTS` constant per node.
-    # vote (+2): `theta_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
+    # vote (+2): `paired_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
     # ml-2 (+2): `pobb.row_choice` and `pobb.refit`, the measuring loop's row-choice switches.
     # ml-4 (+1): `pobb.shape`, whether a block's rows are shared or each walk's own.
     # ml-5 (+2): `pobb.dispatch` and `pobb.read_order`, when the race decides and in what order.
-    # crown (+2): `theta_election.crown` and `next_parent` and `not_separated_stall` join, the
+    # crown (+2): `paired_election.crown` and `next_parent` and `not_separated_stall` join, the
     # paper's ablations of what a round crowns, ends on and counts; the bench's `crowning_bar` goes.
-    "config_leaf_fields": 107,
+    # w11-optim2 (106, under the 107 a cut left): `levi_refine.failure_below` and
+    # `map_elites.lloyd_iterations`, the reference's constants made node config.
+    "config_leaf_fields": 106,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     # w10-seal (+1): `BOX_KEY_FILE`, the box key's path off the data root (the unit's credential).

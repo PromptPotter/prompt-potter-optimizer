@@ -182,9 +182,9 @@ class PoBBKnobs(RowKnobs):
         lt=0.5,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Smaller → fewer stops. A stop ends "
-        "measurement; under ``theta_election.vote: overlap`` it ends the arm's election too, "
+        "measurement; under ``paired_election.vote: overlap`` it ends the arm's election too, "
         "since the panel that vote pairs on is read only for an arm walked to its draw's end. "
-        "What is crowned is ``theta_election.crown``'s.",
+        "What is crowned is ``paired_election.crown``'s.",
     )
     epsilon_floor: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,

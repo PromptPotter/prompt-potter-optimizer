@@ -79,7 +79,8 @@ class ValidationFailure(FrozenModel):
             "The parameter path that failed, ``{node_name}.{param}`` "
             "(e.g. ``llm_only.model``), or an axis on the generator's own "
             "output rather than a pipeline param: ``l1_generate.output`` "
-            "(parse/shape failures) or ``variant`` (no-op / duplicate mutations)."
+            "(parse/shape failures) or ``variant`` (a whole-candidate verdict: a no-op, "
+            "duplicate or repeat mutation)."
         ),
     )
     value: str = Field(

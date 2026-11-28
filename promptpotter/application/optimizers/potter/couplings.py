@@ -6,31 +6,6 @@ from promptpotter.application.optimizer_contract import MemberCoupling
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationKnobs
 from promptpotter.domain.campaign_config import Estimand
 
-ADAPTIVE_QUEUE = (
-    MemberCoupling(
-        name="resubset_subset_relative_on_thin_bank",
-        knobs=("per_round_resubset",),
-        bench_knobs=("optimization.elimination_n_min",),
-        estimand=Estimand.SELECTION,
-        relation=(
-            "per_round_resubset=ON re-draws the scored subset per round. Every "
-            "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
-            "c0_ok and PoBB elimination all via "
-            "fit_theta on cycle.difficulty — and that ruler is EXTENDED to cover each "
-            "round's new cells, so the fitness-space collision is resolved."
-        ),
-        consequence=(
-            "Resubset is comparability-coherent in θ, with ONE residual, WARMTH: below "
-            "elimination_n_min banked samples the ruler stays flat and θ is logit-fitness "
-            "on each arm's OWN subset, so those rounds are subset-relative until it warms. "
-            "A cell missing from a WARM ruler is not that residual — it raises."
-        ),
-        severity="info",
-        predicate=lambda _c, k, _d, _s: bool(k.per_round_resubset),
-    ),
-)
-
-
 POBB = (
     MemberCoupling(
         name="epsilon_floor_inverted",
@@ -73,7 +48,7 @@ POBB = (
         relation=(
             "row_choice=informative takes each block's rows by expected information, which reverses "
             "the round order's stratified interleave (verdict-resolution.md); the election then "
-            "pairs an arm with its parent on the origin panel alone, theta_election.vote=overlap."
+            "pairs an arm with its parent on the origin panel alone, paired_election.vote=overlap."
         ),
         consequence=(
             "The selector votes on the rows the race chose, which are no longer a blind draw, so "

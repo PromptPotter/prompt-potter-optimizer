@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import NamedTuple, cast
+from typing import NamedTuple, assert_never, cast
 
 from promptpotter.application.bench.node_context import Bounds, Lineage, NodeContext, Replay
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
@@ -11,7 +11,7 @@ from promptpotter.application.scoring.paired import RoundPairs
 from promptpotter.application.scoring.selection import crowned, ranked_first
 from promptpotter.domain.arms import ArmState, Concluded, arm_name
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, NextParent, Vote
-from promptpotter.domain.origin_panel import RoundEnding, panel_trigger
+from promptpotter.domain.origin_panel import Decided, RoundEnding, panel_trigger
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -61,7 +61,10 @@ def _verdict_reason(
                 f"no arm cleared the parent; the line moves on to {labels[leading]}, uncrowned, "
                 f"on {said}; {census}"
             )
-    return f"no arm cleared the parent: best {labels[leading]} {said}; {census}"
+        case RoundEnding.HELD:
+            return f"no arm cleared the parent: best {labels[leading]} {said}; {census}"
+        case _:
+            assert_never(ending)
 
 
 def seated(
@@ -81,7 +84,7 @@ class RoundDecision(NamedTuple):
     """The arm a round's election reads off and how the round ends on it."""
 
     leading: ArmKey | None
-    ending: RoundEnding
+    ending: Decided
 
 
 class RoundWinner(Replayed, kind="round_winner"):

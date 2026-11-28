@@ -95,7 +95,7 @@ flowchart LR
   L1S --> ROWS
   L1S --> HEALTH
   L1S --> L1W
-  L1S -->|theta_election| RP
+  L1S -->|paired_election| RP
 
   %% floors
   FRAME --> L1G
@@ -256,7 +256,7 @@ The `ladder` slice (`records.py::Ladder`) is a frozen value replaced whole and b
 
 L2's injection set is `NODE_LAYOUTS["l2_context"].floor`; no L2-only surface object exists. A refused edit fires L3 at once, so by L2's next fire it reads the new `plan`. The wire model is `dispatch/schemas.py::L2ContextOutput`; every field is optional at the PARSE boundary — a missing one leaves its state untouched. The LEVERS: `l1_layout`, `l1_overrides` and, under `recombination_host: l2_context` (`L2RecombiningOutput`, closed on the `l2_recombination_pool` ids), `recombinations`; a fire touching none is scored by `l2_targets_l1_surface`. The REASON — `axis_targeted` + `rationale` — rides every fire (`l2_rationale_substantive`, `l2_evidence_anchored`); an absent rationale is REPORTED, never replaced by a stand-in. `terminate_proposal` is the HITL exit: the cycle halts (`StopReason.OPTIMIZER_ABORT`). Both control outputs are gated by their capability bit — [`potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § The layer-control channel. Two fields the schema deliberately lacks: `task_context` (frozen) and `action` (probe rounds are not wired — [`../specs/roadmap.md`](../specs/roadmap.md) § Probe rounds).
 
-`axis_targeted` is the evidence anchor, NOT a steering surface (L1 reads its axes from `axis_memory`). `l1_layout` is **a per-slot EDIT, not a replacement** — it moves the listed panels and keeps the rest (`coerce_l1_layout`, the same rule L4's `layout` param takes), addressing only the slots `NodeLayoutSpec.slots` opens (for `l1_generate` the volatile slot alone); `l1_overrides` are numeric, laid key by key over the standing steer.
+`axis_targeted` is the evidence anchor, NOT a steering surface (L1 reads its axes from `axis_memory`). `l1_layout` is **a per-slot EDIT, not a replacement** — it moves the listed panels and keeps the rest (`dispatch/layout.py::edit_layout`, the one door L4's `layout` param takes too), addressing only the slots `NodeLayoutSpec.slots` opens (for `l1_generate` the volatile slot alone); `l1_overrides` are numeric, laid key by key over the standing steer.
 
 ### How L2 steers L1
 

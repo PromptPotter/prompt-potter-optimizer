@@ -241,6 +241,11 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
     return out
 
 
+def _collapse(reason: ValidationReason, value: str, allowed: list[str]) -> ValidationFailure:
+    """A whole-candidate verdict: booked under `variant`, the one axis no param path names."""
+    return ValidationFailure(axis="variant", value=value, allowed=allowed, reason=reason)
+
+
 def detect_invariants(
     proposals: list[Proposal],
     parent_opt_sp: OptSearchPoint,
@@ -266,22 +271,16 @@ def detect_invariants(
         delta = candidate_delta(child_fields, parent_fields, cp.overlay, parent_pp)
         if not delta:
             failures[i].append(
-                ValidationFailure(
-                    axis="variant",
-                    value="(no mutation)",
-                    allowed=["non-empty mutation"],
-                    reason=ValidationReason.NO_OP_VARIANT,
-                )
+                _collapse(ValidationReason.NO_OP_VARIANT, "(no mutation)", ["non-empty mutation"])
             )
             continue
         sig = delta.signature()
         if sig in seen:
             failures[i].append(
-                ValidationFailure(
-                    axis="variant",
-                    value=f"duplicate of C{seen[sig] + 1}",
-                    allowed=["unique mutation"],
-                    reason=ValidationReason.DUPLICATE_VARIANT,
+                _collapse(
+                    ValidationReason.DUPLICATE_VARIANT,
+                    f"duplicate of C{seen[sig] + 1}",
+                    ["unique mutation"],
                 )
             )
             continue
@@ -300,11 +299,10 @@ def detect_invariants(
     if len(repeats) < n_live:
         for i, echo in repeats:
             failures[i].append(
-                ValidationFailure(
-                    axis="variant",
-                    value=f"re-proposes the idea measured and lost in round {echo}",
-                    allowed=["an idea this cycle has not already lost with"],
-                    reason=ValidationReason.REPEAT_VARIANT,
+                _collapse(
+                    ValidationReason.REPEAT_VARIANT,
+                    f"re-proposes the idea measured and lost in round {echo}",
+                    ["an idea this cycle has not already lost with"],
                 )
             )
     return [

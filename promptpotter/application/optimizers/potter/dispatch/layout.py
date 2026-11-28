@@ -248,21 +248,14 @@ def unplaceable_edit(raw_layout: object, spec: NodeLayoutSpec) -> ValidatorOutco
     )
 
 
-def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
-    """``None`` is "no edit asked". An unknown PANEL is placed, not dropped, so ``l1_layout_unknown_placeholder`` rolls the edit back."""
-    if not raw_layout:
-        return None
-    moves: dict[str, str] = {
-        panel: region for region, panels in dict(raw_layout).items() for panel in panels
-    }
+def _laid(raw_layout: Mapping[str, list[str]], base: L1Layout) -> L1Layout:
+    """An unknown PANEL is placed, not dropped, so ``l1_layout_unknown_placeholder`` rolls the edit back."""
+    moves = {panel: region for region, panels in raw_layout.items() for panel in panels}
     update: dict[str, list[str]] = {}
     for region in L1_LAYOUT_REGIONS:
         kept = [n for n in base.region(region) if moves.get(n, region) == region]
         update[region] = kept + [n for n, s in moves.items() if s == region and n not in kept]
-    out = base.model_copy(update=update, deep=True)
-    placed = out.all_placeholders()
-    assert len(placed) == len(set(placed)), f"a layout edit placed one panel twice: {placed}"
-    return out
+    return base.model_copy(update=update, deep=True)
 
 
 class LayoutValidationResult:
@@ -338,15 +331,24 @@ def resolve_layout_override(
 ) -> tuple[L1Layout, list[ValidatorOutcome]]:
     """ONE derivation for both boundaries (`validators.py` at proposal, this module at render), so they cannot disagree."""
     spec = NODE_LAYOUTS[node]
-    if breach := unplaceable_edit(raw_layout, spec):
-        return spec.floor, [breach]
-    merged = coerce_l1_layout(raw_layout, base=spec.floor)
-    if merged is None:
-        return spec.floor, []
-    result = validate_l1_layout(merged, spec=spec)
+    merged, result = edit_layout(raw_layout, spec, base=spec.floor)
     if not result.is_valid:
         return spec.floor, list(result.outcomes)
-    return merged, []
+    return spec.floor if merged is None else merged, []
+
+
+def edit_layout(
+    raw_layout: Any, spec: NodeLayoutSpec, *, base: L1Layout, prior: L1Layout | None = None
+) -> tuple[L1Layout | None, LayoutValidationResult]:
+    """The one door of a layout edit: *raw_layout* refused (`unplaceable_edit`), else laid on
+    *base* as a per-slot edit and judged. The layout is ``None`` where none was asked or it fails."""
+    if breach := unplaceable_edit(raw_layout, spec):
+        return None, LayoutValidationResult(False, [breach])
+    if not raw_layout:
+        return None, LayoutValidationResult(True, [])
+    layout = _laid(raw_layout, base)
+    result = validate_l1_layout(layout, spec=spec, prior_layout=prior)
+    return layout if result.is_valid else None, result
 
 
 def resolve_node_layout(node: str, levers: Mapping[str, Any]) -> L1Layout:

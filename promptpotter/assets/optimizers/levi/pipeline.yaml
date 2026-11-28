@@ -53,6 +53,8 @@ nodes:
       # NOT the paper's: it passes per-instance failure traces without a count (App. E.6); 3 is
       # GEPA's reflection minibatch (arXiv 2507.19457), whose suite its prompt runs use (§4.2).
       feedback_failures: 3
+      # NOT the paper's: it names a failed instance; a cell short of full fitness is one.
+      failure_below: 1.0
   # The paradigm-shift route (§3.2, App. F): one call per period; max_tokens 4,096 (App. F). NOT
   # the paper's: the model — its Gemini 3 Flash (App. A) costs over 20x `optimization.call_target`.
   levi_paradigm_shift:
@@ -104,6 +106,8 @@ nodes:
       centroids: 50
       cvt_samples: 5000
       descriptors: [target_prompt_chars, cell_objectives]
+      # NOT the paper's: the most Lloyd steps a k-means takes, which it does not state.
+      lloyd_iterations: 100
 pipelines:
   default:
     - proxy_css
@@ -130,7 +134,7 @@ resolved_prompts:
       {{parent_prompt}}
       --- PROMPT END ---
 
-      {{feedback_section}}{{inspirations_section}}{{meta_advice_section}}## Task
+      {{feedback_section}}{{inspirations_section}}## Task
       Rewrite the prompt to score higher on the evaluation.
 
       Treat the failures above as the only window you'll get into the task -- anything they reveal about the inputs, desired outputs, failure modes, or strategies that worked must end up encoded in the new prompt itself, because the assistant won't see this feedback at evaluation time.

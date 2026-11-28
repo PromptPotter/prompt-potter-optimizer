@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Annotated, ClassVar
+from typing import Annotated, Any, ClassVar
 
 from pydantic import Field
 
@@ -26,22 +26,21 @@ from promptpotter.application.optimizer_contract import (
     MeasuredRound,
     PromptArity,
     Proposals,
+    Ranking,
     RewriteKnobs,
     RoundSamples,
-    Selection,
 )
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.descriptors import cell_objectives
+from promptpotter.application.optimizers.descriptors import cell_objectives, mean_on, shared_cells
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import child, shown
-from promptpotter.application.scoring.race_protocol import Decision, Race, View, next_block
+from promptpotter.application.scoring.race_protocol import BlockRace, View
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import Cut, Elimination, Measured
+from promptpotter.domain.arms import Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
-from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.records.decision import DecisionInputs
@@ -254,17 +253,13 @@ def minibatch_improves(
     bar: Mapping[str, float], child: Mapping[str, float]
 ) -> tuple[bool, float | None, float | None]:
     """Alg. 1 lines 13-14, over the cells BOTH graded: accepted only on a strict gain, and no shared cell shows none."""
-    shared = [key for key in bar if key in child]
-    if not shared:
+    if not (shared := shared_cells(bar, child)):
         return False, None, None
-    sigma = sum(bar[key] for key in shared) / len(shared)
-    sigma_prime = sum(child[key] for key in shared) / len(shared)
+    sigma, sigma_prime = mean_on(bar, shared), mean_on(child, shared)
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class _GateRace(Race):
-    gate = "not_improved"
-
+class _GateRace(BlockRace):
     def __init__(
         self,
         ctx: NodeContext,
@@ -273,28 +268,21 @@ class _GateRace(Race):
         block_size: int,
         n_cells: int,
     ) -> None:
+        super().__init__(ctx.node, block_size=block_size, n_cells=n_cells)
         self._replay = ctx.read(Replay)
-        self.node = ctx.node
         self._bars = bars.bars
-        self._block_size = block_size
-        self._n_cells = n_cells
-        self._tested: set[ArmKey] = set()
 
     @property
     def n_priors(self) -> int:
         return 1
 
-    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
-        stops = {} if view.opening else self._cut(view)
-        return next_block(view, stops, self._block_size)
-
-    def _cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
+    def cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
         stops: dict[ArmKey, StopSignal] = {}
         for cid, walk in view.walks.items():
             arm_rows = walk.taken
-            if cid in self._tested:
+            # Tested once, on its minibatch: a walk past it passed.
+            if len(arm_rows) > self.block_size:
                 continue
-            self._tested.add(cid)
             if (held := self._bars.get(cid)) is None:
                 raise KeyError(
                     f"{self.node} tests arm {cid[:8]}, for which no proposer this round banked a "
@@ -314,25 +302,23 @@ class _GateRace(Race):
                 accepted,
             )
             if not accepted:
-                stops[cid] = StopSignal(
-                    self.node,
+                stops[cid] = self.signal(
                     "eliminated",
-                    {
-                        "gate": self.gate,
-                        "queries_scored": len(arm_rows),
-                        "total_samples": self._n_cells,
-                        "parent_id": parent_id,
-                        "sigma": sigma,
-                        "sigma_prime": sigma_prime,
-                    },
+                    "not_improved",
+                    len(arm_rows),
+                    parent_id=parent_id,
+                    sigma=sigma,
+                    sigma_prime=sigma_prime,
                 )
         return stops
 
-    def judge(
-        self, signal: StopSignal | None, _key: ArmKey, _labels: Mapping[ArmKey, str]
-    ) -> Elimination | None:
-        if signal is None or signal.check_name != self.node:
-            return None
+    def ruling(
+        self,
+        signal: StopSignal,
+        context: dict[str, Any],
+        _key: ArmKey,
+        _labels: Mapping[ArmKey, str],
+    ) -> Elimination:
         cr = signal.check_result
         mean, bar = cr["sigma_prime"], cr["sigma"]
         reading = f"{mean:.3f} ≤ parent's {bar:.3f}" if mean is not None else "no shared cell"
@@ -341,9 +327,7 @@ class _GateRace(Race):
                 f"no gain on the minibatch q{cr['queries_scored']}/{cr['total_samples']}  {reading}"
             ),
             context={
-                "gate": cr["gate"],
-                "queries_scored": cr["queries_scored"],
-                "total_queries": cr["total_samples"],
+                **context,
                 "n_priors": 1,
                 "parent": cr["parent_id"],
                 "sigma": cr["sigma"],
@@ -369,10 +353,6 @@ class MinibatchGate(optimizer_contract.Eliminator):
         )
 
 
-def _aggregate(scores: Mapping[str, float]) -> float:
-    return sum(scores.values()) / len(scores)
-
-
 def pareto_frequencies(
     candidates: Mapping[str, Mapping[str, float]], pareto_set: Sequence[str]
 ) -> dict[str, int]:
@@ -383,7 +363,7 @@ def pareto_frequencies(
         if scored:
             top = max(scored.values())
             cell_tops.append({cid for cid, score in scored.items() if score == top})
-    aggregate = {cid: _aggregate(scores) for cid, scores in candidates.items()}
+    aggregate = {cid: mean_on(scores) for cid, scores in candidates.items()}
     leading = [cid for cid in candidates if any(cid in tops for tops in cell_tops)]
     ranked = sorted(leading, key=lambda cid: aggregate[cid])
     dominated: set[str] = set()
@@ -409,16 +389,14 @@ def draw_parent(
     return rng.choices(ids, weights=[frequency[cid] for cid in ids])[0]
 
 
-class Pareto(optimizer_contract.Selector):
+class Pareto(optimizer_contract.RankingSelector):
     name: ClassVar[str] = "pareto"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_partial: ClassVar[bool] = False
-
-    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
-        return "composite"
+    elects_on: ClassVar[DisplayMetric] = "composite"
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -428,7 +406,7 @@ class Pareto(optimizer_contract.Selector):
             return []
         arms = round_result.proposed.values()
         accepted = sum(1 for arm in arms if isinstance(arm, Measured))
-        rejected = sum(1 for arm in arms if isinstance(arm, Cut) and arm.kind == "eliminated")
+        rejected = optimizer_contract.eliminated_arms(round_result)
         leading = len(pareto_frequencies(scores, banked.slice(ParetoSet).keys))
         return [
             OptimizerFact(
@@ -458,7 +436,7 @@ class Pareto(optimizer_contract.Selector):
     def parent_read(self, panel: optimizer_contract.DrawSize) -> int:
         return panel.cells - panel.block_size
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+    def rank(self, ctx: NodeContext, measured: MeasuredRound) -> Ranking:
         pareto_set = ctx.slice(ParetoSet).keys
         candidates = dict(ctx.slice(ParetoScores).scores)
         lineage, replay = ctx.read(Lineage), ctx.read(Replay)
@@ -482,34 +460,24 @@ class Pareto(optimizer_contract.Selector):
             candidates[ind.id] = {key: graded[key] for key in pareto_set}
         if not candidates:
             ctx.put(ParetoScores())
-            return optimizer_contract.Selection(
-                leading=None,
-                ending=RoundEnding.HELD,
-                electable=len(measured.electable),
+            return Ranking(
+                standing={},
+                arms={},
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; none "
                 "is admitted",
                 ranked=kept,
             )
-        aggregates = {cid: _aggregate(scores) for cid, scores in candidates.items()}
-        top = max(aggregates.values())
-        leaders = [cid for cid, aggregate in aggregates.items() if aggregate == top]
-        incumbent = lineage.parent.id
-        # A tie never advances: the incumbent holds against an equal aggregate.
-        selected_id = "" if incumbent in leaders else leaders[0]
-        if selected_id and selected_id not in admitted:
-            raise ValueError("pareto: the best aggregate is neither the incumbent nor this round's")
+        aggregates = {cid: mean_on(scores) for cid, scores in candidates.items()}
         parent_id = draw_parent(candidates, pareto_set, replay.rng())
         verdict = (
             f"{len(admitted)} of {len(measured.arms)} arms passed the minibatch, joining "
-            f"{len(candidates)} candidates; best aggregate {top:.3f} on {len(pareto_set)} "
-            f"Pareto-set cells; next parent {parent_id[:8]}"
+            f"{len(candidates)} candidates; best aggregate {max(aggregates.values()):.3f} on "
+            f"{len(pareto_set)} Pareto-set cells; next parent {parent_id[:8]}"
         )
         ctx.put(ParetoScores(scores=candidates, parent_id=parent_id))
-        leading = selected_id or max(admitted, key=aggregates.__getitem__, default="")
-        return optimizer_contract.Selection(
-            leading=ArmKey(leading) if leading else None,
-            ending=RoundEnding.CROWNED if selected_id else RoundEnding.HELD,
-            electable=len(measured.electable),
+        return Ranking(
+            standing={ArmKey(cid): aggregate for cid, aggregate in aggregates.items()},
+            arms={ArmKey(cid): aggregates[cid] for cid in admitted},
             verdict_reason=verdict,
             ranked=kept,
         )

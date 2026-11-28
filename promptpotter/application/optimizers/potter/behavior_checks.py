@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.application.optimizer_contract import CheckResult
+from promptpotter.application.optimizers.potter.dispatch.bundle import WIDE_REBUT
 from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
     HELD_PROMPT_FIELD_MARK,
 )
@@ -221,11 +222,13 @@ def run_all_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult
     return judged(CHECK_REGISTRY, variants, audit, ctx) if variants else []
 
 
+# The escalation panel's own rebut, the critique fields a citation may lean on, and the
+# spellings a model writes for the rebut when it paraphrases.
 _REBUT_SIGNALS: tuple[str, ...] = (
     "priority_fix",
     "suggested_axes",
     "critique names",
-    "exploration_budget=wide",
+    WIDE_REBUT,
     "exploration_budget = wide",
     "wide exploration",
 )

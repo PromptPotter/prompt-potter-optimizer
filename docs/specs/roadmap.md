@@ -598,7 +598,7 @@ each moving what the loop decides ([`../developer/offline-run.md`](../developer/
 - **One crown ends the round**, a switch on that bound (operator 2026-11-26): content with one winner a
   round, the race stops at the first arm the bar crowns, and its siblings buy nothing more. Today
   nothing is crowned mid-race: the election reads once every arm has walked its draw or been cut. The
-  bar must hold under a read after every answer, so it rides `theta_election.crown: e_process`,
+  bar must hold under a read after every answer, so it rides `paired_election.crown: e_process`,
   already anytime-valid, or the bound above, never the posterior a fixed panel is read on.
 - **The standing pick's evidence pools across rounds.** A near-miss does not carry forward: a round's
   race buys its evidence up to the round's cap, and a leader short of the bar there is never crowned;

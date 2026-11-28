@@ -14,7 +14,6 @@ from promptpotter.application.bench.node_context import Calls, Children, Lineage
 from promptpotter.application.optimizer_contract import ManifestDir, RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.records.decision import DecisionInputs
@@ -26,8 +25,8 @@ if TYPE_CHECKING:
         MeasuredRound,
         PromptArity,
         Proposals,
+        Ranking,
         RoundSamples,
-        Selection,
     )
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.arm_reading import DisplayMetric
@@ -93,16 +92,16 @@ class Propose(optimizer_contract.Proposer):
         )
 
 
-class Keep(optimizer_contract.Selector):
+class Keep(optimizer_contract.RankingSelector):
+    """Ranks alone: the bench crowns the best where it beats the parent, and holds otherwise."""
+
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees = frozenset({Lineage, Replay})
     elects_partial: ClassVar[bool] = False
+    elects_on: ClassVar[DisplayMetric] = "composite"
 
-    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
-        return "composite"
-
-    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+    def rank(self, ctx: NodeContext, measured: MeasuredRound) -> Ranking:
         folds = measured.folds
         # An arm with no composite is unread, never ranked; a parent with none sets no bar.
         fitness = {
@@ -111,14 +110,12 @@ class Keep(optimizer_contract.Selector):
             if (value := folds[key].composite_fitness) is not None
         }
         ranked = sorted(fitness, key=lambda key: -fitness[key])
+        ctx.read(Replay).decide(ExampleKept(ranked=ranked), ranked)
         bar = folds[measured.parent.key].composite_fitness
-        selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
-        ctx.read(Replay).decide(ExampleKept(ranked=ranked), selected or "")
-        return optimizer_contract.Selection(
-            leading=ranked[0] if ranked else None,
-            ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
-            electable=len(measured.electable),
-            verdict_reason=f"kept {selected[:8] if selected else 'the parent'}",
+        return optimizer_contract.Ranking(
+            standing=fitness if bar is None else {measured.parent.key: bar, **fitness},
+            arms=fitness,
+            verdict_reason=f"ranked {len(ranked)} arms on composite fitness",
             ranked=list(ctx.read(Lineage).population),
         )
 

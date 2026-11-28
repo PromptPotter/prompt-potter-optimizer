@@ -689,42 +689,26 @@ entry-point registry, so a third party ships one with no edit here; its working 
 (`application/optimizer_contract.py`) sits below the bench; outside `optimizers/` only the landing's loader
 imports an optimizer package.
 
-- **Potter's dispatch spells a rule twice and a cap inline** (w11-plugin census):
-  `potter/dispatch/layout.py::unplaceable_edit` refuses an edit placed twice and
-  `potter/dispatch/layout.py::coerce_l1_layout` asserts it again; `potter/behavior_checks.py`'s
-  `_REBUT_SIGNALS` must match the words `potter/dispatch/injections/panels.py` tells the model to write;
-  `panels.py` and `potter/dispatch/injections/layer_state.py` cut text at inline literals (`[:70]`,
-  `char_cap=400`, `char_cap=2400`) beside `potter/dispatch/bundle.py`'s caps, and `layer_state.py`'s
-  `_r_l1_layout` re-derives `potter/dispatch/prompts.py::node_layout`; `potter/validators.py` books its
-  no-op, duplicate and repeat verdicts under the placeholder axis `variant`, no locus, which
-  `domain/failures.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
-  whole-candidate verdict names no axis. **Rides with:** area 09's chain. **Re-test:**
-  `git grep -c 'axis="variant"' -- promptpotter` is 0 and `layer_state.py` names no `char_cap=` literal.
-- **Selection and the race are written once per peer, not in the backbone** (w10-survey):
-  `capo/members.py::PopulationSelector.select`, `gepa/members.py::Pareto.select` and
-  `levi/members.py::MapElites.select` each re-derive the leader, a tie rule and the `RoundEnding` /
-  `Selection`; `capo/members.py::PairedTRace.decide` and `gepa/members.py::_GateRace.decide` are one
-  `scoring/race_protocol.py::next_block` body and both build the `eliminated` `StopSignal`;
-  `kind == "eliminated"` is counted in `capo/members.py`, `gepa/members.py` and
-  `potter/dispatch/injections/panels.py`; the shared-cell mean is written three times
-  (`capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
-  `gepa/members.py::_aggregate`) beside `optimizers/descriptors.py::cell_objectives`. Root: the backbone
-  takes a score map and owns crown, hold and the stop signal; a peer supplies the ranking. **Rides with:**
-  area 09's chain. **Re-test:** `git grep -n "next_block(" -- promptpotter/application/optimizers` is 0 in
-  the peers (2 now).
-- **Peers hold defaults and an Optional the manifest should own** (w10-survey):
-  `capo/members.py::mutate_shots` draws `rng.randrange(3)`; `levi/members.py::_LLOYD_ITERATIONS` (100), the
-  `< 1.0` threshold in `levi/members.py::_failures` and an always-empty `meta_advice_section` in
-  `levi/members.py::refine_prompt` are code constants; `levi/members.py::LeviRefine._refinement` takes
-  `LeviCalibration | None` and asserts it; `elects_on` returns a constant in all three peers while
-  `potter/members.py` takes `selected`; `gepa/members.py::_GateRace._tested` is race-local state beside
-  `optimizer_state`. Root: a knob is a node `config` field; the round carries what exists. **Rides with:**
-  area 09's chain. **Re-test:**
-  `git grep -nE "_LLOYD_ITERATIONS|randrange\(3\)" -- promptpotter/application/optimizers` is empty.
-- **`theta_election` names a θ it no longer reads**: since θ left the round's statement every crown elects
-  on the fitness column, yet the pipeline node, its knobs and `row_policy.py` still spell
-  `theta_election`. Action: rename it to what it decides (with its doc row; a behaviour-key move).
-  **Rides with:** area 09's chain. **Re-test:** `git grep -c theta_election -- promptpotter` is 0.
+- **A whole-candidate verdict books a placeholder axis** (w11-plugin census; w11-optim2 cut it to
+  this): `potter/validators.py::_collapse` books the no-op, duplicate and repeat verdicts under axis
+  `variant`, because `domain/failures.py::ValidationFailure`'s `axis` is a required `str`. Root: a
+  whole-candidate verdict names no axis, so `axis` is optional (a scoring-tolerance reshape: run data
+  wiped, L2's rendered failure JSON moves). **Rides with:** area 09's chain, with a domain/ owner.
+  **Re-test:** `git grep -c 'axis="variant"' -- promptpotter` is 0.
+- **The plugin contract is spread over seven modules** (w11-optim2, 11-28): `examples/optimizer-plugin`
+  imports `optimizer_contract`, `bench/node_context`, `optimizers/paper_templates` (a built-in's),
+  `domain/campaign_config`, `domain/paired_reading`, `domain/pipeline_schema` and `domain/records/decision`.
+  A third party edits nothing under `application/optimizers/`, but it reaches seven homes. Root: the
+  contract module owns what a plugin reads, so the example imports one module. **Rides with:** area 09's
+  chain (map § 09 UNDECIDED). **Re-test:** the example's `promptpotter` imports name one module.
+- **"wound" survives in potter's dispatch hub** (w11-optim2, 11-28): `domain/wounds.py` became
+  `failures.py`, but `potter/dispatch/injections/wounds.py` and its `l1_wounds` injection keep the word.
+  Renaming the injection key re-keys potter, a measured move. **Rides with:** area 09's chain. **Re-test:**
+  `git grep -c wound -- promptpotter/application/optimizers` is 0.
+- **CAPO's settled race path runs in no offline leg** (w9-pass; w11-optim2, 11-28):
+  `capo/members.py::PairedTRace.cut`'s `settled` signal is reached by no leg, so a change to it moves no
+  key. **Rides with:** area 09's chain, with area 14's offline legs. **Re-test:** `offline_run.py
+  --coverage` reaches it.
 - **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
@@ -738,23 +722,6 @@ imports an optimizer package.
   names `mechanism` and `claim` before `sample_ids` in the layout and `schemas.py::FailureCluster`'s
   order, and each id appears once in the whole reply. Open: the paid proof. **Re-test:** the banked
   inputs (`.scratch/wave-2/bank/row111/`) re-asked under `l1_critique/1` as it now renders finish `stop`.
-- **A held round's words are the election match's fall-through** (w8-round, 11-27):
-  `promptpotter/application/optimizers/potter/election.py::_verdict_reason` — a HELD round (and
-  ADOPTED) reaches the closing `return` of the `match`, since `RoundDecision.ending` is typed
-  `RoundEnding`, which admits `adopted` — a selector's ending type is the endings it can decide
-  (crowned, moved, held), so each reads its own arm — **Rides with:** `area 09's chain` —
-  **Re-test:** `_verdict_reason` has a `case RoundEnding.HELD` and `RoundDecision.ending` excludes
-  `ADOPTED`.
-- **A coupling note is developer prose on every potter campaign** (w11-walk, 11-27):
-  `promptpotter/application/optimizers/potter/couplings.py`'s `per_round_resubset` text ("ONE anchored
-  δ ruler in θ — the stall replayer, c0_ok and PoBB elimination all via fit_theta on
-  cycle.difficulty …") is served through `promptpotter/domain/phase_acts.py` as a "config coupling"
-  info line naming the two knobs' dotted keys, above every potter
-  campaign's chat. Expected: an info a run keeps is no news (`KnobClashes.tsx`'s own rule), or one
-  operator sentence. **Rides with:** `area 09's chain` — **Re-test:** the walk world's campaign chat
-  shows no coupling the config keeps.
-  Walk #2 (11-28, 390×844): still. Both walk-world campaigns show the full `per_round_resubset`
-  paragraph in red-keyed monospace, above their chat and in the sidebar's node panel.
 
 ## 10 · L4
 

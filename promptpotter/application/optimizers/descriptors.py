@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Literal, assert_never
 
 from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell
@@ -19,6 +19,17 @@ def prompt_chars(rows: Iterable[GradedCell]) -> int | None:
 def cell_objectives(rows: Iterable[GradedCell]) -> dict[str, float]:
     objective = ROW_GRADES["objective"]
     return {cell.key: float(objective.read(cell)) for cell in rows if cell.scored}
+
+
+def shared_cells(a: Mapping[str, float], b: Mapping[str, float]) -> list[str]:
+    """The cells both graded, in *a*'s order: what every peer pairs two readings on."""
+    return [key for key in a if key in b]
+
+
+def mean_on(scores: Mapping[str, float], cells: Collection[str] | None = None) -> float:
+    """*scores*' mean on *cells*, on every cell it holds where none are named."""
+    keys = scores if cells is None else cells
+    return sum(scores[key] for key in keys) / len(keys)
 
 
 def behaviour_descriptor(

@@ -38,6 +38,13 @@ def offers_param(
 
 
 L3_PLAN_MAX_CHARS = 800
+L3_NOTE_MAX_CHARS = 150
+# Above the critique distiller's whole quota (`schemas.py::L1CritiqueOutput`): `CLUSTERS_MAX`
+# clusters (mechanism, `CLUSTER_IDS_SHOWN` ids, claim) + priority_fix + axes; a runaway backstop.
+CRITIQUE_MAX_CHARS = 2400
+# The rebut a PEAKED axis is mutated under, which the escalation panel tells L1 to write and the
+# behaviour score reads back (`behavior_checks.py::_has_peaked_rebut`).
+WIDE_REBUT = "exploration_budget=wide"
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
     "Each `output_schema_descriptions.<path>` key rewrites the JSON-Schema "
@@ -72,6 +79,9 @@ NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_PREDICTED_CAP = 60
+SAMPLE_QUERY_CAP = 70
+GROUND_TRUTH_CAP = 60
+JUDGE_REASON_CAP = 200
 # Compressed bytes per char a trace's second half adds to its first; below it the trace loops.
 LOOP_NOVELTY = 0.05
 DEGENERATE_TRACE_CAP = 600

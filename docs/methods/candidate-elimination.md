@@ -36,7 +36,7 @@ The **origin panel's top-up is one more stretch of the same race** (`runner/meas
 
 **The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election, with what the origin panel's line bought after it (`results.py::RoundResult.closed_rows`), which no race read.
 
-**Admission** (potter's `theta_election` `admission`) is the confidence `sign_test` and `e_process`
+**Admission** (potter's `paired_election` `admission`) is the confidence `sign_test` and `e_process`
 read a separation at — never PoBB's ε, which says when to stop BUYING an arm, not when to promote
 one. An `admission` below `sign_posterior(1, 0)` = 0.75 is refused, so one discordant cell never
 promotes. **A pick's crowning
@@ -48,14 +48,14 @@ place, the round's race, up to the round's cap**: a leader short of the bar ther
 false negative the bar accepts. A round ends one of three ways (`origin_panel.py::RoundEnding`, filed
 as `results.py::Election.ending`; `run_standing.py::line_reference` reads it): crowned, moved onto its
 uncrowned leader, or held on its parent, the declared pick staying the last crown. Potter's
-`theta_election` `next_parent` picks between the last two:
+`paired_election` `next_parent` picks between the last two:
 `not_lost` (the default) steps onto the round's leader unless the parent beat it, a neutral move on
 the fixed origin panel (`vote: overlap`, paired lifts add), so the line never falls below a held
 crown; `leading` always steps onto the leader (comma selection); `crowned` keeps the parent (plus
 selection). `RoundWinner` replays `[ending, leading]` (`potter/election.py::RoundWinner.decide`).
 
 **Each selector owns its crown; the bench re-judges none.** capo, gepa and levi crown by their own
-official rules. Potter's crown statistic is `theta_election` `crown`
+official rules. Potter's crown statistic is `paired_election` `crown`
 (`domain/crowning_bar.py::CrowningBar`, potter's alone), read over every readable arm of the round at
 once, the round's crown and lead the arm it ranks first (`CrowningBar.rank`, signed: zero is level
 with the parent; `CrowningBar.lost` is `rank < 0`). Each arm's evidence is the bench's one pairing
@@ -65,14 +65,14 @@ vote's cells (`potter/election.py::RoundWinner.pairings`): its lift is the green
 `paired_point` (the default) crowns that lift above zero, ranked on it: its interval is
 information, which the advance reads, so a point crown whose interval spans
 zero closes `NOT_SEPARATED` and the line moves all the same. Every crown elects on the fitness
-column and floors coverage on the pairing's scored cells (`ThetaElection.elects_on`): no θ rides
+column and floors coverage on the pairing's scored cells (`PairedElection.elects_on`): no θ rides
 the round's statement. Ablation switches of potter's crown only:
 `sign_test`, the exact
 paired sign test on the discordant verdicts, Holm-corrected across the round's arms; `e_process`, a
 uniform-mixture e-value on the same discordance at `arms / α`, valid wherever the race stops. No
 reading crowns an arm its paired verdicts contradict.
 
-**Which rows the bar pairs on is potter's `theta_election` `vote`**, which the bench never reads:
+**Which rows the bar pairs on is potter's `paired_election` `vote`**, which the bench never reads:
 the election banks the cells on its replay inputs (`RoundWinner.cells`), so the crown and the replay
 read one cell set. `draw` pairs an arm with its parent on every cell raced.
 `overlap` (the default) pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
@@ -149,8 +149,8 @@ is out at once, never what is committed, so a cut wastes at most the press.
 
 - potter's `pobb` `epsilon_stop` — the one stop's switch, shipped on (capo-pobb reads the same `pobb` config).
 - potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and, under `vote: draw`, never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/measure.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/measure.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
-- potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
-- potter's `theta_election` `vote` (`overlap` in its manifest) — which rows that bar pairs on (§ The θ rule).
+- potter's `paired_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
+- potter's `paired_election` `vote` (`overlap` in its manifest) — which rows that bar pairs on (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-fitness until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
 
@@ -220,7 +220,7 @@ Departures from the paper:
 - **Rounds, not workers.** A period's `interval - 1` refinements and its shift are measured together and inserted in walk order, so no refinement sees another's insert (LEVI's four workers do, App. B).
 - **The seed pass sends E.7** (E.1 is for code) over the seeds so far, **starting from the origin** (Alg. 1 starts from none) — App. A's five calibration prompts of Table 5's four seeds. A reply without `<prompt>` markers is an invalid arm.
 - **No variants and no meta-advice.** The variant bursts (Table 5, App. F) have only a code template (E.5) and 80 variants exceed the paper's own budget (Table 2); the meta-advice template is unpublished.
-- **Unstated values, chosen:** descriptors = prompt length and each proxy cell's objective; `feedback_failures` 3 (GEPA's reflection minibatch); centroids by k-means over `cvt_samples` uniform draws in the calibration bounds (Figure 2); temperature 1.0; a one-sided tie worth ½ in rank faithfulness; separation normalised by the widest column; inspiration and failures drawn uniformly.
+- **Unstated values, chosen:** descriptors = prompt length and each proxy cell's objective; `feedback_failures` 3 (GEPA's reflection minibatch), a failure any cell under full fitness (`failure_below` 1.0); k-means at most `lloyd_iterations` 100 steps; centroids by k-means over `cvt_samples` uniform draws in the calibration bounds (Figure 2); temperature 1.0; a one-sided tie worth ½ in rank faithfulness; separation normalised by the widest column; inspiration and failures drawn uniformly.
 - **Alg. 1 as printed:** calibration prompts enter the running statistics at line 13 and again at insertion, line 17.
 - **A calibration spanning no descriptor volume halts the run** — every centroid would land on one point; the paper's CVT has no answer either.
 - **The artifact** is the whole prompt, and `{problem_description}` CAPO's task description (§ CAPO's population and operators); shown failures ride `fence_untrusted`.

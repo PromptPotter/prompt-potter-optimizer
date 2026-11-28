@@ -45,6 +45,10 @@ class RoundEnding(StrEnum):
         return self in (RoundEnding.CROWNED, RoundEnding.MOVED)
 
 
+#: The endings a selector decides: round 0's adoption is the bench's, never an election's.
+Decided = Literal[RoundEnding.CROWNED, RoundEnding.MOVED, RoundEnding.HELD]
+
+
 #: What a crown the origin panel does not separate from the origin does to the stall
 #: (`OptimizationConfig.not_separated_stall`).
 NotSeparatedStall = Literal["resets", "counts", "skips"]

@@ -1632,7 +1632,7 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
 
 def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection() -> None:
     for optimizer, nodes, refused in (
-        ("potter", {"theta_election": {"config": {"vote": "draw"}}}, True),
+        ("potter", {"paired_election": {"config": {"vote": "draw"}}}, True),
         ("capo-pobb", {"pobb": {"config": {"row_choice": "informative"}}}, True),
         ("potter", {}, False),
         ("capo-pobb", {}, False),
@@ -4546,7 +4546,7 @@ async def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_
         return dataclasses.replace(cell, pipeline=unread)
 
     monkeypatch.setattr(query_loop, "measure_sample", unpriced)
-    with composed([*walk[:-1], "theta_election"]):
+    with composed([*walk[:-1], "paired_election"]):
         async with _peer_round(
             workspace(), offline, name, composed_nodes, paid_then_cut, panel_gate="off"
         ) as ctx:

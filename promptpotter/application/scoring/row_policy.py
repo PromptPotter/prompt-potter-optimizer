@@ -47,7 +47,7 @@ class RowKnobs(StrictModel):
             "sampler's pool an answer tells θ most about (Fisher information at the θ ``refit`` "
             "seats, off the δ ruler, never off the parent's own grade on the row), so a round reads "
             "rows outside its draw. It reverses the round order's stratified interleave, so it runs "
-            "under ``theta_election.vote: overlap`` alone; any other selector is refused."
+            "under ``paired_election.vote: overlap`` alone; any other selector is refused."
         ),
     )
     refit: Annotated[Refit, Knob(Estimand.SELECTION)] = Field(

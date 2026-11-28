@@ -25,12 +25,12 @@ from promptpotter.application.optimizer_contract import (
     PromptArity,
     Proposals,
     Proposing,
+    Ranking,
     RewriteKnobs,
     RoundSamples,
-    Selection,
 )
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.descriptors import prompt_chars
+from promptpotter.application.optimizers.descriptors import prompt_chars, shared_cells
 from promptpotter.application.optimizers.paper_templates import (
     rewrite,
     rewritten,
@@ -39,13 +39,12 @@ from promptpotter.application.optimizers.paper_templates import (
     unmarked,
 )
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
-from promptpotter.application.scoring.race_protocol import Decision, Race, View, next_block
+from promptpotter.application.scoring.race_protocol import BlockRace, View
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import Cut, Elimination, Proposal
+from promptpotter.domain.arms import Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart, StateSlice
-from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import DemoPool, Pool
@@ -128,29 +127,37 @@ class PopulationKept(Replayed, kind="population_kept"):
     # Each survivor's scores on the cells earlier rounds read it on, which a replay's one round lacks.
     earlier: dict[ArmKey, dict[str, float]]
 
-    def rank(self, rows: Mapping[ArmKey, CellSheet]) -> list[ArmKey]:
-        """promptolution's CAPO: best-first by mean raw score over every cell each survivor was
-        evaluated on, its cache across rounds included; an arm with no graded cell is unranked."""
-        readings = {
-            key: read
+    def means(self, rows: Mapping[ArmKey, CellSheet]) -> dict[ArmKey, float]:
+        """promptolution's CAPO: each survivor's mean raw score over every cell it was evaluated
+        on, its cache across rounds included; an arm with no graded cell is unranked."""
+        return {
+            key: sum(read.values()) / len(read)
             for key in self.survivors
             if (read := {**self.earlier.get(key, {}), **_scores(rows[key].cells)})
         }
-        return sorted(readings, key=lambda key: -sum(readings[key].values()) / len(readings[key]))
+
+    def rank(self, rows: Mapping[ArmKey, CellSheet]) -> list[ArmKey]:
+        """Best-first on ``means``."""
+        means = self.means(rows)
+        return sorted(means, key=lambda key: -means[key])
 
     def replay(self, ctx: ReplayContext) -> list[ArmKey]:
         return self.rank({key: ctx.round_data.rows(key) for key in self.survivors})
 
 
+_SHOT_MOVES = ("add", "drop", "reorder")
+
+
 def mutate_shots(
     shots: Sequence[str], pool: Sequence[str], *, k_max: int, rng: random.Random
 ) -> list[str]:
+    """promptolution's three moves, drawn uniformly: add a pool shot, drop one, or only reorder."""
     out = list(shots)
-    move = rng.randrange(3)
+    move = rng.choice(_SHOT_MOVES)
     unused = [i for i in pool if i not in out]
-    if move == 0 and len(out) < k_max and unused:
+    if move == "add" and len(out) < k_max and unused:
         out.append(rng.choice(unused))
-    elif move == 1 and out:
+    elif move == "drop" and out:
         out.pop(rng.randrange(len(out)))
     rng.shuffle(out)
     return out
@@ -286,7 +293,7 @@ def _readings(
     """A rival sharing under two cells with *arm* was not tested, and is absent from the result."""
     out: dict[ArmKey, tuple[float, int]] = {}
     for pid, rival in rivals.items():
-        shared = [sid for sid in arm if sid in rival]
+        shared = shared_cells(arm, rival)
         p = paired_mean_t([rival[s] for s in shared], [arm[s] for s in shared], tail="greater")[3]
         if p is not None:
             out[pid] = (p, len(shared))
@@ -297,10 +304,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace(Race):
-    gate = "outscored"
-    settled = "settled"
-
+class PairedTRace(BlockRace):
     def __init__(
         self,
         ctx: NodeContext,
@@ -310,26 +314,17 @@ class PairedTRace(Race):
         n_cells: int,
         objective: CapoObjective,
     ) -> None:
+        super().__init__(ctx.node, block_size=block_size, n_cells=n_cells)
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
-        self.node = ctx.node
         self._alpha = ctx.knobs(PairedTKnobs).alpha
         self._survivors = survivors
         self._objective = objective
-        self._block_size = block_size
-        self._n_cells = n_cells
-        self._racing: set[ArmKey] = set()
 
     @property
     def n_priors(self) -> int:
-        return len(self._racing) - 1
+        return len(self.racing) - 1
 
-    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
-        if view.opening:
-            self._racing = set(view.walks)
-        stops = {} if view.opening else self._cut(view)
-        return next_block(view, stops, self._block_size)
-
-    def _cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
+    def cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
         rows = {key: walk.taken for key, walk in view.walks.items()}
         readings: dict[ArmKey, dict[str, float]] = {
             cid: _cell_objectives(r, self._objective) for cid, r in rows.items()
@@ -348,54 +343,42 @@ class PairedTRace(Race):
             # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
             beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)
             if len(beaten_by) >= self._survivors:
-                stops[cid] = StopSignal(
-                    self.node,
+                stops[cid] = self.signal(
                     "eliminated",
-                    {
-                        "gate": self.gate,
-                        "queries_scored": len(arm_rows),
-                        "total_samples": self._n_cells,
-                        "raced_against": sorted(rivals),
-                        "outscored_by": beaten_by,
-                        "p_best": p_best,
-                        "paired_breakdown": breakdown,
-                    },
+                    "outscored",
+                    len(arm_rows),
+                    raced_against=sorted(rivals),
+                    outscored_by=beaten_by,
+                    p_best=p_best,
+                    paired_breakdown=breakdown,
                 )
         left = [cid for cid in rows if cid not in stops]
         if len(left) <= self._survivors:
             for cid in left:
-                if len(rows[cid]) < self._n_cells:
-                    stops[cid] = StopSignal(
-                        self.node,
+                if len(rows[cid]) < self.n_cells:
+                    stops[cid] = self.signal(
                         "locked_in",
-                        {
-                            "gate": self.settled,
-                            "queries_scored": len(rows[cid]),
-                            "total_samples": self._n_cells,
-                            "raced_against": sorted(pid for pid in rows if pid != cid),
-                        },
+                        "settled",
+                        len(rows[cid]),
+                        raced_against=sorted(pid for pid in rows if pid != cid),
                     )
-        self._racing = {cid for cid in left if cid not in stops}
         return stops
 
-    def judge(
-        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
-    ) -> Elimination | None:
-        if signal is None or signal.check_name != self.node:
-            return None
+    def ruling(
+        self,
+        signal: StopSignal,
+        context: dict[str, Any],
+        key: ArmKey,
+        labels: Mapping[ArmKey, str],
+    ) -> Elimination:
         cr = signal.check_result
 
         def walk_order(keys: list[ArmKey]) -> list[ArmKey]:
             return [key for key in labels if key in keys]
 
-        context: dict[str, Any] = {
-            "gate": cr["gate"],
-            "queries_scored": cr["queries_scored"],
-            "total_queries": cr["total_samples"],
-            "block": -(-cr["queries_scored"] // self._block_size),
-            "blocks": -(-cr["total_samples"] // self._block_size),
-            "raced_against": walk_order(cr["raced_against"]),
-        }
+        context["block"] = -(-cr["queries_scored"] // self.block_size)
+        context["blocks"] = -(-cr["total_samples"] // self.block_size)
+        context["raced_against"] = walk_order(cr["raced_against"])
         where = (
             f"at block {context['block']}/{context['blocks']} "
             f"(q{cr['queries_scored']}/{cr['total_samples']})"
@@ -440,7 +423,7 @@ class PairedT(optimizer_contract.Eliminator):
         if round_result.round == 0:
             return []
         arms = round_result.proposed
-        cut = sum(1 for arm in arms.values() if isinstance(arm, Cut) and arm.kind == "eliminated")
+        cut = optimizer_contract.eliminated_arms(round_result)
         return [
             OptimizerFact(
                 key="cut", label="Cut", text=f"{cut} of {len(arms)} arms", value=cut, kind="stat"
@@ -656,7 +639,7 @@ class PopulationRejoin(optimizer_contract.Proposer):
         )
 
 
-class PopulationSelector(optimizer_contract.Selector):
+class PopulationSelector(optimizer_contract.RankingSelector):
     """Ranks the race's survivors as the reference ranks them (`PopulationKept.rank`); `survival`
     keeps the top μ."""
 
@@ -664,9 +647,7 @@ class PopulationSelector(optimizer_contract.Selector):
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_partial: ClassVar[bool] = True
-
-    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
-        return "fitness"
+    elects_on: ClassVar[DisplayMetric] = "fitness"
 
     def parent_cells(
         self,
@@ -682,7 +663,7 @@ class PopulationSelector(optimizer_contract.Selector):
         # Round 1's origin is no arm and reads block one; later the incumbent races as an arm.
         return panel.block_size
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+    def rank(self, ctx: NodeContext, measured: MeasuredRound) -> Ranking:
         lineage = ctx.read(Lineage)
         earlier = {
             key: read
@@ -695,20 +676,18 @@ class PopulationSelector(optimizer_contract.Selector):
         }
         inputs = PopulationKept(survivors=measured.electable, earlier=earlier)
         ranked = ctx.read(Replay).decide(inputs, inputs.rank(measured.rows))
-        best = ranked[0] if ranked else None
         carried = lineage.population
         verdict = (
             f"ranked {len(ranked)} surviving arms by mean score on every cell each was read "
-            f"on; best {measured.labels[best]}"
-            if best is not None
+            f"on; best {measured.labels[ranked[0]]}"
+            if ranked
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
-        crowned = best is not None and best != lineage.parent.id
-        return optimizer_contract.Selection(
-            # The race's best survivor, which the incumbent may be: it races as an arm.
-            leading=best,
-            ending=RoundEnding.CROWNED if crowned else RoundEnding.HELD,
-            electable=len(measured.electable),
+        # The incumbent races as an arm, so it stands on the score every arm does.
+        means = inputs.means(measured.rows)
+        return Ranking(
+            standing=means,
+            arms=means,
             verdict_reason=verdict,
             ranked=[measured.arms[key].individual for key in ranked] if ranked else carried,
         )

@@ -30,14 +30,14 @@ from promptpotter.application.scoring.race_protocol import Race
 from promptpotter.config.paths import PACKAGE_ROOT, optimizers_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import ArmPosition, Concluded, Proposal, Proposed
+from promptpotter.domain.arms import ArmPosition, Concluded, Proposal, Proposed, arm_end
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.origin_panel import RoundEnding
+from promptpotter.domain.origin_panel import Decided, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadPair
 from promptpotter.domain.phase_acts import StepFact
 from promptpotter.domain.pipeline_schema import (
@@ -444,7 +444,7 @@ class Selection:
     ends on it (`Election.ending`)."""
 
     leading: ArmKey | None
-    ending: RoundEnding
+    ending: Decided
     # The arms that entered the election, which a selector narrowing `MeasuredRound.electable` counts.
     electable: int
     verdict_reason: str
@@ -452,10 +452,6 @@ class Selection:
     # walk names one (`Survivor`), else whole.
     ranked: Sequence[OptSearchPoint]
     deciding_pair: ReadPair | None = None
-
-    @property
-    def selected(self) -> ArmKey | None:
-        return self.leading if self.ending is RoundEnding.CROWNED else None
 
 
 class Sampler(NodeMember, Protocol):
@@ -529,8 +525,9 @@ class Eliminator(NodeMember, Protocol):
 
 
 class Selector(NodeMember, Protocol):
-    def elects_on(self, selected: SelectedOptimizer) -> DisplayMetric:
-        """The scoreboard column ``select`` elects on under *selected*'s knobs — the nearest the bench serves where its objective is its own."""
+    @property
+    def elects_on(self) -> DisplayMetric:
+        """The scoreboard column ``select`` elects on — the nearest the bench serves where its objective is its own."""
         ...
 
     @property
@@ -561,6 +558,56 @@ class Selector(NodeMember, Protocol):
         return len({cell.key for cell in cells if cell.scored})
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
+
+
+@dataclass(frozen=True)
+class Ranking:
+    """A ranking selector's reading of its round, on its own objective: the backbone crowns off it
+    (`RankingSelector.select`)."""
+
+    # Every candidate it keeps, by id, on the score its crown ranks: the incumbent where read.
+    standing: Mapping[ArmKey, float]
+    # This round's arms it read, in walk order, on that score: a held round leads with the best.
+    arms: Mapping[ArmKey, float]
+    verdict_reason: str
+    # What it keeps, best first (`Selection.ranked`).
+    ranked: Sequence[OptSearchPoint]
+
+
+class RankingSelector(Selector, Protocol):
+    """A peer's selector: it ranks, and the backbone owns the crown, the tie rule and the hold."""
+
+    def rank(self, ctx: NodeContext, measured: MeasuredRound) -> Ranking: ...
+
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+        """The top of the standing is crowned where it is this round's arm, the first walked on a
+        tie. A tie never advances: the incumbent at the top holds, as does a round none stands in.
+        A held round leads with its best arm but the incumbent, the first walked on a tie."""
+        ranking, incumbent = self.rank(ctx, measured), measured.parent.key
+        top = max(ranking.standing.values(), default=None)
+        leaders = {cid for cid, score in ranking.standing.items() if score == top}
+        crown = (
+            None
+            if incumbent in leaders
+            else next((key for key in ranking.arms if key in leaders), None)
+        )
+        if leaders and incumbent not in leaders and crown is None:
+            raise ValueError(
+                f"{self.name}: the best standing is neither the incumbent nor this round's"
+            )
+        challengers = {key: s for key, s in ranking.arms.items() if key != incumbent}
+        return Selection(
+            leading=crown or max(challengers, key=challengers.__getitem__, default=None),
+            ending=RoundEnding.HELD if crown is None else RoundEnding.CROWNED,
+            electable=len(measured.electable),
+            verdict_reason=ranking.verdict_reason,
+            ranked=ranking.ranked,
+        )
+
+
+def eliminated_arms(round_result: RoundResult) -> int:
+    """The round's arms its race cut."""
+    return sum(1 for arm in round_result.proposed.values() if arm_end(arm) == "eliminated")
 
 
 class Survivor(NodeMember, Protocol):

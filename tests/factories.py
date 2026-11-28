@@ -905,7 +905,7 @@ def pobb_knobs(**bend: Any) -> PoBBKnobs:
 def election_knobs() -> ElectionKnobs:
     return cast(
         "ElectionKnobs",
-        select_optimizer(bench_choice("potter")).knobs("theta_election"),
+        select_optimizer(bench_choice("potter")).knobs("paired_election"),
     )
 
 

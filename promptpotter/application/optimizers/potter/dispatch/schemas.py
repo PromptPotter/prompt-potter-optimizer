@@ -20,6 +20,7 @@ from pydantic import (
 
 from promptpotter.application.bench.llm_call import OptimizerResponseModel
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    L3_NOTE_MAX_CHARS,
     L3_PLAN_MAX_CHARS,
     LAYOUT_SCHEMA_INSTRUCTION,
     RecombinationOffer,
@@ -495,7 +496,7 @@ class L3PlanOutput(OptimizerResponseModel):
             "vocabulary instructs neither, and rides every downstream call regardless."
         ),
     )
-    note: Annotated[str, BeforeValidator(_truncate_marked(150))] = ""
+    note: Annotated[str, BeforeValidator(_truncate_marked(L3_NOTE_MAX_CHARS))] = ""
     rationale: Annotated[str, BeforeValidator(_truncate_marked(125))] = ""
 
 
