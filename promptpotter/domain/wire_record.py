@@ -34,6 +34,8 @@ ALWAYS: Mapping[str, object] = {"wire": "always"}
 REST: Mapping[str, object] = {"wire": "rest"}
 # Sparse, written and read by the owner; its key holds whatever the field may.
 BY_HAND: Mapping[str, object] = {"wire": "by_hand"}
+# A model laid flat into the record: each of its fields is a key, absent where it holds ``None``.
+FLAT: Mapping[str, object] = {"wire": "flat"}
 
 
 def always_as(key: str) -> Mapping[str, object]:
@@ -231,6 +233,23 @@ class WireRecord[T]:
                 rest = f.name
                 continue
             key = f.metadata.get("key", f.name)
+            if how == "flat":
+                # Each part is read by its own scalar's reader, as a field of the record is.
+                model = resolved[f.name]
+                parts, made = get_type_hints(model), f"make_{model.__name__}"
+                scope[made] = model.model_construct
+                laid: list[str] = []
+                for part, info in model.model_fields.items():
+                    hint = _without_none(parts[part])
+                    hints[part] = hint if info.default is None else Required[hint]
+                    one = _crossing(hint, f"{owner.__name__}.{part}", scope).read("v")
+                    laid.append(
+                        f"{part}={info.default!r} if (v := get({part!r})) is None else {one}"
+                    )
+                reads.append(f"{f.name}={made}({', '.join(laid)}),")
+                always.append(f"**owner.{f.name}.model_dump(exclude_none=True),")
+                said.append(f"out.update(owner.{f.name}.model_dump(exclude_none=True))")
+                continue
             if how == "by_hand":
                 by_hand.append(f.name)
                 hints[key] = resolved[f.name]

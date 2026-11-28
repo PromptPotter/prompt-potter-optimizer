@@ -17061,6 +17061,18 @@
         "additionalProperties": false,
         "description": "The cycle's bill per round, keyed by kind across rounds, in round order.",
         "properties": {
+          "empty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Said in place of the series where no round billed anything; null otherwise.",
+            "title": "Empty"
+          },
           "readings": {
             "description": "Each round's bill by kind in one line, as `rounds`.",
             "items": {
@@ -17088,7 +17100,8 @@
         "required": [
           "rounds",
           "series",
-          "readings"
+          "readings",
+          "empty"
         ],
         "title": "SpendByRound",
         "type": "object"

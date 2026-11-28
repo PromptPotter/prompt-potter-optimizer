@@ -166,8 +166,9 @@ class AllowanceStateInfo(NamedTuple):
 
 
 ALLOWANCE_STATE_INFO: dict[AllowanceState, AllowanceStateInfo] = {
+    # "Allowance", never "Spend": a run's spend is its own figure, beside this one.
     AllowanceState.UNMETERED: AllowanceStateInfo(
-        "Spend",
+        "Allowance",
         "unmetered",
         "Nothing meters this account's sends on the host's keys: it runs the box, or its "
         "allowance bounds no unit.",

@@ -610,7 +610,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     backend_revision: null,
     spend_metered: NO_METER,
     fork_remainder: null,
-    spend_by_round: { rounds: [], series: [], readings: [] },
+    spend_by_round: { rounds: [], series: [], readings: [], empty: "Nothing billed yet." },
     metered_line: "",
     cap_lines: [],
     caps: armedCaps(),

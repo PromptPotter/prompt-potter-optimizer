@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, NamedTuple, assert_never, get_args
+from typing import ClassVar, NamedTuple, assert_never, get_args
 
 from pydantic import TypeAdapter
 
@@ -32,10 +32,12 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.spend_rollup import SpendRollup, metered
 from promptpotter.infrastructure.store.io import complete_lines
-from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
-
-if TYPE_CHECKING:
-    pass
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    RecordClasses,
+    enclosed_spans,
+)
 
 
 def bill_paid(bill: Bill) -> PaidSpend:
@@ -70,16 +72,6 @@ def still_held(open_holds: Iterable[Hold], unpriced: Iterable[Hold]) -> PaidSpen
     return total
 
 
-class Spent(NamedTuple):
-    # What the ledger's subject COST: every answered send, a nested run's mirrored onto it included.
-    cost: PaidSpend
-    # What its own sends billed: the cost less the mirrored sends a nested run's own ledger bills.
-    billed: PaidSpend
-
-    def plus(self, spent: Spent) -> Spent:
-        return Spent(self.cost.plus(spent.cost), self.billed.plus(spent.billed))
-
-
 MoneyRecord = Hold | Bill | Release | Lapse | TokenUsageRecord
 
 
@@ -106,7 +98,8 @@ NO_CALLS = NodeCalls(0, 0.0, 0)
 class Money(NamedTuple):
     """One subject's money: the account's charge book, or one ledger's OWN lines."""
 
-    spent: Spent
+    # Every answered send it holds, each filed once.
+    spent: PaidSpend
     # Each hold no bill or release closed yet.
     open: dict[str, Hold]
     # Each hold at its latest bound, while open or while a kept hold or an unreported send names it.
@@ -129,6 +122,8 @@ class Money(NamedTuple):
     by_node: dict[tuple[str, str], NodeCalls]
     # By the ledger a call's sends land on (`Hold.ledger`).
     overshot: dict[str, Overshoot]
+    # A nested run's ledger's sends as its root files them (`TokenUsageRecord.filed_by_root`).
+    enclosed: Money | None
 
     def holding(self, hold_id: str) -> bool:
         """Whether *hold_id* and every hold above it is still open."""
@@ -206,7 +201,8 @@ class MoneyFold:
     records: ClassVar[RecordClasses] = get_args(MoneyRecord)
 
     def __init__(self) -> None:
-        self._spent = Spent(NOTHING_PAID, NOTHING_PAID)
+        self._spent = NOTHING_PAID
+        self._enclosed: MoneyFold | None = None
         self._open: dict[str, Hold] = {}
         self._drawn: dict[str, PaidSpend] = {}
         self._holds: dict[str, Hold] = {}
@@ -243,7 +239,7 @@ class MoneyFold:
             case Hold():
                 self._hold(record)
             case Bill():
-                self._bill(record, mirrored=False)
+                self._bill(record)
             case Release():
                 self._close(record.hold_id)
             case Lapse():
@@ -296,13 +292,10 @@ class MoneyFold:
             if hold_id in self._children:
                 self._children[hold_id] -= 1
 
-    def _bill(self, bill: Bill, *, mirrored: bool) -> None:
+    def _bill(self, bill: Bill) -> None:
         paid = bill_paid(bill)
-        self._spent = Spent(
-            self._spent.cost.plus(paid),
-            self._spent.billed if mirrored else self._spent.billed.plus(paid),
-        )
-        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
+        self._spent = self._spent.plus(paid)
+        # A ledger's bill names a hold of the account's charge book.
         if (held := self._holds.get(bill.hold_id)) is None:
             return
         self._settling = held.hold_id
@@ -352,7 +345,11 @@ class MoneyFold:
         if (bill := usage.bill) is not None:
             self._calls += 1
             self._worked_s += usage.duration_s
-            self._bill(bill, mirrored=usage.mirrored)
+            self._bill(bill)
+        if usage.root_filing is not None:
+            if self._enclosed is None:
+                self._enclosed = MoneyFold()
+            self._enclosed.feed(usage.filed_by_root())
 
     def value(self) -> Money:
         if self._view is None:
@@ -370,8 +367,37 @@ class MoneyFold:
                 self._worked_s,
                 dict(self._by_node),
                 self._overshot,
+                None if self._enclosed is None else self._enclosed.value(),
             )
         return self._view
+
+
+NO_MONEY = MoneyFold().value()
+
+
+def filed(own: Money, span: LedgerSpan) -> Money:
+    """*span*'s money as the line reading it files it: an L4 inner ledger's as its root does."""
+    if not span.enclosed:
+        return own
+    return NO_MONEY if own.enclosed is None else own.enclosed
+
+
+class CycleMoney(NamedTuple):
+    """A cycle's ledger and its L4 inner cycles', as the cycle files them."""
+
+    spent: PaidSpend
+    metered: dict[CeilingMeter, Budget]
+    ledgers: tuple[Path, ...]
+
+
+def cycle_money(ledger: Path) -> CycleMoney:
+    spans = [LedgerSpan(ledger), *enclosed_spans(LedgerSpan(ledger))]
+    spent, metered_by = NOTHING_PAID, NO_MONEY.metered
+    for span in spans:
+        own = filed(money_on(span.path), span)
+        spent = spent.plus(own.spent)
+        metered_by = {meter: held.plus(own.metered[meter]) for meter, held in metered_by.items()}
+    return CycleMoney(spent, metered_by, tuple(span.path for span in spans))
 
 
 LedgerIndex.readers(MoneyFold)

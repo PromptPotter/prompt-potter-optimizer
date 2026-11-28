@@ -83,7 +83,7 @@ def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int
     usage = facts.pipeline.step_tokens.get(node)
     if usage is None:
         return (None, None)
-    return (usage.finish_reason, usage.reasoning)
+    return (usage.finish_reason, usage.tokens.reasoning)
 
 
 def _answered(facts: MeasuredCell) -> bool:

@@ -77,6 +77,7 @@ from promptpotter.infrastructure.run_state import producer_stamps
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     campaign_spend,
+    cycle_unreported,
     unreported_under,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LEDGER_SPEND
@@ -130,8 +131,10 @@ def _state_row(status: RunStatus) -> Figure:
     )
 
 
-def _spend_row(spent: MeteredSpend) -> Figure:
-    return _figure("spend", "Spend", spent.bill, spent.rate_priced_line)
+def _spend_row(spent: MeteredSpend, unreported_usd: float) -> Figure:
+    """A send a pause cut lapses on the charge book, never its ledger: said beside the bill."""
+    said = f"up to {usd_text(unreported_usd)} more unreported" if unreported_usd > 0 else None
+    return _figure("spend", "Spend", spent.bill, said or spent.rate_priced_line)
 
 
 def _lifetime_row(spent: UserSpend) -> Figure:
@@ -197,13 +200,14 @@ def _cycle_figures(
     runs_with: CampaignRunsWith | None,
     *,
     on_live_cycle: bool,
+    unreported_usd: float,
 ) -> list[Figure]:
     bench = facts.bench
     rows = [_state_row(status)]
     if runs_with is not None:
         models = [model for vendor in runs_with.vendors for model in vendor.models]
         rows.append(_figure("optimizer", "Optimizer", runs_with.optimizer, " · ".join(models)))
-    rows.append(_spend_row(facts.spend))
+    rows.append(_spend_row(facts.spend, unreported_usd))
     if not on_live_cycle:
         rows.append(_bench_row(ReadingState.HELD_ELSEWHERE, None))
     elif bench is not None:
@@ -339,7 +343,14 @@ def cycle_entry(
         # An inner cycle is named for the outer panel cell it measures, by its last segment.
         label=_cycle_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
         tags=tags,
-        figures=_cycle_figures(state.status, facts, cap, runs_with, on_live_cycle=hop == holder),
+        figures=_cycle_figures(
+            state.status,
+            facts,
+            cap,
+            runs_with,
+            on_live_cycle=hop == holder,
+            unreported_usd=cycle_unreported(stores.charges, cycle_dir).unreported_usd,
+        ),
         climb=_cycle_climb(facts),
         lines=_cycle_said_lines(root, line),
         state=state,

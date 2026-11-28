@@ -89,6 +89,7 @@ from promptpotter.application.head_to_head_price import (
     optimizer_round_price,
     priced_head_to_head,
 )
+from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs import interlock, mint, quota
@@ -191,6 +192,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.fitness_fold import cell_channels_of
 from promptpotter.domain.fork import ConfigOverrides, ForkRemainder, ForkTrigger, RebaseRequest
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
+from promptpotter.domain.hierarchy import HierarchyCampaign
 from promptpotter.domain.job import (
     CampaignLaunch,
     EmbeddedRun,
@@ -240,6 +242,7 @@ from promptpotter.domain.spend import (
     StepUsage,
     TokenAccount,
     TokenUsageKind,
+    usd_text,
 )
 from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.infrastructure import docker_host, holders
@@ -299,7 +302,6 @@ from promptpotter.infrastructure.store.account_spend import (
     bank_spend,
     billed_spend,
     campaign_spend,
-    ledger_cost,
     unreported_under,
     workspace_bank,
 )
@@ -761,7 +763,8 @@ async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows
             )
         with scoped(ledger=cells):
             emit_replayed_step_tokens(
-                {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}, {}
+                {"agent": StepUsage(TokenAccount(input=1200, output=300), rate_priced_usd=0.25)},
+                {},
             )
     *ran, replayed = [r for r in ledger_records(cells) if isinstance(r, TokenUsageRecord)]
     assert row_.error_category == ErrorCategory.UNSCOREABLE, "an ungraded cell read as graded"
@@ -2480,10 +2483,17 @@ def test_a_settled_call_leaves_the_money_fold_at_the_next_line(tmp_path: Path) -
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
-    tmp_path: Path, built_stores: Stores
-) -> None:
-    root = CycleEventLog(CycleLayout(tmp_path / "root").ledger)
+def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(built_stores: Stores) -> None:
+    outer = CycleHop(campaign_id="outer__000001", cycle_id="c0")
+    root = CycleEventLog(built_stores.campaigns.ledger(outer))
+    sandbox = inner_sandbox(built_stores, outer.campaign_id, outer.cycle_id)
+    inner_ledgers = built_stores.campaigns.in_sandbox(sandbox)
+    hops = [
+        CycleHop(campaign_id="innerds__20260101-000000", cycle_id=f"inner-cycle-{n}")
+        for n in (0, 1)
+    ]
+    inner_ledgers.mint_cycle(hops[1])
+    nested, benched = (CycleEventLog.open(CycleDir(inner_ledgers.cycle_dir(h))) for h in hops)
     book = spend_book(0.05, meters="search_incurred", metered_on=root.path)
     book.ledger = root
     inner = spend_book(5.0, enclosing=book)
@@ -2495,7 +2505,7 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
         cost_usd=0.01,
         recorded=None,
     )
-    with _billing_on(CycleEventLog(tmp_path / "nested.jsonl"), inner):
+    with _billing_on(nested, inner):
         telemetry.emit_replay_usage(
             node="cell",
             usage=TokenAccount(input=10, output=5),
@@ -2503,11 +2513,11 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
             price=price,
             served_by=None,
         )
-    assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
+    metered = built_stores.campaigns.cycle_metered(outer, "search_incurred").usd_amount
+    assert metered == pytest.approx(0.01) == book.spent.sent_usd, (
         "a nested run's replay reached its root's search-incurred meter at another price"
     )
     # Spawned by the root's bench pass: the bench's price on the root, the call's own kind inside.
-    benched = CycleEventLog(tmp_path / "benched.jsonl")
     with scoped(filed_as="bench"), scoped():
         enter_inner_cell(
             _inner_seat(built_stores, inner_cells("potter"))[0], built_stores.campaigns, "c"
@@ -2534,7 +2544,8 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
         "an inner run filed its own call as the bench pass that spawned it"
     )
     by_kind = read_line(CycleLayout.of_ledger(root.path).cycle_dir, LEDGER_SPEND).spend.by_kind
-    assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
+    metered = built_stores.campaigns.cycle_metered(outer, "search_incurred").usd_amount
+    assert metered == pytest.approx(0.01), (
         "a nested run a bench pass spawned was metered as the search's spend"
     )
     assert by_kind["bench"].incurred_usd == pytest.approx(0.01), (
@@ -2617,18 +2628,14 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
     inner.ledger = nested
     with _billing_on(nested, inner):
         jumping_clock(_owned_chat("inner", "nested"))
-    assert [(r.node, r.mirrored) for r in _token_bills(root)] == [("inner:inner", False)], (
-        "a nested send was not billed on its root's ledger"
-    )
-    assert [r.mirrored for r in _token_bills(nested)] == [True], "the nested copy bills twice"
-    assert _unreported_sends(root) == 0, "a billed nested send stayed held"
-    assert billed_spend([nested.path]).total.sent_usd == 0.0, "the nested ledger billed its mirror"
-    assert ledger_cost([nested.path]).total.sent_usd == pytest.approx(
-        billed_spend([root.path]).total.sent_usd
-    ), "the nested run's own cost read another figure than the bill its root carries"
+    assert _token_bills(root) == [], "a nested send was copied onto its root's ledger"
+    assert [(r.node, r.root_filing and r.root_filing.kind) for r in _token_bills(nested)] == [
+        ("inner", "backend")
+    ], "a nested send was not filed once, on its own ledger, naming how its root files it"
+    assert _unreported_sends(nested) == 0, "a billed nested send stayed held"
     metered_usd = book.spent.sent_usd
-    assert 0.0 < metered_usd == pytest.approx(billed_spend([root.path]).total.sent_usd), (
-        "the root's book read another bill than its ledger holds"
+    assert 0.0 < metered_usd == pytest.approx(billed_spend([nested.path]).total.sent_usd), (
+        "the root's book read another bill than the nested ledger holds"
     )
     assert inner.spent.sent_usd == pytest.approx(metered_usd), (
         "the nested book counted another bill than its root's"
@@ -2651,9 +2658,39 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
             provider="openai",
             paid_by="host",
         ).unreported()
-    assert _unreported_sends(root) == 1, "a nested send cut short lapsed nowhere"
+    assert _unreported_sends(nested) == 1, "a nested send cut short lapsed off its own ledger"
     assert book.spent.unreported_usd == pytest.approx(_HOLD_USD), (
         "a nested send cut short stayed held on its own book and freed its root's"
+    )
+
+
+# A cut send lapses on the charge book, never a ledger: the cycle's row reads it there.
+async def test_a_cycles_row_says_the_sends_a_pause_cut_never_a_bare_bill(world: World) -> None:
+    hop = await world.minted()
+    charges = world.stores.charges
+    cut = Hold(
+        hold_id="cut",
+        parent=None,
+        key_source="host",
+        bound=Budget(usd=_HOLD_USD, tokens=0),
+        resource="optimizer",
+        node="o",
+        ledger=charges.held_on(world.stores.campaigns.ledger(hop)),
+    )
+    charges.append(cut, Lapse(hold_id="cut", bound=cut.bound))
+    [entry] = list_hierarchy(
+        world.stores,
+        inside=(),
+        dataset=None,
+        lifecycle="all",
+        campaign_id=None,
+        attached_only=False,
+        depth=1,
+    ).entries
+    assert isinstance(entry, HierarchyCampaign), "a minted campaign listed as an open check-in"
+    spend = [f.sub for cycle in entry.children for f in cycle.figures if f.key == "spend"]
+    assert spend == [f"up to {usd_text(_HOLD_USD)} more unreported"], (
+        "a cycle's row read a send a pause cut as nothing spent"
     )
 
 
@@ -3835,6 +3872,29 @@ def test_a_coupon_the_host_sets_is_served_and_afresh_draws_from_now_leaving_the_
     assert coupon_status(stores).used_share == 0.0, "a new face undid the start afresh"
     with pytest.raises(NotFoundError):
         set_coupon(projects, "sub-0", Budget(usd=1.0), afresh=False)
+
+
+# A coupon's window sums on from its last read (`account_spend.py::_Bills.billed_since`).
+def test_a_bill_landing_between_two_coupon_reads_is_drawn_once() -> None:
+    user = User(user_id="sub-8", tenant_id="sub-8", created_at="2026-01-01T00:00:00Z")
+    stores = _account_stores(issuer=_WEB, user=user, spent=_SPENT_THE_COUPON)
+    set_coupon(default_projects_root(), "sub-8", Budget(usd=_FACE.usd_amount), afresh=True)
+    assert coupon_status(stores).used_share == 0.0, "a coupon started afresh drew the old bill"
+    quarter = Budget(usd=_FACE.usd_amount / 4, tokens=0)
+    late = Hold(
+        hold_id="late",
+        parent=None,
+        key_source="host",
+        bound=quarter,
+        resource="backend",
+        node="cell",
+        ledger="late.jsonl",
+    )
+    stores.charges.append(late, _bill("late", quarter.usd_amount))
+    for read in ("first", "second"):
+        assert coupon_status(stores).used_share == pytest.approx(0.25), (
+            f"the {read} read after a bill landed drew it other than once"
+        )
 
 
 def test_a_grant_file_without_its_start_does_not_load() -> None:
@@ -5075,7 +5135,7 @@ def test_the_account_and_the_campaigns_ceiling_read_what_its_run_billed(ran_24: 
         billed = [
             r.money
             for r in ledger_records(stores.campaigns.layout(hop).ledger)
-            if isinstance(r, TokenUsageRecord) and isinstance(r.money, Bill) and not r.mirrored
+            if isinstance(r, TokenUsageRecord) and isinstance(r.money, Bill)
         ]
         ceiling = stores.campaigns.metered_spend(hop.campaign_id, "bill")
         used = account_bill(stores.charges).host.used_usd
@@ -5308,7 +5368,7 @@ def test_a_campaign_whose_manifest_a_torn_delete_left_gone_still_deletes_and_ban
 
 
 @pytest.mark.usefixtures("account_bound")
-def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
+def test_a_reclaimed_orphan_sandbox_banks_its_inner_cycles_spend_once(
     built_stores: Stores, spent_campaign: _SpentCampaign
 ) -> None:
     stores = built_stores
@@ -5319,8 +5379,8 @@ def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
     inner_ledger = CycleEventLog.open(
         CycleDir(stores.campaigns.in_sandbox(sandbox).cycle_dir(inner_hop))
     )
-    # One call carried out, one not: only the second is still this sandbox's to bank.
-    for input_tokens, cost_usd, mirrored in ((400, 0.10, True), (600, 0.15, False)):
+    # Two calls the inner cycle filed: each is the sandbox's to bank, once.
+    for input_tokens, cost_usd in ((400, 0.10), (600, 0.15)):
         inner_ledger.append(
             billed_call(
                 cost_usd,
@@ -5331,18 +5391,15 @@ def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
                 input_tokens=input_tokens,
                 output_tokens=100,
                 duration_s=1.0,
-                mirrored=mirrored,
             )
         )
     banked_before = len(tombstones())
     reclaim_orphan_sandboxes(stores.projects_root)
     assert not sandbox.exists(), "a reclaimed sandbox survived"
     banked = tombstones()[banked_before:]
-    assert [b.spent["host"].used_tokens for b in banked] == [600 + 100] and [
+    assert [b.spent["host"].used_tokens for b in banked] == [400 + 600 + 2 * 100] and [
         b.spent["host"].used_usd for b in banked
-    ] == pytest.approx([0.15]), (
-        "a forwarded inner cycle was banked twice, or its own spend not at all"
-    )
+    ] == pytest.approx([0.25]), "a reclaimed inner cycle's spend was banked twice, or not at all"
 
 
 @pytest.mark.usefixtures("account_bound")
@@ -5667,13 +5724,11 @@ def test_a_reported_zero_of_reasoning_reaches_a_step_as_zero_and_none_as_unrepor
     wrote = ReportedUsage.model_validate(
         {**said, "prompt_tokens_details": {"cache_write_tokens": 5}}
     ).tokens
-    assert StepUsage.from_account(zero).reasoning == 0, "a reported zero read as unreported"
-    assert StepUsage.from_account(silent).reasoning is None, "an unreported part read as 0"
+    assert zero.reasoning == 0, "a reported zero read as unreported"
+    assert silent.reasoning is None, "an unreported part read as 0"
     # A row's step entry rides the wire, and the fold reads its account off it.
     folds = {
-        name: TokenAccount.from_step_tokens(
-            {"n": StepUsage.from_wire(StepUsage.from_account(tokens).wire())}
-        )
+        name: TokenAccount.from_step_tokens({"n": StepUsage.from_wire(StepUsage(tokens).wire())})
         for name, tokens in (("wrote", wrote), ("zero", zero), ("silent", silent))
     }
     assert [(f.cache_write, f.reasoning) for f in folds.values() if f is not None] == [

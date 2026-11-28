@@ -402,7 +402,7 @@ def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_
     # INSIDE the cell's own task, or the mode leaks to the spawner; before the cell's run binds its
     # own round, so this still reads the spawner's: the root's, as the spawner is the root.
     spawner = run_scope()
-    mode = InstrumentMode(spawner.depth + 1, root_round=spawner.round, enclosed_as=spawner.filed_as)
+    mode = InstrumentMode(root_round=spawner.round, enclosed_as=spawner.filed_as)
     rescope(instrument=mode, filed_as=None)
     return ArmOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
 

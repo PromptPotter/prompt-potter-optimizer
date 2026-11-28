@@ -19,7 +19,7 @@ from promptpotter.domain.records.money import (
     Hold,
     Lapse,
     Release,
-    TokenUsageRecord,
+    RootFiling,
 )
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
@@ -27,7 +27,6 @@ from promptpotter.domain.spend import (
     METER_KINDS,
     METER_PRICES_REPLAYS,
     MONEY_AXES,
-    NESTED_NODE_PREFIX,
     NOTHING_PAID,
     RESERVE_PER_CEILING,
     Budget,
@@ -43,7 +42,7 @@ from promptpotter.domain.spend import (
     usd_text,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.money_fold import Money, money_on, still_held
+from promptpotter.infrastructure.llm.money_fold import Money, cycle_money, money_on, still_held
 from promptpotter.infrastructure.llm.telemetry import (
     billing_ledger,
     call_price,
@@ -236,7 +235,7 @@ class SpendMeter:
         self.charges = charges
         # The job's hold every call and cell of this book draws on.
         self.hold_id = hold_id
-        # The cycle's ledger its share meters (replays and a nested run's copies live there);
+        # The cycle's ledger its share meters, with its L4 inner cycles' (`cycle_money`);
         # ``None`` meters what its job's hold drew.
         self.metered_on = metered_on
         self.meters = meters
@@ -268,19 +267,19 @@ class SpendMeter:
         if self.metered_on is None:
             drawn = money.drawn.get(self.hold_id, NOTHING_PAID)
             return drawn.host if host else drawn.total
-        on = money_on(self.metered_on)
-        ledger = self.charges.held_on(self.metered_on)
+        on = cycle_money(self.metered_on)
+        ledgers = {self.charges.held_on(ledger) for ledger in on.ledgers}
 
         def mine(hold: Hold) -> bool:
             kind = self._filed(money, hold)
             if kind is None:
-                return hold.ledger == ledger
+                return hold.ledger in ledgers
             return host or self.binds(kind)
 
         whole, unpriced = money.unreported_holds()
         left = still_held(filter(mine, whole), filter(mine, unpriced))
         if host:
-            return on.spent.cost.host.plus(left.host)
+            return on.spent.host.plus(left.host)
         metered = on.metered[self.meters]
         return UserSpend(metered.usd_amount, metered.token_amount, 0).plus(left.total)
 
@@ -343,7 +342,7 @@ class SpendBook(SpendMeter):
         self.cycle = cycle
         # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
         self.opened = opened
-        # The ledger a nested run's sends are copied onto, as this book's root.
+        # The ledger its run bills, armed at the run's start.
         self.ledger: CycleEventLog | None = None
         # A nested run's book: each send is admitted against it AND every book enclosing it, which
         # files it as `enclosed_as`: the kind of the enclosing pass that spawned the run.
@@ -590,31 +589,15 @@ class SpendBook(SpendMeter):
         if self._aside_id in self._money().open:
             self.charges.append(Release(hold_id=self._aside_id))
 
-    @property
-    def nested(self) -> bool:
-        return self.enclosing is not None
-
-    def file(self, record: TokenUsageRecord, ledger: CycleEventLog) -> None:
-        """A call's usage on *ledger*, the scope's as its send was admitted, a replay's included;
-        a nested run's lands on its root's ledger first, the copy money is summed off."""
-        if self.nested:
-            self.root().mirror(record, self.enclosed_as)
-        ledger.append(record)
-
-    def mirror(self, record: TokenUsageRecord, kind: TokenUsageKind) -> None:
-        """The root ledger's copy of a nested run's call, filed as *kind*, which its meter counts."""
-        if self.ledger is None:
-            return
+    def root_filing(self) -> RootFiling | None:
+        """How the root files a send of this nested book: the spawner's kind, in the ROOT's round
+        (the nested run binds its own); ``None`` on a root book."""
+        if self.enclosing is None:
+            return None
         mode = run_scope().instrument
-        copy = record.filed_as(kind).model_copy(
-            update={
-                "node": f"{NESTED_NODE_PREFIX}{record.node}",
-                # The ROOT's round, whose ledger this lands on; the nested run binds its own.
-                "round": current_round() if mode is None else mode.root_round,
-                "mirrored": False,
-            }
+        return RootFiling(
+            kind=self.enclosed_as, round=current_round() if mode is None else mode.root_round
         )
-        self.ledger.append(copy)
 
     def prices_sends(self) -> bool:
         """Whether ANY send is held in dollars here: a price list is then needed whoever pays."""
@@ -737,8 +720,6 @@ class Admission:
         self._model = model
         self._provider = provider
         self._started = time.monotonic()
-        # A nested run's sends land on its ROOT's ledger too; the account's charges take each once.
-        self._root = book.root()
         self._charges = book.charges
         # Its usage lands where the ledger was bound at admission, whatever a probe mutes after.
         self._ledger = billing_ledger(label.node)
@@ -751,7 +732,7 @@ class Admission:
             label,
             what=what,
             paid_by=paid_by,
-            ledger=self._charges.held_on((self._root.ledger or self._ledger).path),
+            ledger=self._charges.held_on(self._ledger.path),
         )
 
     def _price(self, part: Billed) -> _Part:
@@ -775,9 +756,8 @@ class Admission:
             ),
             money=bill,
             served_by=part.served_by,
-            mirrored=self._book.nested,
         )
-        self._book.file(record, self._ledger)
+        self._ledger.append(record)
 
     def close(self, outcome: SendOutcome) -> None:
         if outcome.reported is not None:

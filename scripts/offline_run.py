@@ -172,7 +172,6 @@ from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
@@ -183,7 +182,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     list_populations,
     load_population,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import CYCLE_INDEX
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import CYCLE_INDEX, LEDGER_SPEND
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import (
@@ -776,8 +775,7 @@ async def banked(
         raise SystemExit(f"offline run: arm {name} searched {beside} beside its prompt")
     stores.campaigns.update_campaign(session.campaign_id, label=LABEL)
     cycle = Path(stores.campaigns.cycle_dir(session.hop))
-    dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
-    spend = SpendRollup.model_validate(dashboard["spend"])
+    spend = stores.campaigns.read(session.hop, LEDGER_SPEND).spend
     if billed := spend.total_used_usd:
         raise SystemExit(f"offline run billed ${billed}: a fake answered with a cost")
     backend = harness.backend

@@ -7418,6 +7418,32 @@
         "title": "RoleScope",
         "type": "string"
       },
+      "RootFiling": {
+        "additionalProperties": false,
+        "description": "How an L4 outer files a send its inner run filed: the kind of the pass that spawned the\nrun, in the outer's round.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TokenUsageKind"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          }
+        },
+        "required": [
+          "kind",
+          "round"
+        ],
+        "title": "RootFiling",
+        "type": "object"
+      },
       "RoundAdvance": {
         "description": "Whether a closed round ADVANCED the best-so-far line.",
         "enum": [
@@ -9356,11 +9382,6 @@
             "title": "Input Tokens",
             "type": "integer"
           },
-          "mirrored": {
-            "default": false,
-            "title": "Mirrored",
-            "type": "boolean"
-          },
           "money": {
             "anyOf": [
               {
@@ -9402,6 +9423,17 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MeasurementRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "root_filing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RootFiling"
               },
               {
                 "type": "null"

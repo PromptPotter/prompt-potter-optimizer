@@ -59,10 +59,10 @@ class InnerSpawnContext:
 
 @dataclass(frozen=True)
 class InstrumentMode:
-    """``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger,
-    filed as ``enclosed_as``, the spawner's kind; the cell's own ledger files each call as itself."""
+    """An L4 inner cell's: ``root_round`` is its root's round, ``enclosed_as`` the spawner's kind,
+    which its sends' `RootFiling` names; the cell's own ledger files each call as itself (L4 is one
+    level deep, `docs/concepts/l4.md` § Depth)."""
 
-    depth: int
     root_round: int | None
     enclosed_as: TokenUsageKind | None
 
@@ -96,16 +96,12 @@ class RunScope:
     stall_sink: Callable[[float], None] | None = None
     # The open cell's hold on the account, which its sends draw on.
     reservation: str | None = None
-    # An L4 inner cell's depth and its root's round, laid at the cell's entry inside its own task
-    # and never undone there, so it covers FINALIZE: a late bill lands on the root's ledger.
+    # An L4 inner cell's mode, laid at the cell's entry inside its own task and never undone
+    # there, so it covers FINALIZE: a late bill names its root's round too.
     instrument: InstrumentMode | None = None
     # The scoring pass a walk's cells measure, laid at its INGRESS (`scope_context`), or a
     # re-entering asker inherits it stale; ``None`` is an origin pass.
     measured: MeasuredPass | None = None
-
-    @property
-    def depth(self) -> int:
-        return 0 if self.instrument is None else self.instrument.depth
 
 
 _EMPTY = RunScope()

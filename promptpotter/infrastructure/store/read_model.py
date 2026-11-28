@@ -45,7 +45,12 @@ from promptpotter.infrastructure.store.io import (
     read_tail,
     write_bytes,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycle_dirs, cycle_ledgers
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    campaign_cycle_dirs,
+    cycle_ledgers,
+    inner_cycle_ledgers,
+)
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import (
     FileKind,
@@ -58,6 +63,8 @@ from promptpotter.shared.errors import (
 class LedgerSpan(NamedTuple):
     path: Path
     until: int | None = None
+    # An L4 inner cycle's ledger, read as the cycle whose run spawned it files its sends.
+    enclosed: bool = False
 
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
@@ -852,11 +859,32 @@ def fork_chain(cycle_dir: Path) -> list[LedgerSpan]:
 def _widest_walks(campaign_root: Path) -> list[LedgerSpan]:
     widest: dict[Path, int | None] = {}
     for cycle_dir in campaign_cycle_dirs(campaign_root):
-        for path, until in fork_chain(cycle_dir):
+        for path, until, _ in fork_chain(cycle_dir):
             if path.is_file():
                 held = widest.get(path, 0)
                 widest[path] = None if until is None or held is None else max(held, until)
     return [LedgerSpan(path, until) for path, until in widest.items()]
+
+
+def enclosed_spans(span: LedgerSpan) -> list[LedgerSpan]:
+    """The L4 inner cycles' ledgers of *span*'s cycle, each cut at the instant *span* is."""
+    inner = inner_cycle_ledgers(span.path)
+    if span.until is None or not inner:
+        return [LedgerSpan(ledger, enclosed=True) for ledger in inner]
+    if span.until == 0:
+        return [LedgerSpan(ledger, 0, enclosed=True) for ledger in inner]
+    cut = Moment(span.path, span.until - 1)
+    return [cut.span(ledger)._replace(enclosed=True) for ledger in inner]
+
+
+def enclosing(scope: LineScope) -> LineScope:
+    """*scope*'s ledgers, each followed by its L4 inner cycles': an outer's spend is a fold of
+    what its inner runs filed, once each, on their own ledgers."""
+
+    def spans(at: Path) -> list[LedgerSpan]:
+        return [one for span in scope.spans(at) for one in (span, *enclosed_spans(span))]
+
+    return LineScope(spans, of_campaign=scope.of_campaign)
 
 
 # A cycle's chain: a fork reads its parent's ledger to its cut.
@@ -959,7 +987,7 @@ class Moment(NamedTuple):
         for held in chain:
             then = self.span(held.path).until
             assert then is not None
-            out.append(LedgerSpan(held.path, then if held.until is None else min(held.until, then)))
+            out.append(held._replace(until=then if held.until is None else min(held.until, then)))
         return out
 
 

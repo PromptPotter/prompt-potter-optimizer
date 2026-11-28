@@ -6,6 +6,7 @@
 
 # The nodes a free run's pipeline may hold.
 task_nodes: [llm_only]
+# The first launches a task node whose own model is off this list and whose config names none.
 task_models:
   # Refuses `none` (HTTP 400); its `default` is `medium`.
   openai/gpt-oss-20b:nitro: {reasoning_effort: [low]}

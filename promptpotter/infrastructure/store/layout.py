@@ -138,6 +138,25 @@ def inner_sandbox_dir(workspace_projects_root: Path, tenant_id: str, hop: CycleH
     return inner_sandboxes_dir(workspace_projects_root) / inner_sandbox_key(tenant_id, hop)
 
 
+def inner_cycle_ledgers(ledger: Path) -> list[Path]:
+    """Each ledger of the L4 inner cycles the cycle holding *ledger* spawned, read off its sandbox
+    (`inner_sandbox_key`); none for a ledger of no campaign cycle, or of one inside a sandbox (L4
+    is one level deep)."""
+    cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
+    parents = cycle_dir.parents
+    if len(parents) < 4 or (parents[0].name, parents[2].name) != (CYCLES_DIR, CAMPAIGNS_DIR):
+        return []
+    workspace = parents[3]
+    if in_inner_sandbox(workspace):
+        return []
+    hop = CycleHop(campaign_id=parents[1].name, cycle_id=cycle_dir.name)
+    inner = WorkspaceDir(inner_sandbox_dir(workspace.parent, workspace.name, hop) / workspace.name)
+    campaigns = campaigns_root_dir_for(inner)
+    if not campaigns.is_dir():
+        return []
+    return [path for root in sorted(campaigns.iterdir()) for path in cycle_ledgers(root)]
+
+
 def sandbox_owner_path(sandbox_dir: Path) -> Path:
     return sandbox_dir / "owner.json"
 

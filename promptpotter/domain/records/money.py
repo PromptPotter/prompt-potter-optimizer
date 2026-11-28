@@ -16,6 +16,7 @@ from pydantic_core import CoreSchema
 
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.spend import (
+    NESTED_NODE_PREFIX,
     Budget,
     KeySource,
     TokenUsageKind,
@@ -116,6 +117,14 @@ class Lapse(FrozenModel):
 ChargeLine = Annotated[Hold | Bill | Release | Lapse, Field(discriminator="record_type")]
 
 
+class RootFiling(FrozenModel):
+    """How an L4 outer files a send its inner run filed: the kind of the pass that spawned the
+    run, in the outer's round."""
+
+    kind: TokenUsageKind
+    round: int | None
+
+
 class TokenUsageRecord(CycleRecord):
     """ONE answered send, or a replay; a send that reported no usage writes none."""
 
@@ -134,8 +143,8 @@ class TokenUsageRecord(CycleRecord):
     duration_s: float = 0.0
     # A send's bill; a replay's recorded price alone, which no wallet paid.
     money: Bill | CallPrice
-    # A nested run's own view of its call; money is summed off the copy on the outer ledger.
-    mirrored: bool = False
+    # A nested run's send, filed once on its own ledger: how its root's folds file it.
+    root_filing: RootFiling | None = None
     round: int | None = None
     # ``None`` outside a candidate's pass; a nested run's copy keeps ITS pass: `by_role` skips it.
     role: MeasurementRole | None = None
@@ -154,6 +163,18 @@ class TokenUsageRecord(CycleRecord):
         price = self.price.model_copy(update={"kind": kind})
         money = price if self.bill is None else self.money.model_copy(update={"price": price})
         return self.model_copy(update={"money": money})
+
+    def filed_by_root(self) -> TokenUsageRecord:
+        """This nested send as its root's folds read it: its kind and round, its node marked."""
+        if (filing := self.root_filing) is None:
+            raise ValueError(f"{self.node}: a send its own run filed has no root filing")
+        return self.filed_as(filing.kind).model_copy(
+            update={
+                "node": f"{NESTED_NODE_PREFIX}{self.node}",
+                "round": filing.round,
+                "root_filing": None,
+            }
+        )
 
     @property
     def spend_round(self) -> int:

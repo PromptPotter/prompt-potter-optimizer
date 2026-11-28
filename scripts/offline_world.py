@@ -438,9 +438,9 @@ def inner_cell(stores: Stores, hop: CycleHop) -> str:
 
 def _asker() -> str:
     """Empty for the run's own call; an L4 cell's inner campaign by its `inner_cell`."""
-    if not run_scope().depth:
-        return ""
     scope = run_scope()
+    if scope.instrument is None:
+        return ""
     spawn, stores = scope.spawn, scope.account
     assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
     return inner_cell(stores, spawn.inside[-1])

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import math
 import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import Annotated, Any, Literal, NamedTuple, get_args
+from typing import Annotated, Literal, NamedTuple, get_args
 
 from pydantic import (
     Field,
@@ -26,53 +25,8 @@ from promptpotter.domain.strict_model import (
     StrictModel,
     WireInt,
 )
-from promptpotter.domain.wire_record import ALWAYS, WireRecord
+from promptpotter.domain.wire_record import ALWAYS, FLAT, WireRecord
 from promptpotter.shared.worded import Worded
-
-
-@dataclass(frozen=True, slots=True)
-class StepUsage:
-    input: int = field(default=0, metadata=ALWAYS)
-    output: int = field(default=0, metadata=ALWAYS)
-    estimated: bool = field(default=False, metadata=ALWAYS)
-    # What the provider REPORTED it billed; absent where it reported nothing, never our rate's price.
-    cost_usd: float | None = None
-    rate_priced_usd: float | None = None
-    model: str | None = None
-    provider: str | None = None
-    # The upstream host that answered, where `provider` names a gateway.
-    served_by: str | None = None
-    finish_reason: str | None = None
-    reasoning: int | None = None
-    # THEY discounted the call; the `cached` flag beside it says WE replayed it.
-    cache_read: int | None = None
-    cache_write: int | None = None
-    # The counts above sum every request the node sent; these left and reported no usage (a 5xx).
-    unreported_attempts: int = 0
-
-    @classmethod
-    def from_wire(cls, entry: Mapping[str, object]) -> StepUsage:
-        return _STEP_USAGE.read(entry)
-
-    @classmethod
-    def from_account(cls, tokens: TokenAccount, **billed: Any) -> StepUsage:
-        """The one builder every connector calls: `TokenAccount`'s fields are the roster of parts."""
-        return cls(**tokens.model_dump(), **billed)
-
-    def wire(self) -> dict[str, object]:
-        return _STEP_USAGE.write(self)
-
-    @property
-    def account(self) -> TokenAccount:
-        return TokenAccount(**{part: getattr(self, part) for part in TokenAccount.model_fields})
-
-
-_STEP_USAGE = WireRecord.of(
-    StepUsage,
-    "StepTokenUsage",
-    "Per-LLM-node ``step_tokens`` entry — the WIRE spelling of :class:`TokenAccount`, which\n"
-    "deserializes one. A ``NotRequired`` key is absent where the provider surfaced nothing.",
-)
 
 
 def _reported_sum(a: int | None, b: int | None) -> int | None:
@@ -111,7 +65,7 @@ class TokenAccount(FrozenModel):
         """``None`` where the row carries no entries: "reported nothing" is not "reported zero"."""
         if not step_tokens:
             return None
-        return reduce(operator.add, (usage.account for usage in step_tokens.values()))
+        return reduce(operator.add, (usage.tokens for usage in step_tokens.values()))
 
     @classmethod
     def from_rows(cls, rows: Iterable[Mapping[str, StepUsage]]) -> TokenAccount | None:
@@ -129,6 +83,38 @@ class TokenAccount(FrozenModel):
 
     def prefix(self, *, replayed: bool) -> PrefixReading:
         return prefix_reading(self.cache_share(replayed=replayed), replayed=replayed)
+
+
+@dataclass(frozen=True, slots=True)
+class StepUsage:
+    # THEIR cache parts; the `cached` flag beside a cell says WE replayed it.
+    tokens: TokenAccount = field(default_factory=TokenAccount, metadata=FLAT)
+    estimated: bool = field(default=False, metadata=ALWAYS)
+    # What the provider REPORTED it billed; absent where it reported nothing, never our rate's price.
+    cost_usd: float | None = None
+    rate_priced_usd: float | None = None
+    model: str | None = None
+    provider: str | None = None
+    # The upstream host that answered, where `provider` names a gateway.
+    served_by: str | None = None
+    finish_reason: str | None = None
+    # The counts above sum every request the node sent; these left and reported no usage (a 5xx).
+    unreported_attempts: int = 0
+
+    @classmethod
+    def from_wire(cls, entry: Mapping[str, object]) -> StepUsage:
+        return _STEP_USAGE.read(entry)
+
+    def wire(self) -> dict[str, object]:
+        return _STEP_USAGE.write(self)
+
+
+_STEP_USAGE = WireRecord.of(
+    StepUsage,
+    "StepTokenUsage",
+    "Per-LLM-node ``step_tokens`` entry — the WIRE spelling of :class:`TokenAccount`, which\n"
+    "deserializes one. A ``NotRequired`` key is absent where the provider surfaced nothing.",
+)
 
 
 PrefixState = Literal["discounted", "cold", "unreported", "replayed"]
@@ -484,12 +470,8 @@ assert list(CAP_AXIS_INFO) == list(Budget.model_fields) == list(get_args(CapAxis
 
 
 def usd_text(usd: float) -> str:
-    """THE money wording, `webapp/lib/format.ts::fmtUsd`'s: three significant digits under a
-    dollar, so a cheap model's cent reads, else two places."""
-    if usd == 0 or abs(usd) >= 1:
-        return f"${usd:.2f}"
-    places = 2 - math.floor(math.log10(abs(usd)))
-    return f"${usd:.{places if abs(round(usd, places)) < 1 else 2}f}"
+    """A sum of money as a person reads it: the ``usd`` measurand's level (`money_places`)."""
+    return level_text(usd, "usd")
 
 
 def bill_text(usd: float, *, floor: bool) -> str:

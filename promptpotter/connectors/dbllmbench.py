@@ -276,7 +276,7 @@ def _spent(records: list[dict[str, Any]], cfg: NodeCall) -> dict[str, dict[str, 
             else None
         ),
     )
-    return {WRITER_NODE: StepUsage.from_account(spent, model=cfg.model).wire()}
+    return {WRITER_NODE: StepUsage(spent, model=cfg.model).wire()}
 
 
 def _stalled(record: Mapping[str, Any]) -> str | None:

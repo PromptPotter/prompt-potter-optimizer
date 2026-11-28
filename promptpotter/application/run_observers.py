@@ -36,6 +36,7 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import billing_ledger, current_round
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import LEDGER_SPEND
 from promptpotter.infrastructure.store.campaign_store.store import CycleIndexProjection
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.stores import Stores
@@ -43,7 +44,6 @@ from promptpotter.infrastructure.store.stores import Stores
 
 def declare_run_stop(
     session: Session,
-    observers: RunObservers,
     stop_reason: StopReason,
     *,
     cause: PauseCause | None = None,
@@ -61,7 +61,7 @@ def declare_run_stop(
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
     cycle, campaign = spend_counts(session.store, session.hop, meter)
     spend = StopSpend(
-        spent=observers.dashboard.spend,
+        spent=session.store.campaigns.read(session.hop, LEDGER_SPEND).spend,
         meter=meter,
         cycle=cycle,
         campaign=campaign,

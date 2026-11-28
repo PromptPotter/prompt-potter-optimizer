@@ -125,7 +125,7 @@ def _step_parts(
 ) -> list[Billed]:
     return [
         Billed(
-            usage.account,
+            usage.tokens,
             usage.cost_usd,
             served_by=usage.served_by,
             model=usage.model,
@@ -135,7 +135,7 @@ def _step_parts(
             rate_priced_usd=usage.rate_priced_usd,
         )
         for node_name, usage in step_tokens.items()
-        if usage.input or usage.output or usage.cost_usd
+        if usage.tokens.total or usage.cost_usd
     ]
 
 
@@ -353,7 +353,7 @@ def _at_our_rate(usage: StepUsage) -> StepUsage:
     return replace(
         usage,
         rate_priced_usd=rate_priced_usd(
-            usage.account,
+            usage.tokens,
             model=usage.model,
             provider=usage.provider,
             cost_usd=usage.cost_usd,
@@ -372,7 +372,7 @@ def _estimated_usage(
     in_text = prompt if isinstance(prompt, str) else ""
     out_text = " ".join(_observed_texts(node, resp_data))
     model, provider = priced_as
-    return StepUsage.from_account(
+    return StepUsage(
         TokenAccount(input=len(in_text) // 4, output=len(out_text) // 4),
         estimated=True,
         model=model,

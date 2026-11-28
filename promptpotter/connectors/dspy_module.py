@@ -131,11 +131,7 @@ class _ProgramCalls:
     def step_tokens(self) -> dict[str, dict[str, object]]:
         if not self.used.total:
             return {}
-        return {
-            PROGRAM_NODE: StepUsage.from_account(
-                self.used, model=self.model, provider=self.provider
-            ).wire()
-        }
+        return {PROGRAM_NODE: StepUsage(self.used, model=self.model, provider=self.provider).wire()}
 
     async def _count_call(self) -> None:
         # Once per call, never per resend: a resend is admitted at its own bound.

@@ -24,7 +24,7 @@ from pydantic_core import core_schema
 
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO
-from promptpotter.domain.spend import StepUsage
+from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.domain.wire_record import (
     ALWAYS,
     BY_HAND,
@@ -345,7 +345,12 @@ _SAYS_EVERYTHING = MeasuredCell(
         terminal_node="n",
         step_timings={"n": 1.5},
         step_tokens={
-            "n": StepUsage(input=3, output=4, estimated=True, cost_usd=0.5, model="m", reasoning=0),
+            "n": StepUsage(
+                TokenAccount(input=3, output=4, reasoning=0),
+                estimated=True,
+                cost_usd=0.5,
+                model="m",
+            ),
             "silent": StepUsage(),
         },
         diagnostics=Diagnostics(

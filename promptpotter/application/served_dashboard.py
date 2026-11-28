@@ -80,12 +80,15 @@ from promptpotter.infrastructure.projections.live_dashboard import (
     fold_at,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LEDGER_SPEND,
+    SPEND_BY_ROUND,
     VERIFY_LEDGER,
+    LedgerSpend,
     VerifyLedger,
 )
 from promptpotter.infrastructure.store.command_log import HeldLookahead, effective_lookahead
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import read_line
+from promptpotter.infrastructure.store.read_model import Moment, read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words, epoch_seconds
 from promptpotter.shared.hashing import stable_hash
@@ -319,16 +322,23 @@ class SpendByRound(StrictModel):
     rounds: list[int]
     series: list[KindSeries] = Field(description="Every kind, in `SPEND_KIND_LABELS` order.")
     readings: list[str] = Field(description="Each round's bill by kind in one line, as `rounds`.")
+    empty: str | None = Field(
+        description="Said in place of the series where no round billed anything; null otherwise."
+    )
 
     @classmethod
-    def of(cls, by_round: Mapping[str, SpendRollup]) -> SpendByRound:
-        ordered = sorted(by_round.items(), key=lambda kv: int(kv[0]))
+    def of(cls, by_round: Mapping[int, SpendRollup]) -> SpendByRound:
+        ordered = sorted(by_round.items())
         billed = {
             kind: [spent.by_kind[kind].used_usd for _, spent in ordered]
             for kind in SPEND_KIND_LABELS
         }
         return cls(
-            rounds=[int(key) for key, _ in ordered],
+            empty=None
+            if any(any(usd) for usd in billed.values())
+            else "Nothing billed yet: a bill lands per round as a provider reports one, and a "
+            "replay or our rate's price is never one.",
+            rounds=[key for key, _ in ordered],
             series=[
                 KindSeries(key=kind, label=label, billed_usd=billed[kind])
                 for kind, label in SPEND_KIND_LABELS.items()
@@ -885,9 +895,12 @@ def _serve(
     standing: _Present | None,
     owners: _Addresser,
     held_series: str | None,
+    spend: LedgerSpend,
+    spend_by_round: dict[int, SpendRollup],
 ) -> ServedDashboard:
     """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since;
-    *held_series* is the closed series' version its asker holds, which is not re-sent."""
+    *held_series* is the closed series' version its asker holds, which is not re-sent; *spend*
+    is the cycle's money lines at that moment, its L4 inner runs' included."""
     banked: dict[str, Any] = {name: getattr(state, name) for name in DashboardFacts.model_fields}
     in_flight, allowed = state.in_flight, state.lookahead_allowed
     # A hold is read against the clock: a past moment has none, and a dead producer holds nothing.
@@ -960,13 +973,13 @@ def _serve(
         lookahead=_lookahead(
             state, run=run, standing=standing, in_flight=in_flight, allowed=allowed
         ),
-        spend_metered=MeteredSpend.of(state.spend, meter),
-        spend_by_round=SpendByRound.of(state.spend_by_round),
+        spend_metered=MeteredSpend.of(spend.spend, meter),
+        spend_by_round=SpendByRound.of(spend_by_round),
         metered_line=metered_line(
             meter,
             # A replay holds nothing: the bills it folded are its whole count.
             count=SpendCount(
-                billed=state.spend.metered(meter),
+                billed=spend.spend.metered(meter),
                 unreported=NOTHING_METERED,
                 set_aside=NOTHING_METERED,
                 out=NOTHING_METERED,
@@ -1036,6 +1049,9 @@ def served_dashboard(
         )
     folded = stores.campaigns.run_limits(seat, offset=at)
     assert folded is not None, "a folded state stands on its wiring"
+    moment = None if at is None else Moment(CycleLayout(cycle_path).ledger, at)
+    spend = stores.campaigns.read(hop, LEDGER_SPEND, moment=moment)
+    spend_by_round = stores.campaigns.read(hop, SPEND_BY_ROUND, moment=moment)
     if at is not None:
         return _serve(
             state,
@@ -1048,6 +1064,8 @@ def served_dashboard(
             standing=None,
             owners=_addresser(stores, hop),
             held_series=series,
+            spend=spend,
+            spend_by_round=spend_by_round,
         )
     config = cycle_config(stores, seat).config
     limits = _binding(stores, seat, config, run, folded)
@@ -1079,4 +1097,6 @@ def served_dashboard(
         ),
         owners=_addresser(stores, hop),
         held_series=series,
+        spend=spend,
+        spend_by_round=spend_by_round,
     )

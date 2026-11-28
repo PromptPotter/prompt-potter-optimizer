@@ -3624,7 +3624,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     )
     # A pause filed between the stop's declaration and the drain dies at the release (B16): only a
     # producer that stops on a pause takes it, so none reads "answered" on a run that never paused.
-    declare_run_stop(opened, observers, StopReason.ROUNDS_BUDGET)
+    declare_run_stop(opened, StopReason.ROUNDS_BUDGET)
     late = launch.pause("late")
     # The drain, then the run's `finally`: draining alone keeps the cycle held.
     observers.drain_all()
@@ -3811,7 +3811,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
         )
     book.set_aside(0.125, 0, paid_by="host")
     with scoped(book=book):
-        declare_run_stop(opened, observers, StopReason.PAUSED, cause=PauseCause.INTERRUPT)
+        declare_run_stop(opened, StopReason.PAUSED, cause=PauseCause.INTERRUPT)
     observers.drain_all()
     observers.release()
     stop = stores.campaigns.last(opened.hop, RunPhaseRecord)
@@ -3883,7 +3883,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
 
     first, r0 = launch()
     late = pause("late")
-    declare_run_stop(opened, r0, StopReason.ROUNDS_BUDGET)
+    declare_run_stop(opened, StopReason.ROUNDS_BUDGET)
     r0.drain_all()
     r0.release()
     _, r1 = launch()

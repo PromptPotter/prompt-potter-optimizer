@@ -23,6 +23,12 @@ settle before L4 spends.
 `export.py`, `candidate_diff.py` and `shared/errors.py`; what it found is a row below). Of the 51 models a
 `RoundStatement` nests, 2 name a reader on themselves and 43 are read in several modules.
 
+- **The data-root spec names dataclass fields, not wire keys** (w11-spend2, 11-28):
+  `docs/specs/data-root.generated.json` prints `pipeline` where the file holds `pipeline_data`, and prints
+  `StepUsage.tokens` where the wire lays it flat. A survivor's migration is written against that spec.
+  Root: the generator reads the wire record (`WireRecord.of`). **Rides with:** area 01's chain.
+  **Re-test:** each spec key appears in the file the offline run writes.
+
 - **The layering is fictional at runtime**: the package holds no function-local import and its
   runtime file graph is acyclic, but 51 `TYPE_CHECKING` imports lie on a file-level cycle after
   w11-records2 (57 at its base), so a type-only block hides each knot rather than cuts it. Every other
@@ -334,51 +340,13 @@ bill.
   `run_observers.py::RunObservers.arm_spend_book` reads none of `self`, so a fact repeats its
   `enclosed_as` line instead of calling it; `tests/factories.py::spend_book(enclosing=…)` nests a book a
   second way; `spend_book.py::_ENCLOSED = "backend"` is what a nested book falls back to where its
-  spawner's pass names no kind; `RunScope.depth` / `InstrumentMode.depth` restate `instrument is not
-  None` (L4 is one level deep, `docs/concepts/l4.md` § Depth). Root: `enter_inner_cell` nests the book (enclosing book and
-  kind together, every spawning pass naming its kind), and depth goes. `_ENCLOSED` is also
+  spawner's pass names no kind. Root: `enter_inner_cell` nests the book (enclosing book and
+  kind together, every spawning pass naming its kind). `_ENCLOSED` is also
   the hold tree's kind for a nested cell's hold with no resource (`SpendBook._filed`, `_out`), where
   an outer search's inner cell IS its backend. **Decided 2026-11-27:** the spawning pass names a nested
   cell's hold kind; an inner cell's is its connector's name, so no fallback is needed.
-  **Re-test:** `factories.spend_book` takes no `enclosing`; `InstrumentMode` carries no `depth`; the
-  nested-replay fact calls the production nesting.
-- **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**:
-  `hierarchy.py:302-308` builds the cycle row from `ledger_scan.py::LEDGER_SPEND` and passes `None` as
-  unreported (`_spend_row("spend", …, None)`). A send a pause cuts is already filed at the cut as a
-  `Lapse` (`spend_book.py::admitted`), but on the charge book, and for a nested run under the ROOT's
-  ledger (`Admission`: `held_on((root.ledger or ledger).path)`), so neither the inner row nor the
-  inner ledger can see it. `MeteredSpend` carries no `sends_unreported` (the paused-inner row's text
-  says it does). Action: the cycle row reads its unreported off the hold tree
-  (`Money.unreported_holds` under the cycle's jobs), not by ledger. **Decided 2026-11-27:** a cut send's
-  late usage is not collected: it stays an unreported `Lapse`, since the cancelled request never returns. **Rides with:** hierarchy.py
-  and the inner chain. **Re-test:** pause an outer mid inner-round (operator 2026-11-18: seat #001
-  of `promptpotter-self.run__54ccef`); the inner row reads its cut sends as unreported, never
-  `$0.000`, and the outer's mirror matches.
-- **The wallet read under the admission gate grows with the account's charges** (gate-hold's
-  report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
-  `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
-  **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
-- **A nested run's send is filed once, on the run that sent it**: `domain/records/money.py::TokenUsageRecord`
-  `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
-  the money fold branches on it, and `store/CLAUDE.md` warns that money "banks twice" where a reader
-  forgets (`mirrored` 14/6). The next row holds its root and its cut. Under **A nested spend book is
-  wired beside the cell that nests it** and **A cycle's sidebar spend reads its ledger alone, so a cut
-  send reads $0.000**. Reshapes run data. **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
-- **An outer run's cost is folded from copies its inner runs write onto its ledger** (w11-spend, 11-28):
-  `spend_book.py::SpendBook.mirror` copies every inner send onto the root's ledger (node `inner:…`, kind
-  `enclosed_as`, round `InstrumentMode.root_round`), and the inner ledger keeps its own as
-  `TokenUsageRecord.mirrored`. Every outer read takes the copy: the book's meter, `ledger_scan.py::LEDGER_SPEND`'s
-  by-kind, by-round and `by_nested_node`, the live dashboard projection, and `account_spend.py::billed_spend`.
-  The bill itself already lands once, on the charge book under the outer job's hold tree.
-
-  Root: the outer's ledger folds take its inner ledgers (`stores.py::inner_sandbox_store` lists them).
-  Each inner send is filed once and names how its root files it (kind and round), so the copy and
-  `mirrored` go. It closes the three rows above together.
-
-  It was cut by w11-spend, because its holders sit outside area 05: the live projection,
-  `ledger_scan.py`, `hierarchy.py`, `records/money.py`, `run_observers.py` and `runner/inner/tasks.py`.
-  **Rides with:** one chain owning areas 02, 05 and 11 at once. **Re-test:** `mirrored` is 0, and
-  pausing an outer run mid inner round makes the inner row read its cut sends as unreported.
+  **Re-test:** `factories.spend_book` takes no `enclosing`; the nested-replay fact calls the
+  production nesting.
 - **A landing that drops other accounts' run data refunds nobody** (w11-spend, 11-28). On 11-26 a
   deploy wiped a stranger's campaign, and the operator granted their coupon again by hand. The landing's
   run-data wipe (`store/data_root.py`) folds the dropped campaigns' charges nowhere. **Operator's
@@ -400,47 +368,27 @@ bill.
   `anthropic`, so `host_key_attr("anthropic")` raises a `KeyError` and `wallet.py::cells_paid_by` would
   raise on an anthropic cell. Root: the wallet's providers include every provider a connector's container
   sends on, and the send is admitted in-module as `harbor.py::_installed_run` does.
-- **`StepUsage` re-declares `TokenAccount`'s parts** (usage-2, 11-19):
-  `promptpotter/domain/spend.py::StepUsage` — its flat `reasoning`, `cache_read`, `cache_write`
-  fields repeat the names `TokenAccount.model_fields` already rosters (`from_account` and `account`
-  go through that roster) — the root: `step_tokens`' flat wire shape; `StepUsage` holds a
-  `TokenAccount` and the wire flattens it — **Rides with:** `area 05's chain` — **Re-test:** a new
-  `TokenAccount` part reaches `StepUsage` without a second field edit.
-- **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
-  `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
-  `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with
-  no unit and no empty-state line. Expected one served state ("nothing billed: unmetered") on all
-  three; seen three. Root: one served spend headline the surfaces render, an empty series said, not
-  drawn. **Rides with:** `area 05's chain` — **Re-test:** on the walk world the three name one state.
-  Walk #2 (11-28, 390×844): still three. The sidebar says "SPEND unmetered", the masthead and the run
-  row "$0.00", the run dock "$0.00 of $0.0250 spent", and "Spend by round" draws its empty 0–1.0 axis,
-  while the served `metered_line` reads "this cycle $0.00 (billed + priced at our rate)".
-- **A measurand's USD reads four fixed places beside the three-digit rule** (w11-walk2, 11-28): on the
-  walk world, `justlogic.d234` → Dashboard → Leader, "AVG COST / CELL" reads "$0.0000 → $0.0000". That
-  is the evidence read's `cost` side channel (`application/evidence/read.py`), formatted by
-  `promptpotter/domain/paired_reading.py::UNIT_FORMATS`'s `usd` row at 4 fixed digits. The money rule is
-  `promptpotter/domain/spend.py::usd_text`'s: three significant digits under a dollar. So a cell's cost
-  of $0.000123 reads "$0.0001". Expected: one money format. Seen: two. Root: the `usd` unit formats
-  through `usd_text`, and its lift says the same. **Rides with:** `area 05's chain` — **Re-test:**
-  `git grep -n '"usd": UnitFormat' -- promptpotter/domain/paired_reading.py` names no fixed digit count.
-- **A free account's shipped dataset opens refused** (w11-walk2, 11-28): on an auth-on offline world
-  with `OPENROUTER_API_KEY` set on the box, sign in as a fresh non-host account, then press
-  email-tagging. The check-in's Start is disabled and says "the task model openai/gpt-oss-20b is not
-  part of the free tier yet. To ask for it, open an issue: https://… or message us on LinkedIn:
-  https://…". The dataset launches `openai/gpt-oss-20b`
-  (`promptpotter/assets/datasets/email-tagging/dataset.yaml`), while `promptpotter/assets/free_tier.yaml`
-  lists only `openai/gpt-oss-20b:nitro` and `qwen/qwen3.7-flash`.
-  `promptpotter/application/free_tier.py::free_tier_overlay` lays a tier param only where the config
-  leaves it unset, and never the model. The refusal also opens in lower case and spells both links as
-  raw URLs. Without a box key, the same draft says only "No key for a provider", with its sentence
-  behind a tap. Expected: a free account meets a startable check-in on a shipped dataset, or a refusal
-  that offers the tier's model. Seen: every pick refused. Root: the tier lays its first task model
-  where the dataset's is off it, as it lays a param's lowest value. **Rides with:** `area 05's chain`.
-  **Re-test:** a fresh free account's email-tagging check-in serves no `not_on_free_tier`.
 - **A landed job's cycle is asked twice** (w11-jobs3, 11-28): `shares.py::_refuse_unshared` tests
   `other.hop is None` beside `Job.on_campaign`, which already implies it, only so the type narrows. Root:
   `Job.on_campaign` answers the landed hop. **Rides with:** area 05's chain. **Re-test:** no `hop is None`
   guard beside an `on_campaign` call.
+- **A free account's refusal reads as a raw sentence** (w11-walk2, 11-28): on an auth-on offline world,
+  a free account's `not_on_free_tier` refusal
+  (`promptpotter/application/free_tier.py::outside_free_tier_refusal`) opens in lower case and spells
+  both links as raw URLs. Without a box key, the same draft says only "No key for a provider", with its
+  sentence behind a tap. Expected: a refusal written as a person reads it, its doors as links. Seen:
+  a joined string. **Rides with:** `area 05's chain`. **Re-test:** on the walk world, a free account's
+  off-tier pick reads one capitalised sentence per refusal, and both doors render as links.
+- **A provider hold is filed twice under a nested run** (w11-spend2, 11-28):
+  `infrastructure/llm/send_pacing.py`'s `_announce` appends a `ProviderHoldRecord` onto the sending ledger
+  and again onto the root's. Now that the outer folds its inner ledgers (`read_model.py::enclosing`), the
+  root's copy is a second filing of one fact. Root: it is filed once, on the sender, and the outer reads
+  it through the fold. **Rides with:** area 05's chain. **Re-test:** one `ProviderHoldRecord` per hold
+  across the L4 leg's ledgers.
+- **An outer run's overshoot may read its own ledger alone** (w11-spend2, 11-28; unverified): the outer's
+  overshoot check reads `LEDGER_SPEND` over its own ledger, not the `enclosing` fold its money lines now
+  read, so an inner round's sends may not count toward it. **Rides with:** area 05's chain. **Re-test:**
+  an outer whose inner rounds pass its ceiling halts at it on the L4 leg.
 
 ## 06 · Jobs, launch, commands
 
