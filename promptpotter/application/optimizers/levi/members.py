@@ -25,15 +25,16 @@ from promptpotter.application.optimizer_contract import (
     MeasuredRound,
     PromptArity,
     Proposals,
+    Ranking,
     RewriteKnobs,
     RoundSamples,
-    Selection,
 )
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
     cell_objectives,
+    mean_on,
 )
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import child, shown, task_description
@@ -42,7 +43,6 @@ from promptpotter.domain.arms import Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart, StateSlice
-from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
 from promptpotter.domain.results import OptimizerFact, RoundResult
@@ -117,10 +117,10 @@ def paradigm_shift_prompt(
     )
 
 
-def _failures(rows: Sequence[GradedCell], n: int, rng: random.Random) -> str:
+def _failures(rows: Sequence[GradedCell], knobs: LeviRefineKnobs, rng: random.Random) -> str:
     fitness = ROW_GRADES["fitness"]
-    failed = [r.facts for r in rows if r.scored and float(fitness.read(r)) < 1.0]
-    picked = rng.sample(failed, min(n, len(failed)))
+    failed = [r.facts for r in rows if r.scored and float(fitness.read(r)) < knobs.failure_below]
+    picked = rng.sample(failed, min(knobs.feedback_failures, len(failed)))
     if not picked:
         return ""
     traces = "\n\n".join(
@@ -144,10 +144,10 @@ def refine_prompt(
     parent: tuple[OptSearchPoint, float],
     parent_rows: Sequence[GradedCell],
     inspirations: Sequence[tuple[OptSearchPoint, float]],
-    n_failures: int,
+    knobs: LeviRefineKnobs,
     rng: random.Random,
 ) -> str:
-    """E.6; meta-advice stays empty: the paper publishes no template for it (App. B)."""
+    """E.6 without its meta-advice: the paper publishes no template for it (App. B)."""
     individual, score = parent
     node = ctx.read(Target).prompt_node
     return (
@@ -157,14 +157,10 @@ def refine_prompt(
             problem_description=task_description(ctx, node),
             parent_score=_score(score),
             parent_prompt=shown(ctx, individual, node),
-            feedback_section=_failures(parent_rows, n_failures, rng),
+            feedback_section=_failures(parent_rows, knobs, rng),
             inspirations_section=_inspirations(ctx, inspirations),
-            meta_advice_section="",
         )
     )
-
-
-_LLOYD_ITERATIONS = 100
 
 
 class ProxyCssKnobs(StrictModel):
@@ -271,11 +267,13 @@ class ProxyCss(optimizer_contract.Sampler):
         )
 
 
-def _lloyd(points: np.ndarray, k: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+def _lloyd(
+    points: np.ndarray, k: int, rng: np.random.Generator, iterations: int
+) -> tuple[np.ndarray, np.ndarray]:
     """A cluster left empty keeps its centre."""
     centres = points[rng.choice(len(points), size=k, replace=False)].copy()
     labels = np.full(len(points), -1)
-    for _ in range(_LLOYD_ITERATIONS):
+    for _ in range(iterations):
         distances = ((points[:, None, :] - centres[None, :, :]) ** 2).sum(axis=2)
         moved = distances.argmin(axis=1)
         if np.array_equal(moved, labels):
@@ -330,6 +328,11 @@ class MapElitesKnobs(StrictModel):
         description="What places an arm in the archive: its scored prompt's length "
         "(`target_prompt_chars`) and its objective on each proxy cell (`cell_objectives`).",
     )
+    lloyd_iterations: Annotated[int, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description="The most Lloyd steps a k-means runs, the centroids' and the paradigm "
+        "shift's clusters alike, short of converging.",
+    )
 
     @model_validator(mode="after")
     def _draws_cover_centroids(self) -> MapElitesKnobs:
@@ -371,11 +374,11 @@ def _calibrate(
         )
     rng = _generator(ctx)
     draws = rng.uniform(seen.min(axis=0), seen.max(axis=0), size=(knobs.cvt_samples, seen.shape[1]))
-    centres, _ = _lloyd(draws, knobs.centroids, rng)
+    centres, _ = _lloyd(draws, knobs.centroids, rng, knobs.lloyd_iterations)
     return LeviCalibration(proxy=proxy, centroids=centres.tolist(), stats=stats)
 
 
-class MapElites(optimizer_contract.Selector):
+class MapElites(optimizer_contract.RankingSelector):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
@@ -384,9 +387,7 @@ class MapElites(optimizer_contract.Selector):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
     elects_partial: ClassVar[bool] = False
-
-    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
-        return "composite"
+    elects_on: ClassVar[DisplayMetric] = "composite"
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -406,7 +407,7 @@ class MapElites(optimizer_contract.Selector):
             OptimizerFact(key="proxy", label="Proxy K", text=str(k), value=k, kind="stat"),
         ]
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+    def rank(self, ctx: NodeContext, measured: MeasuredRound) -> Ranking:
         knobs = ctx.knobs(MapElitesKnobs)
         offered = [
             (key, measured.arms[key].individual, measured.rows[key]) for key in measured.electable
@@ -432,7 +433,7 @@ class MapElites(optimizer_contract.Selector):
             placed += 1
             stats = _welford(stats, x)
             cell = _nearest(calibration.centroids, _normalized(stats, x))
-            score = sum(graded[c] for c in calibration.proxy) / len(calibration.proxy)
+            score = mean_on(graded, calibration.proxy)
             if key in arms:
                 placed_scores[key] = score
             if cell not in elites or score > elites[cell].score:
@@ -444,27 +445,23 @@ class MapElites(optimizer_contract.Selector):
         archive = sorted(elites.values(), key=lambda e: e.cell)
         lineage = ctx.read(Lineage)
         held = {ind.id: ind for ind in (*lineage.population, *(ind for _, ind, _ in offered))}
-        top = max((e.score for e in archive), default=None)
-        leaders = {e.individual_id for e in archive if e.score == top}
-        # A tie never advances: the incumbent holds, then the first arm walked.
-        walked = [key for key, ind, _ in offered if ind.id in leaders]
-        incumbent_leads = lineage.parent.id in leaders
-        if leaders and not walked and not incumbent_leads:
-            raise ValueError("map_elites: the best elite is neither the incumbent nor this round's")
-        selected = walked[0] if walked and not incumbent_leads else None
+        # An individual holding two cells stands on its better.
+        standing: dict[ArmKey, float] = {}
+        for e in archive:
+            at = ArmKey(e.individual_id)
+            standing[at] = max(e.score, standing.get(at, e.score))
         verdict = (
             f"placed {placed} of {len(offered)} arms, {kept} into an empty or outscored cell; the "
             f"archive holds {len(archive)} of {len(calibration.centroids)} cells"
-            + (f", best {top:.3f}" if top is not None else "")
+            + (f", best {max(standing.values()):.3f}" if standing else "")
         )
         ctx.put(DescriptorCalibration(calibration=calibration))
         ctx.put(EliteArchive(elites=archive))
-        return optimizer_contract.Selection(
-            leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
-            ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
-            electable=len(measured.electable),
+        return Ranking(
+            standing=standing,
+            arms=placed_scores,
             verdict_reason=verdict,
-            ranked=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
+            ranked=[held[cid] for cid in standing],
         )
 
 
@@ -529,6 +526,7 @@ class LeviParadigmShift(optimizer_contract.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Lineage, Replay, Target}
     )
+    consults: ClassVar[frozenset[type]] = frozenset({MapElites})
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
@@ -565,7 +563,7 @@ class LeviParadigmShift(optimizer_contract.Proposer):
         centroids = np.asarray(calibration.centroids)
         occupied = np.asarray([centroids[e.cell] for e in elites])
         k = min(n_clusters, len(elites))
-        _, labels = _lloyd(occupied, k, _generator(ctx))
+        _, labels = _lloyd(occupied, k, _generator(ctx), ctx.knobs(MapElitesKnobs).lloyd_iterations)
         clusters: dict[int, list[LeviElite]] = {}
         for elite, label in zip(elites, labels.tolist(), strict=True):
             clusters.setdefault(label, []).append(elite)
@@ -603,6 +601,12 @@ class LeviRefineKnobs(RewriteKnobs):
         ge=0,
         description="The parent's failed proxy cells a refinement is shown, drawn at random.",
     )
+    failure_below: Annotated[float, Knob(Estimand.SEARCH)] = Field(
+        gt=0.0,
+        le=1.0,
+        description="A proxy cell the parent scored under this fitness is a failure a "
+        "refinement may be shown.",
+    )
 
 
 def _softmax_pick(elites: Sequence[LeviElite], temperature: float, rng: random.Random) -> LeviElite:
@@ -630,10 +634,11 @@ class LeviRefine(optimizer_contract.Proposer):
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
 
     async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
-        calibration = ctx.slice(DescriptorCalibration).calibration
-        elites = ctx.slice(EliteArchive).elites
+        if (calibration := ctx.slice(DescriptorCalibration).calibration) is None:
+            raise ValueError("levi_refine: no calibration stands, so no elite to refine")
+        proxy, elites = set(calibration.proxy), ctx.slice(EliteArchive).elites
         shift = ctx.knobs(LeviParadigmShiftKnobs)
-        asked = [self._refinement(ctx, calibration, elites, i) for i in range(shift.interval - 1)]
+        asked = [self._refinement(ctx, proxy, elites, i) for i in range(shift.interval - 1)]
         replies = await ctx.read(Calls).ask_each({i: p for i, (_, p) in enumerate(asked)})
         node = ctx.read(Target).prompt_node
         return optimizer_contract.Proposals(
@@ -646,11 +651,10 @@ class LeviRefine(optimizer_contract.Proposer):
     def _refinement(
         self,
         ctx: NodeContext,
-        calibration: LeviCalibration | None,
+        proxy: set[str],
         elites: Sequence[LeviElite],
         idx: int,
     ) -> tuple[OptSearchPoint, str]:
-        assert calibration is not None
         knobs = ctx.knobs(LeviRefineKnobs)
         rng = ctx.read(Replay).rng(f":{idx}")
         parent = _softmax_pick(elites, rng.choice(knobs.sampler_temperatures), rng)
@@ -660,7 +664,6 @@ class LeviRefine(optimizer_contract.Proposer):
             if rng.random() < knobs.inspiration_drop
             else rng.sample(others, min(knobs.n_inspirations, len(others)))
         )
-        proxy = set(calibration.proxy)
         lineage = ctx.read(Lineage)
         measured_in = next(rr for rr in lineage.rounds if rr.round == parent.round)
         rows = measured_in.sheet_of(parent.individual_id)
@@ -670,7 +673,7 @@ class LeviRefine(optimizer_contract.Proposer):
             parent=(held[parent.individual_id], parent.score),
             parent_rows=[cell for cell in rows if cell.facts.sample_key in proxy],
             inspirations=[(held[e.individual_id], e.score) for e in inspirations],
-            n_failures=knobs.feedback_failures,
+            knobs=knobs,
             rng=rng,
         )
         return held[parent.individual_id], prompt

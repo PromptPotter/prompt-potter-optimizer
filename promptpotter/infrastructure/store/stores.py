@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
@@ -19,30 +19,13 @@ from promptpotter.domain.phases import ProducerState, RunState, StopReason
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.lineage import CycleSupersededRecord
 from promptpotter.domain.records.run_phase import RunPhaseRecord
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import CycleFactsFold
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls
-from promptpotter.infrastructure.store.dataset_access import (
-    DEFINITION_FILE,
-    FRAMING_FILE,
-    ORIGIN_FILE,
-    claim_own_definition,
-    render_framing_file,
-)
 from promptpotter.infrastructure.store.draft_store import DraftStore
-from promptpotter.infrastructure.store.io import (
-    WORKSPACE_STATE_DIR,
-    refuse_off_workspace,
-    rmtree_robust,
-    stamp_of,
-    unlink_robust,
-    write_bytes,
-    write_text,
-    write_yaml,
-)
+from promptpotter.infrastructure.store.io import WORKSPACE_STATE_DIR, refuse_off_workspace, stamp_of
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
@@ -203,49 +186,6 @@ class Stores:
         return self.run_state(hop).producer.state is ProducerState.SILENT and self.declare_ended(
             hop, StopReason.PRODUCER_VANISHED
         )
-
-    def write_own_definition(
-        self,
-        slug: str,
-        *,
-        source: dict[str, Any],
-        pipeline: dict[str, Any],
-        campaign: dict[str, Any],
-        description: str,
-        framing: TaskDecomposition,
-        origin: dict[str, dict[str, Any]],
-    ) -> Path:
-        """THE writer of an account's definition, here since only the stores see every tier its
-        name is claimed over. WHOLE files: the tenant tier lays no defaults or family under it."""
-        claim_own_definition(self, slug, new=False)
-        dst = self.tenant_datasets.dataset_dir(slug)
-        staged = dst / _STAGED_DIR
-        rmtree_robust(staged)
-        write_text(staged / FRAMING_FILE, render_framing_file(description, framing))
-        if origin:
-            write_yaml(staged / ORIGIN_FILE, origin)
-        definition = {"source": source, "pipeline": pipeline, "campaign": campaign}
-        write_yaml(staged / DEFINITION_FILE, definition)
-        # The commit: from here the swap is laid whole, by this call or by the landing.
-        staged.rename(dst / DEFINITION_SWAP_DIR)
-        complete_definition_swap(dst / DEFINITION_SWAP_DIR)
-        return dst
-
-
-_STAGED_DIR = ".staged"
-DEFINITION_SWAP_DIR = ".swap"
-# Definition last: its file is what makes the directory a dataset.
-_DEFINITION_SET = (FRAMING_FILE, ORIGIN_FILE, DEFINITION_FILE)
-
-
-def complete_definition_swap(swap: Path) -> None:
-    """Re-lays a committed swap whole, so a torn one completes on any re-run: a file it lacks goes."""
-    for name in _DEFINITION_SET:
-        if (swap / name).is_file():
-            write_bytes(swap.parent / name, (swap / name).read_bytes())
-        else:
-            unlink_robust(swap.parent / name)
-    rmtree_robust(swap)
 
 
 def build_stores(

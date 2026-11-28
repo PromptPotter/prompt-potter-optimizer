@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import (
     DraftCriterion,
+    draft_modes,
     mode_exclusions,
     owned_draft,
 )
@@ -47,7 +48,6 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.infrastructure.store.dataset_access import declared_pipelines
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -159,7 +159,7 @@ def _modes(
             steps=steps,
             pickable=upload or mode_exclusions(declared, steps) is not None,
         )
-        for name, steps in declared_pipelines(served.over({})).items()
+        for name, steps in draft_modes(served.over({})).items()
     ]
 
 
@@ -330,14 +330,19 @@ def _launch(
     return (None if refused is None else Refusal.of(refused)), launch_bound(wallet, sends)
 
 
-def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
-    """One property off a model's own schema, so its bounds have one source; the null arm drops."""
+def _field(
+    schema: dict[str, Any], name: str, title: str, said: str | None = None
+) -> dict[str, Any]:
+    """One property off a model's own schema, so its bounds have one source; the null arm drops.
+    Its `description` is the developer's, never served: an operator line is *said*, in the unit
+    *title* asks for."""
     prop = dict(schema["properties"][name])
+    prop.pop("description", None)
     arms = [arm for arm in prop.pop("anyOf", ()) if arm.get("type") != "null"]
     prop = {**(arms[0] if arms else {}), **prop}
     if prop.get("default") is None:
         prop.pop("default", None)
-    return {**prop, "title": title}
+    return {**prop, "title": title, **({} if said is None else {"description": said})}
 
 
 def _column(draft: DraftFile, field_key: str, title: str) -> dict[str, Any]:
@@ -402,7 +407,11 @@ def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[
                                 "type": "object",
                                 "properties": {
                                     "halt_at_fitness": _field(
-                                        optimization, "halt_at_fitness", "Halt at fitness"
+                                        optimization,
+                                        "halt_at_fitness",
+                                        "Halt at fitness",
+                                        "Stop once a candidate's fitness surely reaches this; "
+                                        "blank never stops on fitness.",
                                     ),
                                 },
                             },

@@ -56,19 +56,23 @@ def _write_task(
             _write(task_dir / rel.format_map(page), text.format_map(page))
 
 
-def _panel_yaml(tasks: list[dict[str, str]], provenance: str) -> str:
+def _panel_yaml(
+    tasks: list[dict[str, str]], provenance: str, agent: dict[str, str], dropped: list[int]
+) -> str:
     """Paths are relative to this file, since a task's pin enters its sample key; `harbor.py`
-    resolves them against the panel's directory."""
+    resolves them against the panel's directory. *dropped* is filed in its header: a source row
+    no task was built from is said, never lost."""
     # json.dumps every scalar: a question or gold may hold a colon, quote or newline.
     lines = [
         "# BUILT from the definition's `source:` — rebuilt whole, never hand-edited.",
         f"# {provenance}",
+        *([f"# rows holding no documents, built into no task: {dropped}"] if dropped else []),
         "",
         "reward_key: reward",
         "",
         "agent:",
-        "  name: terminus-2",
-        "  environment: docker",
+        f"  name: {json.dumps(agent['name'])}",
+        f"  environment: {json.dumps(agent['environment'])}",
         # NO `kwargs:` — `harbor.py` lays `pipeline.nodes.agent.config` over it, always.
         "",
         "tasks:",
@@ -89,17 +93,21 @@ def write_task_panel(
     columns: dict[str, str],
     task_prefix: str,
     provenance: str,
+    agent: dict[str, str],
 ) -> int:
     """One task per row holding documents: `columns` names the row's `question`, `answer` and
-    `documents` (a list of ``{title, text}``) columns."""
+    `documents` (a list of ``{title, text}``) columns; *agent* the definition's agent `name` and
+    `environment`."""
     template = _template(layers)
     tasks_root = out_dir / "tasks"
     # Rebuilt whole rather than merged into: a stale directory is a task Harbor still runs.
     rmtree_robust(tasks_root)
     tasks: list[dict[str, str]] = []
+    dropped: list[int] = []
     for i, row in enumerate(rows):
         haystack = list(row.get(columns["documents"]) or [])
         if not haystack:
+            dropped.append(i)
             continue
         task_id = f"{task_prefix}-{i:03d}"
         task_dir = tasks_root / task_id
@@ -113,5 +121,5 @@ def write_task_panel(
                 "answer": str(row[columns["answer"]]).strip(),
             }
         )
-    _write(out_dir / MATERIALIZED_PANEL_FILE, _panel_yaml(tasks, provenance))
+    _write(out_dir / MATERIALIZED_PANEL_FILE, _panel_yaml(tasks, provenance, agent, dropped))
     return len(tasks)

@@ -18,8 +18,9 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import WALKED_
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, file_keys, standing
 from promptpotter.infrastructure.store.read_model import (
+    CAMPAIGN_WALKS,
     LedgerIndex,
-    LedgerSpan,
+    Line,
     RecordClasses,
     line_union,
     read_line,
@@ -38,8 +39,8 @@ class CampaignWalks(NamedTuple):
     campaigns: CampaignStore
     campaign_id: str
 
-    def spans(self) -> list[LedgerSpan]:
-        return self.campaigns.campaign_walk_spans(self.campaign_id)
+    def read[V, L](self, line: Line[V, L]) -> L:
+        return read_line(self.campaigns.campaign_root_dir(self.campaign_id), line)
 
 
 class OpenAt(NamedTuple):
@@ -85,14 +86,13 @@ class _UntakenBought:
 
 
 LedgerIndex.readers(_UntakenBought)
-_UNTAKEN_BOUGHT = line_union(_UntakenBought)
+_UNTAKEN_BOUGHT = line_union(_UntakenBought, CAMPAIGN_WALKS)
 
 
 def _left_out(walks: CampaignWalks) -> frozenset[str]:
     """What the campaign's walks bought and none of them took since: its spans' alone."""
-    spans = walks.spans()
-    bought: frozenset[str] = read_line(spans, _UNTAKEN_BOUGHT)
-    taken: frozenset[str] = read_line(spans, WALKED_ANSWERS) if bought else frozenset()
+    bought = walks.read(_UNTAKEN_BOUGHT)
+    taken = walks.read(WALKED_ANSWERS) if bought else frozenset[str]()
     return bought - taken
 
 
@@ -104,7 +104,7 @@ def _remembered() -> Callable[[FiledAnswer], bool] | None:
                 return None
             return lambda answer: answer.answer not in out
         case ArmOf(walks=walks):
-            own = read_line(walks.spans(), WALKED_ANSWERS)
+            own = walks.read(WALKED_ANSWERS)
             return lambda answer: answer.answer in own
         case _:
             assert_never(scope)
@@ -176,7 +176,7 @@ def signed_populations(stores: Stores, bank: Bank) -> list[tuple[ArchiveEntry, l
     left: Counter[str] = Counter()
     match scope := memory_scope():
         case ArmOf(walks=walks):
-            own = Counter(ref.partition(".")[0] for ref in read_line(walks.spans(), WALKED_ANSWERS))
+            own = Counter(ref.partition(".")[0] for ref in walks.read(WALKED_ANSWERS))
         case OpenAt(walks=walks):
             if walks is not None:
                 left = Counter(ref.partition(".")[0] for ref in _left_out(walks))

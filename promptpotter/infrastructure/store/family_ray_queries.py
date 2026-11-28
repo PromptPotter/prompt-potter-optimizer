@@ -1,4 +1,4 @@
-"""**A ray reads each cycle's own file**: a ledger file is an own-file read, and a fork's prefix lies in its ancestors' files, which ``ledger_chain`` joins."""
+"""**A ray reads each cycle's own file**: a ledger file is an own-file read, and a fork's prefix lies in its ancestors' files, which ``read_model.py::fork_chain`` joins."""
 
 from __future__ import annotations
 

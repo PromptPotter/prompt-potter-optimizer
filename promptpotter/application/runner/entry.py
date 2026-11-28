@@ -72,10 +72,12 @@ from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import TIMELINES, wall_clock_of
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    CYCLE_TIMELINES,
+    wall_clock_of,
+)
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
 from promptpotter.shared.clock import utcnow_iso
 
 
@@ -123,9 +125,7 @@ def build_cycle_result(
         started_at=started_at,
         finished_at=finished_at,
         wall_clock=wall_clock_of(
-            read_line(
-                (LedgerSpan(p) for p in [session.store.campaigns.ledger(session.hop)]), TIMELINES
-            ),
+            session.store.campaigns.read(session.hop, CYCLE_TIMELINES),
             started_at=started_at,
             finished_at=finished_at,
             optimizer_phases=selected.phases,

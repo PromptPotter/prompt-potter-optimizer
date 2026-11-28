@@ -22,7 +22,7 @@
 
 ## Dataset content has three tiers, and only one is writable
 
-**A dataset DEFINITION is authored; everything DERIVED from it is the operator's** and lands in the tenant tree, never under the definition's directory. A name resolves ONCE, to the first tier holding it: tenant, install, research (`dataset_access.py::resolve_dataset`); every chain read takes the `ResolvedDataset`, never a bare directory. `Stores.write_own_definition` refuses a NEW name another tier holds; no verb writes the install or research tier.
+**A dataset DEFINITION is authored; everything DERIVED from it is the operator's** and lands in the tenant tree, never under the definition's directory. A name resolves ONCE, to the first tier holding it: tenant, install, research (`dataset_access.py::resolve_dataset`); every chain read takes the `ResolvedDataset`, never a bare directory. `dataset_access.py::write_own_definition` refuses a NEW name another tier holds; no verb writes the install or research tier.
 
 ## Picking a JSON reader is a decision
 

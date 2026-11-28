@@ -292,7 +292,7 @@ reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, iden
 decimals). Count the discordant cells (a pairing's `FlipCounts`, `paired_reading.py`) to tell the two apart.
 
 **`pobb.row_choice: informative` (potter's default) reverses this decision, and is refused unless
-`theta_election.vote: overlap`** (`couplings.py::POBB`, `informative_rows_without_overlap`). At
+`paired_election.vote: overlap`** (`couplings.py::POBB`, `informative_rows_without_overlap`). At
 every block's open the race takes each walk's next rows from the sampler's pool by Fisher
 information (`rasch.py::most_informative`), δ read off the ruler and θ by `pobb.refit`: `per_round`
 the parent's on the ruler seated at the round's start, `per_decision` (the default) the survivors' in PoBB's last

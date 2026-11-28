@@ -3,6 +3,7 @@ source:
   rev: 98603ec6ea79c5da6c2e2c45f0ada2bfedad1e98
   recipe: columns
   split: train
+  shuffled: true
   query: |-
     Premises:
     {paragraph}

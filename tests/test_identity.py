@@ -113,6 +113,7 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.draft_campaign import (
     DraftCriterion,
     draft_criterion,
+    draft_modes,
     new_draft,
     owned_draft,
     upload_pipeline_json,
@@ -384,6 +385,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
     runnable_definition,
     with_node_templates,
+    write_own_definition,
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
@@ -403,7 +405,6 @@ from promptpotter.infrastructure.store.read_model import (
     Projection,
     derived,
     file_sig,
-    read_line,
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
@@ -1281,6 +1282,7 @@ def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
                 "hub": "org/repo",
                 "rev": "c2",
                 "split": "test",
+                "shuffled": True,
                 "query": "q",
                 "truth": "t",
             },
@@ -1292,14 +1294,27 @@ def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
         assert startability.dataset_reading(built_stores, "hubcut") == (
             startability.DatasetReading(1, None)
         ), "a held bank was refused for the extra only its fetch needs"
-        assert startability.checkin_bank(built_stores, "hubcut").dataset_hash == (
+        assert startability.checkin_bank(built_stores, hubcut).dataset_hash == (
             hub_bank.dataset_hash
         ), "a check-in on a held bank did not open on it"
         fresh = startability.dataset_reading(built_stores, "hubfresh")
         assert fresh.block is StartBlock.MISSING_EXTRA, "an unheld bank listed as startable"
         with pytest.raises(DatasetUnstartableError):
-            startability.checkin_bank(built_stores, "hubfresh")
+            startability.checkin_bank(built_stores, resolve_dataset(built_stores, "hubfresh"))
     assert not offline.unrouted, f"a refused fetch reached the hub: {offline.unrouted}"
+    # A hub this box cannot reach refuses the check-in typed, naming where it asked: never a 500.
+    with monkeypatch.context() as unreachable:
+
+        def no_hub(*_args: Any, **_kwargs: Any) -> Any:
+            raise FileNotFoundError("Couldn't find 'org/repo' on the Hugging Face Hub")
+
+        unreachable.setattr(loaders, "from_hub", no_hub)
+        with pytest.raises(DatasetUnstartableError) as refused:
+            startability.checkin_bank(built_stores, resolve_dataset(built_stores, "hubfresh"))
+    assert refused.value.details == {
+        "reason": StartBlock.SOURCE_UNREACHABLE.value,
+        "source": "hub org/repo@c2 (FileNotFoundError)",
+    }, "an unreachable hub was not refused by its source"
 
 
 @pytest.fixture
@@ -1398,9 +1413,10 @@ def test_the_one_writer_refuses_a_name_another_tier_holds(tiered: Stores) -> Non
     shadowed = entries_version([tiered])
 
     def write_own(name: str) -> Path:
-        return tiered.write_own_definition(
+        return write_own_definition(
+            tiered,
             name,
-            source={"recipe": "rows", "items": []},
+            source={"recipe": "rows", "shuffled": False, "items": []},
             pipeline=_TERMNORM["pipeline"],
             campaign={},
             description="d",
@@ -1685,6 +1701,7 @@ def test_a_paragraphs_row_renders_as_one_title_and_text_paragraph_per_entry(
         "hub": "org/repo",
         "rev": "c1",
         "split": "validation",
+        "shuffled": False,
         "query": "Question: {question}\n\nContext:\n\n{context}",
         "truth": "answer",
         "paragraphs": {"column": "context", "title": "title", "text": "sentences"},
@@ -2124,6 +2141,21 @@ def test_a_mode_pick_switches_an_upload_between_its_connectors_pipelines(
     )
 
 
+def test_a_check_in_offers_each_chain_under_one_mode_name() -> None:
+    # Two names for one chain: a pick of the second read back as the first, a 200 undone.
+    for declaration, offered in (
+        (
+            {"nodes": {"llm_only": {}}, "pipelines": {"llm_only": ["llm_only"]}},
+            {"default": ["llm_only"]},
+        ),
+        (
+            {"nodes": {"a": {}, "b": {}}, "pipelines": {"b_only": ["b"]}},
+            {"default": ["a", "b"], "b_only": ["b"]},
+        ),
+    ):
+        assert draft_modes(declaration) == offered, f"{declaration} offered a chain twice"
+
+
 def test_an_uploads_draft_splits_once_between_definition_and_campaign(
     built_stores: Stores, knobbed_upload: _KnobbedUpload
 ) -> None:
@@ -2161,7 +2193,7 @@ def test_a_resolvers_model_proposal_is_one_edit_its_turn_raises_and_never_applie
     model_found = OriginFinding(
         field="node.llm_only.model", proposed_value=menu[-1], confidence="high", evidence="row 1"
     )
-    (proposal,) = raised_commands(
+    (proposal,), _ = raised_commands(
         knobbed, CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
     )
     proposed = asyncio.run(plan_draft_patch(built_stores, knobbed, proposal.patch))
@@ -2590,7 +2622,7 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    read = read_line(stores.campaigns.chain(root.hop), RESOLVED_RUN).read
+    read = stores.campaigns.read(root.hop, RESOLVED_RUN).read
     assert read is not None
     recorded = read.knob_layers["l1_generate"]
     sources = {
@@ -3272,7 +3304,7 @@ def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(held:
     for panel in (measured, moved, measured):
         client.workload = replace(client.workload, experiment=panel)
         opened.record_resolved_run()
-        resolved = read_line(opened.store.campaigns.chain(hop), RESOLVED_RUN)
+        resolved = opened.store.campaigns.read(hop, RESOLVED_RUN)
         assert resolved.experiment == measured.model_dump(mode="json"), (
             "a later launch's roster displaced the one every round measured"
         )
@@ -4628,6 +4660,23 @@ def test_no_held_out_row_reaches_the_index_the_optimizers_panels_read() -> None:
             )
         )
     assert not index.records(), "a held-out row reached the index the optimizer's panels read"
+
+
+def test_a_dataset_picked_twice_reopens_its_one_open_check_in(built_stores: Stores) -> None:
+    built_stores.tenant_datasets.put_bank(twice := Bank.of(samples(40, "TRUE", query="claim ")))
+    built_stores.tenant_datasets.relabel("twice", twice.dataset_hash)
+    dataset_dir = built_stores.tenant_datasets.dataset_dir("twice")
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / DEFINITION_FILE).write_text(
+        "pipeline:\n  connector: termnorm\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n",
+        encoding="utf-8",
+    )
+    first, second = (
+        asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="twice"))
+        for _ in range(2)
+    )
+    assert second.draft_id == first.draft_id, "a second pick minted a twin check-in"
+    assert len(built_stores.drafts.draft_ids()) == 1, "a second pick kept a second draft"
 
 
 def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_checked(

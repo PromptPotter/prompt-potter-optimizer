@@ -38,7 +38,7 @@ from promptpotter.application.optimizer_contract import (
     Selection,
 )
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
+from promptpotter.application.optimizers.potter.couplings import LADDER, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     VIEW_READS,
@@ -52,9 +52,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
-    coerce_l1_layout,
-    unplaceable_edit,
-    validate_l1_layout,
+    edit_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
@@ -112,7 +110,6 @@ from promptpotter.application.optimizers.potter.l1 import (
 from promptpotter.application.optimizers.potter.pobb import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.optimizers.potter.records import (
-    L1Layout,
     L1Readout,
     L2Memory,
     L3Memory,
@@ -146,7 +143,6 @@ from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 
@@ -169,7 +165,6 @@ class AdaptiveQueue(optimizer_contract.Sampler):
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Parent, Ruler, Bounds, Replay})
     size_knob: ClassVar[str | None] = "sp_budget_round"
-    couplings: ClassVar[tuple[optimizer_contract.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
     def drawn(
         self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str
@@ -239,7 +234,7 @@ class L1Generate(LayoutNode, optimizer_contract.Proposer):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, ThetaElection})
+        return frozenset({AdaptiveQueue, Escalation, PairedElection})
 
     def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
         """The rename with each wire name stripped, here alone; an empty one renames nothing."""
@@ -341,16 +336,14 @@ class PoBB(optimizer_contract.Eliminator):
         return PoBBRace(ctx, panel)
 
 
-class ThetaElection(optimizer_contract.Selector):
-    name: ClassVar[str] = "theta_election"
+class PairedElection(optimizer_contract.Selector):
+    name: ClassVar[str] = "paired_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ElectionKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Replay})
     elects_partial: ClassVar[bool] = True
-
-    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
-        """Every crown reads the paired fitness verdicts."""
-        return "fitness"
+    # Every crown reads the paired fitness verdicts.
+    elects_on: ClassVar[DisplayMetric] = "fitness"
 
     def admission(self, selected: SelectedOptimizer) -> float:
         return selected.knobs_of(self.name, ElectionKnobs).admission
@@ -377,7 +370,7 @@ class L1Critique(LayoutNode, optimizer_contract.Adapter):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, PairedElection})
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -405,7 +398,7 @@ class L2Context(LayoutNode):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, PairedElection})
 
     def reply_model(self, view: PotterView) -> type[L2ContextOutput]:
         return build_l2_response_model(
@@ -427,22 +420,12 @@ class L2Context(LayoutNode):
         prior = node_layout(
             "l1_generate", ctx.slice(L2Memory), ctx.read(Calls).levers("l1_generate")
         )
-        layout_outcomes: list[ValidatorOutcome] = []
-        accepted_layout: L1Layout | None = None
-        layout_refused = False
-        spec = NODE_LAYOUTS[L1Generate.name]
-        if breach := unplaceable_edit(raw.l1_layout, spec):
-            layout_outcomes = [breach]
-            layout_refused = True
-        elif proposed_layout := coerce_l1_layout(raw.l1_layout, base=prior):
-            layout_result = validate_l1_layout(proposed_layout, spec=spec, prior_layout=prior)
-            layout_outcomes = list(layout_result.outcomes)
-            if layout_result.is_valid:
-                accepted_layout = proposed_layout
-                # Whole, never the edit: a move lands relative to where each panel then sat.
-                steer["layout"] = proposed_layout.model_dump(mode="json")
-            else:
-                layout_refused = True
+        accepted_layout, layout_result = edit_layout(
+            raw.l1_layout, NODE_LAYOUTS[L1Generate.name], base=prior, prior=prior
+        )
+        if accepted_layout is not None:
+            # Whole, never the edit: a move lands relative to where each panel then sat.
+            steer["layout"] = accepted_layout.model_dump(mode="json")
 
         named = raw.recombinations if isinstance(raw, L2RecombiningOutput) else []
         return TransitionResult(
@@ -450,8 +433,8 @@ class L2Context(LayoutNode):
             steer=steer,
             axis_targeted=raw.axis_targeted,
             l1_layout=accepted_layout,
-            l1_layout_refused=layout_refused,
-            l2_guard_breaches=layout_outcomes,
+            l1_layout_refused=not layout_result.is_valid,
+            l2_guard_breaches=list(layout_result.outcomes),
             fork_proposal=proposed_fork(raw),
             terminate_proposal=(
                 raw.terminate_proposal if isinstance(raw, L2TerminatingOutput) else None
@@ -525,7 +508,7 @@ class L3Plan(LayoutNode):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, PairedElection})
 
     def reply_model(self, view: PotterView) -> type[L3PlanOutput]:
         return build_l3_response_model(
@@ -795,7 +778,7 @@ MEMBERS = (
     AdaptiveQueue(),
     L1Generate(),
     PoBB(),
-    ThetaElection(),
+    PairedElection(),
     L1Critique(),
     Escalation(),
     L2,

@@ -10,6 +10,7 @@ from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
     default_slug_from_filename,
     new_draft,
+    owned_drafts,
 )
 from promptpotter.application.datasets.prompts import origin_prompts
 from promptpotter.application.datasets.startability import (
@@ -23,6 +24,7 @@ from promptpotter.application.datasets.tabular_ingest import (
     file_extension,
     read_tabular,
 )
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
@@ -33,7 +35,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.connectors import upload_connector
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
@@ -114,7 +116,13 @@ async def draft_from_dataset(
 ) -> DraftCampaignWire:
     await _open_checkin(stores)
     dataset = offered_dataset(stores, dataset_name)
-    bank = checkin_bank(stores, dataset_name)
+    if (
+        overrides is None
+        and origin_campaign is None
+        and (reopened := _open_checkin_of(stores, dataset_name))
+    ):
+        return await kept_draft_wire(stores, reopened, await draft_served(stores, reopened))
+    bank = checkin_bank(stores, dataset)
     rows = labelled_rows(bank.samples)
 
     authored = read_authored_dataset(dataset)
@@ -163,6 +171,21 @@ async def draft_from_dataset(
     if overrides:
         draft = draft.patch(**overrides)
     return await kept_draft_wire(stores, draft, served)
+
+
+def _open_checkin_of(stores: Stores, dataset_name: str) -> DraftFile | None:
+    """The newest check-in of *dataset_name* no Start holds: a second pick reopens it, never a
+    twin no row tells apart."""
+    held = JobRegistry.attach(stores.jobs_dir).draft_starts(user_id=str(stores.identity.user_id))
+    return max(
+        (
+            draft
+            for draft in owned_drafts(stores)
+            if draft.basis == DatasetBasis(dataset=dataset_name) and draft.draft_id not in held
+        ),
+        key=lambda draft: draft.created_at,
+        default=None,
+    )
 
 
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignWire:

@@ -16,6 +16,7 @@ class StartBlock(StrEnum):
     MISSING_EXTRA = "missing_extra"
     UNREADABLE = "unreadable"
     BACKEND_UNREACHABLE = "backend_unreachable"
+    SOURCE_UNREACHABLE = "source_unreachable"
 
 
 START_BLOCK_WORDS: Worded[StartBlock, str] = Worded(
@@ -26,6 +27,7 @@ START_BLOCK_WORDS: Worded[StartBlock, str] = Worded(
         StartBlock.MISSING_EXTRA: "It runs through a Python extra this install lacks.",
         StartBlock.UNREADABLE: "Its samples could not be read on this install.",
         StartBlock.BACKEND_UNREACHABLE: "Its backend is not answering; it opens once the backend is up.",
+        StartBlock.SOURCE_UNREACHABLE: "This install could not fetch its rows from their source.",
     }
 )
 assert START_BLOCK_WORDS.keys() == set(StartBlock)
@@ -34,5 +36,8 @@ assert START_BLOCK_WORDS.keys() == set(StartBlock)
 class DatasetUnstartableError(PayloadInvalidError):
     code = "dataset_unstartable"
 
-    def __init__(self, name: str, block: StartBlock) -> None:
-        super().__init__(f"{name}: {START_BLOCK_WORDS[block]}", details={"reason": block.value})
+    def __init__(self, name: str, block: StartBlock, *, source: str | None = None) -> None:
+        """*source* names where the rows were asked of, when that is what refused."""
+        said = START_BLOCK_WORDS[block] + (f" Asked of: {source}." if source else "")
+        details = {"reason": block.value} | ({"source": source} if source else {})
+        super().__init__(f"{name}: {said}", details=details)

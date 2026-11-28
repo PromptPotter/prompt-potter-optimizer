@@ -117,7 +117,7 @@ nodes:
       read_order: launch
   # The next parent: the arm `crown` ranks first of those it crowns (`selection.py::crowned`), else
   # the round's leader where its parent did not beat it.
-  theta_election:
+  paired_election:
     type: selector
     config:
       admission: 0.85
@@ -189,7 +189,7 @@ pipelines:
     - locus_crossover
     - pobb
     - l1_score
-    - theta_election
+    - paired_election
     - l1_critique
     - escalation
 resolved_prompts:

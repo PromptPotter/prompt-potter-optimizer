@@ -4437,12 +4437,11 @@
             "type": "string"
           },
           "severity": {
-            "description": "collision (soundness) | inert (wasted knob) | info (relationship)",
+            "description": "refused (no run may take it) | collision (soundness) | inert (wasted knob)",
             "enum": [
               "refused",
               "collision",
-              "inert",
-              "info"
+              "inert"
             ],
             "title": "Severity",
             "type": "string"
@@ -5202,7 +5201,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`read_model.py::CHAIN`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [
@@ -17291,7 +17290,8 @@
           "empty",
           "missing_extra",
           "unreadable",
-          "backend_unreachable"
+          "backend_unreachable",
+          "source_unreachable"
         ],
         "title": "StartBlock",
         "type": "string"
@@ -18453,7 +18453,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`read_model.py::CHAIN`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [
@@ -19014,7 +19014,7 @@
             "type": "array"
           },
           "axis": {
-            "description": "The parameter path that failed, ``{node_name}.{param}`` (e.g. ``llm_only.model``), or an axis on the generator's own output rather than a pipeline param: ``l1_generate.output`` (parse/shape failures) or ``variant`` (no-op / duplicate mutations).",
+            "description": "The parameter path that failed, ``{node_name}.{param}`` (e.g. ``llm_only.model``), or an axis on the generator's own output rather than a pipeline param: ``l1_generate.output`` (parse/shape failures) or ``variant`` (a whole-candidate verdict: a no-op, duplicate or repeat mutation).",
             "title": "Axis",
             "type": "string"
           },

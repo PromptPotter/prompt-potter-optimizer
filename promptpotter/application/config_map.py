@@ -119,8 +119,8 @@ def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
     return {**dumped, **purpose, "loop": _measured(spec.loop, ())}
 
 
-# Gravest first: a pairing no run may take, an ill-defined statistic, a silent waste, knobs that co-move.
-CouplingSeverity = Literal["refused", "collision", "inert", "info"]
+# Gravest first: a pairing no run may take, an ill-defined statistic, a silent waste.
+CouplingSeverity = Literal["refused", "collision", "inert"]
 
 
 class CouplingSeverityInfo(NamedTuple):
@@ -133,7 +133,6 @@ COUPLING_SEVERITY_INFO: Worded[CouplingSeverity, CouplingSeverityInfo] = Worded(
         "refused": CouplingSeverityInfo("danger"),
         "collision": CouplingSeverityInfo("danger"),
         "inert": CouplingSeverityInfo("attention"),
-        "info": CouplingSeverityInfo("quiet"),
     }
 )
 
@@ -296,7 +295,7 @@ class ConfigCoupling(StrictModel):
     relation: str = Field(description="The relationship rule, plain language")
     consequence: str = Field(description="What goes wrong when the combination is violated")
     severity: CouplingSeverity = Field(
-        description="collision (soundness) | inert (wasted knob) | info (relationship)"
+        description="refused (no run may take it) | collision (soundness) | inert (wasted knob)"
     )
     active: bool = Field(
         description="True when this campaign's config is in the violating combination"

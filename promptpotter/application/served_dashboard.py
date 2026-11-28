@@ -85,7 +85,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.command_log import HeldLookahead, effective_lookahead
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import LedgerSpan, read_line
+from promptpotter.infrastructure.store.read_model import read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words, epoch_seconds
 from promptpotter.shared.hashing import stable_hash
@@ -1066,7 +1066,7 @@ def served_dashboard(
         standing=_Present(
             allotment=_allotment(stores, hop, run),
             lookahead=stores.commands.book().lookahead(stores.subject(hop)),
-            verify=read_line([LedgerSpan(CycleLayout(cycle_path).ledger)], VERIFY_LEDGER),
+            verify=read_line(cycle_path, VERIFY_LEDGER),
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,
             fork_remainder=remainder,

@@ -13,7 +13,7 @@ const POTTER: PipelineView = (() => {
     "locus_crossover",
     "pobb",
     "l1_score",
-    "theta_election",
+    "paired_election",
     "l1_critique",
     "escalation",
   ];
@@ -118,8 +118,8 @@ const overlap = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 &&
 
 describe("wrapAt", () => {
   it("breaks after a separator only where the line would not fit, and rejoins into the name", () => {
-    expect(wrapAt("theta_election", "_", 20)).toEqual(["theta_election"]);
-    expect(wrapAt("theta_election", "_", 10)).toEqual(["theta_", "election"]);
+    expect(wrapAt("paired_election", "_", 20)).toEqual(["paired_election"]);
+    expect(wrapAt("paired_election", "_", 10)).toEqual(["paired_", "election"]);
     expect(wrapAt("mean_round_delta_held_out", "_", 16)).toEqual(["mean_round_", "delta_held_out"]);
     expect(wrapAt(MODEL, "/", 20).join("")).toBe(MODEL);
     expect(wrapAt("", "/", 20)).toEqual([]);

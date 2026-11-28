@@ -17,6 +17,7 @@ from typing import Any
 
 from promptpotter.application.datasets.harbor_panel import write_task_panel
 from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_kept_table
+from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.search_point import JobSearchPoint
@@ -184,10 +185,11 @@ def _query_and_truth(row: Row) -> Drawn:
 class BankLoader:
     source: SourceKind
     rows: Callable[[], list[Row]]
+    # `sample_dataset` takes a PREFIX, so a source-ordered bank is shuffled once, here, when its
+    # definition says so (`source.shuffled`).
+    shuffled: bool
     draw: Callable[[Row], Drawn] = _query_and_truth
     cap: int | None = None
-    # `sample_dataset` takes a PREFIX, so a source-ordered bank is shuffled once, here.
-    shuffled: bool = True
     bench_tail: BankLoader | None = None
 
     @property
@@ -219,9 +221,7 @@ class BankLoader:
 def _bank(
     src: Source, rows: Callable[[], list[Row]], draw: Callable[[Row], Drawn] = _query_and_truth
 ) -> BankLoader:
-    return BankLoader(
-        src.kind, rows, draw, cap=src.get("cap"), shuffled=bool(src.get("shuffled", True))
-    )
+    return BankLoader(src.kind, rows, bool(src["shuffled"]), draw, cap=src.get("cap"))
 
 
 def _plain_number(value: float) -> str:
@@ -296,7 +296,9 @@ def _columns(src: Source) -> BankLoader:
     if "stratum" not in src.params:
         return _bank(src, rows, draw)
     tail = (
-        BankLoader(src.kind, lambda: _stratified(rows(), src, held=True), draw)
+        BankLoader(
+            src.kind, lambda: _stratified(rows(), src, held=True), bool(src["shuffled"]), draw
+        )
         if "held_per_stratum" in src.params
         else None
     )
@@ -316,7 +318,7 @@ def _table(src: Source) -> BankLoader:
         )
         return [{"query": s.query, "ground_truth": s.ground_truth} for s in samples]
 
-    return BankLoader(src.kind, rows, shuffled=False)
+    return BankLoader(src.kind, rows, False)
 
 
 BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
@@ -331,7 +333,8 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
 
 def _harbor_tasks(src: Source, out_dir: Path) -> int:
     """A hub split as Harbor task directories, each laid from the `template` layers and formatted
-    over its row's `question`, `answer` and `documents` columns."""
+    over its row's `question`, `answer` and `documents` columns, run by the `agent` in the
+    `environment` the source names."""
     rows = list(from_hub(src, *_configs(src), split=src["split"]))
     provenance = f"{src.repo} config={src['config']} split={src['split']} revision={src.rev}"
     return write_task_panel(
@@ -341,6 +344,7 @@ def _harbor_tasks(src: Source, out_dir: Path) -> int:
         columns={key: str(src[key]) for key in ("question", "answer", "documents")},
         task_prefix=str(src["task_prefix"]),
         provenance=provenance,
+        agent={"name": str(src["agent"]), "environment": str(src["environment"])},
     )
 
 
@@ -456,7 +460,14 @@ def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
     src = definition_source(dataset)
     if src is None or src.recipe not in BANK_RECIPES:
         return Bank.of(())
-    bank = _cut(_loader(stores, src))
+    try:
+        bank = _cut(_loader(stores, src))
+    except OSError as fault:
+        # The source's door: a hub or a repo this box cannot reach refuses by where it asked.
+        asked = f"{src.kind.value} {src.repo}@{src.rev} ({type(fault).__name__})"
+        raise DatasetUnstartableError(
+            dataset.name, StartBlock.SOURCE_UNREACHABLE, source=asked
+        ) from fault
     stores.tenant_datasets.record_cut(src.identity, bank)
     return bank
 

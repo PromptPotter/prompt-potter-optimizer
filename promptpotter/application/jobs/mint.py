@@ -89,7 +89,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.io import make_dirs
-from promptpotter.infrastructure.store.read_model import read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PayloadInvalidError
@@ -417,7 +416,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
         checked = resumed(session.bound(campaign.root_cycle))
     campaigns = session.store.campaigns
-    recorded = read_line(campaigns.chain(campaign.root_hop), RESOLVED_RUN)
+    recorded = campaigns.read(campaign.root_hop, RESOLVED_RUN)
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
     drawn = drawn_partition(campaigns, campaign.root_hop)
     drift = ConfigDriftError(

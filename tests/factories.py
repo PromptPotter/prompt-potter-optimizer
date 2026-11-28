@@ -184,7 +184,7 @@ BENCH_TARGET = bench_choice("potter").call_target
 
 
 def ledger_records(ledger: CycleEventLog | Path) -> list[CycleRecord]:
-    """A ledger file's own records, in line order; a fork's prefix is `ledger_chain`'s."""
+    """A ledger file's own records, in line order; a fork's prefix is `read_model.py::fork_chain`'s."""
     path = ledger.path if isinstance(ledger, CycleEventLog) else ledger
     lines = path.read_bytes().splitlines() if path.exists() else []
     return [ledger_line(line) for line in lines if line.strip()]
@@ -905,7 +905,7 @@ def pobb_knobs(**bend: Any) -> PoBBKnobs:
 def election_knobs() -> ElectionKnobs:
     return cast(
         "ElectionKnobs",
-        select_optimizer(bench_choice("potter")).knobs("theta_election"),
+        select_optimizer(bench_choice("potter")).knobs("paired_election"),
     )
 
 

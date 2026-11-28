@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ClosedBenchFold,
 )
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
-from promptpotter.infrastructure.store.read_model import LedgerIndex, Projection, read_line
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Projection
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -77,6 +77,6 @@ def _render_export(stores: Stores, at: CampaignCycle, dataset: ResolvedDataset |
         framing=campaign_framing(stores, res.config, dataset),
         demo=drawn.restored(bank.samples).demo,
         bench=bench,
-        spend=read_line(store.chain(hop), LEDGER_SPEND).spend,
+        spend=store.read(hop, LEDGER_SPEND).spend,
     )
     store.write_export(hop, export)

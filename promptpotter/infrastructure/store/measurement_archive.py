@@ -119,18 +119,23 @@ def _fold_key(key: str, dataset_hash: str) -> str:
     return f"{key}|{dataset_hash}"
 
 
+def chain_keys(node_configs: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    """The key of each prefix of a node chain, its first node's first: a cell files under the
+    prefix ending at the node that answered it."""
+    return [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
+
+
 def file_keys(entry: ArchiveEntry) -> list[str]:
-    chain = entry.node_configs
-    return [config_key(chain[:n]) for n in range(1, len(chain) + 1)] or [entry.config_key]
+    return chain_keys(entry.node_configs) or [entry.config_key]
 
 
 def _file_of(entry: ArchiveEntry, cell: MeasuredCell) -> str:
     terminal = cell.pipeline.terminal_node
     # A failed cell answers for the WHOLE configuration, whichever node it failed at.
     if terminal and not cell.errored:
-        for n, (name, _) in enumerate(entry.node_configs, start=1):
+        for (name, _), key in zip(entry.node_configs, chain_keys(entry.node_configs), strict=True):
             if name == terminal:
-                return config_key(entry.node_configs[:n])
+                return key
     return entry.config_key
 
 
@@ -596,7 +601,7 @@ class ReplayFeed:
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs
-        self._file_keys = [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
+        self._file_keys = chain_keys(node_configs)
         self._marks: dict[str, FileMark] = {}
         self._served: dict[str, tuple[bool, str, str]] = {}
 

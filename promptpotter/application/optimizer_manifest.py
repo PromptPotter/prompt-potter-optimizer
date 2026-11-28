@@ -314,7 +314,7 @@ class SelectedOptimizer:
 
     @property
     def elects_on(self) -> DisplayMetric:
-        return self.plan.selector.elects_on(self)
+        return self.plan.selector.elects_on
 
     @property
     def admission(self) -> float | None:

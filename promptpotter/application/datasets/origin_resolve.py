@@ -38,6 +38,7 @@ from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import validation_reason
 
 _PREVIEW_ROWS = 10
 
@@ -145,11 +146,11 @@ async def resolve_origin_turn(
                 stores=stores,
             )
 
-    raised = raised_commands(draft, raw)
+    raised, refused = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised, pipeline.chain.prompt_nodes())
 
     degraded_cause = _degraded_cause(
-        output=raw, applied=updated is not draft, repair_attempts=repair_attempts
+        output=raw, applied=updated is not draft, repair_attempts=repair_attempts, refused=refused
     )
     resolution = OriginResolution(
         last_resolution=OriginLastResolution(
@@ -167,26 +168,37 @@ async def resolve_origin_turn(
     return updated.patch(resolver_ran=True, resolution=resolution)
 
 
-def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:
-    """Served, never raised: the turn was paid, so its answer is kept with the cause beside it."""
+def _degraded_cause(
+    *, output: CheckinOutput, applied: bool, repair_attempts: int, refused: list[str]
+) -> str | None:
+    """Served, never raised: the turn was paid, so its answer is kept with the cause beside it,
+    each proposal the draft refused said by its reason."""
     asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
+    causes = [f"the draft refused {said}" for said in refused]
     if not applied and not asking and not output.recap.strip():
         reasons = ["it produced no usable setup, recap, or question"]
         if repair_attempts > 0:
             reasons.append(
                 "the retry after the empty/truncated first response also failed to recover"
             )
-        return "the check-in model returned an empty/degraded response — " + "; ".join(reasons)
-    if repair_attempts > 0:
-        return (
-            "the model's first response was empty or truncated and was retried "
-            "(~2x cost and latency); the resulting setup may be thin"
+        causes.insert(
+            0, "the check-in model returned an empty/degraded response — " + "; ".join(reasons)
         )
-    return None
+    elif repair_attempts > 0:
+        causes.insert(
+            0,
+            "the model's first response was empty or truncated and was retried "
+            "(~2x cost and latency); the resulting setup may be thin",
+        )
+    return "; ".join(causes) or None
 
 
-def raised_commands(draft: DraftFile, output: CheckinOutput) -> list[OriginProposal]:
+def raised_commands(
+    draft: DraftFile, output: CheckinOutput
+) -> tuple[list[OriginProposal], list[str]]:
+    """The turn's proposals, and each one whose patch the draft refuses, said by its reason."""
     raised: list[OriginProposal] = []
+    refused: list[str] = []
     for finding in output.findings:
         row = checklist_field(finding.field)
         if row is None or not finding.evidence.strip():
@@ -200,7 +212,8 @@ def raised_commands(draft: DraftFile, output: CheckinOutput) -> list[OriginPropo
             continue
         try:
             patch = EditDraftPatch.model_validate(patch_at(row.patch_path, coerced))
-        except ValidationError:
+        except ValidationError as fault:
+            refused.append(f"{finding.field} = {coerced!r} ({validation_reason(fault, shown=1)})")
             continue
         raised.append(
             OriginProposal(
@@ -212,7 +225,7 @@ def raised_commands(draft: DraftFile, output: CheckinOutput) -> list[OriginPropo
                 evidence=finding.evidence,
             )
         )
-    return raised
+    return raised, refused
 
 
 def _apply_findings(

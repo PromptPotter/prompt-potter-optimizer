@@ -13,10 +13,10 @@ from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     BENCH_READINGS,
-    STANDING_ROUNDS,
+    RECORD_ROUNDS,
     VERIFY_LEDGER,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, read_line
+from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -142,26 +142,12 @@ class CycleRoundsRead(NamedTuple):
     entered: int | None
 
 
-def _cycle_spans(
-    stores: Stores, hop: CycleHop, index: CycleIndex, *, moment: Moment | None
-) -> list[LedgerSpan]:
-    """A sibling fork's lifted rounds are its parent's, so it reads its own ledger; a cycle cut from
-    ANOTHER tree has no parent cycle here, and its prefix is its own record."""
-    layout = stores.campaigns.layout(hop)
-    if index.parent is not None and index.parent_cycle_id is None:
-        return stores.campaigns.chain(hop, moment=moment)
-    return [LedgerSpan(layout.ledger) if moment is None else moment.span(layout.ledger)]
-
-
 _NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None)
 
 
-def read_cycle(
-    stores: Stores, hop: CycleHop, index: CycleIndex, *, moment: Moment | None
-) -> CycleRoundsRead:
+def read_cycle(stores: Stores, hop: CycleHop, *, moment: Moment | None) -> CycleRoundsRead:
     """One cycle's own record: its arms in round and position order, read, and each round's election."""
-    spans = _cycle_spans(stores, hop, index, moment=moment)
-    standing = read_line(spans, STANDING_ROUNDS)
+    standing = stores.campaigns.read(hop, RECORD_ROUNDS, moment=moment)
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
     line = line_by_individual(
         next((c.origin_panel.reading for c in closes if overlap_line(c.origin_panel.reading)), None)
@@ -171,13 +157,10 @@ def read_cycle(
         {}
         if moment is not None
         else {
-            key: read
-            for key, (_, read) in read_line(
-                [LedgerSpan(stores.campaigns.ledger(hop))], VERIFY_LEDGER
-            ).graded.items()
+            key: read for key, (_, read) in stores.campaigns.read(hop, VERIFY_LEDGER).graded.items()
         }
     )
-    bench = read_line(spans, BENCH_READINGS)
+    bench = stores.campaigns.read(hop, BENCH_READINGS, moment=moment)
 
     def election_of(rnd: int) -> Election | None:
         if (election := standing.elections.get(rnd)) is not None:

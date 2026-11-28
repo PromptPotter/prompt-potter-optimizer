@@ -4,16 +4,17 @@ sends. The phase keeps one queue of the calls sent; the trigger names when it as
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_acts import RowsRan
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
-from promptpotter.domain.validators import StopSignal
+from promptpotter.domain.validators import StopSignal, WalkStop
 
 # When a race decides: once no call it sent is out, or on every returned row.
 Dispatch = Literal["batch", "rolling"]
@@ -144,3 +145,52 @@ class Race(Decider[ArmKey], Protocol):
     def rows_ran(self) -> RowsRan:
         """The row choice it runs, which the round's measure record names."""
         return "random"
+
+
+class BlockRace(Race):
+    """A block race on its sampler's order (`next_block`): it cuts once a block closes, never at
+    the opening, and books every stop in ONE signal shape, which ``ruling`` words."""
+
+    def __init__(self, node: str, *, block_size: int, n_cells: int) -> None:
+        self.node, self.block_size, self.n_cells = node, block_size, n_cells
+        # The walks the last decision left racing.
+        self.racing: set[ArmKey] = set()
+
+    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        stops = {} if view.opening else self.cut(view)
+        self.racing = {key for key in view.walks if key not in stops}
+        return next_block(view, stops, self.block_size)
+
+    @abstractmethod
+    def cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]: ...
+
+    def signal(self, outcome: WalkStop, gate: str, taken: int, **context: Any) -> StopSignal:
+        return StopSignal(
+            self.node,
+            outcome,
+            {"gate": gate, "queries_scored": taken, "total_samples": self.n_cells, **context},
+        )
+
+    def judge(
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
+    ) -> Elimination | None:
+        if signal is None or signal.check_name != self.node:
+            return None
+        cr = signal.check_result
+        context = {
+            "gate": cr["gate"],
+            "queries_scored": cr["queries_scored"],
+            "total_queries": cr["total_samples"],
+        }
+        return self.ruling(signal, context, key, labels)
+
+    @abstractmethod
+    def ruling(
+        self,
+        signal: StopSignal,
+        context: dict[str, Any],
+        key: ArmKey,
+        labels: Mapping[ArmKey, str],
+    ) -> Elimination:
+        """*signal* worded on *context*, which holds what every block race's elimination names."""
+        ...

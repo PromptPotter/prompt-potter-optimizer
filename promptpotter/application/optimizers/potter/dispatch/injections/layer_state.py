@@ -5,6 +5,8 @@ from collections.abc import Collection, Sequence
 
 from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    CRITIQUE_MAX_CHARS,
+    L3_NOTE_MAX_CHARS,
     L3_PLAN_MAX_CHARS,
     ElectionRow,
     InjectionKind,
@@ -18,8 +20,9 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_REGIONS,
     NODE_LAYOUTS,
     VOLATILE_REGION,
-    resolve_node_layout,
 )
+from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
+from promptpotter.application.optimizers.potter.dispatch.schemas import CLUSTERS_MAX
 from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
@@ -46,15 +49,18 @@ def _r_plan(b: PotterView) -> list[Item]:
     return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
 
+_NOTE_HEADER = "L3 NOTE TO L2:\n"
+
+
 @signal(
     "l3_to_l2_note",
     kind=InjectionKind.DIRECTIVE,
-    char_cap=400,
+    char_cap=L3_NOTE_MAX_CHARS + len(_NOTE_HEADER),
     citable=False,
 )
 def _r_l3_to_l2_note(b: PotterView) -> list[Item]:
     note = b.l3.note
-    return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
+    return [Item(f"{_NOTE_HEADER}{note}" if note else "")]
 
 
 _TARGET_PROMPT_HEADER = (
@@ -114,12 +120,7 @@ def _r_l1_overrides(b: PotterView) -> list[Item]:
 )
 def _r_l1_layout(b: PotterView) -> list[Item]:
     """Listed region → panels, the shape an edit takes, so each line is an edit ready to answer."""
-    steered = b.l2.steered_layout("l1_generate")
-    layout = (
-        resolve_node_layout("l1_generate", b.ctx.read(Calls).levers("l1_generate"))
-        if steered is None
-        else steered
-    )
+    layout = node_layout("l1_generate", b.l2, b.ctx.read(Calls).levers("l1_generate"))
     lines = [
         f'  "{region}": {json.dumps([p for p in layout.region(region) if p not in b.silent_l1_panels])}'
         for region in L1_LAYOUT_REGIONS
@@ -212,7 +213,7 @@ def format_l1_critique_for_prompt(
         parts.append(
             "Clusters (target ONE by its rows; the edit must hold for every row it spans):"
         )
-        for c in fh[:3]:
+        for c in fh[:CLUSTERS_MAX]:
             ids = c["sample_ids"]
             # The panels' own mark, so a row this panel names is a row the generator may target.
             shown = " ".join(f"[{sample_tag(i)}]" for i in ids[:CLUSTER_IDS_SHOWN])
@@ -227,8 +228,7 @@ def format_l1_critique_for_prompt(
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 320c) + priority_fix 320c + axes.
-    char_cap=2400,
+    char_cap=CRITIQUE_MAX_CHARS,
     citable=True,
 )
 def _r_critique(b: PotterView) -> list[Item]:

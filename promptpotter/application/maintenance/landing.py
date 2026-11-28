@@ -65,6 +65,10 @@ from promptpotter.infrastructure.store.data_root import (
     unloadable_rows,
     unloadable_why,
 )
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_SWAP_DIR,
+    complete_definition_swap,
+)
 from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     INNER_SANDBOXES_DIR,
@@ -81,11 +85,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.private_root import hold_private
 from promptpotter.infrastructure.store.read_model import LedgerIndex
-from promptpotter.infrastructure.store.stores import (
-    DEFINITION_SWAP_DIR,
-    complete_definition_swap,
-    tenant_stores,
-)
+from promptpotter.infrastructure.store.stores import tenant_stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
 from promptpotter.shared.named_rows import walked
@@ -187,7 +187,7 @@ class Landing(NamedTuple):
     # its manifest since, so it kept (`apply_landing`): the stamp then names no key, and the next
     # entry lands the root again.
     kept: tuple[Unloadable, ...]
-    # A definition swap committed and not yet laid (`stores.py::complete_definition_swap`).
+    # A definition swap committed and not yet laid (`dataset_access.py::complete_definition_swap`).
     swaps: tuple[Path, ...]
     # The package version that last landed the root, where it is newer than this code's.
     newer: str | None

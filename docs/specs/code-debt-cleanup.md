@@ -64,8 +64,8 @@ archive one content-addressed tree filed by the dataset a row measured, `Measure
 A line's fold is stated once and read by one keyed read `(hop, scope, fold)`. Survivors migrate, everything
 else is wiped at a landing. The store holds no money rule and no served shape.
 
-**Unexamined:** `store/campaign_store/store.py`, `store/stores.py`, `store/layout.py`,
-`maintenance/archive_maintenance.py`, `maintenance/landing_key.py`, `store/io.py`, `store/data_root.py`
+**Unexamined:** `maintenance/archive_maintenance.py` (w11-store2 read every module under `store/**`
+and `landing_key.py`; what it found is a row below).
 
 - **The feed's version spans a whole store**: a campaign is a subject its writers stamp
   (`io.py::stamp`), and a subtree reads its family's campaigns alone (`Stores.stamps`), but every
@@ -75,7 +75,9 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `reads.ts::draftRead` follows bare `store:` beside `account`, since Start's refusal reads the wallet
   every ledger's bill moves, so an inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is
   one lock over every account's walk. Action: a view keys on its campaign's stamp, and a sandbox is
-  found off its owner's stamp, never a walk. **Rides with:** a version chain of its own.
+  found off its owner's stamp, never a walk. Beside it, an install or research definition edit
+  ticks no feed (those tiers sit off every stamp); the cells ETag does move
+  (`dataset_access.py::definition_version`). **Rides with:** a version chain of its own.
   **Re-test:** `draftRead`'s subject is not `store:`.
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
@@ -102,11 +104,6 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **Which ledgers answer for a hop is decided at each reader**: a fold over a line is one
-  `read_model.py::read_line` of a `Line`, but its spans are built at each caller (`CampaignStore.chain`,
-  `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
-  fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
-  sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -118,61 +115,31 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   run folder stays indented; only `dashboard.json`, which nothing reads back, is a candidate for compact. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
-- **A landing key's first derivation costs ~2.3 s per code version** (tw-v, tw-v2): it is derived
-  once per process and filed by the package's bytes in the data root (`landing_key.py::landing_key`),
-  but `shared/import_walk.py::import_closure` normalizes each module from its own parse
-  (`hashing.py::normalized_tree`), beside `hashing.py::normalized_module`'s memo, and
-  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over every kind, so the first
-  entry after a code edit, and a child in a fresh data root, pays it. tw-v2's memo (`arc/tw-v2`
-  604b03eb2) was not taken: +47 production lines. **Rides with:** after wave 6. **Re-test:**
-  `landing_key.py::derived_landing_key()` takes under 0.5 s cold, with production no larger.
-- **The landing key over-keys by module** (bkeys-4, 11-19; items 451, 456, 462):
-  `promptpotter/application/maintenance/landing_key.py::loading_modules` — keys the whole import closure of every reader,
-  so a prose-free edit to any module a load could import re-lands every root, a cost not a
-  wipe — key the functions a load calls, not their modules — **Rides with:**
-  `area 02's chain` — **Re-test:** an edit to an unreached function in
-  `promptpotter/domain/paired_reading.py` leaves `derived_landing_key()` unchanged.
-- **A replay feed spells the prefix-chain keys beside `file_keys`** (store-5a, 11-19):
-  `promptpotter/infrastructure/store/measurement_archive.py::ReplayFeed.__init__` — builds
-  `config_key(node_configs[:n])` per prefix, beside `file_keys(entry)` and without its
-  `entry.config_key` fallback — the file-key chain is a function of `node_configs` alone, one
-  spelling — **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -c "config_key(.*\[:n\])" -- promptpotter/infrastructure/store/measurement_archive.py` is 1.
 - **`list_campaigns` drops an unreadable manifest into a log** (hubs-2, 11-18):
   `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.list_campaigns` —
   `logger.warning` then `continue`: the account holds a campaign no surface reports — the
   survey has a typed unreadable row — **Rides with:** `area 02's chain` — **Re-test:** a
   campaign with a corrupt manifest appears in the listing as unreadable.
-- **The dataset definition's `source` merges one level** (cite-fold, 11-18):
-  `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — `source |=`
-  is a shallow merge beside `merge_node_blocks` — `source` folds through `fold_layers` —
-  **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -c "source |=" -- promptpotter/infrastructure/store/dataset_access.py` is 0.
-- **An authored dataset definition has no writer** (w7-ver, 11-27):
-  `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — an install or
-  research definition edit moves no stamp (those tiers sit off the data root's subjects), so reads
-  that depend on it stand until the store's next write or a restart — the definition loader stamps
-  its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
-  cells ETag moves.
 - **A line's walks are a flat list every reader re-scans per individual** (w11-reads, 11-28):
   `campaign_store/ledger_scan.py::line_walks` returns `list[IndividualWalk]`. `closed_rounds.py::LineCells` keys it
   once for the reads, but `passes.py:220` and `domain/results.py:329` still filter it per individual.
   Root: `line_walks` serves the walks keyed by individual. **Rides with:** area 02's chain (with 01's
   `results.py`). **Re-test:** `git grep -n "individual_id ==" -- promptpotter/application/scoring
   promptpotter/domain/results.py` is empty.
-- **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
-  `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
-  index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
-  ledger's `MoneyFold` meters in a loop of its own — each is a `read_model.py::Line` over its fold —
-  **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -cE "def (fold_cycle_index|_ledger_meters)" -- promptpotter/infrastructure/store/campaign_store/store.py` is 0.
-- **The `Stores` hub holds a cycle's stop machine and the definition writer** (w11-store, 11-28):
+- **A sandbox whose owner file does not parse is kept and reported nowhere** (w11-store2, 11-28):
+  `promptpotter/infrastructure/store/layout.py::read_sandbox_owner` logs the parse error and reads
+  `None`, which every caller takes as "keep"; the trail and the delete skip it, so its spend and its
+  disk stand under no surface. Root: an unreadable owner is a typed row the storage report lists —
+  **Rides with:** `area 02's chain` — **Re-test:** a sandbox with a corrupt owner file appears in
+  `storage_report.py`'s report.
+- **The `Stores` hub holds a cycle's stop machine** (w11-store, 11-28):
   `promptpotter/infrastructure/store/stores.py::Stores.declare_ended` (with `declare_stop`,
   `mark_superseded`, `mark_producer_vanished`) runs the producer-lock ending on the hub every
-  bench import reaches, and `Stores.write_own_definition` is the dataset tier's writer — the
-  ending belongs to the campaign store's append door, the writer to the dataset store — **Rides
-  with:** `area 02's chain` — **Re-test:**
-  `git grep -cE "def (declare_ended|write_own_definition)" -- promptpotter/infrastructure/store/stores.py` is 0.
+  bench import reaches; the ending belongs to the campaign store's append door, which cannot void
+  the inbox yet: a `CampaignStore` carries no subject chain (`CampaignStore.in_sandbox` builds one
+  off a sandbox whose `store/layout.py::SandboxOwner` names one hop). Root: the campaign store carries its
+  `inside` and the account's `CommandLog` — **Rides with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def declare_ended" -- promptpotter/infrastructure/store/stores.py` is 0.
 
 ## 03 · Runner, round, bench
 
@@ -600,36 +567,31 @@ sole route for a backend tunable.
   block's per-key merge are `ParamLayer`s or `CAMPAIGN_RULE`, so params are final once folded. **Rides
   with:** area 07's chain. **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def;
   4 now) and `git grep -c "_folded_scoring" -- promptpotter` is 0 (2 now).
-- **A source default lives in code** (w10-survey): `datasets/loaders.py::_bank` keeps
-  `src.get("shuffled", True)`, which belongs in the dataset file or `defaults.yaml`. **Rides with:** area
-  07's chain. **Re-test:** `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py`
-  is 0 (1 now).
-- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/ingest.py::draft_from_dataset`
-  resolves the dataset, then `datasets/startability.py::checkin_bank` resolves it again by name;
-  `datasets/loaders.py::resolve_bank`, `held_bank` and `fetch_bank` each read the definition the
-  `ResolvedDataset` already carries; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source`
-  looks up again. Root: the seam's answer (`ResolvedDataset`, `DraftSource`) is handed down, never a name.
-  **Rides with:** area 07's chain. **Re-test:** `git grep -c "checkin_bank(" --
-  promptpotter/application/datasets/ingest.py` is 0 (1 now).
+- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/loaders.py::resolve_bank`,
+  `held_bank` and `fetch_bank` each re-read the definition (`definition_source`) a `ResolvedDataset` does not
+  carry; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source` looks up again. Root:
+  the seam's answer (`ResolvedDataset` holding its read definition, `DraftSource`) is handed down, never a
+  name. **Rides with:** area 07's chain, with area 02's (`dataset_access.py::ResolvedDataset`). **Re-test:**
+  `git grep -c "definition_source(dataset)" -- promptpotter/application/datasets/loaders.py` is 0 (5 now).
 - **A knob's provenance is diffed, not read off the fold** (w11-config): `config_map.py::_knob_rows` calls a
   bench knob `default` where its value equals `defaults.yaml`'s, so a campaign that states the default reads as
   unstated; `campaign_config.py::OptimizerChoice.arm_gate` keeps a code default (`"off"`) the
   `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
   map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
   **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
-- **A refusal is swallowed into nothing** (w11-config): `datasets/origin_resolve.py::raised_commands` drops a
-  finding whose patch fails `EditDraftPatch` with `continue`, and `datasets/harbor_panel.py::write_task_panel`
-  drops a row with no documents; neither files what it dropped, and `harbor_panel.py::_panel_yaml` hardcodes
-  `terminus-2` / `docker` the dataset file should name. Root: a dropped finding or row is a reported
-  refusal; the panel's agent and environment are the dataset's. **Rides with:** area 07's chain.
-  **Re-test:** `git grep -c "except ValidationError" -- promptpotter/application/datasets/origin_resolve.py`
-  is 0 (1 now) and `git grep -c "name: terminus-2" -- promptpotter/application/datasets/harbor_panel.py` is
-  0 (1 now).
 - **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
   `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
   connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
   definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
   `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
+  w11-config2 adds a code default of the same root: `connectors/harbor.py`'s
+  `(agent or {}).get("name") or "terminus-2"`.
+- **An origin finding with an unknown row is dropped unserved** (w11-config2, 11-28):
+  `datasets/origin_resolve.py::raised_commands` drops through `_coerce` a finding whose row is unknown,
+  whose evidence is empty or that names an absent header, and serves none of them, while a finding
+  `EditDraftPatch` refuses is now served in `degraded_cause`. Root: a dropped finding is served with its
+  reason, as a refused one is. **Rides with:** area 07's chain. **Re-test:** a finding naming an absent
+  header reads in `degraded_cause`.
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
   patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
@@ -643,51 +605,18 @@ sole route for a backend tunable.
   `ManifestNode.optimizer` is a `dict[str, Any]`, `pipeline_schema.py::node_config_schema` takes optional
   `values` / `sources` that act as fallbacks, and `layer_fold.py::_laid` ignores a non-list SUBSET value.
   Action: one typed node document with knobs a view on it; the steer a named layer.
-  **Rides with:** area 07's chain.
+  **Rides with:** area 07's chain. w11-config2 counts 24 files naming `NodeCall`, and finds an edge
+  of it: `datasets/ingest.py::_open_checkin_of` cannot tell an origin-opened draft from a plain pick
+  (same `DatasetBasis`), so a plain pick may reopen it; the draft does not record its opener.
 - **The pipeline carrier is typed only at its door**: the archive address
   (`measurement_archive.py::config_key`'s `list[tuple[str, dict]]`) and `RuntimeFailure.observed_config`
   (laid as a dict by `scoring/arm_states.py`; an abort's holds the whole document) stay dicts, typed at
   their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
   `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
-  area 04's (`observed_config`). **Re-test:** `git grep -c "NodeCall.model_validate(" --
+  area 04's (`observed_config`). w11-config2 left it unbuilt for a design: `config_key` hashes
+  `("", {"prompt_fields_id"})` pairs that no `NodeCall` holds, and the scoring block's per-key merge
+  (the fold row above) has dial semantics `CAMPAIGN_RULE` lacks. **Re-test:** `git grep -c "NodeCall.model_validate(" --
   promptpotter/application/scoring/measurement_log.py promptpotter/domain/failures.py` is 0 (2 now).
-- **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
-  field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
-  (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch
-  runs" (`promptpotter/domain/spend.py`). Expected operator words in the unit the field asks for; seen
-  RST backticks and a seconds/minutes contradiction. Root: a served field's operator line is its own
-  served text, never the model's docstring. **Rides with:** `area 07's chain` — **Re-test:** no served field
-  `description` the Run bounds form renders holds a double backtick or names a unit its label does not.
-  Walk #2 (11-28, 390×844): still. On an upload's Run bounds, "Halt at fitness" reads "Stop
-  ``target_hit`` … ``None`` → no such stop", and "Wall-clock cap (minutes)" reads "Seconds ONE launch
-  runs".
-- **Picking a dataset twice opens two identical check-ins** (w11-walk, 11-27): each press of a dataset
-  in `webapp/components/ingest/DatasetPickList.tsx::DatasetPickList` files `open-dataset-draft`, so a
-  second press mints a second draft; the pick list shows two "email-tagging · just now" rows and the
-  sidebar two "email-tagging unstarted" campaigns, nothing telling them apart. Expected: a dataset with
-  an open check-in reopens it (or the rows say what differs). **Rides with:** `area 07's chain` —
-  **Re-test:** two presses of one dataset leave one open check-in.
-- **A Hub dataset the box cannot fetch opens as a 500** (w11-walk2, 11-28): on the cold world, press
-  "+ New campaign", then "justlogic/d234 — JustLogic — deductive reasoning". `open-dataset-draft`
-  answers 500 `internal_error`, and the chat says "Internal server error Anything you sent may not have
-  been applied." The server raised `FileNotFoundError` (Couldn't find 'michaelchenkj/JustLogic' on the
-  Hugging Face Hub) from `promptpotter/application/datasets/loaders.py::_load_dataset`, through
-  `promptpotter/application/datasets/startability.py::checkin_bank`. The pick list also offers the
-  dataset with "—" rows, beside email-tagging's 15. Expected: a typed refusal (the dataset's rows are
-  unreachable, from where) that the pick says. A 500 reads as `transient`, so the webapp retries it.
-  Root: a dataset's row source fails typed at its loader's door. **Rides with:** `area 07's chain`.
-  **Re-test:** with the Hub unreachable, the pick answers a typed 4xx/503 naming the source.
-- **A check-in's mode pick reads back as another mode of the same chain** (w11-walk2, 11-28): on the
-  cold world, upload a CSV, open Pipeline, and pick `llm_only` from "default · 1 step / llm_only ·
-  1 step". `edit-draft-campaign {"mode":"llm_only"}` answers 200. The draft then serves `mode: default`,
-  the select snaps back, and the summary still says "default · 1 step". Termnorm serves both modes
-  with `steps: ["llm_only"]`, and
-  `promptpotter/application/datasets/draft_build.py::draft_wire` names the mode as the first whose
-  steps equal the active chain. Expected: the pick holds, or one chain has one mode name. Seen: a 200
-  that reads back undone, which is a state the system enters but cannot report. Root: the draft serves
-  the mode it holds (`EditDraftPatch.mode`), never one re-derived from steps. Or, if two names for
-  one chain is the defect, the connector declares one. **Rides with:** `area 07's chain`.
-  **Re-test:** picking each served mode reads it back as the draft's `mode`.
 
 ## 08 · Connectors, backends, LLM clients
 
@@ -760,42 +689,26 @@ entry-point registry, so a third party ships one with no edit here; its working 
 (`application/optimizer_contract.py`) sits below the bench; outside `optimizers/` only the landing's loader
 imports an optimizer package.
 
-- **Potter's dispatch spells a rule twice and a cap inline** (w11-plugin census):
-  `potter/dispatch/layout.py::unplaceable_edit` refuses an edit placed twice and
-  `potter/dispatch/layout.py::coerce_l1_layout` asserts it again; `potter/behavior_checks.py`'s
-  `_REBUT_SIGNALS` must match the words `potter/dispatch/injections/panels.py` tells the model to write;
-  `panels.py` and `potter/dispatch/injections/layer_state.py` cut text at inline literals (`[:70]`,
-  `char_cap=400`, `char_cap=2400`) beside `potter/dispatch/bundle.py`'s caps, and `layer_state.py`'s
-  `_r_l1_layout` re-derives `potter/dispatch/prompts.py::node_layout`; `potter/validators.py` books its
-  no-op, duplicate and repeat verdicts under the placeholder axis `variant`, no locus, which
-  `domain/failures.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
-  whole-candidate verdict names no axis. **Rides with:** area 09's chain. **Re-test:**
-  `git grep -c 'axis="variant"' -- promptpotter` is 0 and `layer_state.py` names no `char_cap=` literal.
-- **Selection and the race are written once per peer, not in the backbone** (w10-survey):
-  `capo/members.py::PopulationSelector.select`, `gepa/members.py::Pareto.select` and
-  `levi/members.py::MapElites.select` each re-derive the leader, a tie rule and the `RoundEnding` /
-  `Selection`; `capo/members.py::PairedTRace.decide` and `gepa/members.py::_GateRace.decide` are one
-  `scoring/race_protocol.py::next_block` body and both build the `eliminated` `StopSignal`;
-  `kind == "eliminated"` is counted in `capo/members.py`, `gepa/members.py` and
-  `potter/dispatch/injections/panels.py`; the shared-cell mean is written three times
-  (`capo/members.py::_readings`, `gepa/members.py::minibatch_improves`,
-  `gepa/members.py::_aggregate`) beside `optimizers/descriptors.py::cell_objectives`. Root: the backbone
-  takes a score map and owns crown, hold and the stop signal; a peer supplies the ranking. **Rides with:**
-  area 09's chain. **Re-test:** `git grep -n "next_block(" -- promptpotter/application/optimizers` is 0 in
-  the peers (2 now).
-- **Peers hold defaults and an Optional the manifest should own** (w10-survey):
-  `capo/members.py::mutate_shots` draws `rng.randrange(3)`; `levi/members.py::_LLOYD_ITERATIONS` (100), the
-  `< 1.0` threshold in `levi/members.py::_failures` and an always-empty `meta_advice_section` in
-  `levi/members.py::refine_prompt` are code constants; `levi/members.py::LeviRefine._refinement` takes
-  `LeviCalibration | None` and asserts it; `elects_on` returns a constant in all three peers while
-  `potter/members.py` takes `selected`; `gepa/members.py::_GateRace._tested` is race-local state beside
-  `optimizer_state`. Root: a knob is a node `config` field; the round carries what exists. **Rides with:**
-  area 09's chain. **Re-test:**
-  `git grep -nE "_LLOYD_ITERATIONS|randrange\(3\)" -- promptpotter/application/optimizers` is empty.
-- **`theta_election` names a θ it no longer reads**: since θ left the round's statement every crown elects
-  on the fitness column, yet the pipeline node, its knobs and `row_policy.py` still spell
-  `theta_election`. Action: rename it to what it decides (with its doc row; a behaviour-key move).
-  **Rides with:** area 09's chain. **Re-test:** `git grep -c theta_election -- promptpotter` is 0.
+- **A whole-candidate verdict books a placeholder axis** (w11-plugin census; w11-optim2 cut it to
+  this): `potter/validators.py::_collapse` books the no-op, duplicate and repeat verdicts under axis
+  `variant`, because `domain/failures.py::ValidationFailure`'s `axis` is a required `str`. Root: a
+  whole-candidate verdict names no axis, so `axis` is optional (a scoring-tolerance reshape: run data
+  wiped, L2's rendered failure JSON moves). **Rides with:** area 09's chain, with a domain/ owner.
+  **Re-test:** `git grep -c 'axis="variant"' -- promptpotter` is 0.
+- **The plugin contract is spread over seven modules** (w11-optim2, 11-28): `examples/optimizer-plugin`
+  imports `optimizer_contract`, `bench/node_context`, `optimizers/paper_templates` (a built-in's),
+  `domain/campaign_config`, `domain/paired_reading`, `domain/pipeline_schema` and `domain/records/decision`.
+  A third party edits nothing under `application/optimizers/`, but it reaches seven homes. Root: the
+  contract module owns what a plugin reads, so the example imports one module. **Rides with:** area 09's
+  chain (map § 09 UNDECIDED). **Re-test:** the example's `promptpotter` imports name one module.
+- **"wound" survives in potter's dispatch hub** (w11-optim2, 11-28): `domain/wounds.py` became
+  `failures.py`, but `potter/dispatch/injections/wounds.py` and its `l1_wounds` injection keep the word.
+  Renaming the injection key re-keys potter, a measured move. **Rides with:** area 09's chain. **Re-test:**
+  `git grep -c wound -- promptpotter/application/optimizers` is 0.
+- **CAPO's settled race path runs in no offline leg** (w9-pass; w11-optim2, 11-28):
+  `capo/members.py::PairedTRace.cut`'s `settled` signal is reached by no leg, so a change to it moves no
+  key. **Rides with:** area 09's chain, with area 14's offline legs. **Re-test:** `offline_run.py
+  --coverage` reaches it.
 - **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
@@ -809,23 +722,6 @@ imports an optimizer package.
   names `mechanism` and `claim` before `sample_ids` in the layout and `schemas.py::FailureCluster`'s
   order, and each id appears once in the whole reply. Open: the paid proof. **Re-test:** the banked
   inputs (`.scratch/wave-2/bank/row111/`) re-asked under `l1_critique/1` as it now renders finish `stop`.
-- **A held round's words are the election match's fall-through** (w8-round, 11-27):
-  `promptpotter/application/optimizers/potter/election.py::_verdict_reason` — a HELD round (and
-  ADOPTED) reaches the closing `return` of the `match`, since `RoundDecision.ending` is typed
-  `RoundEnding`, which admits `adopted` — a selector's ending type is the endings it can decide
-  (crowned, moved, held), so each reads its own arm — **Rides with:** `area 09's chain` —
-  **Re-test:** `_verdict_reason` has a `case RoundEnding.HELD` and `RoundDecision.ending` excludes
-  `ADOPTED`.
-- **A coupling note is developer prose on every potter campaign** (w11-walk, 11-27):
-  `promptpotter/application/optimizers/potter/couplings.py`'s `per_round_resubset` text ("ONE anchored
-  δ ruler in θ — the stall replayer, c0_ok and PoBB elimination all via fit_theta on
-  cycle.difficulty …") is served through `promptpotter/domain/phase_acts.py` as a "config coupling"
-  info line naming the two knobs' dotted keys, above every potter
-  campaign's chat. Expected: an info a run keeps is no news (`KnobClashes.tsx`'s own rule), or one
-  operator sentence. **Rides with:** `area 09's chain` — **Re-test:** the walk world's campaign chat
-  shows no coupling the config keeps.
-  Walk #2 (11-28, 390×844): still. Both walk-world campaigns show the full `per_round_resubset`
-  paragraph in red-keyed monospace, above their chat and in the sidebar's node panel.
 
 ## 10 · L4
 

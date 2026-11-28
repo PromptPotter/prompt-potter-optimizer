@@ -465,9 +465,8 @@ def _cycle_cells(
     served once. The headline is the latest election's `ended_on`, a dataset scope's every column."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
-    chain = stores.campaigns.chain(hop, moment=moment)
-    line = LineCells(stores, line_walks(chain), scorer)
-    standing = read_line(chain, STANDING_ROUNDS)
+    line = LineCells(stores, line_walks(cycle_dir, moment=moment), scorer)
+    standing = read_line(cycle_dir, STANDING_ROUNDS, moment=moment)
     elected = max(standing.elections, default=None)
     ended_on = None if elected is None else standing.elections[elected].ended_on
     candidates: dict[str, CellCandidate] = {}

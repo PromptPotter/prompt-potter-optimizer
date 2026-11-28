@@ -257,7 +257,7 @@ class CycleEntryFacts(FrozenModel):
     )
     spend: MeteredSpend = Field(
         description="Its line's bill at the moment: its fork prefix's, then its own ledger's "
-        "(`CampaignStore.chain`), what its dashboard's spend folds."
+        "(`read_model.py::CHAIN`), what its dashboard's spend folds."
     )
     bench: BenchScore | None = Field(
         description="The campaign's bench, on the cycle holding the line, read whole at the "

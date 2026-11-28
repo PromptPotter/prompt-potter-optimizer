@@ -747,7 +747,7 @@ export interface CycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first. */
   elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
-   * (`CampaignStore.chain`), what its dashboard's spend folds. */
+   * (`read_model.py::CHAIN`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -1360,7 +1360,7 @@ export interface SubtreeCycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first. */
   elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
-   * (`CampaignStore.chain`), what its dashboard's spend folds. */
+   * (`read_model.py::CHAIN`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -2085,7 +2085,8 @@ export interface ValidationFailure {
   /** The parameter path that failed, ``{node_name}.{param}`` (e.g.
    * ``llm_only.model``), or an axis on the generator's own output rather than
    * a pipeline param: ``l1_generate.output`` (parse/shape failures) or
-   * ``variant`` (no-op / duplicate mutations). */
+   * ``variant`` (a whole-candidate verdict: a no-op, duplicate or repeat
+   * mutation). */
   axis: string;
   /** The offending value as rendered for the prompt; truncated to ≤300 chars for
    * raw LLM output. Always a string — original type is encoded into the
@@ -4688,8 +4689,8 @@ export interface ConfigCoupling {
   relation: string;
   /** What goes wrong when the combination is violated */
   consequence: string;
-  /** collision (soundness) | inert (wasted knob) | info (relationship) */
-  severity: 'refused' | 'collision' | 'inert' | 'info';
+  /** refused (no run may take it) | collision (soundness) | inert (wasted knob) */
+  severity: 'refused' | 'collision' | 'inert';
   /** True when this campaign's config is in the violating combination */
   active: boolean;
 }
@@ -4770,7 +4771,7 @@ export interface DatasetIndexEntry {
   n_samples: number | null;
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
    * ``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`. */
-  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
+  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | 'source_unreachable' | null;
   /** What refused its rows where a refusal says which field of its definition is
    * wrong; null otherwise. */
   refusal: Refusal | null;
@@ -5822,7 +5823,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "618095ddd02a7894";
+export const SERVED_CONTRACT = "fdd02f150eaff040";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6063,7 +6064,7 @@ export type ArchiveMode = 'compact' | 'restore' | 'purge-cold' | 'reclaim';
 export type StatusMark = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 
 // promptpotter.domain.dataset_start::StartBlock
-export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
+export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | 'source_unreachable';
 
 // promptpotter.domain.export::ExportTier
 export type ExportTier = 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
@@ -6278,11 +6279,10 @@ export const SIGN_IN_REFUSAL_INFO: Record<'state_invalid_or_expired' | 'code_exc
 };
 
 // Mirror of application/config_map.py::COUPLING_SEVERITY_INFO, in display order.
-export const COUPLING_SEVERITY_INFO: Record<'refused' | 'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
+export const COUPLING_SEVERITY_INFO: Record<'refused' | 'collision' | 'inert', CouplingSeverityInfo> = {
   "refused": { tone: "danger" },
   "collision": { tone: "danger" },
   "inert": { tone: "attention" },
-  "info": { tone: "quiet" },
 };
 
 // Mirror of application/config_map.py::KNOB_SOURCE_SET_BY, in display order.
@@ -6595,6 +6595,7 @@ export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "missing_extra": "It runs through a Python extra this install lacks.",
   "unreadable": "Its samples could not be read on this install.",
   "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
+  "source_unreachable": "This install could not fetch its rows from their source.",
 };
 
 // Mirror of domain/export.py::EXPORT_TIER_INFO, in display order.
@@ -6876,7 +6877,7 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
 // Each table's keys in display order (lib/api/words.ts walks a table by it).
 export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
   [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
-  [COUPLING_SEVERITY_INFO, ["refused", "collision", "inert", "info"]],
+  [COUPLING_SEVERITY_INFO, ["refused", "collision", "inert"]],
   [KNOB_SOURCE_SET_BY, ["default", "dataset", "campaign", "free_tier", "start", "manifest"]],
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
   [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],
@@ -6909,7 +6910,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
   [SAMPLE_MOVEMENT_TONE, ["new", "readded", "gained", "lost", "kept"]],
-  [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
+  [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable", "source_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],
   [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],

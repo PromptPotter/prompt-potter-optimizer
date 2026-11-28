@@ -40,6 +40,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.store.dataset_access import write_own_definition
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -82,7 +83,7 @@ async def answer_read(params: ReadParams, stores: Stores | None = None) -> objec
 
 @dataclass(frozen=True)
 class HostDefinition:
-    """An account definition a host runs, as `Stores.write_own_definition` takes it: `run_campaign`
+    """An account definition a host runs, as `dataset_access.py::write_own_definition` takes it: `run_campaign`
     writes it past its one `enter`, since a landing drops a definition written before it."""
 
     slug: str
@@ -114,7 +115,7 @@ async def run_campaign(
     ``arm_gate`` it blocks until ``submit-arms`` answers."""
     stores = await enter(stores)
     if isinstance(target, HostDefinition):
-        stores.write_own_definition(**vars(target))
+        write_own_definition(stores, **vars(target))
         target = target.slug
     payload: StartRunPayload | MintCampaignPayload
     if isinstance(target, CycleHop):

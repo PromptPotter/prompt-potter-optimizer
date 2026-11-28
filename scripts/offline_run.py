@@ -157,7 +157,7 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
 )
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.origin_panel import RoundEnding
@@ -174,7 +174,6 @@ from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.run_scope import scoped
@@ -184,12 +183,15 @@ from promptpotter.infrastructure.store.archive_queries import (
     list_populations,
     load_population,
 )
-from promptpotter.infrastructure.store.campaign_store.store import fold_cycle_index
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import CYCLE_INDEX
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    dataset_id_prefix,
+    inner_sandboxes_dir,
+)
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
-from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
@@ -1265,7 +1267,7 @@ async def run_controlled(
         return CampaignWalks(stores.campaigns, campaign_id)
 
     def filed(campaign_id: str) -> frozenset[str]:
-        return read_line(walks(campaign_id).spans(), WALKED_ANSWERS)
+        return walks(campaign_id).read(WALKED_ANSWERS)
 
     bank = stores.tenant_datasets.labelled(DATASET)
     assert bank is not None, "every arm ran on the labelled bank"
@@ -1513,7 +1515,7 @@ def _id_map(ledger: list[dict[str, Any]]) -> dict[str, str]:
 
 def _cycle_index(cycle: Path) -> CycleIndex:
     """A cycle the world left as a bare tree, folded off its chain as the store folds a hop's."""
-    index = fold_cycle_index(ledger_chain(CycleDir(cycle), moment=None))
+    index = read_line(cycle, CYCLE_INDEX).cycle
     assert index is not None, f"{cycle.name} ran without minting its cycle"
     return index
 
@@ -2534,7 +2536,10 @@ def skipped_leg(name: str, home: Path, straight: Future[int], twin: Future[int])
         print(f"{name}: a skip and its resumed twin: FAILED (exit {rcs}) -- {legs[0] / 'run.log'}")
         return False
     complete_registries()
-    skips = [read_line([LedgerSpan(leg_ledger_path(leg))], STANDING_ROUNDS).skipped for leg in legs]
+    skips = [
+        read_line(CycleLayout.of_ledger(leg_ledger_path(leg)).cycle_dir, STANDING_ROUNDS).skipped
+        for leg in legs
+    ]
     cells = [
         (BehaviourTrace.read(leg).decisions["harness"]["backend_cells"], *bought(leg))
         for leg in legs

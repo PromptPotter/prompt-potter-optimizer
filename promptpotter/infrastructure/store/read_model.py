@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import pickle
 import re
 import sys
@@ -27,9 +28,10 @@ from typing import (
 
 from pydantic import ValidationError
 
-from promptpotter.config.paths import LEDGER_FOLDS_DIR, user_data_root
+from promptpotter.config.paths import LEDGER_FOLDS_DIR, short_form, user_data_root
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.lineage import CycleMintedRecord
 from promptpotter.domain.records.rounds import stale_file_warning
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
@@ -43,6 +45,7 @@ from promptpotter.infrastructure.store.io import (
     read_tail,
     write_bytes,
 )
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycle_dirs, cycle_ledgers
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import (
     FileKind,
@@ -50,6 +53,12 @@ from promptpotter.shared.errors import (
     NotFoundError,
     validation_reason,
 )
+
+
+class LedgerSpan(NamedTuple):
+    path: Path
+    until: int | None = None
+
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 _ARM_MODELS = {kind.encode(): arm for kind, arm in RECORDS.registered().items()}
@@ -209,11 +218,6 @@ def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[Str
     return {
         model.model_fields["record_type"].default: model for fold in folds for model in fold.records
     }
-
-
-class LedgerSpan(NamedTuple):
-    path: Path
-    until: int | None = None
 
 
 logger = logging.getLogger(__name__)
@@ -749,50 +753,119 @@ class LastOf:
 
 
 @dataclass(frozen=True)
+class LineScope:
+    """Which ledgers answer for a subject, the earliest first: a cycle directory's, or, where
+    *of_campaign*, a campaign root's."""
+
+    spans: Callable[[Path], list[LedgerSpan]]
+    of_campaign: bool = False
+
+
+@dataclass(frozen=True)
 class Line[V, L]:
-    """A fold read over a line of ledgers, its composition stated once: *fold* folds each span,
-    *then* lays a span's value onto what the spans before it held, from *start*."""
+    """A fold read over the ledgers its *over* names, its composition stated once: *fold* folds
+    each span, *then* lays a span's value onto what the spans before it held, from *start*."""
 
     fold: Callable[[], LedgerFold[Any, V]]
     start: Callable[[], L]
     then: Callable[[L, V, LedgerSpan], L]
+    over: LineScope
 
 
-def read_line[V, L](spans: Iterable[LedgerSpan], line: Line[V, L]) -> L:
-    """The one read of a fold over spans, the earliest first."""
+def read_line[V, L](at: Path, line: Line[V, L], *, moment: Moment | None = None) -> L:
+    """THE read of a line: *at* is its scope's subject, cut at *moment*."""
+    spans = line.over.spans(at)
+    if moment is not None:
+        spans = moment.spans(spans)
     held = line.start()
     for span in spans:
         held = line.then(held, LedgerIndex.of(span.path).view(line.fold, span.until), span)
     return held
 
 
-def last[R: StrictModel](record: type[R]) -> Line[R | None, R | None]:
+def last[R: StrictModel](record: type[R], over: LineScope) -> Line[R | None, R | None]:
     """The last *record* the spans hold, a later span's over an earlier one's."""
     return Line(
         cast("Callable[[], LedgerFold[Any, R | None]]", LastOf(record)),
         lambda: None,
         lambda held, own, _: held if own is None else own,
+        over,
     )
 
 
-def each_last[R: StrictModel](record: type[R]) -> Line[R | None, list[R | None]]:
+def each_last[R: StrictModel](record: type[R], over: LineScope) -> Line[R | None, list[R | None]]:
     """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
     return Line(
         cast("Callable[[], LedgerFold[Any, R | None]]", LastOf(record)),
         lambda: list[R | None](),
         lambda held, own, _: [*held, own],
+        over,
     )
 
 
-def line_concat[T](fold: Callable[[], LedgerFold[Any, list[T]]]) -> Line[list[T], list[T]]:
+def line_concat[T](
+    fold: Callable[[], LedgerFold[Any, list[T]]], over: LineScope
+) -> Line[list[T], list[T]]:
     """Every span's values, oldest first."""
-    return Line(fold, lambda: list[T](), lambda held, own, _: [*held, *own])
+    return Line(fold, lambda: list[T](), lambda held, own, _: [*held, *own], over)
 
 
 def line_union[T](
-    fold: Callable[[], LedgerFold[Any, frozenset[T]]],
+    fold: Callable[[], LedgerFold[Any, frozenset[T]]], over: LineScope
 ) -> Line[frozenset[T], frozenset[T]]:
-    return Line(fold, lambda: frozenset[T](), lambda held, own, _: held | own if held else own)
+    return Line(
+        fold, lambda: frozenset[T](), lambda held, own, _: held | own if held else own, over
+    )
+
+
+# A cycle's own ledger: what a fork never inherits.
+CYCLE = LineScope(lambda cycle: [LedgerSpan(CycleLayout(cycle).ledger)])
+
+
+def _fork_prefix(cycle_dir: Path) -> list[LedgerSpan]:
+    prefix: list[LedgerSpan] = []
+    child_dir = cycle_dir
+    # By dir, never id: two trees can hold the same cycle id. A mint names its parent off the
+    # child's own path, so the spelling alone is compared, with no filesystem call per hop.
+    seen = {os.path.normcase(short_form(child_dir))}
+    while (minted := read_line(child_dir, _MINT)) is not None and (
+        parent_dir := minted.parent_cycle_dir(child_dir)
+    ) is not None:
+        cut = minted.forked_at_offset
+        assert cut is not None
+        if (spelled := os.path.normcase(short_form(parent_dir))) in seen:
+            raise ValueError(
+                f"{child_dir}: parent {parent_dir} is already on this fork chain — "
+                "the mints describe a cycle, which no walk can resolve."
+            )
+        seen.add(spelled)
+        child_dir = parent_dir
+        prefix.append(LedgerSpan(CycleLayout(child_dir).ledger, cut))
+    return prefix[::-1]
+
+
+def fork_chain(cycle_dir: Path) -> list[LedgerSpan]:
+    """A cycle's fork prefix, its root's first, each cut where its child forked, then its own."""
+    return [*_fork_prefix(cycle_dir), LedgerSpan(CycleLayout(cycle_dir).ledger)]
+
+
+def _widest_walks(campaign_root: Path) -> list[LedgerSpan]:
+    widest: dict[Path, int | None] = {}
+    for cycle_dir in campaign_cycle_dirs(campaign_root):
+        for path, until in fork_chain(cycle_dir):
+            if path.is_file():
+                held = widest.get(path, 0)
+                widest[path] = None if until is None or held is None else max(held, until)
+    return [LedgerSpan(path, until) for path, until in widest.items()]
+
+
+# A cycle's chain: a fork reads its parent's ledger to its cut.
+CHAIN = LineScope(fork_chain)
+# Every cycle ledger of a campaign, each read whole, so each cycle's own appends count once.
+CAMPAIGN = LineScope(lambda root: [LedgerSpan(p) for p in cycle_ledgers(root)], of_campaign=True)
+# Each cycle's whole chain, widest per ledger: a cycle lifted from another tree remembers its prefix.
+CAMPAIGN_WALKS = LineScope(_widest_walks, of_campaign=True)
+_MINT = last(CycleMintedRecord, CYCLE)
 
 
 class LineIndex(_LedgerTail):

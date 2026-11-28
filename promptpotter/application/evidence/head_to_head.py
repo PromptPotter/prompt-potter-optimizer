@@ -54,8 +54,7 @@ from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.spend_rollup import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import LEDGER_SPEND
-from promptpotter.infrastructure.store.read_model import read_line
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import LINE_SPEND
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError
@@ -605,11 +604,7 @@ def _read(
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
     launches = line_launches(stores, campaign)
-    cost = (
-        read_line(stores.campaigns.line_spans(campaign.root_hop), LEDGER_SPEND)
-        if launches
-        else None
-    )
+    cost = stores.campaigns.read(campaign.root_hop, LINE_SPEND) if launches else None
     spend = None if cost is None else cost.spend
     windows = [
         (start, end)

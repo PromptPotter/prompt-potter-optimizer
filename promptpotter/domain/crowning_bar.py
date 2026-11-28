@@ -1,5 +1,5 @@
 """The bar potter's election crowns on: a predicate whose statistic is a switch
-(``theta_election.crown``). A baseline crowns by its own rule and is never read here."""
+(``paired_election.crown``). A baseline crowns by its own rule and is never read here."""
 
 from __future__ import annotations
 

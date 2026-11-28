@@ -45,6 +45,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     own_definition,
     resolve_dataset,
     runnable_definition,
+    write_own_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
@@ -310,7 +311,8 @@ def commit_upload_definition(
     """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug.
     Writes the definition, its ``campaign`` the draft's layers laid (`ConfigLayers.block`): the
     dataset's block from here on, as a shipped dataset's `dataset.yaml::campaign` is."""
-    stores.write_own_definition(
+    write_own_definition(
+        stores,
         draft.slug,
         source=source,
         pipeline=pipeline.local,
