@@ -24,7 +24,6 @@ import uuid
 from collections.abc import Callable, Coroutine, Iterator
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn, cast, get_args
-from unittest import mock
 
 import httpx
 import offline_world
@@ -209,9 +208,7 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import CampaignPhase, PauseCause, StopReason
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import (
-    PipelineSchema,
-)
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, PipelineSchema
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     Bill,
@@ -254,7 +251,7 @@ from promptpotter.domain.spend import (
     TokenAccount,
     TokenUsageKind,
 )
-from promptpotter.infrastructure import holders
+from promptpotter.infrastructure import docker_host, holders
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
@@ -263,6 +260,7 @@ from promptpotter.infrastructure.llm.capabilities import (
     CAPABILITY_FILE,
     ensure_model_capabilities,
     resolve_model_capabilities,
+    resolve_schema_menu,
 )
 from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, ReportedUsage
@@ -1245,10 +1243,6 @@ def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
 
 
 # 3. A campaign's ceiling
-
-
-async def _no_wait(*_: Any) -> None:
-    return None
 
 
 @dataclasses.dataclass
@@ -2566,6 +2560,26 @@ def test_a_malformed_capability_override_is_refused_never_read_past(tmp_path: Pa
         resolve_model_capabilities("gpt-x", "openai", workspace=tmp_path)
 
 
+def test_a_schema_serves_each_model_once_per_provider_its_nodes_send_on(tmp_path: Path) -> None:
+    # An optimizer's pool or election node names no provider: it sends on none.
+    sends, pools = (
+        PipelineNode(
+            name=name,
+            kind=kind,
+            current_config=NodeCall(model=model, provider=provider),
+            tunes_llm=False,
+        )
+        for name, kind, model, provider in (
+            ("generate", NodeKind.LLM, "gpt-x", "openrouter"),
+            ("pool", NodeKind.TOOL, None, None),
+        )
+    )
+    menu = resolve_schema_menu(pipeline_schema([sends, pools]), workspace=tmp_path)
+    assert {p: sorted(models) for p, models in menu.items()} == {"openrouter": ["gpt-x"]}, (
+        f"{sorted(menu)}: a model is served under a provider no node sends on"
+    )
+
+
 async def test_a_fresh_workspaces_first_catalogue_fetch_lands_its_snapshot(
     offline: Router, tmp_path: Path
 ) -> None:
@@ -2740,6 +2754,24 @@ def test_a_resent_call_costs_what_its_admissions_booked(tmp_path: Path, offline:
     assert len(sent) == 2 and book.spent.unreported_usd > 0, "the 5xx was not resent and held"
     assert reply.cost_usd == pytest.approx(booked), (
         "a call's cost read below what its resent sends booked"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_the_offline_worlds_llm_resend_waits_no_wall_time(offline: Router) -> None:
+    _priced_wire(offline)
+    offline.llm.says = lambda _body: (
+        completion("ok", model="gpt-x", usd=0.001)
+        if offline.llm.sent[1:]
+        else httpx.Response(500, json={"error": "blip"})
+    )
+    started = time.monotonic()
+    # The loop's own clock, never a jumping one: what the offline run's legs run on.
+    with scoped(book=spend_book()):
+        asyncio.run(_owned_chat("resent"))
+    waited = time.monotonic() - started
+    assert len(offline.llm.sent) == 2 and waited < 0.5, (
+        f"{waited:.2f}s for {len(offline.llm.sent)} sends: the world slept a resend's wait"
     )
 
 
@@ -2925,6 +2957,62 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     )
 
 
+@pytest.mark.usefixtures("run_bound")
+def test_harbors_own_docker_fault_out_of_a_trial_ends_the_cell_on_the_machine_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from harbor.trial.trial import Trial  # extras: harbor
+
+    from promptpotter.connectors import harbor  # extras: harbor
+
+    created: list[int] = []
+
+    async def compose_down(*_args: Any, **_kw: Any) -> Any:
+        created.append(1)
+        # Harbor's own words (`DockerEnvironment._run_docker_compose_command`).
+        raise RuntimeError("Docker compose command failed for environment task. Return code: 1.")
+
+    monkeypatch.setattr(Trial, "create", compose_down)
+    # The machine claimed off the loop, as a launch claims it, and the producer its trials are
+    # labelled with: both restored after.
+    monkeypatch.setattr(docker_host, "_claimed", None)
+    monkeypatch.setenv(harbor._PRODUCER_ENV, "")
+    docker_host.claim_machine(tmp_path / "jobs")
+    client = BackendClient(
+        harbor.CONNECTOR,
+        endpoint=None,
+        workload=InProcessWorkload(
+            # Harbor's own agent, so no model of ours is bound before the trial is.
+            experiment=harbor.HarborPanel(
+                tasks=[], agent={"environment": "docker", "name": "oracle"}
+            ),
+            experiment_dir=tmp_path,
+            program=None,
+            workspace=None,
+        ),
+        jobs_dir=tmp_path / "jobs",
+    )
+
+    async def container_cell() -> Any:
+        async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
+            return await client.run_query(
+                Sample(id=0, query="task", ground_truth=None, source_pin={"path": "task"}),
+                PipelineParams().with_nodes(
+                    {harbor.AGENT_NODE: {harbor.SKILL_DELIVERY_KEY: "agent_skill"}}
+                ),
+                bound=None,
+                pairs={},
+                billed=cell_billing(pipeline_schema([]), {}, {}),
+            )
+
+    with pytest.raises(CellInfrastructureError) as ended:
+        jumping_clock(container_cell())
+    assert (ended.value.category, len(created)) == (
+        ErrorCategory.CONNECTION,
+        harbor.CONNECTOR.cell_attempts,
+    ), "Harbor's docker fault reached the cell raw, charged as the prompt's, or went unretried"
+
+
 def test_a_machine_held_connector_arms_on_its_pool_never_the_process_count(tmp_path: Path) -> None:
     class Phase:
         def __init__(self, out: int) -> None:
@@ -3060,7 +3148,6 @@ def dspy_billed(net: Router, out: Path) -> dict[str, Any]:
         scoped(account=account),
         scoped(ledger=CycleEventLog(out / "bound.jsonl")),
         scoped(round=1),
-        mock.patch.object(dspy_module, "held_wait", _no_wait),
     ):
         # The one purse every cell bills, laid once the account it draws on is bound.
         purse = spend_book(1.0)
@@ -3087,6 +3174,7 @@ def dspy_billed(net: Router, out: Path) -> dict[str, Any]:
                 lm15.BillingError("Insufficient credits", status=402),
                 lm15.InvalidRequestError("Your credit balance is too low", status=400),
                 lm15.InvalidRequestError("unknown field", status=400),
+                lm15.StreamAssemblyError("the reply broke off"),
             )
         ]
         account.api_keys.put("openai", SecretStr("sk-own"))
@@ -3148,12 +3236,14 @@ def test_a_dspy_cell_past_its_bound_halts_and_bills_the_calls_it_made(
 def test_a_dspy_cell_reads_a_providers_failure_as_a_hole_and_ends_on_its_sends_close(
     dspy_paid: dict[str, Any],
 ) -> None:
-    # Refused, out of credit (402, and a 400 saying so), then a 400 the close reads as ours.
+    # Refused, out of credit (402, and a 400 saying so), a 400 the close reads as ours, then a
+    # status-less failure, which leaves the program typed as its close, never raw.
     assert dspy_paid["holes"] == [
         ["infrastructure", ErrorCategory.CONNECTION, None],
         ["refused", ErrorCategory.PROVIDER_CREDIT, None],
         ["refused", ErrorCategory.PROVIDER_CREDIT, None],
         ["closed", ErrorCategory.CLIENT, 400],
+        ["closed", ErrorCategory.UNKNOWN, None],
     ], "a provider's failure scored a cell, or the cell re-read the raw error past its close"
 
 
@@ -3304,6 +3394,31 @@ def test_an_agent_whose_sends_died_on_a_5xx_never_measured_the_prompt(offline: R
     ended = downed.failure(cast("Any", None))
     assert ended is not None and ended[1] is ErrorCategory.SERVER, (
         f"an episode the provider's 5xx ended scored as the prompt's failure: {ended!r}"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_an_agents_own_retries_resend_nothing_past_the_one_send_budget(offline: Router) -> None:
+    from promptpotter.connectors import harbor  # extras: harbor
+
+    wire = _priced_wire(offline)
+    wire.down = True
+
+    async def retried_turn() -> None:
+        seam = harbor._AgentModel(NodeCall(model="gpt-x", provider="openai", max_tokens=100), 1000)
+        with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
+            # terminus-2's `_query_llm` tries a failed query three times.
+            for _try in range(3):
+                with pytest.raises(FailedSendError):
+                    await seam.call("turn")
+
+    with scoped(book=spend_book()):
+        offline.llm.sent.clear()
+        jumping_clock(retried_turn())
+    wire.down = False
+    assert len(offline.llm.sent) == SEND_ATTEMPTS, (
+        f"{len(offline.llm.sent)} sends: the agent's retries resent past the one budget's "
+        f"{SEND_ATTEMPTS}"
     )
 
 
@@ -3917,8 +4032,7 @@ def test_start_refuses_on_the_free_tier_what_its_fence_leaves_outside(
             run, selected, PipelineParams.model_validate(params), schema, fence
         )
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
-    with pytest.raises(PayloadInvalidError):
-        free_tier.refuse_outside_free_tier(off)
+    assert isinstance(free_tier.outside_free_tier_refusal(off), PayloadInvalidError)
 
 
 @pytest.mark.usefixtures("run_bound")

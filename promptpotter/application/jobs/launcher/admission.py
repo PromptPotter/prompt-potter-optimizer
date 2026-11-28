@@ -14,11 +14,13 @@ from promptpotter.application.jobs.launcher.opening import (
     open_spend_book,
 )
 from promptpotter.application.jobs.quota import (
+    account_wallet,
     admit_launch,
     admitting_before,
     call_book,
     check_launch_quotas,
     declare_run_budget,
+    launch_refusal,
     next_launch_budget,
     sends_on,
     slot_rate,
@@ -91,6 +93,7 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     MachineBusyError,
+    PotterError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
@@ -195,13 +198,24 @@ def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError
     return None
 
 
-def admitted(stores: Stores, campaign: Campaign, run: RunState) -> RunAdmission:
-    """*run*'s launch half with its campaign's refusal and its reader's kinds joined (the read's own
-    `stores.identity`, capability-less on the exhibit): the acts every served read offers."""
-    joined = (
-        None if (refused := campaign_refusal(stores, campaign)) is None else Refusal.of(refused)
-    )
-    return RunAdmission.of(run, campaign_refusal=joined, filable=filable(stores.identity))
+def admitted(stores: Stores, at: CampaignCycle, run: RunState) -> RunAdmission:
+    """*run*'s launch half with the refusal its launch meets and its reader's kinds joined (the
+    read's own `stores.identity`, capability-less on the exhibit): the acts every served read
+    offers, asked only where it offers a launch."""
+    refused = launch_preflight(stores, at) if RunAdmission.launches(run) else None
+    joined = None if refused is None else Refusal.of(refused)
+    return RunAdmission.of(run, launch_refusal=joined, filable=filable(stores.identity))
+
+
+def launch_preflight(stores: Stores, at: CampaignCycle) -> PotterError | None:
+    """THE refusal a launch on *at* meets at its admission, asked with no slot: its campaign's
+    (`refuse_campaign`), then its sends' (`quota.py::launch_refusal`, which `admit_launch`
+    raises), so the read offering a Start serves what its press answers."""
+    if (refused := campaign_refusal(stores, at.campaign)) is not None:
+        return refused
+    declared = next_launch_budget(cycle_config(stores, at).config, stores=stores, at=at)
+    sends = campaign_sends(stores, at)
+    return launch_refusal(account_wallet(stores), declared, sends, stores=stores, refusing=None)
 
 
 def refuse_campaign(stores: Stores, campaign: Campaign) -> None:

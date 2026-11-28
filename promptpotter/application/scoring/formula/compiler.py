@@ -316,8 +316,8 @@ def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -
         f"no label — its backend answers with a number that its own verifier decided. Every cell "
         f"would be graded against an empty string, which `label_match` scores as a PERFECT 1.0 "
         f"wherever the prediction is also empty. Score the observation the backend emits instead "
-        f"(the key the connector declares in `required_observation_keys`, e.g. "
-        f"`max(0.0, min(1.0, env_reward))`).",
+        f"(a key the connector declares in `required_observation_keys`, clamped as "
+        f"`max(0.0, min(1.0, <key>))`).",
         code="pipeline_config_invalid",
         details={"formula": formula, "source": source},
     )

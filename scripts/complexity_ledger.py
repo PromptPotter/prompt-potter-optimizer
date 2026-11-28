@@ -388,7 +388,11 @@ BASELINE = {
     # from `jobs/`, and the imports `round.py`'s split into `measure.py` repeats.
     # w11-scoring2 (−282): the stale-data protocol and the hand fitness means go; set to the measured
     # count.
-    "package_lines": 113920,
+    # w11-jobs2 (+38): a cycle's and a draft's read serve the refusal their launch meets (+29); a
+    # queued Start's job holds its draft against a second command (+9).
+    # w11-connectors2 (+9): Harbor's harness fault typed at its door, and the connector's roster-pin
+    # declaration.
+    "package_lines": 113967,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

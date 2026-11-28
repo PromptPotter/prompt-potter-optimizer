@@ -11,12 +11,6 @@ from promptpotter.application.datasets.tabular_ingest import (
     answer_terms_from_rows,
     parse_answer_terms,
 )
-from promptpotter.application.free_tier import (
-    FreeFence,
-    free_fence,
-    outside_free_tier,
-    refuse_outside_free_tier,
-)
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
@@ -24,7 +18,6 @@ from promptpotter.application.pipeline_resolve import (
     draft_served,
     resolved_output_schemas,
 )
-from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.evaluators import campaign_owners
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
@@ -161,16 +154,6 @@ async def plan_draft_patch(
                 f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
             )
 
-    if "config" in changes:
-        # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
-        was_unpriced, was_outside = _refusals(was, fence=free_fence(stores, held.connector))
-        unpriced, outside = _refusals(
-            draft_pipeline(stores, draft.patch(**changes), served),
-            fence=free_fence(stores, served.connector),
-        )
-        refuse_unpriced([r for r in unpriced if r not in was_unpriced])
-        refuse_outside_free_tier([o for o in outside if o not in was_outside])
-
     return DraftPatchPlan(
         changes=changes,
         provenance=provenance,
@@ -187,17 +170,6 @@ def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
         for node, schema in resolved_output_schemas(pipeline.chain, pipeline.params).items()
         if schema is not None
     }
-
-
-def _refusals(pipeline: DraftPipeline, *, fence: FreeFence | None) -> tuple[list[str], list[str]]:
-    config, params, schema, selected = (
-        pipeline.config,
-        pipeline.params,
-        pipeline.chain,
-        pipeline.optimizer,
-    )
-    outside = [] if fence is None else outside_free_tier(config, selected, params, schema, fence)
-    return unpriced_routes(config, selected, params, schema), outside
 
 
 def _picked_mode(

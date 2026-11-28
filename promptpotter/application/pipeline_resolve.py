@@ -160,9 +160,8 @@ from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
 JUDGE_INSTRUMENT_KEY = "judge_instrument"
 """The node-config key the judges' fingerprint rides into measurement identity — ONE key over the
-whole term → judge mapping. Twin of `connectors/harbor.py::INSTRUMENT_KEY`, named apart because
-that one says which task bytes ran and this one which grader read the answer. Both are identity,
-neither a tunable — nothing may put either in `param_keys`."""
+whole term → judge mapping: which grader read the answer, identity beside what a connector's
+`identity_config` lays, never a tunable — nothing may put it in `param_keys`."""
 
 PARAM_LAYERS: tuple[ParamLayer, ...] = get_args(ParamLayer)
 
@@ -452,7 +451,7 @@ def _resolve_active_schema(
         filtered = filtered.narrow(narrowing)
     # Every run keys its cells with the pins, workspace or not.
     filtered = filtered.model_copy(update={"default_routes": default_routes()})
-    # LAST, over the narrowed schema, so `selectable_routes` reads the nodes as the run holds them.
+    # LAST, over the narrowed schema, so `resolve_schema_menu` reads the nodes as the run holds them.
     if workspace is not None:
         filtered = filtered.model_copy(
             update={"model_capabilities": resolve_schema_menu(filtered, workspace=workspace)}

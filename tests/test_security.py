@@ -3883,7 +3883,7 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     into_leaf = Subject.of((log.hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
-    running = admitted(inner, inner.campaigns.campaign(leaf.campaign_id), inner.run_state(leaf))
+    running = admitted(inner, inner.campaigns.campaign_cycle(leaf), inner.run_state(leaf))
     assert _refusal_said(running) == INNER_PAUSE_REFUSAL, "its own loop's run took a pause"
     unfiled = ("-", "-", "-", "PayloadInvalidError", 0)
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
@@ -3926,8 +3926,8 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(
                 campaign_id=held.campaign_id, cycle_id=held.cycle_id, reason="stop"
             )
             await command_log.sender.dispatch(CommandCall(pause, door=Door.HOST))
-            campaign = stores.campaigns.campaign(held.campaign_id)
-            said.append(_refusal_said(admitted(stores, campaign, stores.run_state(held))))
+            seat = stores.campaigns.campaign_cycle(held)
+            said.append(_refusal_said(admitted(stores, seat, stores.run_state(held))))
             raise asyncio.CancelledError("aborted")
     parked = RUN_PHASE_INFO[RunPhase.PAUSED].refusal
     assert parked is not None and said == [parked.message], "a pause under a pass left it startable"
@@ -4219,6 +4219,24 @@ async def test_a_reopen_of_a_draft_its_queued_start_holds_serves_that_starts_sta
     assert (await answered("draft", {"draft_id": draft["draft_id"]}))["start"] is None, (
         "a withdrawn Start still held its reopened draft"
     )
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_start_queued_and_handed_on_still_holds_its_draft_against_a_second_start(
+    monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+) -> None:
+    _, caller, _, answered, keyed, upload = host_tenant
+    draft = await answered("ingest-upload", keyed(upload))
+    full = JobRegistry(caller.stores.jobs_dir, capacity=lambda _live: 0)
+    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
+    start = StartCheckinPayload(draft_id=draft["draft_id"])
+    sender = CommandDispatcher(caller.stores, job_registry=full)
+    queued = (await sender.dispatch(CommandCall(start, "first", door=Door.HOST))).result
+    assert isinstance(queued, launcher_launch.Admitted) and queued.opening.job.queued, "guard"
+    await queued.hand_over(queued.handed())
+    with pytest.raises(ConflictError) as held:
+        await sender.dispatch(CommandCall(start, "second", door=Door.HOST))
+    assert held.value.code == "draft_held", "a second Start landed beside a queued one"
 
 
 @pytest.mark.usefixtures("offline")

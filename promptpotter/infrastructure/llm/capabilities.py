@@ -231,18 +231,22 @@ def sent_llm_bound(
 
 
 def resolve_menu(routes: Iterable[tuple[str, str]], *, workspace: Path | None) -> CapabilityMenu:
+    """One entry per (provider, model): a node naming no provider sends on none, so it has no route."""
     menu: CapabilityMenu = {}
     if workspace is None:
         return menu
     for provider, model in routes:
-        menu.setdefault(provider, {})[model] = resolve_model_capabilities(
-            model, provider, workspace=workspace
-        )
+        if provider:
+            menu.setdefault(provider, {})[model] = resolve_model_capabilities(
+                model, provider, workspace=workspace
+            )
     return menu
 
 
 def resolve_schema_menu(schema: PipelineSchema, *, workspace: Path | None) -> CapabilityMenu:
-    return resolve_menu(schema.selectable_routes(), workspace=workspace)
+    providers = {node.provider for node in schema.declared_nodes}
+    routes = ((p, m) for p in sorted(providers) for m in schema.selectable_models())
+    return resolve_menu(routes, workspace=workspace)
 
 
 async def ensure_model_capabilities(workspace: Path, *, max_age_days: float = 7.0) -> int:

@@ -71,7 +71,6 @@ from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, drawn_bud
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     CallLabel,
-    SendOutcome,
     admitted,
     answered,
     reservation_left,
@@ -213,9 +212,11 @@ _ROSTER_DIR = Path(__file__).parent / "resources"
 _REGISTRY_NAME = re.compile(r"[\w.-]+")
 
 # The harness's own words (Docker, a registry pull): our sends fail typed (`_AgentModel.failure`).
-_HARNESS_NETWORK_FAILURE = re.compile(
+# A compose command Harbor checks is its own lifecycle (build, up, stop, down), never the agent's.
+_HARNESS_FAULT = re.compile(
     r"no such host|Temporary failure in name resolution|failed to fetch oauth token|"
-    r"TLS handshake timeout|i/o timeout|dial tcp|Network is unreachable"
+    r"TLS handshake timeout|i/o timeout|dial tcp|Network is unreachable|"
+    r"Docker compose command failed"
 )
 _FETCH_FAILURE = re.compile(
     r"^Err:\d+ https?://|Failed to fetch https?://|Temporary failure resolving|"
@@ -859,10 +860,16 @@ def _credit_refusal(result: TrialResult) -> tuple[str, ErrorCategory] | None:
     return None
 
 
+def _harness_fault(kind: str, detail: str) -> tuple[str, ErrorCategory] | None:
+    """Recorded on a trial or raised out of one, Harbor's own fault is the machine's."""
+    ours = kind in _HARNESS_TIMEOUTS or _HARNESS_FAULT.search(detail)
+    return (detail[:300], ErrorCategory.CONNECTION) if ours else None
+
+
 def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
     for kind, detail in _trial_failures(result):
-        if kind in _HARNESS_TIMEOUTS or _HARNESS_NETWORK_FAILURE.search(detail):
-            return detail[:300], ErrorCategory.CONNECTION
+        if (fault := _harness_fault(kind, detail)) is not None:
+            return fault
     for log in _trial_root(result).rglob("test-stdout.txt"):
         if log.parent.name == "verifier" and (line := _first_line(log, _FETCH_FAILURE)):
             return (
@@ -1173,12 +1180,9 @@ class _AgentModel:
         self.usage: TokenAccount | None = TokenAccount()
         self._answered = 0
         self._cost: float | None = 0.0
-        # A refusal is raised again on every later call: terminus-2 retries a failed query, and
-        # would answer around a send we refused.
-        self._ended: SendRefusedError | None = None
-        # The close of the last send's fault no answer has followed: terminus-2 retries it, and
-        # a trial ending on it never measured the prompt.
-        self._fault: SendOutcome | None = None
+        # A refusal, or a fault its send budget closed, is raised again on every later call:
+        # terminus-2 retries a failed query (`_query_llm`) past the one budget, unsent.
+        self._ended: SendRefusedError | FailedSendError | None = None
 
     async def call(
         self,
@@ -1212,18 +1216,16 @@ class _AgentModel:
         except ContextOverflowError as exc:
             # terminus-2 summarizes its history on this, and resends.
             raise ContextLengthExceededError(str(exc)) from exc
-        except SendRefusedError as exc:
+        except (SendRefusedError, FailedSendError) as exc:
             self._ended = exc
-            raise
-        except Exception as exc:
-            self._fault = exc.outcome if isinstance(exc, FailedSendError) else None
-            # A refusal before generation bills nothing; a fault past the reply may have.
-            if not isinstance(exc, UngeneratedRequestError) and (
-                self._fault is None or self._fault.may_have_billed
-            ):
+            if isinstance(exc, FailedSendError) and exc.outcome.may_have_billed:
                 self._cost = None
             raise
-        self._fault = None
+        except Exception as exc:
+            # A refusal before generation bills nothing; a fault past the reply may have.
+            if not isinstance(exc, UngeneratedRequestError):
+                self._cost = None
+            raise
         self._answered += 1
         self.usage = None if self.usage is None or reply.usage is None else self.usage + reply.usage
         if self._cost is not None:
@@ -1262,11 +1264,11 @@ class _AgentModel:
 
     def failure(self, result: TrialResult) -> tuple[str, ErrorCategory] | None:
         """What ended the episode that was never the prompt's doing; our own refusal raises."""
-        if (ended := self._ended) is not None:
+        if isinstance(ended := self._ended, SendRefusedError):
             if ended.category not in NOT_THE_PROMPT:
                 raise ended
             return str(ended)[:300], ended.category
-        if (fault := self._fault) is not None and fault.failure in NOT_THE_PROMPT:
+        if ended is not None and (fault := ended.outcome).failure in NOT_THE_PROMPT:
             return fault.detail[:300], fault.failure
         if self._client.pushback(self._model) is not None and any(
             kind == "AgentTimeoutError" for kind, _ in _trial_failures(result)
@@ -1370,6 +1372,11 @@ async def _run_episode(
             ran = await _attempt(episode)
         except CellInfrastructureError as exc:
             cause, category = str(exc), exc.category
+        except Exception as exc:
+            # Harbor raises its harness's fault untyped (`Trial.create`): typed here, at its door.
+            if (fault := _harness_fault(kind := type(exc).__name__, f"{kind}: {exc}")) is None:
+                raise
+            cause, category = fault
         else:
             result, elapsed = ran.result, ran.elapsed_s
             attempts.append(_step_tokens(ran.usage, ran.cost_usd, episode))
@@ -1501,6 +1508,7 @@ CONNECTOR = Connector(
     version_check=_version_check,
     identity_config=_identity_config,
     resolve_experiment=_resolve_experiment,
+    pin_roster=pin_roster,
     measured_unit="cell",
     prompt_delivery=_prompt_delivery,
     # Each cell holds a container: the ceiling is the MACHINE's, shared by every run on it.

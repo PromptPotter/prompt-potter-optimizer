@@ -32,7 +32,7 @@ from promptpotter.application.maintenance.landing import (
 )
 from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, plan_reset
 from promptpotter.config.paths import default_projects_root
-from promptpotter.connectors.harbor import pin_roster
+from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
@@ -44,7 +44,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.main import budget_from_args
 from promptpotter.shared.command_result import CommandResult
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.extras import Extra, require_extra
+from promptpotter.shared.extras import require_extra
 
 _ADDRESS = ("campaign_id", "cycle_id")
 
@@ -303,6 +303,8 @@ async def cmd_offer_extras(_args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_pin_roster(args: argparse.Namespace) -> CommandResult:
-    require_extra(Extra.HARBOR)
-    path = pin_roster(args.dataset, args.version)
+    (connector,) = (c for c in CONNECTORS.table.values() if c.pin_roster is not None)
+    assert connector.pin_roster is not None and connector.extra is not None
+    require_extra(connector.extra)
+    path = connector.pin_roster(args.dataset, args.version)
     return CommandResult(data={"path": str(path)}, human=f"pin-roster: {path.name} written.")

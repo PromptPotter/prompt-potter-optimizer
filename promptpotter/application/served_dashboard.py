@@ -1022,7 +1022,7 @@ def served_dashboard(
     campaign = seat.campaign
     meter = ceiling_meter(campaign.declaration.purpose)
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
-    admission = admitted(stores, campaign, run)
+    admission = admitted(stores, seat, run)
     skips = CommandKind.SKIP_SEARCHPOINT in filable(stores.identity)
     skip_refusal = run.skip_refusal or ("" if skips else READ_ONLY.message)
 

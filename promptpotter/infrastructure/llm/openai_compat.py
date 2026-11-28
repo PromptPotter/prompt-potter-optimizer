@@ -13,6 +13,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.round_audit import RepairAttempt
 from promptpotter.domain.spend import TokenAccount
+from promptpotter.infrastructure.llm import send_pacing
 from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
     ChatMessage,
@@ -44,7 +45,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
     Backpressure,
     apply_discovered_caps,
     drawn_budget,
-    held_wait,
     raise_if_context_overflow,
     raise_if_request_too_large,
     window_slot,
@@ -466,7 +466,7 @@ class OpenAICompatibleClient:
                         if spent is not None:
                             slot.billed(spent.usage.total)
                         return reply, booked_sum(booked, admission.booked_usd)
-            await held_wait(wait, f"{label.node} {self._provider_name}")
+            await send_pacing.held_wait(wait, f"{label.node} {self._provider_name}")
 
     async def _post(self, body: dict[str, Any]) -> httpx.Response:
         http = wire_client(self._spec.base_url, timeout_s=self._spec.timeout)

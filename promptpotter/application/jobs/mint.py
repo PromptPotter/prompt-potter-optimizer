@@ -21,7 +21,7 @@ from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import (
     free_fence,
     outside_free_tier,
-    refuse_outside_free_tier,
+    outside_free_tier_refusal,
 )
 from promptpotter.application.initialization.session import drawn_partition
 from promptpotter.application.jobs.launcher.admission import paid_call
@@ -43,7 +43,7 @@ from promptpotter.application.preflight import (
     refuse_below_reasoning_floor,
     refuse_off_contract,
     refuse_unfit_pipeline,
-    refuse_unpriced,
+    unpriced_refusal,
     unpriced_routes,
 )
 from promptpotter.application.run_observers import declare_run_wiring
@@ -151,12 +151,31 @@ def refuse_unrunnable(
     refuse_below_reasoning_floor(
         [*pipeline_params.nodes.items(), *optimizer_node_configs(selected)]
     )
-    refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
-    if (fence := free_fence(stores, connector)) is not None:
-        refuse_outside_free_tier(
-            outside_free_tier(campaign_config, selected, pipeline_params, schema, fence)
-        )
+    refused = route_refusal(
+        campaign_config, selected, pipeline_params, schema, stores=stores, connector=connector
+    )
+    if refused is not None:
+        raise refused
     return partition
+
+
+def route_refusal(
+    config: CampaignConfig,
+    selected: SelectedOptimizer,
+    pipeline_params: PipelineParams,
+    schema: PipelineSchema,
+    *,
+    stores: Stores,
+    connector: Connector,
+) -> PayloadInvalidError | None:
+    """What a run's routes refuse, a model no rate prices, then a send the free tier does not
+    list: the mint raises it, and a check-in's draft serves it (`draft_build.py::draft_wire`)."""
+    unpriced = unpriced_refusal(unpriced_routes(config, selected, pipeline_params, schema))
+    if unpriced is not None or (fence := free_fence(stores, connector)) is None:
+        return unpriced
+    return outside_free_tier_refusal(
+        outside_free_tier(config, selected, pipeline_params, schema, fence)
+    )
 
 
 @dataclass(frozen=True)

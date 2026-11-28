@@ -1059,10 +1059,6 @@ class PipelineSchema(FrozenModel):
                 models.add(picked)
         return sorted(models)
 
-    def selectable_routes(self) -> list[tuple[str, str]]:
-        providers = {node.provider for node in self.declared_nodes}
-        return sorted((p, m) for p in providers for m in self.selectable_models())
-
     def node_config_schema(
         self,
         own_axes: dict[str, set[str]] | None = None,
