@@ -29,7 +29,7 @@ from pydantic import SecretStr
 from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import normalize_model_id
-from promptpotter.infrastructure import backend as backend_wire
+from promptpotter.infrastructure.llm import send_pacing
 from promptpotter.infrastructure.llm.pricing import (
     BUNDLED_PATH,
     UPSTREAM_URL,
@@ -719,8 +719,8 @@ def install_network(router: Router) -> Callable[[], None]:
     async def unslept(total_sec: float, label: str) -> None:  # noqa: ARG001 -- held_wait's signature
         await asyncio.sleep(0)
 
-    # The backend's own binding of `send_pacing.py::held_wait`, which it resends after.
-    wire = vars(backend_wire)
+    # `send_pacing.py::held_wait`, the one binding every sender reads, the backend's and an LLM's.
+    wire = vars(send_pacing)
     real = (wire["held_wait"], settings.TERMNORM_ENDPOINTS)
     # The operator's TermNorm is this world's backend, its one endpoint.
     settings.TERMNORM_ENDPOINTS = {"offline": FakeBackend.URL}

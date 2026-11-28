@@ -191,6 +191,10 @@ class Connector:
     """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel, in place
     of ``experiment_model``'s parse."""
 
+    pin_roster: Callable[[str, str], Path] | None = None
+    """``(dataset, version) -> file``: the one fetch of a published panel's roster that
+    ``resolve_experiment`` then reads, never dialling out (the ``pin-roster`` verb)."""
+
     execution: ConnectorExecution = "remote_http"
     """``BackendClient.run_query`` dispatches on this, never on ``name``."""
 

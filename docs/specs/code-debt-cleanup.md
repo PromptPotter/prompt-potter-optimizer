@@ -638,23 +638,6 @@ selection explicit.
 **Unexamined:** none (w11-connectors read `connectors/harbor.py`, `connectors/dspy_module.py`,
 `infrastructure/llm/openai_compat.py` and `infrastructure/llm/base.py` against the Target).
 
-- **A harbor trial's harness fault escapes raw** (recovered, 2026-11): `connectors/harbor.py::_attempt`
-  wraps only the image reuse and the package cache in `docker_host.py::machine_step`; a fault from
-  `Trial.create` or `trial.run` that is no `OSError`/`TimeoutError` reaches the cell as UNKNOWN, charged as
-  the prompt's. Root: the connector declares Harbor's harness faults as `CONNECTION`, never core reading
-  them. **Rides with:** area 08's chain, with one measured fault class. **Re-test:** a `Trial.create`
-  raising Harbor's own docker error ends the cell `CONNECTION`, retried.
-- **dspy's send raises its raw failure** (recovered, w8): `connectors/dspy_module.py::_ProgramCalls._settle`
-  closes a status-less failure outside `send_failure.py::NOT_THE_PROMPT` and returns, so the program
-  re-raises litellm's exception, which `application/scoring/sample_measurement.py` classifies again
-  through `failed_send`. Root: raise `FailedSendError` carrying the closed outcome. **Rides with:** area
-  04's chain (the second reader). **Re-test:** `git grep -c "failed_send" -- promptpotter/application` == 0.
-- **The offline world sleeps an LLM resend on the wall clock** (recovered, w7): `scripts/offline_world.py`'s
-  `unslept` replaces only `infrastructure/backend.py`'s binding of `send_pacing.py::held_wait`, so
-  `openai_compat.py`'s resend waits real seconds offline; and a fault raised inside the world's LLM reply
-  is closed as a failed send before it raises as itself (`OpenAICompatibleClient._admitted_send`).
-  Root: the world answers the sleep at `send_pacing.py`, the one owner. **Rides with:** area 14's chain.
-  **Re-test:** a 5xx scripted on the offline LLM resends in no wall time.
 - **A remote backend's cells ask the bound account** (recovered): `infrastructure/backend.py::BackendClient.cells_paid_by`
   reads `bound_account` for a backend that sends on its own keys, harmless while every sending entry
   binds one. Root: the payer is asked only of a connector that `holds_own_sends` or is host-paid
@@ -662,12 +645,11 @@ selection explicit.
   no bound account is admitted.
 
 - **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
-  `terminus-2`, `application/datasets/loaders.py::_harbor_tasks` loads the roster,
-  `presentation/cli/commands/writes.py` imports `pin_roster`, and `domain/scoring.py` and
-  `application/scoring/formula/compiler.py` spell `env_reward`, which `connectors/harbor.py::REWARD_KEY`
-  owns; `application/pipeline_resolve.py` keeps a "twin" of `connectors/harbor.py::INSTRUMENT_KEY`. Root: a
-  connector declares its panel, dataset loader and reward key; core reads the declaration. **Re-test:**
-  `git grep -nE "env_reward" -- 'promptpotter/*.py' ':!promptpotter/connectors/harbor.py'` is empty.
+  Harbor's panel document and `application/datasets/loaders.py::_harbor_tasks` is its recipe, both in
+  core because what they read (`loaders.py::from_hub`, `Source`) sits above `connectors/`
+  (`scripts/gate.py::_LAYERING`). Root: a connector declares its panel recipe on `Connector`, over a hub
+  read and a `Source` moved below `connectors/`; core reads the declaration. **Rides with:** area 07's
+  chain. **Re-test:** `git grep -c "harbor" -- promptpotter/application/datasets/loaders.py` is 0 (3 now).
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -688,17 +670,13 @@ selection explicit.
   **Rides with:** xconn 4. **Re-test:** `git grep -n "failed: {" -- backend-api/api` in the TermNorm
   checkout, on master.
 - **`infrastructure/llm/send_pacing.py::SendBudget` stops at the relay's door**: TermNorm's
-  `_MAX_ATTEMPTS`, and terminus-2's `_query_llm` thrice over `connectors/harbor.py::_AgentModel`, retry
-  on their own. Patched singly, each fix is one more copy; the remedy is the upstream redesign. **Rides
+  `_MAX_ATTEMPTS` retries on its own (terminus-2's `_query_llm` no longer does: `connectors/harbor.py::_AgentModel`
+  raises a send the budget closed again, unsent). The remedy is the upstream redesign. **Rides
   with:** xconn 4. **Re-test:** the relay's retries, not one constant: on TermNorm's `xconn` branch
   `_MAX_ATTEMPTS` becomes per-node `max_attempts` (`pipeline.json:156,232,287,325`), so a grep of
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **A draft serves every optimizer model twice, once under an empty provider** (w11-walk, 11-27):
-  `GET /drafts/{id}`'s `draft.pipeline.optimizer_setup.model_capabilities` carries each model under
-  `openrouter` and again under the empty string. Expected one entry per (provider, model). **Rides with:**
-  `area 08's chain` — **Re-test:** no `model_capabilities` key is the empty string.
 - **The box keeps 21 dead producers' locks** (`jobs/producers/`), though one sweep reaps a dead
   producer's containers and then its lock (re-tested 2026-11-27 off a dead lock and a scripted
   `docker ps`; the w7-small symptom, a lock unlinked before the reaper reads it, holds no more). What
@@ -706,6 +684,13 @@ selection explicit.
   raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
   next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
   `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
+- **A machine slot claims its producer on the event loop** (w11-connectors2, 11-28):
+  `infrastructure/backend.py::MachineSlots.hold` calls `docker_host.py::claim_machine` inline. When the
+  producer is unclaimed, `producer_lock.this_producer` waits on a lock, and `io.py::refuse_on_event_loop`
+  raises. A cell is safe only where a launch claimed the producer earlier. Root: the claim is taken off
+  the loop at the async door, or at the launch that owns the process. **Rides with:** area 08's chain.
+  **Re-test:** a harbor cell through `BackendClient.run_query`, in a process that has not claimed a
+  producer, is measured, never refused.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 

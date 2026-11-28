@@ -358,7 +358,7 @@ _SAYS_EVERYTHING = MeasuredCell(
         step_phases={},
         judge_readings={"t": JudgeReading(), "u": JudgeReading("label", "why")},
         target_prompt_chars=0,
-        observations={"final_ranking": [1], "env_reward": 0.0, "opened": False},
+        observations={"final_ranking": [1], "reward": 0.0, "opened": False},
     ),
 )
 assert all(

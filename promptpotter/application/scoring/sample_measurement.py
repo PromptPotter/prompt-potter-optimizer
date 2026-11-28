@@ -38,7 +38,7 @@ from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.backend import CellBilling
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
-from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError
 from promptpotter.infrastructure.llm.spend_book import (
     FRAMING_TOKENS,
     Billed,
@@ -625,13 +625,14 @@ def _candidate_and_sample_facts(
 def _failed_row(sample: Sample, exc: Exception) -> MeasuredCell:
     if isinstance(exc, CellUnscoreableError):
         return _error_result(sample, str(exc), category=exc.category)
+    if not isinstance(exc, FailedSendError):
+        # A send fails typed at its adapter's door; this is the cell's own, named by TYPE.
+        return _error_result(sample, f"{type(exc).__name__}: {exc}", category=ErrorCategory.UNKNOWN)
     # Never a backend 429: `BackendClient.run_query` answers each with the run's backpressure.
-    carried = isinstance(exc, FailedSendError)
-    outcome = failed_send(exc)
+    outcome = exc.outcome
     category = outcome.failure or ErrorCategory.UNKNOWN
-    # Named by TYPE: a bare `TimeoutError()` has no message.
-    error_msg = outcome.detail if carried else f"{type(exc).__name__}: {exc}"
-    if carried and outcome.status is not None:
+    error_msg = outcome.detail
+    if outcome.status is not None:
         upstream = _upstream(outcome.detail)
         error_msg = f"HTTP {outcome.status} {category}{f' :: {upstream}' if upstream else ''}"
     elif category is ErrorCategory.CONNECTION:

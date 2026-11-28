@@ -19,6 +19,7 @@ from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.infrastructure.llm import send_pacing
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
@@ -28,7 +29,7 @@ from promptpotter.infrastructure.llm.send_failure import (
     FailedSendError,
     failed_send,
 )
-from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
+from promptpotter.infrastructure.llm.send_pacing import drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
     Billed,
@@ -179,8 +180,8 @@ class _ProgramCalls:
         admission: Admission,
         totals: dict[str, dict[str, Any]],
         failure: Exception | None,
-    ) -> bool:
-        """``True`` where the send goes again."""
+    ) -> None:
+        """A failed send returns only to go again; otherwise it raises as its close decided."""
         bill = None
         if totals:
             usage = sum(
@@ -191,7 +192,7 @@ class _ProgramCalls:
         with hold:
             if failure is None:
                 admission.close(answered(bill))
-                return False
+                return
             outcome = failed_send(failure)
             if bill is not None:
                 outcome = outcome._replace(reported=ReportedSpend((bill,)))
@@ -199,8 +200,8 @@ class _ProgramCalls:
         cause = type(failure).__name__
         wait = self.budget.resend_wait(self.what, cause) if outcome.resendable else None
         if wait is not None:
-            await held_wait(wait, self.what)
-            return True
+            await send_pacing.held_wait(wait, self.what)
+            return
         if outcome.failure in NOT_THE_PROMPT:
             raise self.end(
                 cell_failure(
@@ -209,10 +210,7 @@ class _ProgramCalls:
                     spent=self.step_tokens(),
                 )
             ) from failure
-        if outcome.status is not None:
-            # The reply's failure carries its close; the program's own fault raises as itself.
-            raise FailedSendError(outcome) from failure
-        return False
+        raise FailedSendError(outcome) from failure
 
     def _on_loop(self, step: Coroutine[Any, Any, Any]) -> Any:
         return asyncio.run_coroutine_threadsafe(step, self.loop).result()
@@ -232,9 +230,8 @@ class _ProgramCalls:
             try:
                 with track_usage() as used:
                     reply = await call()
-            except Exception as failure:
-                if not await self._settle(hold, admission, used.get_total_tokens(), failure):
-                    raise
+            except Exception as failure:  # noqa: BLE001 -- it raises typed, or goes again
+                await self._settle(hold, admission, used.get_total_tokens(), failure)
             except BaseException:
                 # Cancelled with the send out: nothing reported what it cost.
                 hold.close()
@@ -263,10 +260,8 @@ class _ProgramCalls:
             try:
                 with track_usage() as used:
                     reply = call()
-            except Exception as failure:
-                closing = self._settle(hold, admission, used.get_total_tokens(), failure)
-                if not self._on_loop(closing):
-                    raise
+            except Exception as failure:  # noqa: BLE001 -- it raises typed, or goes again
+                self._on_loop(self._settle(hold, admission, used.get_total_tokens(), failure))
             except BaseException:
                 self.loop.call_soon_threadsafe(hold.close)
                 raise

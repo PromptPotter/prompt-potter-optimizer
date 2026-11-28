@@ -6,7 +6,6 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import httpx
 import pytest
@@ -43,10 +42,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.shared.errors import CellInfrastructureError
 
 _TESTS = Path(__file__).resolve().parent
-
-
-async def _no_wait(*_: Any) -> None:
-    return None
 
 
 def _lm_bills(ledger: Path) -> list[TokenUsageRecord]:
@@ -177,7 +172,8 @@ def dspy_cells(world: Router, out: Path) -> dict[str, Any]:
     from dspy import lm15
 
     complete_registries()
-    with scoped(account=workspace()), mock.patch.object(dspy_module, "held_wait", _no_wait):
+    # The world answers a resend's wait unslept (`offline_world.py::install_network`).
+    with scoped(account=workspace()):
         _priced(world)
         resent_sends: list[int] = []
         lm = _scripted_lm(resent_sends, [lm15.ServerError("boom", status=500)])

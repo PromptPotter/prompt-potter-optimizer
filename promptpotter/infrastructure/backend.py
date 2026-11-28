@@ -21,6 +21,7 @@ from promptpotter.domain.records.run_records import BackendWarningRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
+from promptpotter.infrastructure.llm import send_pacing
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -28,7 +29,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
     Backpressure,
     SendBudget,
     drawn_budget,
-    held_wait,
     loop_now,
     report_throttle_stall,
 )
@@ -420,7 +420,7 @@ class BackendClient:
             if wait is None:
                 return outcome, data, spent
             if wait:
-                await held_wait(wait, "backend")
+                await send_pacing.held_wait(wait, "backend")
 
     async def _resend_wait(
         self,
