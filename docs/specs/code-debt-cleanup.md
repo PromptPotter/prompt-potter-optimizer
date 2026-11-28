@@ -782,11 +782,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   `lib/hooks/useFiles.ts::useFiles` answers only a boolean from `filable`. Root: the served filable answer
   carries its refusal as a `Said` row, and `useFiles` returns it. **Rides with:** area 12's chain.
   **Re-test:** `git grep -c "not yours to set" -- webapp/components` is 0.
-- **No walk spec opens the remote panel** (w11-web3 census, 11-28): `RemoteControl.tsx:31` mounts
-  `RemotePanel` (provenance, `RunLimitsControl`) only when open, and no file under `webapp/e2e` names the
-  remote control, so the panel's render against a served cycle rides RTL tests alone. Root: a walk spec
-  opens the remote on a served run and reads its limits. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -c "Campaign remote control" -- webapp/e2e/walk` is at least 1.
 - **A terminal launch's start-up summary is said on stderr only** (w11-web3 census, 11-28):
   `cli/commands/launch.py::_run_origin` and `_resume` say the reached backend URL, the dataset and its query count,
   the node list and the minted campaign through `_checkin_line` and `log_startup_summary`, a logger on
@@ -947,6 +942,9 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+  w11-tests5: not reproduced beside 12 CPU spinners or a busy pytest on 4-core Linux; suspect
+  `read_model.py::shielded` catching `io.py::_holding`'s `TimeoutError` (an `OSError`) as
+  `derived_file_stale` under lock contention.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
@@ -976,6 +974,8 @@ budgets.
   unpinned panel (L4's is pinned) and a moved roster is a moved bank, so the resume refuses on the
   origin before run init restates it. Door: `world.campaign` on an owning connector whose panel
   moves without its rows. **Rides with:** area 14's chain. **Re-test:** the fact sets no workload.
+  w11-tests5: `World.opened` takes a connector and `World.campaign` does not, so the door is a
+  `connector=` on `tests/world.py::World.campaign`.
 - **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
   "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
   with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
@@ -1012,6 +1012,12 @@ budgets.
   queues behind the clone's lock (`scripts/queue_then.py`) rather than sharing its hard-coded 90 s
   worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127
   runs). **Re-test:** five looping builders plus one gate on the Windows desk reap none.
+- **A vitest test's 5 s budget pays a fresh module graph** (group M's full gate, 2026-11-28):
+  `stale-build.test.ts`'s stream test calls `vi.resetModules()` and re-imports `lib/api/client` and
+  `lib/live-stream` inside the test, so its time is the graph's transform under the gate's load. It
+  timed out at 5.10 s at 0.37 cpu/wall; the same tree's vitest alone ran green in 103 s at 0.93. The
+  stale flag is module state that a test can only reset by importing the module again. **Re-test:** the
+  file's slowest test stays under 1 s inside a full gate.
 - **capo's skip twin moved once on the Windows desk** (w8-tests3's leg, 2026-11-27): the full gate
   on 6b3f691b3 read "a skip stands at [3] cells, its twin paused inside round 1 and resumed, skip,
   decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
@@ -1033,18 +1039,16 @@ budgets.
 - **A torn-bill fact takes 3.08 s** (w11-tests2):
   `test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill` runs over the 2 s budget.
   **Rides with:** area 14's chain. **Re-test:** `pytest --durations=10` does not list it.
-- **No offline leg draws a mixed-benchmark round** (draw-strata, 11-18):
-  `scripts/offline_run.py::run_l4` — the L4 leg (`L4_DATASET = "promptpotter-self/e2e"`) seats one
-  search and one held-out cell on one benchmark, so `build_round_order`'s interleave and
-  `origin_panel`'s per-benchmark seats are proved by pytest alone and a regression moves no leg — the
-  e2e L4 panel seats two benchmarks — **Rides with:** `area 14's chain` — **Re-test:** `potter/l4`
-  moves against a base that draws by δ alone. (item 541)
-- **A shipped-data scan lives in test_identity** (tw-3, 11-25):
-  `tests/test_identity.py::test_every_committed_datasets_framing_reads_within_its_budget` — a repo-wide
-  scan of shipped data run as a test — the check runs at import in the registry that owns it
-  (`application/CLAUDE.md` § Registries complete at import), then the test goes — **Rides with:**
-  `area 14's chain` — **Re-test:** the test is gone and an over-budget framing refuses at import.
-  (item 200)
+  w11-tests5: 0.02 s on 4-core Linux, so the 3.08 s is a desk reading: re-test on the Windows desk;
+  the spinning reader's switch interval is the suspect.
+- **Nothing checks that an offline run reproduces the keys it wrote** (w11-tests5):
+  `scripts/offline_run.py::_CAMPAIGN_ID` knew only two benchmarks, so a third's inner ids reached the
+  estimator raw, and since those ids embed `cell_estimator` the key had no fixpoint (b118 → 816e →
+  c734) until w11-tests5 keyed them by benchmark. The gate's offline-run check reads "ok 2.0 s" on a
+  kept green whose key file the next run rewrites. Root: no key embeds an id cut from itself, and the
+  check proves the written `behaviour_keys.json` a fixpoint without a second full run. **Rides with:**
+  area 14's chain.
+  **Re-test:** a key that embeds itself fails the gate on its first run.
 - **A rule the suite reaches only through a round is decided where no table can reach it** (w10-tests
   link 1): the slowest `offline` facts walk a campaign to reach one decision, e.g.
   `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`

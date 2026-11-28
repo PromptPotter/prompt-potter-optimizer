@@ -428,11 +428,13 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
 
 
 def inner_cell(stores: Stores, hop: CycleHop) -> str:
-    """An L4 cell's inner campaign at *hop* by its seat's `run_seed` and the arm laid into its
-    overlay, so two seats of one arm never share it, never by its id, which hashes the code."""
-    config = cycle_config(stores, stores.campaigns.campaign_cycle(hop)).config
+    """An L4 cell's inner campaign at *hop* by its seat's benchmark and `run_seed` and the arm laid
+    into its overlay, so two seats of one arm never share it, never by its id, which hashes the code."""
+    at = stores.campaigns.campaign_cycle(hop)
+    config = cycle_config(stores, at).config
     overlay = {node: dict(o.config) for node, o in sorted(config.optimization.nodes.items())}
-    held = json.dumps([config.run_seed, overlay], sort_keys=True, default=str)
+    seat = [at.campaign.dataset_name, config.run_seed, overlay]
+    held = json.dumps(seat, sort_keys=True, default=str)
     return hashlib.sha256(held.encode()).hexdigest()[:8]
 
 

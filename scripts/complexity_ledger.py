@@ -427,7 +427,9 @@ BASELINE = {
     # and an unbilled series is said (`served_dashboard.py::SpendByRound.empty`).
     # w11-cli (−59): the maintenance renderers leave the CLI for `views/render/maintenance.py`, and
     # the admin bot relays CLI verbs on the CLI grammar instead of its own verb table.
-    "package_lines": 114418,
+    # w11-tests5 (+10): each shipped framing's budget is checked where the registries complete
+    # (`dataset_access.py::check_shipped_framings`), where a test scanned the shipped tiers.
+    "package_lines": 114428,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

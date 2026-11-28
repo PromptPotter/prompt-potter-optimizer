@@ -4299,15 +4299,6 @@ def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
         NodePromptInfo(fields=("rubric",), rewrite_field="instruction")
 
 
-def test_every_committed_datasets_framing_reads_within_its_budget(
-    shipped_tiers: tuple[Stores, list[set[str]]],
-) -> None:
-    # An over-budget field lands green and refuses every launch on its dataset at mint.
-    checkout, shipped = shipped_tiers
-    for name in sorted(set.union(*shipped)):
-        committed_task_context(checkout, resolve_dataset(checkout, name))
-
-
 def test_a_members_panel_lays_over_its_familys_key_by_key_at_every_depth(tmp_path: Path) -> None:
     family = {
         "inner_campaign": {"optimization": {"budget": {"rounds": 4}, "seed": 7}},
