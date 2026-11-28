@@ -8,12 +8,10 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
-from enum import StrEnum
 from statistics import fmean
 from typing import Any
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
@@ -27,16 +25,12 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     WebSpendBound,
 )
-from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
     NO_RESULT,
     PIPELINE_KEYS,
     MeasuredCell,
     PipelineData,
-    RerunComparison,
-    Scorer,
-    StaleOutcome,
     extract_item_label,
     turn_scalars,
 )
@@ -60,18 +54,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
-
-
-class StaleDataStep(StrEnum):
-    """The stale-data ladder, climbed in declared order."""
-
-    RERUN = "rerun"
-    SAMPLESWITCH = "sampleswitch"
-
-
-RERUN_TRIGGER_COUNT: int = 3
-
-SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
 
 # TARGET-prompt `{{var}}` slots a dataset row fills; the OPTIMIZER's `{{slot}}`s are `dispatch/facade.py`'s.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -657,104 +639,3 @@ def _failed_row(sample: Sample, exc: Exception) -> MeasuredCell:
     return _error_result(
         sample, error_msg, category=category, refused_parameter=outcome.refused_parameter
     )
-
-
-def compare_rerun(
-    cached_result: MeasuredCell, rerun_result: MeasuredCell, scorer: Scorer
-) -> RerunComparison:
-    cached, rerun = scorer.grade(cached_result), scorer.grade(rerun_result)
-    cached_hit, rerun_hit = cached.hit, rerun.hit
-    hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
-
-    cached_rank = cached.grade.ground_truth_rank
-    rerun_rank = rerun.grade.ground_truth_rank
-    rank_change = (
-        f"{cached_rank}->{rerun_rank}"
-        if cached_rank is not None and rerun_rank is not None
-        else None
-    )
-
-    improved = (not cached_hit and rerun_hit) or (
-        cached_rank is not None and rerun_rank is not None and rerun_rank < cached_rank
-    )
-
-    return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
-
-
-def _rerun_would_repeat_token_budget_failure(
-    cached_result: MeasuredCell,
-    rerun_pipeline_params: PipelineParams,
-) -> bool:
-    # The helper `classify_result` stamps its codes with: a second spelling of the node misses silently.
-    node = cached_result.pipeline.terminal_node
-    if node is None:
-        return False
-    cl = classify_result(cached_result)
-    budget_exhausted = (
-        f"{node}:reasoning_budget_exhausted" in cl.infra_codes
-        or f"{node}:output_truncated" in cl.infra_codes
-    )
-    if not budget_exhausted:
-        return False
-
-    cached_step = cached_result.pipeline.step_tokens.get(node)
-    cached_completion = cached_step.output if cached_step is not None else 0
-    if cached_completion <= 0:
-        return False
-
-    rerun_max_tokens = rerun_pipeline_params.node(node).max_tokens
-    if rerun_max_tokens is None:
-        return False
-
-    return rerun_max_tokens <= cached_completion
-
-
-async def execute_stale_data_protocol(
-    sample: Sample,
-    cached_result: MeasuredCell,
-    session: Session,
-    *,
-    pipeline_params: PipelineParams,
-    sample_index: SampleIndex | None = None,
-) -> MeasuredCell:
-    result = cached_result
-
-    for step in StaleDataStep:
-        if session.state.control.pause_requested():
-            return replace(result, stale_outcome=StaleOutcome.PAUSED)
-        match step:
-            case StaleDataStep.RERUN:
-                historical = sample_index.degradation_count(sample.id) if sample_index else 0
-                effective_count = historical + 1
-                if effective_count < RERUN_TRIGGER_COUNT:
-                    return replace(
-                        cached_result,
-                        stale_outcome=StaleOutcome.OBSERVED,
-                        degraded_obs_count=effective_count,
-                        degraded_obs_threshold=RERUN_TRIGGER_COUNT,
-                    )
-
-                if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
-                    return replace(cached_result, stale_outcome=StaleOutcome.CONFIG_SKIP)
-
-                rerun = await measure_sample(sample, session, pipeline_params)
-                result = replace(
-                    rerun,
-                    stale_outcome=StaleOutcome.RETRIED,
-                    rerun_comparison=compare_rerun(
-                        cached_result, rerun, session.state.scoring.scorer
-                    ),
-                )
-                if not is_deprecated(result):
-                    return result
-            case StaleDataStep.SAMPLESWITCH:
-                if (
-                    sample_index
-                    and sample_index.degradation_rate(sample.id)
-                    >= SAMPLESWITCH_MIN_DEGRADATION_RATE
-                ):
-                    return replace(
-                        cached_result, cached=True, stale_outcome=StaleOutcome.SWITCHED_OUT
-                    )
-
-    return replace(result, stale_outcome=StaleOutcome.PERSISTENTLY_DEGRADED)

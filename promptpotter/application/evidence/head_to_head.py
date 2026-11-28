@@ -45,7 +45,6 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import (
-    ROUND_LIFT_SPEC,
     Measurand,
     MeasuredLift,
     ReadingState,
@@ -698,7 +697,6 @@ def _contrast(
         [g.selected for g in b if g.selected is not None],
         cells=a[0].sample_keys,
         measurand=headline,
-        spec=ROUND_LIFT_SPEC,
     )
     clustered, naive = reading.se_clustered, reading.se_naive
     return ArmContrast(

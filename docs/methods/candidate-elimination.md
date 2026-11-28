@@ -156,21 +156,20 @@ is out at once, never what is committed, so a cut wastes at most the press.
 
 ## The full elimination ladder
 
-Five mechanisms, fixed order, each owning its memory field and display annotation:
+Four mechanisms, fixed order, each owning its memory field and display annotation:
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
 | 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.invalid`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/measure.py::_open_arm` |
-| 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
-| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
-| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
-| 5 | **`PoBBCheck`** — the field's `P(best) < ε(n)`, behind `epsilon_stop` | every checkpoint | `n_min` | eliminated; records `elimination_cut` | — | `optimizers/potter/pobb.py` |
+| 2 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
+| 3 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
+| 4 | **`PoBBCheck`** — the field's `P(best) < ε(n)`, behind `epsilon_stop` | every checkpoint | `n_min` | eliminated; records `elimination_cut` | — | `optimizers/potter/pobb.py` |
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
 **Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A `batch` decision bounds no launch: a walk has at most the press's cells out past the rows it sent, on the order the last decision ranked, each re-seated by its sample where the next decision moves its row, so a cut there discards at most the press; under `rolling` a walk sends no row past those its decisions sent, and a cut discards at most its calls out, the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
-**One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
+**One comparator, one stop rule — do not add a fifth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 

@@ -70,7 +70,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.domain.wounds import RuntimeFailure, ValidationReason
@@ -359,9 +359,9 @@ class PotterView:
 
     # -- the evidence
     @functools.cached_property
-    def parent_rows(self) -> tuple[GradedCell, ...]:
+    def parent_rows(self) -> CellSheet:
         """The rows an edit of the parent must win back: its own cells, never another's."""
-        return tuple(self.ctx.read(Parent).own_rows)
+        return self.ctx.read(Parent).own_rows
 
     @property
     def transcript_knobs(self) -> TranscriptKnobs:

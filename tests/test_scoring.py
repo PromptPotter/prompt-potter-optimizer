@@ -207,11 +207,8 @@ from promptpotter.application.runner.round import (
 )
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring import passes as held_out
-from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
-from promptpotter.application.scoring.evaluators import (
-    SampleEvaluator,
-    compute_fitness,
-)
+from promptpotter.application.scoring.classification import DegradationCheck
+from promptpotter.application.scoring.evaluators import SampleEvaluator
 from promptpotter.application.scoring.formula import compiler
 from promptpotter.application.scoring.formula.compiler import (
     auto_scorer_id,
@@ -652,8 +649,6 @@ def wire_cell() -> _WireCell:
         },
         "cached": True,
         "answer": "file.a1",
-        "stale_outcome": "retried",
-        "degraded_obs_count": 2,
     }
     stale = {"fitness": 1.0, "objective": 1.0, "unscored": "an older formula's"}
     plain = scorer_of("env_reward", verifier_graded=True)
@@ -737,7 +732,7 @@ def test_a_cell_the_formula_cannot_grade_is_unscored_and_a_regrade_recovers_it(
     assert not unread.facts.errored and unread.facts.error_category is None, (
         "a cell the formula cannot grade is no fault of the backend"
     )
-    assert scoreable_rows([first, unread]) == [first], "an unscored cell entered the mean"
+    assert first.scored and not unread.scored, "an unscored cell entered the mean"
     recovered = plain.grade(unread.facts)
     assert (recovered.grade.fitness, recovered.scored) == (1.0, True), "a regrade recovers it"
 
@@ -1254,8 +1249,9 @@ def test_a_formula_is_two_valued_by_its_expression_over_what_emits() -> None:
 
 def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero() -> None:
     # A round that measured every sample and failed them all IS a 0.0; an unmeasured one is not.
-    for rate in (compute_fitness, compute_error_rate, compute_degraded_rate):
+    for rate in (compute_error_rate, compute_degraded_rate):
         assert rate(results=[]) is None, f"{rate.__name__} read an empty round as 0.0"
+    assert level_band(sheet([]), "fitness", "rate") is None, "an empty round read as 0.0"
     empty = compute_composite_fitness(sheet([]), scorer_of(), _LLM_ONLY)
     assert (empty.composite_fitness, empty.fitness, empty.total) == (None, None, 0), (
         "an EMPTY round has NO score, never a 0.0 that reads as an arm that failed every cell"
@@ -1271,19 +1267,21 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         return measurement(sid, fitness, **(cell | wire))
 
     deprecated = asked(0, "q", 0.0, error="SCHEMA_VALIDATION_FAILED")
-    assert compute_fitness(results=[deprecated]) == 0.0, "a deprecated row is a measured miss"
+    level = level_band(sheet([deprecated]), "fitness", "rate")
+    assert level and level.value == 0.0, "a deprecated row is a measured miss"
     # A provider's fault is the ABSENCE of a verdict: out of the mean, still on the error channel.
     faulted = [asked(0, "a", 1.0), asked(0, "ERROR", error="boom", error_category="SERVER")]
-    assert compute_fitness(results=faulted) == 1.0, "a provider fault entered the mean"
+    level = level_band(sheet(faulted), "fitness", "rate")
+    assert level and level.value == 1.0, "a provider fault entered the mean"
     assert compute_error_rate(results=faulted) == 0.5, "a provider fault left the error channel"
-    # Every row ERRORED with no label to miss: no rate either (an L4 cell cut throughout is not 0%).
+    # A CHARGED error with no label is still the prompt's answer: an L4 cell cut throughout is a 0.0.
     unlabelled = asked(0, "ERROR", ground_truth="", error="boom", error_category="HALTED")
     all_errored = compute_composite_fitness(sheet([unlabelled]), scorer_of(), _LLM_ONLY)
     assert (all_errored.fitness, all_errored.composite_fitness, all_errored.total) == (
-        None,
-        None,
-        0,
-    ), "a round of faults has no score"
+        0.0,
+        0.0,
+        1,
+    ), "a verifier-graded cut left the fold, so its arm shed its own failure"
 
     # Only a provider fault leaves the count: a refusal and a cut cell are the prompt's own.
     labelled = scorer_of()
@@ -1302,8 +1300,8 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     assert scores.composite_fitness == pytest.approx(scores.fitness), (
         "the default formula is plain accuracy, so the decision metric and the headline agree"
     )
-    assert not labelled.grade(asked(10, "ERROR", ground_truth="", **cut).facts).scored, (
-        "with no label a cut cell has no miss to be, so it carries no verdict either"
+    assert labelled.grade(asked(10, "ERROR", ground_truth="", **cut).facts).scored, (
+        "with no label a cut cell left the fold, so its arm shed its own failure"
     )
 
 
@@ -2551,7 +2549,8 @@ def test_an_empty_or_filtered_answer_is_a_graded_miss_and_cuts_only_by_the_rate(
         one_empty = [*(measurement(i, 1.0) for i in range(17)), measurement(17, 0.0, **empty)]
         assert is_deprecated(one_empty[-1].facts), f"{code} left the degradation rate"
         assert degradation.check(one_empty) is None, f"one {code} row cut an arm that answered 17"
-        assert scoreable_rows(one_empty)[-1].grade.fitness == 0.0, f"the {code} row is no miss"
+        assert one_empty[-1].scored, f"the {code} row is no miss"
+        assert one_empty[-1].grade.fitness == 0.0, f"the {code} row is no miss"
         mostly_empty = [measurement(i, 0.0, **empty) for i in range(2)] + [measurement(2, 1.0)]
         cut = degradation.check(mostly_empty)
         assert cut is not None and cut.check_result["fatal"] is not True, f"{code}: no rate cut"
@@ -3485,9 +3484,7 @@ def test_an_arm_of_one_replicate_reads_its_declaration_and_a_pooled_one_the_t() 
     b2 = member_rows("b2", measurements([1.0] * 6 + [0.0] * 2), bank)
 
     def lift(arm_a: list[MemberRows], arm_b: list[MemberRows]) -> MeasuredLift:
-        read = read_arms(
-            arm_a, arm_b, cells=[s.key for s in bank], measurand=measurand, spec=ROUND_LIFT_SPEC
-        ).lift
+        read = read_arms(arm_a, arm_b, cells=[s.key for s in bank], measurand=measurand).lift
         assert read is not None
         return read
 
@@ -4133,7 +4130,6 @@ def test_an_arm_differences_each_rows_replicate_means_and_clusters_on_the_row() 
         arm(*newer),
         cells=[s.key for s in bank],
         measurand=measurand,
-        spec=ROUND_LIFT_SPEC,
     )
     means = [
         [fmean(col) for col in zip(*(seeded(*lv) for lv in side), strict=True)]
@@ -4153,6 +4149,29 @@ def test_an_arm_differences_each_rows_replicate_means_and_clusters_on_the_row() 
     assert (read.se_clustered, read.se_naive) == pytest.approx(
         (stdev(known.values()) / sqrt(len(known)), stdev(pairs) / sqrt(len(pairs)))
     ), "the row is the cluster: its replicate pairings are never independent rows"
+
+
+def test_a_verifier_graded_charged_error_stays_paired_as_its_arms_miss() -> None:
+    bank = samples(4, "t", query="w")
+    measurand = grade_measurands(scorer_of(_H2H_FORMULA))[0]
+    cut: dict[str, Any] = {"ground_truth": "", "error": "boom", "error_category": "HALTED"}
+
+    def arm(name: str, failed: int | None) -> list[MemberRows]:
+        cells = [
+            measurement(i, None, **cut) if i == failed else measurement(i, 1.0, objective=1.0)
+            for i in range(len(bank))
+        ]
+        return [member_rows(name, cells, bank)]
+
+    read = read_arms(
+        arm("a", None),
+        arm("b", 0),
+        cells=[s.key for s in bank],
+        measurand=measurand,
+    )
+    assert read.differences == {s.key: -1.0 if i == 0 else 0.0 for i, s in enumerate(bank)}, (
+        "the arm shed its own failure: its cut cell left the pair instead of reading a miss"
+    )
 
 
 def test_a_head_to_head_mint_raising_at_its_second_arm_leaves_the_first_stamped(

@@ -333,10 +333,32 @@ optimizer node.
 - **"Which benchmark a row measures" is spelled twice**: `BenchScope` partitions by benchmark under
   the word `RulerScope` owns. Action: `BenchScope` takes a benchmark name. **Held:** l4-runs owns
   `bench/line.py`. **Re-test:** `git grep -n "BenchScope" -- promptpotter` is empty.
-- **A round close re-resolves the config it holds** (tw-q): `scoring/measurement_log.py` calls
-  `cycle_config` inside the hard-sample view though its caller holds the cycle's config. Root: the
-  view is handed the config. **Rides with:** area 04's chain. **Re-test:**
-  `git grep -c cycle_config -- promptpotter/application/scoring/measurement_log.py` is 0.
+- **A hard-sample page resolves its own config** (tw-q; narrowed by w11-scoring2, 11-28): the round
+  close now hands `cycle_hard_samples` its config. The one `cycle_config` call left in
+  `scoring/measurement_log.py` is the page's own resolve. Root: the view is handed what its caller
+  resolved. **Rides with:** area 04's chain. **Re-test:** the hard-sample view resolves nothing.
+- **An L4 panel averages θ over its cells' own rulers** (w11-scoring2, 11-28):
+  `evidence/metric_catalogue.py::merge_cells` and the `promptpotter` connector's θ terms
+  (`domain/l4/proxies.py::INNER_CELL_TERMS`: `origin`, `final_lift`, `peak_lift`) pool θ across inner
+  cycles, though each cycle graduates 1PL or 2PL on its own ruler (`rasch.py::graduate_ruler_model`).
+  Root: `InnerCellFacts` carries its series' `calibration_model`, and a θ-unit merge or formula read
+  over cells of two models refuses. **Rides with:** area 10's chain. **Re-test:** a panel of one 1PL
+  and one 2PL inner cell serves no merged `final_lift`.
+- **`SampleIndex`'s fold row carries a `degraded` nobody reads** (w11-scoring2, 11-28):
+  `intelligence/indexes/sample.py::SampleIndex._derive` still writes it after the stale-data ladder
+  went. Root: the element leaves `SampleFoldRow.cells`, which wipes the persisted fold. **Rides with:**
+  area 04's chain. **Re-test:** `git grep -n "_degraded" -- promptpotter` is empty.
+- **An estimator spec every caller fixes** (w11-scoring2, 11-28): `ROUND_LIFT_SPEC` is passed at 12
+  sites and no other spec exists. `read_arms` now owns its own, and the other sites still pass it in.
+  Root: each reading owns its estimator. **Rides with:** area 04's chain. **Re-test:**
+  `git grep -c "ROUND_LIFT_SPEC" -- promptpotter` names only its definition and its readers' own use.
+- **Held re-tests need world legs** (w11-scoring2, 11-28):
+  - The PoBB false-cut rate (RM592) needs an A/A leg beside capo-pobb, with identical arms and the
+    cut rate read against ε.
+  - The origin panel under `vote: overlap` needs a leg asserting training rows ∩ measured rows = ∅.
+  - The edited-scorer refit needs a world resume after `world.family()` edits the formula.
+
+  **Rides with:** area 14's chain. **Re-test:** each leg exists and reads its claim.
 - **A freed slot waits on a poll** (flight-share, 11-18):
   `promptpotter/application/scoring/query_loop.py::_ScoringPhase` — `freed` polls at `HELD_POLL_S`
   while a run waits on another run's landing, so a freed slot can sit idle up to 0.25 s — the root:
@@ -348,16 +370,6 @@ optimizer node.
   always a read pair, so `scoring/selection.py` asserts `pair.state is READ` — the root: the field
   is typed `ReadPair | None`, and the assert goes — **Rides with:** `area 04's chain` —
   **Re-test:** `git grep -n "a crown is decided on a read pair" -- promptpotter` is empty.
-- **`read_arms` takes a spec its one caller fixes** (readings-3, 11-19):
-  `promptpotter/application/scoring/paired.py::read_arms` — `spec` is always `ROUND_LIFT_SPEC` from
-  `evidence/head_to_head.py` — the root: the one rule is the function's own, not a parameter —
-  **Rides with:** `area 04's chain` — **Re-test:** `git grep -n "read_arms(" -- promptpotter` shows
-  a caller passing any other spec, or the parameter goes.
-- **A noise-floor reading repeats `unread`'s condition** (small-7, 11-18):
-  `promptpotter/application/scoring/passes.py::measure_noise_floor` — `reading=` re-spells
-  `band is None or recorded.composite is None` beside `unread` since mypy narrows only the inline
-  test — the root: one narrowing, a helper returning the band or `None` — **Rides with:** `area
-  04's chain` — **Re-test:** the condition appears once in the function.
 
 ## 05 · Spend, wallet, quota
 

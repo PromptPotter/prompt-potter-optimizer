@@ -4,7 +4,7 @@ import math
 import re
 import zlib
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
 from typing import Any, NamedTuple
@@ -40,7 +40,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.records import ExplorationBudget
-from promptpotter.application.scoring.evaluators import compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
 from promptpotter.domain.arms import Concluded, Cut, Measured
@@ -53,6 +52,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.connector import unit_count, unit_plural
+from promptpotter.domain.fitness_fold import level_band
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
@@ -532,10 +532,6 @@ def _tally(counts: Counter[str], total: int, *, rows: int | None = None) -> str:
     return " | ".join(parts)
 
 
-def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
-    return [c for c in cells if c.facts.ground_truth]
-
-
 @signal(
     "answer_distribution",
     kind=InjectionKind.MEASUREMENT,
@@ -543,7 +539,8 @@ def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
     citable=True,
 )
 def _r_answer_distribution(b: PotterView) -> list[Item]:
-    rows = _labelled(b.parent_rows)
+    labelled = b.parent_rows.where(lambda c: bool(c.facts.ground_truth))
+    rows = list(labelled)
     # `None`: no repeated label to be constant about (free text, or identity-keyed answers).
     truth = enumerable_truth_labels(rows)
     if truth is None:
@@ -553,7 +550,7 @@ def _r_answer_distribution(b: PotterView) -> list[Item]:
 
     top_label, constant = constant_answer(truth)
     # Mean fitness, never a `fitness >= 1.0` count, which reads 0.00 on every graded scorer.
-    scored = compute_fitness(results=rows)
+    scored = level_band(labelled, "fitness", "score")
     if scored is None:
         return [Item("")]
 
@@ -568,7 +565,7 @@ def _r_answer_distribution(b: PotterView) -> list[Item]:
         Item(tally, trusted=False),
         Item(
             f'  Answering "{top_label}" to EVERY {b.measured_unit} would score {constant:.2f}. '
-            f"You score {scored:.2f}."
+            f"You score {scored.value:.2f}."
         ),
     ]
 
@@ -617,7 +614,7 @@ def holds_run(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
 
 def _extent_can_miss(b: PotterView) -> bool:
     """A label answer has no extent to overlap."""
-    return not _no_labels(b) and not enumerable_truth_labels(b.parent_rows)
+    return not _no_labels(b) and not enumerable_truth_labels(b.parent_rows.cells)
 
 
 def _span_near_miss(cell: GradedCell) -> bool:

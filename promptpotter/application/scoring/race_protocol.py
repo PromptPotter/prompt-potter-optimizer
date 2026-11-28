@@ -8,8 +8,11 @@ from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+from promptpotter.domain.arms import Elimination
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phase_acts import RowsRan
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.validators import StopSignal
 
 # When a race decides: once no call it sent is out, or on every returned row.
@@ -100,3 +103,44 @@ def next_block[K: Hashable](view: View[K], stops: Mapping[K, StopSignal], size: 
             for key, walk in survivors(view, stops).items()
         },
     )
+
+
+class Race(Decider[ArmKey], Protocol):
+    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``decide`` (`race_protocol.py`)
+    cuts and sends to every live walk at once. A race whose arms all walk one panel keeps no
+    prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
+
+    @property
+    def n_priors(self) -> int: ...
+
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        """Each prior a later arm is paired with, in prior order: the bench catches it up on a cell it lacks."""
+        return {}
+
+    @property
+    def top_up(self) -> Decider[ArmKey] | None:
+        """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
+        return None
+
+    def judge(
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
+    ) -> Elimination | None: ...
+
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
+        """A decided arm's rows: it joins the priors."""
+        return None
+
+    def catch_up(self, _key: ArmKey, _cells: Sequence[GradedCell]) -> None:
+        """A prior's caught-up cells, folded onto the rows it holds."""
+        return None
+
+    @property
+    def trigger(self) -> Trigger:
+        """``batch``: a race decides once no call it sent is out."""
+        return BATCH
+
+    @property
+    def rows_ran(self) -> RowsRan:
+        """The row choice it runs, which the round's measure record names."""
+        return "random"

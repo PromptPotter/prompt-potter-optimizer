@@ -98,12 +98,8 @@ from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_contract import (
-        Eliminator,
-        Race,
-        Selector,
-    )
-    from promptpotter.application.scoring.race_protocol import Decider
+    from promptpotter.application.optimizer_contract import Eliminator, Selector
+    from promptpotter.application.scoring.race_protocol import Decider, Race
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 
 
@@ -626,7 +622,6 @@ async def _walk_population(
             eliminator.name,
             {parent: (cycle.parent_point, MeasurementRole.PARENT)}
             | {key: (sp, MeasurementRole.PANEL) for key, sp in sps.items()},
-            cycle.sample_index,
         )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
@@ -707,7 +702,6 @@ def _open_arm(
         panel.walked,
         ctx.cycle.session,
         kind=MeasurementRole.PANEL,
-        sample_index=ctx.cycle.sample_index,
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it.
         measured=arm.individual.id,
         skip_at=skip_at,

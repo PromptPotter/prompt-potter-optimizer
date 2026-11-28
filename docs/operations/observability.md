@@ -26,7 +26,7 @@ Optimizer findings surface as two lines — the observation in data terms, then 
   ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds
 ```
 
-The structured finding goes to the round's audit, folded off the ledger (`projections/audit_trail.py::RoundAudits`); per-sample annotation order is `application/views/render/sample.py::fmt_query_result`'s; `↩` (toward a rerun trigger) is suppressed under a fatal warning.
+The structured finding goes to the round's audit, folded off the ledger (`projections/audit_trail.py::RoundAudits`); per-sample annotation order is `application/views/render/sample.py::fmt_query_result`'s.
 
 ## Reading what L2 wrote
 

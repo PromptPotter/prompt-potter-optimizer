@@ -8,16 +8,16 @@ import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_phase_control import Flight, budget_stop
 from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.race_protocol import (
     BATCH,
     Decider,
+    Race,
     Trigger,
     View,
     WalkView,
@@ -26,7 +26,6 @@ from promptpotter.application.scoring.race_protocol import (
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
-    execute_stale_data_protocol,
     measure_sample,
 )
 from promptpotter.domain.account_words import refusal_words
@@ -52,7 +51,6 @@ from promptpotter.domain.records.run_records import (
     SampleStartedRecord,
 )
 from promptpotter.domain.records.untaken import UntakenBoughtRecord
-from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
@@ -87,10 +85,6 @@ from promptpotter.shared.errors import (
     SendRefusedError,
 )
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizer_contract import Race
-
 
 _BUDGET_STOPS = frozenset(
     reason for reason, info in STOP_REASON_INFO.items() if info.category is StopCategory.BUDGET
@@ -166,7 +160,6 @@ class QueryLoopState:
     feed: ReplayFeed | None
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
     recorded: MeasuredPass | None
-    sample_index: SampleIndex | None
     recorder: WalkRecorder
     # The archive's answers by sample key, first read when a row is first sent or taken, never at
     # open: a row the walk never reaches costs no read.
@@ -181,18 +174,10 @@ class QueryLoopState:
             filed.update(self.feed.advance())
         return filed
 
-    def _answer(self, sample: Sample) -> MeasuredCell | None:
+    def replay(self, sample: Sample) -> MeasuredCell | None:
+        """Its archived answer, a deprecated one included: a pair is measured once."""
         held = (self.advance() if self.filed is None else self.filed).get(sample.key)
         return None if held is None else held.cell
-
-    def replay(self, sample: Sample) -> MeasuredCell | None:
-        cell = self._answer(sample)
-        return None if cell is None or is_deprecated(cell) else cell
-
-    def deprecated(self, sample: Sample) -> MeasuredCell | None:
-        """An archived answer the stale-data protocol re-measures."""
-        cell = self._answer(sample)
-        return cell if cell is not None and is_deprecated(cell) else None
 
     def rereads(self, sample: Sample) -> bool:
         """A replay the bound meter prices nothing for: it waits on no ceiling, takes no spend stop."""
@@ -240,23 +225,6 @@ def _armed(session: Session, kind: MeasurementRole) -> LookaheadWindow:
     return effective_lookahead(asked, ceiling)
 
 
-async def _maybe_recover_degraded(
-    result: MeasuredCell,
-    sample: Sample,
-    ctx: QueryLoopState,
-) -> MeasuredCell:
-
-    if not is_deprecated(result):
-        return result
-    return await execute_stale_data_protocol(
-        sample,
-        result,
-        ctx.session,
-        pipeline_params=ctx.search_point.pipeline_params,
-        sample_index=ctx.sample_index,
-    )
-
-
 @dataclass
 class _Acquired:
     """Carries no side effect but a claimed cell's archive row, filed before its claim retires so a
@@ -266,7 +234,6 @@ class _Acquired:
     sample: Sample
     result: GradedCell
     fresh: bool
-    deprecated_display: GradedCell | None = None
 
 
 def _returned(returned: list[tuple[int, int]], call: tuple[int, int], _: object) -> None:
@@ -332,19 +299,10 @@ async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _
         finally:
             claiming.discard(sample.id)
     if cached is not None:
-        cached_r = await _maybe_recover_degraded(cached.replayed(), sample, ctx)
-        return _Acquired(sample=sample, result=ctx.scorer.grade(cached_r), fresh=False)
-
-    deprecated_display: GradedCell | None = None
-    if (cached_deprecated := ctx.deprecated(sample)) is not None:
-        # Graded here, rendered at the take: a display call from a cell prints out of walk order.
-        deprecated_display = ctx.scorer.grade(cached_deprecated.replayed())
+        return _Acquired(sample=sample, result=ctx.scorer.grade(cached.replayed()), fresh=False)
 
     try:
         result = await measure_sample(sample, ctx.session, ctx.search_point.pipeline_params)
-        result = await _maybe_recover_degraded(result, sample, ctx)
-        if cached_deprecated is not None:
-            result = replace(result, retry_of_deprecated_cache=True)
         graded = ctx.scorer.grade(result)
         if claim is not None:
             # The holder files the answer under its claim: the waiter it released replays it.
@@ -356,7 +314,6 @@ async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _
         sample=sample,
         result=graded,
         fresh=True,
-        deprecated_display=deprecated_display,
     )
 
 
@@ -479,17 +436,13 @@ class Walk:
         del self.finished[acq.sample.id]
         ctx, n = self.ctx, self.budget
         first = ctx.claim_price(acq.sample)
-        if not acq.fresh:
-            # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
-            if acq.result.facts.cached and first:
-                pipeline = acq.result.facts.pipeline
-                emit_replayed_step_tokens(pipeline.step_tokens, pipeline.step_timings)
-        elif acq.deprecated_display is not None:
-            ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n)
+        if not acq.fresh and first:
+            pipeline = acq.result.facts.pipeline
+            emit_replayed_step_tokens(pipeline.step_tokens, pipeline.step_timings)
 
         # Before the snapshot below, which names the cell by its answer's address.
         taken = ctx.recorder.take(acq.result)
-        # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
+        # Asked of every row, replays included: a replay carries the stop its measurement named.
         category = taken.facts.error_category
         stop = ERROR_CATEGORY_INFO[category].stops if category is not None else None
         if stop in _BUDGET_STOPS:
@@ -642,7 +595,6 @@ class CatchUps:
     race: Race
     member: str
     passes: Mapping[ArmKey, tuple[JobSearchPoint, MeasurementRole]]
-    sample_index: SampleIndex | None
 
 
 class PhaseEnd(NamedTuple):
@@ -659,9 +611,7 @@ type _CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], C
 def _catch_up(session: Session, catch: CatchUps, sample: Sample, prior: ArmKey) -> _CatchUp:
     # The PRIOR's own pass, never the triggering arm's. No stop rule: it recurses into the eliminator.
     sp, role = catch.passes[prior]
-    walk = open_walk(
-        sp, [sample], session, kind=role, sample_index=catch.sample_index, measured=prior
-    )
+    walk = open_walk(sp, [sample], session, kind=role, measured=prior)
     walk.release()
     _, cell = walk.launch(0, LookaheadWindow(1, 1))
 
@@ -734,7 +684,6 @@ def open_walk(
     *,
     kind: MeasurementRole,
     checks: Sequence[StopRule] = (),
-    sample_index: SampleIndex | None = None,
     measured: str | None,
     skip_at: int | None = None,
     budget: int | None = None,
@@ -754,7 +703,6 @@ def open_walk(
         kind=kind,
         feed=feed,
         recorded=measuring,
-        sample_index=sample_index,
         recorder=_ArchiveRecorder(
             session=session, search_point=search_point, kind=kind, entry=entry
         ),

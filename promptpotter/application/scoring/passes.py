@@ -512,21 +512,8 @@ async def measure_noise_floor(
         # The run-to-run spread, never the support's bound: k replicates of one prompt.
         band = paired_mean_t(composites, [0.0] * k) if len(composites) == k else None
 
-        unread = band is None or recorded.composite is None
-        graded = PassGradedRecord(
-            verification=NoiseFloorPass(
-                arm=arm,
-                sp_hash=sp_hash,
-                cells=cells,
-                sample_keys=[s.key for s in scoring_set],
-                stop=None,
-                scorer_id=scorer.id,
-            ),
-            subject=None,
-            tolerance=None,
-            reserve_usd=None,
-            reserve_tokens=None,
-            reading=None
+        reading = (
+            None
             if band is None or recorded.composite is None
             else NoiseBand(
                 raw=composites,
@@ -549,14 +536,29 @@ async def measure_noise_floor(
                     form="level",
                 ),
                 recorded=recorded,
+            )
+        )
+        graded = PassGradedRecord(
+            verification=NoiseFloorPass(
+                arm=arm,
+                sp_hash=sp_hash,
+                cells=cells,
+                sample_keys=[s.key for s in scoring_set],
+                stop=None,
+                scorer_id=scorer.id,
             ),
-            state=ReadingState.MEMBER_UNSCOREABLE if unread else ReadingState.READ,
+            subject=None,
+            tolerance=None,
+            reserve_usd=None,
+            reserve_tokens=None,
+            reading=reading,
+            state=ReadingState.MEMBER_UNSCOREABLE if reading is None else ReadingState.READ,
             refusal=(
                 f"{len(composites)} of {k} replicates and "
                 f"{'no' if recorded.composite is None else 'a'} recorded composite read on its "
                 "rows: a band would describe the outage, not the backend."
             )
-            if unread and not cells
+            if reading is None and not cells
             else None,
         )
         append_record(graded)

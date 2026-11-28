@@ -46,7 +46,7 @@ from promptpotter.domain.cells import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
-from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.fitness_fold import pooled_band
 from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.records.partition import PartitionRecord
@@ -86,7 +86,9 @@ _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_t
 
 _PREDICTED_CHARS = 120
 
-ScopeCells = tuple[list[CellCandidate], list[CellRow], str | None]
+# Each row beside the graded cell it shows, so a level folds the cell, never the row.
+ScopeCell = tuple[CellRow, GradedCell]
+ScopeCells = tuple[list[CellCandidate], list[ScopeCell], str | None]
 
 
 def _trim(text: object) -> str:
@@ -394,12 +396,12 @@ class _LeaderboardPage:
     shown: dict[int, Sample]
     view: HardSamples
     candidates: list[CellCandidate]
-    cells: list[CellRow]
+    cells: list[ScopeCell]
     headline: str | None
     order: HardSampleOrder
     ranked: list[int]
     """Page positions in served order; index + 1 IS each row's ``hard_sample_rank``."""
-    fitness_unit: MeasurandUnit
+    scorer: Scorer
 
 
 def _selected(
@@ -439,7 +441,7 @@ def _leaderboard_page(
     sorted_by, ranked = rank_hard_samples(
         view,
         wanted,
-        measured={shown[c.position].key for c in rows if c.fitness is not None},
+        measured={shown[c.position].key for c, _ in rows if c.fitness is not None},
         order=order or config.hard_sample_order,
     )
     return _LeaderboardPage(
@@ -450,7 +452,7 @@ def _leaderboard_page(
         headline=headline,
         order=sorted_by,
         ranked=[wanted[key] for key in ranked],
-        fitness_unit=graded_under.fitness_unit,
+        scorer=graded_under,
     )
 
 
@@ -471,7 +473,7 @@ def _cycle_cells(
     elected = max(standing.elections, default=None)
     ended_on = None if elected is None else standing.elections[elected].ended_on
     candidates: dict[str, CellCandidate] = {}
-    cells: list[CellRow] = []
+    cells: list[ScopeCell] = []
     headline = None
     for (round_no, arm_key), arm in standing.arms.items():
         state = arm.state
@@ -496,7 +498,7 @@ def _cycle_cells(
         measured = individual_cells(walks, individual_id, RoleScope.REPORT)
         sheet = walked_rows(stores, measured, scorer).standing()
         cells.extend(
-            _row_cell(cell, key=key, position=wanted[cell.key])
+            (_row_cell(cell, key=key, position=wanted[cell.key]), cell)
             for cell in sheet
             if cell.key in wanted
         )
@@ -510,7 +512,7 @@ def _dataset_cells(
     archive = stores.archive
     sigs = archive.cell_signatures()
     candidates: list[CellCandidate] = []
-    cells: list[CellRow] = []
+    cells: list[ScopeCell] = []
     with scoped(memory=OpenAt()):
         for entry in list_populations(stores, bank):
             key = entry.config_key
@@ -533,7 +535,7 @@ def _dataset_cells(
                 )
             )
             cells.extend(
-                _row_cell(cell, key=key, position=wanted[cell.key])
+                (_row_cell(cell, key=key, position=wanted[cell.key]), cell)
                 for cell in sheet
                 if cell.key in wanted
             )
@@ -544,8 +546,13 @@ def _dataset_campaign_config(stores: Stores, name: str) -> CampaignConfig:
     return load_dataset_campaign_config(resolve_dataset(stores, name))
 
 
-def _graded(cells: list[CellRow]) -> list[float]:
-    return [c.fitness for c in cells if c.fitness is not None]
+def _level(cells: list[ScopeCell], scorer: Scorer) -> tuple[float | None, int]:
+    """THE fold over a scope's cells, each column's standing cells pooled: its level and count."""
+    columns: dict[str, list[GradedCell]] = {}
+    for row, cell in cells:
+        columns.setdefault(row.candidate, []).append(cell)
+    band = pooled_band(map(scorer.graded, columns.values()), "fitness", scorer.fitness_unit)
+    return (None, 0) if band is None or band.n is None else (band.value, band.n)
 
 
 def measurement_log(
@@ -565,8 +572,8 @@ def measurement_log(
     round_of = {c.key: c.round for c in page.candidates}
     individual_of = {c.key: c.candidate_id for c in page.candidates}
     kept = [
-        c
-        for c in page.cells
+        (c, cell)
+        for c, cell in page.cells
         if (candidate_id is None or individual_of.get(c.candidate) == candidate_id)
         and (round is None or round_of.get(c.candidate) == round)
         and (status is None or c.status == status)
@@ -574,22 +581,24 @@ def measurement_log(
     rank_of = {sid: i for i, sid in enumerate(page.ranked)}
     cand_pos = {c.key: i for i, c in enumerate(page.candidates)}
     # Stable, so the walk order inside a candidate survives.
-    kept.sort(key=lambda c: cand_pos[c.candidate])
-    by_sample: dict[int, list[CellRow]] = {}
+    kept.sort(key=lambda c: cand_pos[c[0].candidate])
+    by_sample: dict[int, list[ScopeCell]] = {}
     for c in kept:
-        by_sample.setdefault(c.position, []).append(c)
+        by_sample.setdefault(c[0].position, []).append(c)
 
     filtered = candidate_id is not None or round is not None or status is not None
     ranked = [sid for sid in page.ranked if sid in by_sample] if filtered else page.ranked
-    held = {c.candidate for c in kept}
+    held = {c.candidate for c, _ in kept}
     candidates = [c for c in page.candidates if c.key in held] if filtered else page.candidates
     # A filter names the cells its headline reads; unfiltered, the cycle's is its selection's.
     spread_of = None if filtered else page.headline
 
     def _item(sid: int) -> DatasetItem:
         rows = by_sample.get(sid, [])
-        graded = _graded(rows)
-        headline = _graded([c for c in rows if spread_of in (None, c.candidate)])
+        level, n = _level(rows, page.scorer)
+        headline = [
+            c.fitness for c, _ in rows if c.fitness is not None and spread_of in (None, c.candidate)
+        ]
         sample = shown[sid]
         on_ruler = page.view.difficulty(sample.key)
         return DatasetItem(
@@ -603,12 +612,12 @@ def measurement_log(
             delta=on_ruler.delta,
             delta_se=on_ruler.delta_se,
             pick_score=on_ruler.pick_score,
-            n_measured=len(graded),
-            mean_fitness=sum(graded) / len(graded) if graded else None,
+            n_measured=n,
+            mean_fitness=level,
             hit_spread=hit_spread(headline),
         )
 
-    graded_all = _graded(kept)
+    level, n = _level(kept, page.scorer)
     samples = [_item(sid) for sid in ranked]
     spreads = Counter(item.hit_spread for item in samples)
     return CellsResponse(
@@ -616,7 +625,7 @@ def measurement_log(
         scope=cells.scope,
         order=page.order,
         ruler=page.view.ruler,
-        fitness_unit=page.fitness_unit,
+        fitness_unit=page.scorer.fitness_unit,
         samples=samples,
         never_hit=spreads["never"],
         partly_hit=spreads["partly"],
@@ -624,7 +633,7 @@ def measurement_log(
         measured_samples=len(samples) - spreads["unmeasured"],
         unmeasured_samples=spreads["unmeasured"],
         candidates=candidates,
-        cells=kept,
-        total_measurements=len(graded_all),
-        mean_fitness=sum(graded_all) / len(graded_all) if graded_all else None,
+        cells=[c for c, _ in kept],
+        total_measurements=n,
+        mean_fitness=level,
     )

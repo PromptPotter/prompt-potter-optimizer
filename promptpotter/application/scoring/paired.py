@@ -314,7 +314,6 @@ def read_arms(
     *,
     cells: Collection[str],
     measurand: Measurand,
-    spec: EstimatorSpec,
 ) -> ArmsReading:
     """On the *cells* every replicate of both arms scored; under two of them, no lift."""
     read = _Reader(measurand)
@@ -333,7 +332,7 @@ def read_arms(
     pairs = [(x, y) for xs, ys in zip(*by_cell, strict=True) for x in xs for y in ys]
     return ArmsReading(
         differences,
-        mean_lift(measurand, means[0], means[1], spec, pooled=len(a) > 1 or len(b) > 1),
+        mean_lift(measurand, means[0], means[1], ROUND_LIFT_SPEC, pooled=len(a) > 1 or len(b) > 1),
         paired_diff_posterior(means[1], means[0])[1],
         paired_diff_posterior([y for _, y in pairs], [x for x, _ in pairs])[1],
     )

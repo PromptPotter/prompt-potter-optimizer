@@ -386,7 +386,9 @@ BASELINE = {
     # imports, and `SpendMeter`'s constructor.
     # w11-runner (+90): the cancel shield around a rebase cut, the held run's signatures moved up
     # from `jobs/`, and the imports `round.py`'s split into `measure.py` repeats.
-    "package_lines": 114202,
+    # w11-scoring2 (−282): the stale-data protocol and the hand fitness means go; set to the measured
+    # count.
+    "package_lines": 113920,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
