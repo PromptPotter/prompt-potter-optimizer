@@ -6,8 +6,6 @@ import { useRead } from "@/lib/hooks/useRead";
 import { ACCOUNT, meRead, postLogout } from "@/lib/api";
 import type { MeResponse } from "@/lib/api/types";
 
-const CAP_PREFIX = "campaign.";
-
 export function AccountProfileTab() {
   return (
     <ReadState read={useRead(meRead())} subject="your profile">
@@ -59,9 +57,6 @@ function IdentityCard({ me }: { me: MeResponse }) {
         <Badge tone={me.access_state === "active" ? "success" : "danger"}>
           {me.access_state === "active" ? "✓ Active" : "✕ Blocked"}
         </Badge>
-        <Button variant="ghost" disabled title="Profile editing arrives in a later version">
-          Update profile
-        </Button>
       </div>
     </div>
   );
@@ -96,13 +91,6 @@ function SignInSection({ me }: { me: MeResponse }) {
               <ProviderIcon provider={acc.provider} />
               <span className="account-strong">{providerName(acc.provider)}</span>
               <span className="account-provider-email">{acc.email ?? "no address shared"}</span>
-              <Button
-                variant="ghost"
-                disabled
-                title="Removing the only connected account locks you out"
-              >
-                Remove
-              </Button>
             </li>
           ))}
         </ul>
@@ -113,16 +101,11 @@ function SignInSection({ me }: { me: MeResponse }) {
         </Empty>
       )}
       {me.provider && me.available_providers.length > 0 ? (
-        <div className="account-connect">
-          <Button disabled title="Account linking arrives in a later version">
-            + Connect account
-          </Button>
-          <span className="account-note">
-            Also offered here:{" "}
-            {me.available_providers.map((name) => providerName(name)).join(", ")}. Until linking
-            lands, signing in with one of them opens a separate account.
-          </span>
-        </div>
+        <p className="account-note">
+          Also offered here:{" "}
+          {me.available_providers.map((name) => providerName(name)).join(", ")}. Accounts do not
+          link: signing in with one of them opens a separate account.
+        </p>
       ) : null}
     </AccountSection>
   );
@@ -137,9 +120,7 @@ function PermissionsSection({ capabilities }: { capabilities: string[] }) {
       {capabilities.length > 0 ? (
         <ul className="account-caps">
           {capabilities.map((cap) => (
-            <li key={cap} title={cap}>
-              {cap.startsWith(CAP_PREFIX) ? cap.slice(CAP_PREFIX.length) : cap}
-            </li>
+            <li key={cap}>{cap}</li>
           ))}
         </ul>
       ) : (

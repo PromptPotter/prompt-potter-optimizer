@@ -122,6 +122,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.shares import (
     change_budget,
     cycle_share,
+    declare_round_allowance,
     hold_moved,
     hold_run,
     stand_held_budget,
@@ -2185,7 +2186,8 @@ def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on
     built_stores: Stores, offline: Router
 ) -> None:
     hop = _minted(built_stores, offline).hop
-    built_stores.campaigns.append(hop, StandingBudgetRecord(overshoot=True))
+    jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
     built_stores.campaigns.append(hop, run_wiring())
     limits = built_stores.campaigns.run_limits(_at(built_stores, hop))
     assert limits is not None and limits.overshoot, (
@@ -2197,7 +2199,8 @@ def test_a_launch_standing_its_held_budget_keeps_the_pause_its_allowance_declare
     built_stores: Stores, offline: Router
 ) -> None:
     hop = _minted(built_stores, offline).hop
-    built_stores.campaigns.append(hop, StandingBudgetRecord(pause_at_round=4))
+    # A launch stepping four rounds from round 1 declares its pause at 4.
+    declare_round_allowance(built_stores, hop, resumed_from_round=1, step_rounds=4)
     jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     held = _held(built_stores, jobs, Budget(usd=1.0), standing=Budget(rounds=2))
     stand_held_budget(built_stores, hop, held)

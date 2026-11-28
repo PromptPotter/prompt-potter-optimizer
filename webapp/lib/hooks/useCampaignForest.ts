@@ -38,7 +38,8 @@ interface CampaignForest {
   treeFreed: boolean;
   setTreeFreed: (freed: boolean) => void;
   revealLane: (cycleKey: string) => void;
-  totalDescendants: number;
+  // What the tree draws, as the subtree read counts it (`SubtreeCampaignFacts.candidates`); null until read.
+  candidates: number | null;
   viewedHasRounds: boolean;
   // The viewed fork's parent as the tree serves it (`facts.spawn.parent`); null for a root.
   forkParent: HierarchyCycle | null;
@@ -157,7 +158,7 @@ export function useCampaignForest({
     treeFreed,
     setTreeFreed,
     revealLane,
-    totalDescendants: Math.max(index.cycles.length - 1, 0),
+    candidates: tree ? tree.facts.candidates : null,
     viewedHasRounds,
     forkParent,
     cleanup,

@@ -62,7 +62,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
         })
       : null;
 
-  const { metric, forkedFrom, revealLane, treeFreed, setTreeFreed, totalDescendants } =
+  const { metric, forkedFrom, revealLane, treeFreed, setTreeFreed, candidates } =
     useCampaignForest({
     campaignId,
     cycleId,
@@ -198,7 +198,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     cacheHitCount,
     treeFreed,
     setTreeFreed,
-    totalDescendants,
+    candidates,
     metric,
     forkedFrom,
     plot,

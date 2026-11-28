@@ -328,8 +328,11 @@ export function useIngestFlow({
 
   // A reload's thread, told from what the draft serves: each line is its state, never a memory.
   const retell = ({ draft, resolution }: DraftReopenResponse) => {
-    say(`Reopened your check-in on “${draft.slug}” — ${draft.n_samples} rows parsed.`);
-    if (draft.raw_task_description !== null) echo(draft.raw_task_description);
+    // The task on file is the draft card's to show: the thread echoes only what the operator typed.
+    say(
+      `Reopened your check-in on “${draft.slug}” — ${draft.n_samples} rows parsed` +
+        (draft.raw_task_description !== null ? ", task already on file." : "."),
+    );
     if (resolution.degraded_cause) say(resolution.degraded_cause, "warn");
     const turn = resolution.last_resolution;
     const recap = turn?.recap || turn?.assessment;

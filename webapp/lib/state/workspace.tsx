@@ -13,6 +13,7 @@ import {
   decodeCyclePath,
   encodeCyclePath,
   pathLeaf,
+  pathOfAddress,
   pathRoot,
   type CyclePath,
 } from "@/lib/ids";
@@ -139,22 +140,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Address>(FOLLOWING);
   const [initialized, setInitialized] = useState(false);
   const [goneAddress, setGoneAddress] = useState<GoneAddress | null>(null);
+  // A hash read but not yet a screen: a campaign's address until its listing lands (`campaign`), or a
+  // refused hash on load (`campaign: null`). While held nothing is viewed, never another run beneath.
+  const [held, setHeld] = useState<{ hash: string; campaign: string | null } | null>(null);
   const [reveal, setReveal] = useState<{ family: FamilyId } | null>(null);
   // The screen's address as the bar last showed it; null once a hash is read.
   const written = useRef<string | null>(null);
 
-  const { byAddress } = useRegistry();
+  const { byAddress, read: listing } = useRegistry();
   const { active } = useActivePointer();
   const { viewFor, recordView } = useViewMemory();
 
-  // A refused hash leaves the screen where it is and says why, naming the hash.
-  const openHash = useCallback((hash: string): boolean => {
+  // A refused hash leaves the screen where it is and says why, naming the hash; on load there is
+  // no screen to leave, so it is held empty.
+  const openHash = useCallback((hash: string, onLoad: boolean): boolean => {
     const a = parseAddress(hash);
     if ("refused" in a) {
       setGoneAddress({ address: hash, cause: a.refused });
+      if (onLoad) setHeld({ hash, campaign: null });
       return false;
     }
     written.current = null;
+    if ("campaign" in a) {
+      setHeld({ hash, campaign: a.campaign });
+      setScreen((s) => ({ ...s, views: a.views, keys: a.keys }));
+      return true;
+    }
+    setHeld(null);
     setScreen(a);
     return true;
   }, []);
@@ -162,14 +174,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // A mount effect, not a useState initializer: the static-export HTML and first client render must agree.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!openHash(window.location.hash)) written.current = formatAddress(FOLLOWING);
+    if (!openHash(window.location.hash, true)) written.current = formatAddress(FOLLOWING);
     setInitialized(true);
   }, [openHash]);
+
+  // A held campaign opens the line its listing serves; one the listing does not hold is gone.
+  const heldCampaign = held?.campaign ?? null;
+  const heldEntry = heldCampaign === null ? undefined : byAddress.get(heldCampaign);
+  const listingLanded = listing.status === "ready";
+  useEffect(() => {
+    if (held === null || heldCampaign === null) return;
+    if (heldEntry?.entry_kind === "campaign") {
+      setHeld(null);
+      setScreen((s) => ({ ...s, subject: { path: pathOfAddress(heldEntry.facts.live_cycle) } }));
+    } else if (listingLanded) {
+      setGoneAddress({ address: held.hash, cause: "gone" });
+    }
+  }, [held, heldCampaign, heldEntry, listingLanded]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // The writer below no-ops when the hash already matches, so this cannot loop against it.
   useEffect(() => {
-    const onHash = () => void openHash(window.location.hash);
+    const onHash = () => void openHash(window.location.hash, false);
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, [openHash]);
@@ -199,7 +225,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const pinnedPath = pinned?.path ?? null;
   const viewed: ViewedCycle | null = useMemo(() => {
     const path: CyclePath | null =
-      subject === null
+      held !== null
+        ? null
+        : subject === null
         ? active
           ? [{ campaignId: active.campaign_id, cycleId: active.cycle_id }]
           : null
@@ -207,7 +235,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return path
       ? { path, address: encodeCyclePath(path), root: pathRoot(path), leaf: pathLeaf(path) }
       : null;
-  }, [subject, active, pinnedPath]);
+  }, [held, subject, active, pinnedPath]);
   const campaignId = viewed?.root.campaignId ?? null;
   const viewedAddress = viewed?.address ?? null;
 
@@ -221,7 +249,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // `replaceState`, not `push`: Back leaves the app.
   useEffect(() => {
-    if (!initialized) return;
+    // A held hash stays in the bar until it resolves or the screen moves.
+    if (!initialized || held !== null) return;
     const want = formatAddress(screen);
     // A read hash is written back canonical; a refused one stays in the bar until the screen moves.
     if (want === written.current) return;
@@ -235,7 +264,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       "",
       bare ? window.location.pathname + window.location.search : want,
     );
-  }, [initialized, screen]);
+  }, [initialized, held, screen]);
 
   useEffect(() => {
     if (!campaignId || !viewedAddress) return;
@@ -272,6 +301,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       to !== null && "path" in to && opts.resume && !to.pick
         ? resumedRef.current(to.path)
         : to;
+    setHeld(null);
     setScreen((s) => ({
       subject: target,
       views:

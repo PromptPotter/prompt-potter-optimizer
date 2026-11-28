@@ -1260,9 +1260,6 @@
                 "type": "integer"
               },
               {
-                "type": "null"
-              },
-              {
                 "const": "unbounded",
                 "type": "string"
               }
@@ -1276,9 +1273,6 @@
               {
                 "minimum": 0,
                 "type": "integer"
-              },
-              {
-                "type": "null"
               },
               {
                 "const": "unbounded",
@@ -1296,9 +1290,6 @@
                 "type": "number"
               },
               {
-                "type": "null"
-              },
-              {
                 "const": "unbounded",
                 "type": "string"
               }
@@ -1312,9 +1303,6 @@
               {
                 "exclusiveMinimum": 0.0,
                 "type": "number"
-              },
-              {
-                "type": "null"
               },
               {
                 "const": "unbounded",

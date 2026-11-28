@@ -31,8 +31,8 @@ export function AuthCore({ refusal = null }: { refusal?: SignInRefusal | null })
       {refusal ? <Said {...SIGN_IN_REFUSAL_INFO[refusal]} /> : null}
 
       <p className="auth-note">
-        Create your account with Google. Signing up is the grant: 10 optimization runs on your
-        own data, up to 10 rounds each, on my key.
+        Create your account with Google. Signing up opens an allowance on this server&rsquo;s keys;
+        your account&rsquo;s Usage &amp; limits tab shows what it holds and what is left.
       </p>
 
       <div className="login-buttons">

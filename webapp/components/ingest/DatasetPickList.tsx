@@ -11,7 +11,7 @@ import { refusalText } from "@/lib/derivations";
 import { fmtAgo, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
 import type { ReadResult } from "@/lib/read-cache";
-import { FailureLine } from "@/components/ui";
+import { Button, FailureLine } from "@/components/ui";
 
 export function DatasetPickList({
   drafts,
@@ -79,14 +79,14 @@ export function DatasetPickList({
                   <span className="ingest-pick-name">{d.label}</span>
                   <span className="ingest-pick-meta">{fmtAgo(d.span.last_at)}</span>
                 </button>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   disabled={busy || discard.pending !== null}
                   aria-label={`Discard the ${d.label} check-in edited ${fmtAgo(d.span.last_at)}`}
                   onClick={() => discardDraft(d.address)}
                 >
                   Discard
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

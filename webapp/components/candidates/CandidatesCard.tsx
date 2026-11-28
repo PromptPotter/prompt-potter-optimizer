@@ -4,7 +4,7 @@ import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
-import { CardFrame, HoverCard, Loading, ReadState } from "@/components/ui";
+import { CardFrame, Empty, HoverCard, Loading, ReadState } from "@/components/ui";
 import { Criterion } from "@/components/criterion/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import { setScoringMask } from "@/lib/state/scoring-mask";
@@ -92,6 +92,14 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
         {/* The dendrogram's x-alignment depends on sharing this box with the canvas. */}
         <div className="fitness-chart-wrap">
           <FitnessLegend model={m} />
+          {/* A canvas with no reading to draw says so, never paints blank (I1). */}
+          {views.every((v) => v.reading === null) && (
+            <Empty className="lineage-empty">
+              {views.length === 0
+                ? "No candidate stands on this cycle yet: its rounds are read from the lineage, and it serves none here."
+                : "No candidate on this cycle has a served reading yet, so there is nothing to draw."}
+            </Empty>
+          )}
           <FitnessChart
             ctx={m.seriesCtx}
             divergenceBoundary={m.divergenceBoundary}
@@ -101,7 +109,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             onGeometry={m.onGeometry}
           />
           <div className="cand-tree-row">
-            <TreePairing freed={m.treeFreed} setFreed={m.setTreeFreed} descendants={m.totalDescendants} />
+            <TreePairing freed={m.treeFreed} setFreed={m.setTreeFreed} candidates={m.candidates} />
             {!drilled && !m.treeFreed && (
               <DendrogramStrip
                 views={views}

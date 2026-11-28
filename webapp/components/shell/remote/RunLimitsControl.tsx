@@ -74,7 +74,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
   const pending = cmd.pending !== null;
   const disabled = !viewedPath || !files;
 
-  // Only a CHANGED axis is named: an unnamed one stays as it stands, and a named null would lift it.
+  // Only a CHANGED axis is named: an unnamed one stays as it stands; a lift is named `unbounded`.
   const typed = {} as Record<CapAxis, Cap>;
   const next: Budget = {};
   for (const cap of caps) {
@@ -156,7 +156,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
                 disabled={disabled || pending}
                 onClick={() =>
                   void send(
-                    { budget: { [cap.axis]: null } },
+                    { budget: { [cap.axis]: "unbounded" } },
                     `Applied — no ${info.title.toLowerCase()} from the next round; the other caps govern.`,
                   )
                 }

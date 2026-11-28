@@ -473,16 +473,27 @@ class _Build:
                 self._inner(sandbox, (*inside, cycle.hop), cycle, cycles, depth=depth - 1)
         kinds = filable(stores.identity)
         cleans = CommandKind.CLEANUP_EMPTY_CYCLES in kinds
+        children = [self._cycle(cycle, cycles) for cycle in cycles]
         return SubtreeCampaign(
             **_fields(entry)
             | {
-                "children": [self._cycle(cycle, cycles) for cycle in cycles],
+                "children": children,
                 "facts": SubtreeCampaignFacts(
                     **_fields(entry.facts),
                     deletable_stubs=len(deletable_stubs(stores, campaign.root_hop))
                     if cleans
                     else 0,
                     filable=list(kinds),
+                    # A round's candidates, each with its inner campaigns', and any unclaimed inner.
+                    candidates=sum(
+                        r.facts.candidates
+                        if isinstance(r, SubtreeCampaign)
+                        else sum(
+                            1 + sum(i.facts.candidates for i in k.children) for k in r.children
+                        )
+                        for c in children
+                        for r in c.children
+                    ),
                 ),
             }
         )

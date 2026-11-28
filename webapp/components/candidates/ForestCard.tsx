@@ -47,7 +47,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     expanded,
     onLaneActivate,
     setTreeFreed,
-    totalDescendants,
+    candidates,
     viewedHasRounds,
     forkParent,
     cleanup,
@@ -82,9 +82,11 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
       title={
         <Toolbar>
           <span className="cand-title">Lineage</span>
-          <Badge>
-            {totalDescendants} {totalDescendants === 1 ? "descendant" : "descendants"}
-          </Badge>
+          {candidates !== null && (
+            <Badge>
+              {candidates} {candidates === 1 ? "candidate" : "candidates"}
+            </Badge>
+          )}
           <ToolbarSpacer />
           {cleanup.stubCount !== null && cleanup.stubCount > 0 && (
             <Chip
@@ -97,7 +99,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
             </Chip>
           )}
           <CopyButton data={tree} title="Copy the lineage as JSON" />
-          <TreePairing freed setFreed={setTreeFreed} descendants={totalDescendants} />
+          <TreePairing freed setFreed={setTreeFreed} candidates={candidates} />
         </Toolbar>
       }
     >

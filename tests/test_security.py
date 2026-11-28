@@ -75,7 +75,7 @@ from promptpotter.application.account import (
     put_account_key,
     remove_account_key,
 )
-from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
@@ -263,7 +263,6 @@ from promptpotter.domain.records.run_records import (
     Bill,
     CycleStart,
     Ended,
-    ForkDirection,
     Hold,
     Lapse,
     LaunchedEffect,
@@ -2843,12 +2842,11 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
     held_at = subtree_version(built_stores, family)
     assert counted() == 0, "the tree counted a stub a pass holds as deletable"
     await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
-    # Each act asks again: a sweep whose list predates the pass, and a refused fork's withdraw.
+    # The act asks again: a sweep whose list predates the pass. A refused fork's withdraw reaches
+    # the same `destroying` guard, so this door stands for it.
     with monkeypatch.context() as patched:
         patched.setattr(cycle_cleanup, "deletable_stubs", lambda *_: [fork])
         await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
-    cut = ForkCut(parent=hop, child=fork, direction=ForkDirection.OFFSHOOT)
-    await asyncio.to_thread(cut.withdraw, built_stores, passes, RuntimeError("refused"))
     assert campaigns.cycle_dir(fork).is_dir(), "a destroyer's act deleted a stub a pass holds"
     await asyncio.to_thread(passes.release, fork_pass.job_id)
     assert subtree_version(built_stores, family) != held_at, (

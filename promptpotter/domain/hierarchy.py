@@ -278,6 +278,11 @@ class SubtreeCampaignFacts(CampaignFacts):
         description="The kinds this read's reader may file (`command_kinds.py::filable`): what "
         "an act no read offers (limits, look-ahead, a fork, a scenario, a bank) is drawn by."
     )
+    candidates: int = Field(
+        ge=0,
+        description="The candidates this read serves under the campaign, at every depth it "
+        "reads: the count the lineage tree draws.",
+    )
 
 
 class SubtreeCycleEntryFacts(CycleEntryFacts):

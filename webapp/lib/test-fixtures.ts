@@ -482,6 +482,7 @@ export function subtreeCampaign(
       runs_with: null,
       deletable_stubs: 0,
       filable: OWNER_FILABLE,
+      candidates: 0,
     },
     ...over,
   };

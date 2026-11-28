@@ -322,7 +322,6 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
-    ModelCapability,
     NodeConfigParam,
     NodeKind,
     NodePromptInfo,
@@ -365,6 +364,7 @@ from promptpotter.infrastructure.identity import grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
+from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.live_dashboard import (
@@ -3205,38 +3205,30 @@ def test_one_call_target_moves_every_optimizer_llm_node_a_node_routing_its_own_k
 
 
 def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
-    built_stores: Stores, decl: _Declared, held: _Held
+    decl: _Declared, held: _Held
 ) -> None:
-    stores = built_stores
     rows_30 = decl.rows_30
     opened, held_campaign = held
-    recut = replace(opened, bank=Bank.of(rows_30[:-1]))
     # A resume over an edited bank never runs on an origin other than its rounds stand on.
     with pytest.raises(ConfigDriftError):
-        resolve_resume(recut, held_campaign, rows_30[:-1])
+        resolve_resume(replace(opened, bank=Bank.of(rows_30[:-1])), held_campaign, rows_30[:-1])
     # The candidates a ranker reads beside the bank's answers are origin content too.
     with pytest.raises(ConfigDriftError):
         resolve_resume(replace(opened, answer_terms=("an unlisted label",)), held_campaign, rows_30)
-    # The capability menu the origin hashed under is on record: a moved one is the cause named.
-    floored = ModelCapability(
-        model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
-    )
-    stores.campaigns.write_resolved_run(
-        held_campaign.root_hop,
-        opened.pipeline_read,
-        experiment=None,
-        model_capabilities={
-            **opened.pipeline_read.declared_schema().model_capabilities,
-            "": {"m": floored},
-        },
-    )
+
+
+async def test_a_resume_past_a_moved_catalogue_card_refuses_naming_the_model(world: World) -> None:
+    # The capability menu the origin ran under is on record: the workspace's snapshot refreshed
+    # off a catalogue that moved one model's card refuses the resume, naming that model.
+    root = await world.campaign(rounds=0)
+    world.net.catalogue = [{"id": _MODELS[1], "context_length": 4096}]
+    assert await refresh_model_capabilities(world.stores.base_dir) == 1, "no snapshot refreshed"
     with pytest.raises(ConfigDriftError) as refused:
-        resolve_resume(recut, held_campaign, rows_30[:-1])
-    assert "/m" in refused.value.details["capabilities_moved"], (
-        "a resume past a moved capability snapshot blamed only the dataset"
-    )
-    with pytest.raises(ConfigDriftError):
-        resolve_resume(opened, held_campaign, rows_30)
+        await world.resume(root.hop)
+    # The card is the model's, so its `:nitro` route moves with it.
+    assert refused.value.details["capabilities_moved"] == sorted(
+        f"openrouter/{m}" for m in _MODELS
+    ), "a resume past a moved capability card ran, or named another route than the card moved"
 
 
 def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming_it(
@@ -3275,17 +3267,16 @@ def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming
     )
 
 
-def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(
-    built_stores: Stores, held: _Held
-) -> None:
+def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(held: _Held) -> None:
+    # Each launch restates what it resolved through run init's own door; the panel is the
+    # workload's, as an owning connector reads it (no world connector owns an unpinned one).
     opened, campaign = held
-    hop, campaigns = campaign.root_hop, built_stores.campaigns
+    hop, client = campaign.root_hop, opened.backend_client
     measured, moved = (DbllmbenchPanel(questions=[{"id": q}]) for q in ("q1", "q2"))
     for panel in (measured, moved, measured):
-        campaigns.write_resolved_run(
-            hop, opened.pipeline_read, experiment=panel, model_capabilities={}
-        )
-        resolved = read_line(campaigns.chain(hop), RESOLVED_RUN)
+        client.workload = replace(client.workload, experiment=panel)
+        opened.record_resolved_run()
+        resolved = read_line(opened.store.campaigns.chain(hop), RESOLVED_RUN)
         assert resolved.experiment == measured.model_dump(mode="json"), (
             "a later launch's roster displaced the one every round measured"
         )

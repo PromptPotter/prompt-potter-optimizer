@@ -107,6 +107,14 @@ export interface RefusedAddress {
   refused: AddressRefusal;
 }
 
+// A campaign's served `address` (`/hierarchy`'s entry) names no cycle: the workspace opens the
+// line its listing serves (`facts.live_cycle`), or says it is gone.
+export interface CampaignAddress {
+  campaign: string;
+  views: readonly View[];
+  keys: ViewKeys;
+}
+
 const MALFORMED: RefusedAddress = { refused: "malformed" };
 // The cycle segment of the grammar before the hierarchy's.
 const RETIRED_CYCLE_SEG = "c";
@@ -157,7 +165,7 @@ function parseView(seg: string): View | null {
 const COUNT_RE = /^\d+$/;
 
 // Takes the subject's segments off the front of *segs*; undefined is a malformed subject.
-function takeSubject(segs: string[]): ViewedSubject | undefined {
+function takeSubject(segs: string[]): ViewedSubject | { campaign: string } | undefined {
   const head = segs[0];
   if (head === NEW_SEG) {
     segs.shift();
@@ -168,8 +176,12 @@ function takeSubject(segs: string[]): ViewedSubject | undefined {
     segs.splice(0, 2);
     return draftId !== undefined && validIdComponent(draftId) ? { draftId } : undefined;
   }
-  // Only a hop holds the unit separator, so a view or a typo never reads as a cycle.
-  if (head === undefined || !head.includes(CYCLE_PATH_UNIT_SEP)) return null;
+  if (head === undefined || isFamily(head.split(KEY_SEP)[0] ?? "")) return null;
+  // Only a hop holds the unit separator: anything else at the head is a campaign's address.
+  if (!head.includes(CYCLE_PATH_UNIT_SEP)) {
+    segs.shift();
+    return validIdComponent(head) ? { campaign: head } : undefined;
+  }
   const path = decodeCyclePath(head);
   segs.shift();
   if (!path) return undefined;
@@ -179,7 +191,7 @@ function takeSubject(segs: string[]): ViewedSubject | undefined {
   return pick ? { path, pick, at: null } : undefined;
 }
 
-export function parseAddress(hash: string): Address | RefusedAddress {
+export function parseAddress(hash: string): Address | CampaignAddress | RefusedAddress {
   const [head = "", ...named] = hash.replace(/^#\/?/, "").split(";");
   const segs = head.split("/").filter(Boolean);
   if (segs[0] === RETIRED_CYCLE_SEG) return { refused: "retired" };
@@ -207,6 +219,9 @@ export function parseAddress(hash: string): Address | RefusedAddress {
     else if (name === "observe" && (OBSERVE_STATES as readonly string[]).includes(value)) keys.observe = value as ObserveState;
     else if (name === "samples" && /^(\d+(,\d+)*)?$/.test(value)) keys.samples = value ? value.split(",").map(Number) : [];
     else return MALFORMED;
+  }
+  if (subject !== null && "campaign" in subject) {
+    return { campaign: subject.campaign, views: withViews(views), keys };
   }
   return {
     subject: subject !== null && "path" in subject ? { ...subject, at } : subject,

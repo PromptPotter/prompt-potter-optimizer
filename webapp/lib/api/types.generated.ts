@@ -1305,6 +1305,9 @@ export interface SubtreeCampaignFacts {
    * act no read offers (limits, look-ahead, a fork, a scenario, a bank) is
    * drawn by. */
   filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'post-bulletin' | 'withdraw-bulletin' | 'dismiss-bulletin' | 'block-email' | 'unblock-email' | 'grant-delegation' | 'revoke-delegation' | 'set-coupon' | 'delete-account' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
+  /** The candidates this read serves under the campaign, at every depth it reads:
+   * the count the lineage tree draws. */
+  candidates: number;
 }
 
 /** A cycle as the subtree read serves it: its rounds under it. */
@@ -5821,7 +5824,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "25156584bc751b57";
+export const SERVED_CONTRACT = "a9b321bb73e10642";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

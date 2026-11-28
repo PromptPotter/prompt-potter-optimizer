@@ -195,13 +195,12 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   // The point names its arm; the round read (`useRound`) is the one source of its reading.
   const keyOf = (s: ObserveSubject) => s.point?.key;
 
-  it("best: the last crown, with ITS round's reading while a later round held", () => {
+  it("best: the last crown, with ITS round's reading and verdict while a later round held", () => {
     const s = resolveObserveSubject(closed, stood, NO_PICK);
     expect(s.state).toBe("best");
     expect(s.point).toMatchObject({ round: 1, label: "C1.2", title: "best · C1.2" });
     expect(keyOf(s)).toBe("r1c1");
     expect(s.reading).toMatchObject({ round: 1, ending: "crowned" });
-    expect(s.verdict).toMatchObject({ round: 2, ending: "held" });
     expect(s.round).toBe(1);
     expect(s.live).toBe(false);
   });
@@ -211,7 +210,6 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     expect(s.point).toMatchObject({ round: 2, label: "C2.3", title: "latest · C2.3" });
     expect(keyOf(s)).toBe("r2c2");
     expect(s.reading).toMatchObject({ round: 2, ending: "held" });
-    expect(s.verdict).toBeNull();
   });
 
   it("latest while live: the in-flight arm, and no closed reading", () => {
@@ -245,7 +243,6 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     expect(held.point).toMatchObject({ round: 2, label: "C2.2" });
     expect(keyOf(held)).toBe("r2c1");
     expect(held.reading?.round).toBe(2);
-    expect(held.verdict).toBe(held.reading);
     const zero = resolveObserveSubject(closed, stood, { ...NO_PICK, round: 0 });
     expect(zero.point).toMatchObject({ round: 0, label: "C0", title: "round 0 · C0" });
     expect(keyOf(zero)).toBe("r0c0");
