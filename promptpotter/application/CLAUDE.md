@@ -2,6 +2,26 @@
 
 ## Layer rule
 
+**The import ladder orders the flat packages: a module imports only ranks to its left.** The table is `scripts/gate.py::_LADDER` (file by file; a module it does not place fails `layering`), and each import against it is a `ladder_edges` row in `scripts/complexity_ledger.py` that no change may raise (`--edges` lists them by knot):
+
+```
+shared < domain < config < infrastructure/ (store) < llm/ < projections/, backend.py < connectors/
+  < G   grading: scoring/{formula,judges}/, scoring/{evaluators,paired,race_protocol}.py
+  < A0  optimizer_contract.py
+  < A1  pipeline_resolve.py, optimizer_manifest.py, config_map.py, the datasets/ readers
+  < A2  jobs/, run_stop.py, run_phase_control.py, free_tier.py, account.py
+  < A3  initialization/session.py
+  < A4  scoring/, intelligence/, mask/
+  < A5  bench/
+  < A6  initialization/, origin.py, preflight.py, run_observers.py
+  < A7  runner/
+  < A8  doors (commands/, embedded_run.py, queued_launch.py, runner/inner/, maintenance/, the members)
+        and what sits outside the backbone (views/, evidence/, served shapes, dataset editors)
+  < presentation/
+```
+
+A member (`optimizers/**`, the example plugin) imports only `shared`, `domain`, grading, the contract and its own package (`scripts/gate.py::_MEMBER_FENCE`).
+
 - **`intelligence/` imports neither `bench/` nor an optimizer**; both import it at module level. A back-import moved into a function hides the cycle, it does not fix it. Nothing outside `optimizers/` imports an optimizer package (`scripts/gate.py::_IMPORTS_OPTIMIZER`).
 - **Init writes `Session`, frozen; the runner writes only `Session.state`.** <!-- probe: git grep -cE "^\s*session\.[a-z_]+ = " -- promptpotter/application/runner == 0 --> State that survives `new` / `resume` rides the ledger.
 

@@ -30,6 +30,7 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
+from gate import ladder, ladder_knots
 from processes import REPO, branch_base, clone_cache, git, replace_changed, run
 
 from promptpotter.shared.import_walk import import_statements
@@ -479,6 +480,10 @@ BASELINE = {
     "deferred_imports": 7,
     # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
     "type_cycles": 51,
+    # Imports against the import ladder (`gate.py::_LADDER`), a member's past its fence among them;
+    # `--edges` prints each under the knot that holds it. bb-ladder (131): measured at its base,
+    # 68 of them members' past the fence.
+    "ladder_edges": 131,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
@@ -1143,6 +1148,7 @@ def compute_ledger() -> dict[str, int]:
         **priced,
         "deferred_imports": source["deferred_imports"],
         "type_cycles": _type_cycles(py_files),
+        "ladder_edges": len(ladder()[2]),
         "p_record": records,
         "p_record_drift": records_left_out,
         "p_served": sum(prop not in read for prop in _served_properties()),
@@ -1238,6 +1244,10 @@ def check(ledger: dict[str, int], base: dict[str, int], ceilings: dict[str, int]
 
 
 if __name__ == "__main__":
+    if "--edges" in sys.argv[1:]:
+        for knot, edges in ladder_knots(ladder()[2]).items():
+            print(f"{knot} ({len(edges)})", *(f"  {edge}" for edge in edges), sep="\n")
+        raise SystemExit(0)
     counted = compute_ledger()
     if "--check" not in sys.argv[1:]:
         print(_format(counted))

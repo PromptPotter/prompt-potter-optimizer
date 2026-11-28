@@ -205,39 +205,336 @@ _PRESENTATION_IMPORTS_INFRASTRUCTURE = (
     ("presentation/api/", "presentation/admin_bot.py"),
 )
 _LAYERING: tuple[tuple[str, tuple[str, ...], str | tuple[str, ...]], ...] = (
-    ("application/", ("presentation/",), ""),
-    ("shared/", ("!shared/",), ""),
-    ("domain/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
-    # Above `domain/`, below every layer that reads the settings.
-    ("config/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
-    ("infrastructure/", ("application/", "presentation/"), ""),
-    # `infrastructure/` reads the connector table, so a connector importing `application/` is a cycle.
-    ("connectors/", ("application/", "presentation/"), ""),
     _ROUTER_IMPORTS_INFRASTRUCTURE,
     _PRESENTATION_IMPORTS_INFRASTRUCTURE,
     _IMPORTS_OPTIMIZER,
 )
+_APP = "application/"
+# The import ladder, the one order of the package's modules: a module imports only the ranks before
+# its own, and sits on the rank of the longest entry naming it (a file, or a package ending in `/`).
+# A module no entry names fails `layering`. An import against the order is counted, never failed
+# (`ladder_edges` in `complexity_ledger.py`, which no change may raise), except one that leaves its
+# layer (`_LAYER_HEADS`), which fails.
+_LADDER: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("shared", ("shared/", "__init__.py")),
+    ("domain", ("domain/",)),
+    ("config", ("config/",)),
+    # The store and the infrastructure files beside it.
+    ("store", ("infrastructure/",)),
+    ("llm", ("infrastructure/llm/",)),
+    ("projections", ("infrastructure/projections/", "infrastructure/backend.py")),
+    # `infrastructure/` reads the connector table, so a connector importing `application/` is a cycle.
+    ("connectors", ("connectors/",)),
+    # Grading: what a grade and a race are, no run needed.
+    (
+        "G",
+        tuple(
+            f"{_APP}scoring/{m}"
+            for m in ("formula/", "judges/", "evaluators.py", "paired.py", "race_protocol.py")
+        ),
+    ),
+    ("A0 contract", (f"{_APP}optimizer_contract.py",)),
+    # Which values, which optimizer, which bank: the dataset READERS, while `datasets/` sits on two ranks.
+    (
+        "A1 resolution",
+        (
+            *(f"{_APP}{m}.py" for m in ("pipeline_resolve", "optimizer_manifest", "config_map")),
+            *(
+                f"{_APP}datasets/{m}.py"
+                for m in (
+                    "loaders",
+                    "authored",
+                    "prompts",
+                    "tabular_ingest",
+                    "draft_campaign",
+                    "startability",
+                    "draft_build",
+                    "origin_readiness",
+                )
+            ),
+        ),
+    ),
+    # May it start; how it stops.
+    (
+        "A2 admission",
+        (
+            f"{_APP}jobs/",
+            *(f"{_APP}{m}.py" for m in ("run_stop", "run_phase_control", "free_tier", "account")),
+        ),
+    ),
+    ("A3 session", (f"{_APP}initialization/session.py",)),
+    ("A4 measuring", (f"{_APP}scoring/", f"{_APP}intelligence/", f"{_APP}mask/")),
+    ("A5 bench", (f"{_APP}bench/",)),
+    (
+        "A6 INIT",
+        (
+            f"{_APP}initialization/",
+            *(f"{_APP}{m}.py" for m in ("origin", "preflight", "run_observers")),
+        ),
+    ),
+    ("A7 loop", (f"{_APP}runner/",)),
+    # The doors, and beside them what sits outside the backbone: views, evidence, the served shapes,
+    # the dataset EDITORS and the reads only a door or presentation imports. Members sit here too,
+    # held to `_MEMBER_FENCE` instead.
+    (
+        "A8 doors and outside",
+        (
+            *(
+                f"{_APP}{p}/"
+                for p in (
+                    "commands",
+                    "runner/inner",
+                    "optimizers",
+                    "maintenance",
+                    "views",
+                    "evidence",
+                    "datasets",
+                )
+            ),
+            *(
+                f"{_APP}{m}.py"
+                for m in (
+                    "embedded_run",
+                    "queued_launch",
+                    "served_dashboard",
+                    "hierarchy",
+                    "hierarchy_subtree",
+                    "pipeline_responses",
+                    "account_activity",
+                    "app_visits",
+                    "backend_listing",
+                    "browser_sign_in",
+                    "bulletins",
+                    "caller",
+                    "command_reading",
+                    "cycle_addressing",
+                    "cycle_files",
+                    "cycle_reads",
+                    "exhibit",
+                    "first_run",
+                    "head_to_head_price",
+                    "health",
+                    "host_surface",
+                    "library",
+                    "notices",
+                    "origin_listing",
+                    "path_patch",
+                    "power",
+                    "read_params",
+                    "read_workers",
+                )
+            ),
+        ),
+    ),
+    ("presentation", ("presentation/", "main.py", "__main__.py")),
+)
+# The rank each layer opens at: `shared/`, `domain/`, `config/`, `infrastructure/` with the
+# connectors, `application/`, presentation.
+_LAYER_HEADS = ("shared", "domain", "config", "store", "G", "presentation")
+# What a member (`optimizers/**`, and the example plugin) may import: `shared` and `domain` (a
+# setting reaches it through the face, so `config` is no exception), the grading rank, the contract,
+# and its own built-in's package. Each other import is a `ladder_edges` edge.
+_MEMBER_FENCE = (
+    "shared/",
+    "domain/",
+    *dict(_LADDER)["G"],
+    *(f"{_APP}{m}.py" for m in ("optimizer_contract", "optimizer_knobs", "optimizer_identity")),
+)
+_MEMBERS = f"{_APP}optimizers/"
+# The knots the backbone's moves cut, one row each by the files on its two ends: `ladder_edges
+# --edges` prints each edge under its row, so a move sees which it cut and deletes a row it emptied.
+_LADDER_KNOTS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("the contract reaches the stop", (f"{_APP}optimizer_contract.py",), (f"{_APP}run_stop.py",)),
+    (
+        "resolution binds a session",
+        (f"{_APP}pipeline_resolve.py",),
+        (f"{_APP}initialization/session.py",),
+    ),
+    (
+        "resolution prices a draft",
+        (f"{_APP}pipeline_resolve.py",),
+        (f"{_APP}jobs/quota.py", f"{_APP}free_tier.py"),
+    ),
+    (
+        "resolution builds served shapes",
+        (f"{_APP}pipeline_resolve.py",),
+        (f"{_APP}pipeline_responses.py",),
+    ),
+    (
+        "INIT code in `jobs/`",
+        tuple(
+            f"{_APP}jobs/{m}.py"
+            for m in (
+                "mint",
+                "launcher/mint_and_start",
+                "launcher/checkin",
+                "launcher/head_to_head",
+            )
+        ),
+        (f"{_APP}initialization/", f"{_APP}run_observers.py"),
+    ),
+    (
+        "a held-out pass in `scoring/`",
+        (f"{_APP}scoring/passes.py",),
+        (f"{_APP}bench/", f"{_APP}initialization/scoring_scope.py", f"{_APP}views/readout.py"),
+    ),
+    (
+        "the measurement log reads difficulty",
+        (f"{_APP}scoring/measurement_log.py",),
+        (f"{_APP}bench/difficulty.py",),
+    ),
+    (
+        "L4 is no door",
+        tuple(
+            f"{_APP}{m}.py"
+            for m in ("bench/node_context", "initialization/scoring_scope", "runner/run_init")
+        ),
+        (f"{_APP}runner/inner/",),
+    ),
+    (
+        "the projection roster by import",
+        tuple(
+            f"{_APP}{m}.py"
+            for m in (
+                "run_observers",
+                "runner/entry",
+                "runner/run_init",
+                "bench/resume_and_fork/fork_siblings",
+            )
+        ),
+        (f"{_APP}served_dashboard.py", f"{_APP}views/readout.py"),
+    ),
+    (
+        "the store folds money and the dashboard",
+        ("infrastructure/store/",),
+        ("infrastructure/llm/money_fold.py", "infrastructure/projections/live_dashboard.py"),
+    ),
+    (
+        "the store's llm re-homes",
+        tuple(
+            f"infrastructure/{m}.py"
+            for m in ("store/data_root", "store/llm_reuse_cache", "run_state")
+        ),
+        ("infrastructure/llm/",),
+    ),
+    (
+        "the store hub reads the connectors",
+        ("infrastructure/store/dataset_access.py", "infrastructure/backend.py"),
+        ("connectors/protocol.py",),
+    ),
+    ("`datasets/` on two ranks", (f"{_APP}datasets/",), ("",)),
+    ("the member fence", (_MEMBERS, "examples/"), ("",)),
+)
 
 
-def _layering(_: Selection) -> Outcome:
+def _placed(rel: str) -> int | None:
+    """*rel*'s rank on `_LADDER`, by the longest entry naming it."""
+    found = [
+        (len(entry), at)
+        for at, (_, entries) in enumerate(_LADDER)
+        for entry in entries
+        if rel == entry or (entry.endswith("/") and rel.startswith(entry))
+    ]
+    return max(found)[1] if found else None
+
+
+def _without_code(path: Path) -> bool:
+    body = ast.parse(path.read_text(encoding="utf-8")).body
+    return all(isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) for s in body)
+
+
+def _package_imports() -> dict[str, set[str]]:
+    """Each package file's imported package files, named under `promptpotter/`, function bodies and
+    `TYPE_CHECKING` included: a layer a type crosses is crossed."""
     # A check runs in the pinned venv; this module's own imports also run under the bare one.
     from promptpotter.shared.import_walk import imported_files
 
-    package = "promptpotter/"
-    imports: dict[str, list[str]] = {}
-    for path in _sources(REPO / package, "*.py"):
-        rel = path.relative_to(REPO).as_posix()
-        imports[rel[len(package) :]] = sorted(
-            target[len(package) :] for target in imported_files(path)
+    package = REPO / "promptpotter"
+    return {
+        path.relative_to(package).as_posix(): {
+            target.removeprefix("promptpotter/") for target in imported_files(path)
+        }
+        for path in _sources(package, "*.py")
+    }
+
+
+def ladder(
+    imports: dict[str, set[str]] | None = None,
+) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """The package's modules `_LADDER` does not place; the imports leaving their layer; and the
+    imports against the ladder (each file pair once), a member's being each one `_MEMBER_FENCE`
+    bars. A package `__init__` holding no code is no end of an import: naming a submodule names it
+    too, and it runs nothing."""
+    from promptpotter.shared.import_walk import package_imports, package_modules
+
+    walked = _package_imports() if imports is None else imports
+    counted = {
+        rel
+        for rel in walked
+        if not (rel.endswith("__init__.py") and _without_code(REPO / "promptpotter" / rel))
+    }
+    rank = {rel: at for rel in counted if (at := _placed(rel)) is not None}
+    edges = {rel: walked[rel] & counted for rel in counted}
+    files = package_modules(REPO)
+    for path in _sources(REPO / "examples/optimizer-plugin", "*.py"):
+        named = {files[n].removeprefix("promptpotter/") for n in package_imports(path)}
+        edges[path.relative_to(REPO).as_posix()] = named & counted
+    heads = [at for at, (name, _) in enumerate(_LADDER) if name in _LAYER_HEADS]
+
+    def layer(rel: str) -> int:
+        return sum(at <= rank[rel] for at in heads)
+
+    def against(source: str, target: str) -> bool:
+        if source.startswith((_MEMBERS, "examples/")):
+            own = _MEMBERS + source[len(_MEMBERS) :].partition("/")[0] + "/"
+            return not target.startswith((*_MEMBER_FENCE, own))
+        return rank[target] > rank[source]
+
+    pairs = sorted(
+        (s, t)
+        for s, targets in edges.items()
+        if s in rank or s.startswith("examples/")
+        for t in targets
+        if t in rank
+    )
+    crossings = [
+        f"{s} imports {t}: {_LADDER[rank[s]][0]} may not import {_LADDER[rank[t]][0]}"
+        for s, t in pairs
+        if s in rank and layer(t) > layer(s)
+    ]
+    unplaced = sorted(counted - rank.keys())
+    return unplaced, crossings, [(s, t) for s, t in pairs if against(s, t)]
+
+
+def ladder_knots(edges: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """*edges* under the first `_LADDER_KNOTS` row holding them; the rest under `unlisted`."""
+    rows: dict[str, list[str]] = {name: [] for name, _, _ in _LADDER_KNOTS}
+    rows["unlisted"] = []
+    for source, target in edges:
+        row = next(
+            (
+                name
+                for name, sources, targets in _LADDER_KNOTS
+                if source.startswith(sources) and target.startswith(targets)
+            ),
+            "unlisted",
         )
+        rows[row].append(f"{source} -> {target}")
+    return rows
+
+
+def _layering(_: Selection) -> Outcome:
+    imports = _package_imports()
     hits = [
-        f"{who or package}* must not import {' or '.join(banned)} — {source} imports {target}"
+        f"{who or 'promptpotter/'}* must not import {' or '.join(banned)} — {source} imports {target}"
         for who, banned, exempt in _LAYERING
-        for source, targets in imports.items()
+        for source, targets in sorted(imports.items())
         if source.startswith(who) and not (exempt and source.startswith(exempt))
-        for target in targets
+        for target in sorted(targets)
         if target != "__init__.py" and reads(target, banned)
     ]
+    unplaced, crossings, _edges = ladder(imports)
+    hits += [f"{rel}: no `_LADDER` rank places it" for rel in unplaced] + crossings
     return (1, "\n".join(hits)) if hits else (0, "")
 
 

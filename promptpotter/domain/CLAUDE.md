@@ -1,6 +1,6 @@
 # domain/ — frozen models + pure types
 
-No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictModel` / `FrozenModel`; a lax one says why on itself.
+No I/O, no async (`scripts/gate.py::_LADDER`). Every model inherits `StrictModel` / `FrozenModel`; a lax one says why on itself.
 
 - **A target prompt has no class**: field order is the node's (`NodePromptInfo.fields`), never a shared constant.
 - **A child `OptSearchPoint` is made by `derive` / `edited` alone**; `loci()` is the one roster of its parts and its `id` is its content, never stored. <!-- probe: git grep -cE "OptSearchPoint\(" -- promptpotter/*.py <= 5 -->
