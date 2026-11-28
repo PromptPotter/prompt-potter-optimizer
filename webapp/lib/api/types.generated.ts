@@ -4770,7 +4770,7 @@ export interface DatasetIndexEntry {
   n_samples: number | null;
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
    * ``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`. */
-  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
+  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | 'source_unreachable' | null;
   /** What refused its rows where a refusal says which field of its definition is
    * wrong; null otherwise. */
   refusal: Refusal | null;
@@ -5822,7 +5822,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "90de555a52321484";
+export const SERVED_CONTRACT = "1b1e7f744ea90e6b";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6063,7 +6063,7 @@ export type ArchiveMode = 'compact' | 'restore' | 'purge-cold' | 'reclaim';
 export type StatusMark = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 
 // promptpotter.domain.dataset_start::StartBlock
-export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
+export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | 'source_unreachable';
 
 // promptpotter.domain.export::ExportTier
 export type ExportTier = 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
@@ -6595,6 +6595,7 @@ export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "missing_extra": "It runs through a Python extra this install lacks.",
   "unreadable": "Its samples could not be read on this install.",
   "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
+  "source_unreachable": "This install could not fetch its rows from their source.",
 };
 
 // Mirror of domain/export.py::EXPORT_TIER_INFO, in display order.
@@ -6909,7 +6910,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
   [SAMPLE_MOVEMENT_TONE, ["new", "readded", "gained", "lost", "kept"]],
-  [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
+  [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable", "source_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],
   [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],

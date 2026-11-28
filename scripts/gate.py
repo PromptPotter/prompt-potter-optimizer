@@ -249,9 +249,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/account.py::_dataset_of::FileUnreadableError": (
         "a trail line names its campaign's dataset; an unreadable manifest refuses its own reads"
     ),
-    "application/datasets/origin_resolve.py::raised_commands::ValidationError": (
-        "a check-in finding the draft's patch model refuses is no finding"
-    ),
     "application/evidence/read.py::_at::(BadRequestError, NotFoundError, ValueError)": (
         "an address that names nothing answers None, by contract"
     ),

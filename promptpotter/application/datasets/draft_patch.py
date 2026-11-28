@@ -5,7 +5,11 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import draft_criterion, mode_exclusions
+from promptpotter.application.datasets.draft_campaign import (
+    draft_criterion,
+    draft_modes,
+    mode_exclusions,
+)
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import (
     answer_terms_from_rows,
@@ -45,10 +49,7 @@ from promptpotter.domain.pipeline_schema import (
     description_paths,
     narrowing_of,
 )
-from promptpotter.infrastructure.store.dataset_access import (
-    claim_own_definition,
-    declared_pipelines,
-)
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -182,7 +183,7 @@ def _picked_mode(
 ) -> dict[str, Any]:
     """An upload's definition runs *mode*'s steps, so its exclusions go with the chain they
     excluded from; a reused dataset's runs its own chain less what *mode* leaves out."""
-    modes = declared_pipelines(served.over({}))
+    modes = draft_modes(served.over({}))
     if (steps := modes.get(mode)) is None:
         raise PayloadInvalidError(f"patch.mode {mode!r} is none of {sorted(modes)}.")
     basis = changes.get("basis", draft.basis)

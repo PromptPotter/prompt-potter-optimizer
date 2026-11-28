@@ -567,36 +567,31 @@ sole route for a backend tunable.
   block's per-key merge are `ParamLayer`s or `CAMPAIGN_RULE`, so params are final once folded. **Rides
   with:** area 07's chain. **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def;
   4 now) and `git grep -c "_folded_scoring" -- promptpotter` is 0 (2 now).
-- **A source default lives in code** (w10-survey): `datasets/loaders.py::_bank` keeps
-  `src.get("shuffled", True)`, which belongs in the dataset file or `defaults.yaml`. **Rides with:** area
-  07's chain. **Re-test:** `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py`
-  is 0 (1 now).
-- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/ingest.py::draft_from_dataset`
-  resolves the dataset, then `datasets/startability.py::checkin_bank` resolves it again by name;
-  `datasets/loaders.py::resolve_bank`, `held_bank` and `fetch_bank` each read the definition the
-  `ResolvedDataset` already carries; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source`
-  looks up again. Root: the seam's answer (`ResolvedDataset`, `DraftSource`) is handed down, never a name.
-  **Rides with:** area 07's chain. **Re-test:** `git grep -c "checkin_bank(" --
-  promptpotter/application/datasets/ingest.py` is 0 (1 now).
+- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/loaders.py::resolve_bank`,
+  `held_bank` and `fetch_bank` each re-read the definition (`definition_source`) a `ResolvedDataset` does not
+  carry; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source` looks up again. Root:
+  the seam's answer (`ResolvedDataset` holding its read definition, `DraftSource`) is handed down, never a
+  name. **Rides with:** area 07's chain, with area 02's (`dataset_access.py::ResolvedDataset`). **Re-test:**
+  `git grep -c "definition_source(dataset)" -- promptpotter/application/datasets/loaders.py` is 0 (5 now).
 - **A knob's provenance is diffed, not read off the fold** (w11-config): `config_map.py::_knob_rows` calls a
   bench knob `default` where its value equals `defaults.yaml`'s, so a campaign that states the default reads as
   unstated; `campaign_config.py::OptimizerChoice.arm_gate` keeps a code default (`"off"`) the
   `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
   map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
   **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
-- **A refusal is swallowed into nothing** (w11-config): `datasets/origin_resolve.py::raised_commands` drops a
-  finding whose patch fails `EditDraftPatch` with `continue`, and `datasets/harbor_panel.py::write_task_panel`
-  drops a row with no documents; neither files what it dropped, and `harbor_panel.py::_panel_yaml` hardcodes
-  `terminus-2` / `docker` the dataset file should name. Root: a dropped finding or row is a reported
-  refusal; the panel's agent and environment are the dataset's. **Rides with:** area 07's chain.
-  **Re-test:** `git grep -c "except ValidationError" -- promptpotter/application/datasets/origin_resolve.py`
-  is 0 (1 now) and `git grep -c "name: terminus-2" -- promptpotter/application/datasets/harbor_panel.py` is
-  0 (1 now).
 - **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
   `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
   connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
   definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
   `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
+  w11-config2 adds a code default of the same root: `connectors/harbor.py`'s
+  `(agent or {}).get("name") or "terminus-2"`.
+- **An origin finding with an unknown row is dropped unserved** (w11-config2, 11-28):
+  `datasets/origin_resolve.py::raised_commands` drops through `_coerce` a finding whose row is unknown,
+  whose evidence is empty or that names an absent header, and serves none of them, while a finding
+  `EditDraftPatch` refuses is now served in `degraded_cause`. Root: a dropped finding is served with its
+  reason, as a refused one is. **Rides with:** area 07's chain. **Re-test:** a finding naming an absent
+  header reads in `degraded_cause`.
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
   patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
@@ -610,51 +605,18 @@ sole route for a backend tunable.
   `ManifestNode.optimizer` is a `dict[str, Any]`, `pipeline_schema.py::node_config_schema` takes optional
   `values` / `sources` that act as fallbacks, and `layer_fold.py::_laid` ignores a non-list SUBSET value.
   Action: one typed node document with knobs a view on it; the steer a named layer.
-  **Rides with:** area 07's chain.
+  **Rides with:** area 07's chain. w11-config2 counts 24 files naming `NodeCall`, and finds an edge
+  of it: `datasets/ingest.py::_open_checkin_of` cannot tell an origin-opened draft from a plain pick
+  (same `DatasetBasis`), so a plain pick may reopen it; the draft does not record its opener.
 - **The pipeline carrier is typed only at its door**: the archive address
   (`measurement_archive.py::config_key`'s `list[tuple[str, dict]]`) and `RuntimeFailure.observed_config`
   (laid as a dict by `scoring/arm_states.py`; an abort's holds the whole document) stay dicts, typed at
   their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
   `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
-  area 04's (`observed_config`). **Re-test:** `git grep -c "NodeCall.model_validate(" --
+  area 04's (`observed_config`). w11-config2 left it unbuilt for a design: `config_key` hashes
+  `("", {"prompt_fields_id"})` pairs that no `NodeCall` holds, and the scoring block's per-key merge
+  (the fold row above) has dial semantics `CAMPAIGN_RULE` lacks. **Re-test:** `git grep -c "NodeCall.model_validate(" --
   promptpotter/application/scoring/measurement_log.py promptpotter/domain/failures.py` is 0 (2 now).
-- **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
-  field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
-  (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch
-  runs" (`promptpotter/domain/spend.py`). Expected operator words in the unit the field asks for; seen
-  RST backticks and a seconds/minutes contradiction. Root: a served field's operator line is its own
-  served text, never the model's docstring. **Rides with:** `area 07's chain` — **Re-test:** no served field
-  `description` the Run bounds form renders holds a double backtick or names a unit its label does not.
-  Walk #2 (11-28, 390×844): still. On an upload's Run bounds, "Halt at fitness" reads "Stop
-  ``target_hit`` … ``None`` → no such stop", and "Wall-clock cap (minutes)" reads "Seconds ONE launch
-  runs".
-- **Picking a dataset twice opens two identical check-ins** (w11-walk, 11-27): each press of a dataset
-  in `webapp/components/ingest/DatasetPickList.tsx::DatasetPickList` files `open-dataset-draft`, so a
-  second press mints a second draft; the pick list shows two "email-tagging · just now" rows and the
-  sidebar two "email-tagging unstarted" campaigns, nothing telling them apart. Expected: a dataset with
-  an open check-in reopens it (or the rows say what differs). **Rides with:** `area 07's chain` —
-  **Re-test:** two presses of one dataset leave one open check-in.
-- **A Hub dataset the box cannot fetch opens as a 500** (w11-walk2, 11-28): on the cold world, press
-  "+ New campaign", then "justlogic/d234 — JustLogic — deductive reasoning". `open-dataset-draft`
-  answers 500 `internal_error`, and the chat says "Internal server error Anything you sent may not have
-  been applied." The server raised `FileNotFoundError` (Couldn't find 'michaelchenkj/JustLogic' on the
-  Hugging Face Hub) from `promptpotter/application/datasets/loaders.py::_load_dataset`, through
-  `promptpotter/application/datasets/startability.py::checkin_bank`. The pick list also offers the
-  dataset with "—" rows, beside email-tagging's 15. Expected: a typed refusal (the dataset's rows are
-  unreachable, from where) that the pick says. A 500 reads as `transient`, so the webapp retries it.
-  Root: a dataset's row source fails typed at its loader's door. **Rides with:** `area 07's chain`.
-  **Re-test:** with the Hub unreachable, the pick answers a typed 4xx/503 naming the source.
-- **A check-in's mode pick reads back as another mode of the same chain** (w11-walk2, 11-28): on the
-  cold world, upload a CSV, open Pipeline, and pick `llm_only` from "default · 1 step / llm_only ·
-  1 step". `edit-draft-campaign {"mode":"llm_only"}` answers 200. The draft then serves `mode: default`,
-  the select snaps back, and the summary still says "default · 1 step". Termnorm serves both modes
-  with `steps: ["llm_only"]`, and
-  `promptpotter/application/datasets/draft_build.py::draft_wire` names the mode as the first whose
-  steps equal the active chain. Expected: the pick holds, or one chain has one mode name. Seen: a 200
-  that reads back undone, which is a state the system enters but cannot report. Root: the draft serves
-  the mode it holds (`EditDraftPatch.mode`), never one re-derived from steps. Or, if two names for
-  one chain is the defect, the connector declares one. **Rides with:** `area 07's chain`.
-  **Re-test:** picking each served mode reads it back as the draft's `mode`.
 
 ## 08 · Connectors, backends, LLM clients
 

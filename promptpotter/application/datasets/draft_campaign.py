@@ -22,6 +22,7 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, PipelineSchema
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.dataset_access import declared_pipelines
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
@@ -52,6 +53,16 @@ def upload_pipeline_json(
         "pipelines": {DEFAULT_PIPELINE: steps},
         "available_models": list(uploads.available_models),
     }
+
+
+def draft_modes(declaration: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Each chain a check-in may pick, once, under the first name its declaration gives it: a mode
+    declaring the `default`'s own chain is that `default`, never a second pick that reads back as
+    the first (the draft serves a mode by its chain, `draft_build.py::draft_wire`)."""
+    named: dict[tuple[str, ...], str] = {}
+    for name, steps in declared_pipelines(declaration).items():
+        named.setdefault(tuple(steps), name)
+    return {name: list(steps) for steps, name in named.items()}
 
 
 def mode_exclusions(held: PipelineSchema, steps: Sequence[str]) -> list[str] | None:

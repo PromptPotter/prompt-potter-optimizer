@@ -17291,7 +17291,8 @@
           "empty",
           "missing_extra",
           "unreadable",
-          "backend_unreachable"
+          "backend_unreachable",
+          "source_unreachable"
         ],
         "title": "StartBlock",
         "type": "string"

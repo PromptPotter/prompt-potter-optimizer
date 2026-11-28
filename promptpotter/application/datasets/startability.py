@@ -141,19 +141,18 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
     return DatasetReading(None if held is None else len(held.samples), block)
 
 
-def checkin_bank(stores: Stores, name: str) -> Bank:
+def checkin_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
     """The bank a check-in opens on, refused with the reason the listing serves."""
-    dataset = resolve_dataset(stores, name)
     if _absent(_connector_extra(dataset)) is not None:
-        raise DatasetUnstartableError(name, StartBlock.MISSING_EXTRA)
+        raise DatasetUnstartableError(dataset.name, StartBlock.MISSING_EXTRA)
     held = held_bank(stores, dataset)
     if (block := _held_block(dataset, held)) is not None:
-        raise DatasetUnstartableError(name, block)
+        raise DatasetUnstartableError(dataset.name, block)
     if held is not None:
         return held
     fetched = fetch_bank(stores, dataset)
     if (block := rows_block(fetched)) is not None:
-        raise DatasetUnstartableError(name, block)
+        raise DatasetUnstartableError(dataset.name, block)
     return fetched
 
 
@@ -188,7 +187,7 @@ def checkin_rows(stores: Stores, draft: DraftFile) -> list[dict[str, str]]:
         case UploadBasis(kept=kept):
             return list(read_kept_table(stores.tenant_datasets.upload_path(kept)).rows)
         case DatasetBasis(dataset=name):
-            return labelled_rows(checkin_bank(stores, name).samples)
+            return labelled_rows(checkin_bank(stores, resolve_dataset(stores, name)).samples)
         case _:
             assert_never(draft.basis)
 
