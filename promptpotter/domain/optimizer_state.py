@@ -4,10 +4,10 @@ from typing import ClassVar, Literal, Self, TypedDict, Unpack
 
 from pydantic import ConfigDict, Field, SerializeAsAny, model_validator
 
+from promptpotter.domain.failures import ValidationReason
 from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.domain.wounds import ValidationReason
 
 # The one parse failure charged against the prompt; ask it, never `is not None`.
 PARSE_FAILURE_MALFORMED = ValidationReason.OPTIMIZER_PROMPT_PARSE_FAILURE

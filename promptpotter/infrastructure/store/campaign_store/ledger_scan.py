@@ -9,6 +9,7 @@ from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cycle_index import Intervention
 from promptpotter.domain.cycle_result import WallClock
+from promptpotter.domain.fork import ForkSpec
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
@@ -16,54 +17,58 @@ from promptpotter.domain.phase_acts import InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.decision import DecisionRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.level_series import LevelSeriesRecord
+from promptpotter.domain.records.lineage import (
     BABYSAT,
     ArmAct,
     ArmActRecord,
-    ArmRecord,
-    ArmsGate,
-    CampaignCeilingRecord,
     CycleFinalRecord,
     CycleMintedRecord,
-    CycleShareRecord,
     CycleSupersededRecord,
-    DecisionRecord,
-    ElectionRecord,
-    Ended,
-    ForkSpec,
     LaunchClockRecord,
-    Paused,
-    PhaseRecord,
-    PipelineRead,
+    SpawnedBy,
+    SpawnedRecord,
+)
+from promptpotter.domain.records.money import (
+    CampaignCeilingRecord,
+    CycleShareRecord,
     PricedKeyRecord,
-    RaceCatchUpRecord,
-    ResolvedRunRecord,
+    StandingBudgetRecord,
+    TokenUsageRecord,
+)
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.rounds import (
+    ArmRecord,
+    ElectionRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundStatement,
-    RunPhaseRecord,
-    RunWiringRecord,
-    SampleScoredRecord,
-    ScoringLockedRecord,
-    SpawnedBy,
-    SpawnedRecord,
-    StandingBudgetRecord,
-    TokenUsageRecord,
 )
+from promptpotter.domain.records.run_phase import (
+    ArmsGate,
+    Ended,
+    Paused,
+    PhaseRecord,
+    RunPhaseRecord,
+)
+from promptpotter.domain.records.run_wiring import (
+    PipelineRead,
+    ResolvedRunRecord,
+    RunWiringRecord,
+    ScoringLockedRecord,
+)
+from promptpotter.domain.records.sample_passes import RaceCatchUpRecord, SampleScoredRecord
 from promptpotter.domain.results import round_walks
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
-from promptpotter.domain.spend import (
-    Budget,
-    SpendRollup,
-    spend_slot,
-)
+from promptpotter.domain.spend import Budget, spend_slot
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.verification import (
     BenchPass,
     BenchPasses,
@@ -310,6 +315,8 @@ class StandingRounds(NamedTuple):
     passes: dict[_Pass, dict[str, WalkedCell]]
     # No entry = never elected; elected-and-crowned-nobody is an entry with no selected arm.
     elections: dict[int, ElectionRecord]
+    # The δ scale's reading of the line at each close, banked beside it.
+    series: dict[int, LevelSeries]
     # Keyed on the record's round STAMP, never ledger position: a round can close more than once.
     decisions: dict[int, list[DecisionRecord]]
     # The cells an operator's skip left each arm at: it stands as its proposal does, past a re-entry.
@@ -323,7 +330,7 @@ class StandingRounds(NamedTuple):
 
     @classmethod
     def none(cls) -> StandingRounds:
-        return cls({}, {}, {}, {}, {}, {}, {}, {}, {})
+        return cls({}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 
     def displaced(self, entered: int | None, rewound: int | None) -> StandingRounds:
         return self._replace(
@@ -333,6 +340,7 @@ class StandingRounds(NamedTuple):
             arms=_before(self.arms, entered),
             passes=_before(self.passes, entered),
             elections=_before(self.elections, entered),
+            series=_before(self.series, entered),
             decisions=_before(self.decisions, entered),
             skipped=_before(self.skipped, rewound),
             reads=_before(self.reads, rewound),
@@ -349,6 +357,7 @@ class StandingRounds(NamedTuple):
             arms={**prefix.arms, **later.arms},
             passes={**prefix.passes, **later.passes},
             elections={**prefix.elections, **later.elections},
+            series={**prefix.series, **later.series},
             decisions=prefix.decisions,
             skipped={**prefix.skipped, **later.skipped},
             reads={
@@ -370,7 +379,7 @@ class StandingRounds(NamedTuple):
 
     @property
     def level_series(self) -> LevelSeries | None:
-        return self.rounds[max(self.rounds)].close.level_series if self.rounds else None
+        return self.series[max(self.rounds)] if self.rounds else None
 
     @property
     def crowns(self) -> dict[int, ArmKey]:
@@ -406,6 +415,7 @@ _RoundStep = (
     CycleMintedRecord
     | RoundEnteredRecord
     | ElectionRecord
+    | LevelSeriesRecord
     | DecisionRecord
     | RoundClosedRecord
     | RoundProposedRecord
@@ -456,6 +466,8 @@ class _StandingFold:
                 self._reread = 0
             case ElectionRecord():
                 held.elections[rnd] = record
+            case LevelSeriesRecord():
+                held.series[rnd] = record.series
             case DecisionRecord():
                 held.decisions.setdefault(rnd, []).append(record)
             case RoundClosedRecord():
@@ -535,6 +547,7 @@ class _StandingFold:
             },
             passes={k: dict(taken) for k, taken in held.passes.items()},
             elections=dict(held.elections),
+            series=dict(held.series),
             decisions={n: list(made) for n, made in held.decisions.items()},
             skipped=dict(held.skipped),
             reads={n: list(order) for n, order in held.reads.items()},

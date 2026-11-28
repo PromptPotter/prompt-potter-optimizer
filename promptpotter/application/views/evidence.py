@@ -475,7 +475,7 @@ def _contrast_row(c: ArmContrast) -> Row:
     if lift is None:
         return (*head, *(_ABSENT,) * 8)
     family = lift.family
-    floored = "*" if lift.p_value <= lift.p_floor else " "
+    floored = "*" if lift.floor_binds else " "
     return (
         *head,
         lift.estimate.text,
@@ -658,7 +658,7 @@ def _pair_row(label: str, pair: PairedReading) -> Row:
     if pair.state is not ReadingState.READ:
         return (label, READING_STATE_INFO[pair.state].sentence, *(_ABSENT,) * 3)
     lift = pair.headline
-    floored = "*" if lift.p_value <= lift.p_floor else " "
+    floored = "*" if lift.floor_binds else " "
     return (
         label,
         lift.estimate.text,
@@ -853,7 +853,7 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
                 lift.estimate.point,
                 _band(lift.estimate),
                 str(coverage.scored),
-                "" if lift.side == "spans" else "*",
+                "*" if lift.separated else "",
                 c.campaign_id,
                 c.label,
             )

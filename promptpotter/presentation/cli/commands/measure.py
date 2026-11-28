@@ -13,10 +13,10 @@ from promptpotter.application.cycle_addressing import launched, named_campaign, 
 from promptpotter.application.initialization.scoring_scope import open_diagnostic
 from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.command_effects import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.command_kinds import Door, HeldOutPayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate, ReadingState
-from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.command_result import CommandResult

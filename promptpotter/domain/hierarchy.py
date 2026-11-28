@@ -16,6 +16,7 @@ from promptpotter.domain.command_kinds import (
     acts_filed,
 )
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
+from promptpotter.domain.fork import ForkDirection, ForkTrigger
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
@@ -26,11 +27,10 @@ from promptpotter.domain.phases import (
     StopReading,
     worded_refusal,
 )
-from promptpotter.domain.records.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.said import Said
-from promptpotter.domain.spend import MeteredSpend
+from promptpotter.domain.spend_rollup import MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.errors import ActValue, NextAct
 
@@ -536,10 +536,15 @@ class HierarchyCycle(_RunEntry):
     )
 
 
-class HierarchyCampaign(_RunEntry):
-    """A campaign as the listing serves it: its state and line stats are its line cycle's."""
+class _CampaignEntry(_RunEntry):
+    """A campaign at any depth: its state and line stats are its line cycle's."""
 
     entry_kind: Literal["campaign"] = "campaign"
+
+
+class HierarchyCampaign(_CampaignEntry):
+    """A campaign as the listing serves it, with the Delete its row offers."""
+
     facts: CampaignFacts
     delete: DeleteAct = DeleteAct.of(CommandKind.DELETE_CAMPAIGN)
     children: Sequence[HierarchyCycle] = Field(
@@ -575,8 +580,9 @@ class SubtreeCycle(HierarchyCycle):
     )
 
 
-class SubtreeCampaign(HierarchyCampaign):
-    """A campaign as the subtree read serves it: every level under it."""
+class SubtreeCampaign(_CampaignEntry):
+    """A campaign as the subtree read serves it: every level under it, and no act of a listed
+    row's (an inner campaign is deleted with its outer, never on its own)."""
 
     facts: SubtreeCampaignFacts
     children: Sequence[SubtreeCycle] = Field(description="Its cycles, root first.")

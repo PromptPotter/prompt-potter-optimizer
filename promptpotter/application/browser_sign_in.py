@@ -18,7 +18,7 @@ from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.records.run_records import Device
+from promptpotter.domain.visit_device import Device
 from promptpotter.infrastructure.identity import accounts
 from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,

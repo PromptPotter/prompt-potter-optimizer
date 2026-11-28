@@ -17,7 +17,7 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.records.run_records import DecisionInputs
+from promptpotter.domain.records.decision import DecisionInputs
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:

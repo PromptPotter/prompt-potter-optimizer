@@ -16,7 +16,8 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import Job, LaunchMove
 from promptpotter.domain.phases import PauseCause, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
+from promptpotter.domain.records.money import Hold
+from promptpotter.domain.records.run_phase import RunPhaseRecord
 from promptpotter.domain.spend import Budget, CeilingMeter, HeldBudget
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook
 from promptpotter.infrastructure.store.stores import Stores

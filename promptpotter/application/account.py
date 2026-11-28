@@ -18,10 +18,11 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.command_kinds import CommandKind, Door, filable
-from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
+from promptpotter.domain.records.workspace import AccountEvent, AccountEventRecord
 from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.visit_device import Device
 from promptpotter.infrastructure.identity import accounts, bulletin_board, tokens
 from promptpotter.infrastructure.identity import grants as grant_files
 from promptpotter.infrastructure.identity.grants import (

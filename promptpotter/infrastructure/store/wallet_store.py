@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import short_form
-from promptpotter.domain.records.run_records import ChargeLine
+from promptpotter.domain.records.money import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.identity import sealing

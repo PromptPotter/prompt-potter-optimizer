@@ -6,7 +6,7 @@ import {
   KNOB_SOURCE_SET_BY,
   type ConfigKnob,
   type ConfigMapResponse,
-  type HierarchyEntry,
+  type RowEntry,
   type UnstartedCampaign,
 } from "@/lib/api/types";
 import { LeafSplit } from "@/components/account/LeafSplit";
@@ -34,7 +34,7 @@ export function RowHoverCard({
   card,
   children,
 }: {
-  card: HierarchyEntry | UnstartedCampaign;
+  card: RowEntry | UnstartedCampaign;
   children: ReactNode;
 }) {
   return (
@@ -57,7 +57,7 @@ function Facts({ facts }: { facts: [string, string][] }) {
   );
 }
 
-function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
+function EntryBody({ entry }: { entry: RowEntry | UnstartedCampaign }) {
   const campaign = entry.entry_kind === "campaign" ? entry : null;
   // Storage and config are routed by a top-level campaign id; an inner run's sandbox has neither.
   const campaignId = campaign && campaign.parent === null ? campaign.address : null;

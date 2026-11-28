@@ -16,7 +16,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.campaign import Campaign, CampaignCycle, ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import InnerRun, Job
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.money import (
     CampaignCeilingRecord,
     CycleShareRecord,
     Hold,

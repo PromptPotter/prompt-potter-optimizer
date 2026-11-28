@@ -19,6 +19,7 @@ from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.failures import RuntimeFailure, rf_dedup_key
 from promptpotter.domain.fitness_fold import arm_folds
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
@@ -27,7 +28,8 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.records.run_records import DecisionRecord, RoundProposedRecord
+from promptpotter.domain.records.decision import DecisionRecord
+from promptpotter.domain.records.rounds import RoundProposedRecord
 from promptpotter.domain.results import Election, InRunCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp, withheld
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
@@ -35,7 +37,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.verification import BenchPasses
-from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.measurement_context import MeasurementRole
 

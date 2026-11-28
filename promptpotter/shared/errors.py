@@ -667,15 +667,3 @@ def graceful(msg: str) -> Iterator[None]:
         raise
     except Exception as exc:  # noqa: BLE001 -- the caller handles any fault by saying it
         logger.warning("%s: %s", msg, fault_said(exc)[0])
-
-
-def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
-    cat = result.get("error_category")
-    if cat is None:
-        return None
-    if isinstance(cat, ErrorCategory):
-        return cat
-    try:
-        return ErrorCategory(cat)
-    except ValueError:
-        return None

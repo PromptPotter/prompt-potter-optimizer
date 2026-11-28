@@ -9,6 +9,7 @@ from typing import Literal, NamedTuple
 
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.command_effects import LaunchedEffect, LaunchedJob
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.command_kinds import CommandKind, acts_filed, filable
 from promptpotter.domain.cycle_paths import CycleHop
@@ -23,7 +24,6 @@ from promptpotter.domain.phases import (
     StopReading,
     StopReason,
 )
-from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.stores import Stores

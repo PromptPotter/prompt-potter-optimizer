@@ -15,6 +15,7 @@ from promptpotter.domain.campaign import (
     StoppingRule,
 )
 from promptpotter.domain.cells import HardSampleOrder
+from promptpotter.domain.fork import ConfigOverrides
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Folded, Lay, Layer, ScopedBy, fold_layers, rules_of
 from promptpotter.domain.origin_panel import NotSeparatedStall
@@ -26,7 +27,8 @@ from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeSearchNarrowing,
 )
-from promptpotter.domain.records.run_records import ConfigOverrides, CycleStart, ScoringLockedRecord
+from promptpotter.domain.records.lineage import CycleStart
+from promptpotter.domain.records.run_wiring import ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel

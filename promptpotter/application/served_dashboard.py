@@ -31,6 +31,7 @@ from promptpotter.domain.dashboard_rows import (
     ServedRound,
     served_rounds,
 )
+from promptpotter.domain.fork import ForkRemainder
 from promptpotter.domain.hierarchy import READ_ONLY, Figure, RunAdmission
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName
@@ -45,7 +46,7 @@ from promptpotter.domain.phases import (
     StopReading,
 )
 from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import CycleShareRecord, ForkRemainder
+from promptpotter.domain.records.money import CycleShareRecord
 from promptpotter.domain.round_health import HEALTH_GRADE_INFO
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.said import Said, pinned
@@ -60,14 +61,13 @@ from promptpotter.domain.spend import (
     Budget,
     CapAxis,
     CeilingMeter,
-    MeteredSpend,
     Overshoot,
     SpendCount,
-    SpendRollup,
     TokenUsageKind,
     metered_line,
     usd_text,
 )
+from promptpotter.domain.spend_rollup import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.holders import claim_on
 from promptpotter.infrastructure.llm.money_fold import money_on
@@ -108,13 +108,12 @@ class WarmingDashboard(StrictModel):
 
 
 class SampleWalk(StrictModel):
-    """The scoring walk of the arm being measured, on its own order, plus a cursor. Its cells taken
-    lead, so a race that re-chooses its rows at a decision never moves a taken cell; past the
-    cursor is chosen, never promised — an eliminator can stop the arm before its tail."""
+    """The scoring walk of the arm being measured, plus a cursor: the cells it took, then those
+    out. A race re-chooses its untaken rows at each decision, so nothing past the cells out is
+    served as promised."""
 
     ids: list[int] = Field(
-        description="The arm's rows through its budget as its last turn filed them: those it took, "
-        "in the order it took them, then its untaken in the order its race chose."
+        description="The arm's rows it took, in the order it took them, then those out now."
     )
     cursor: int = Field(
         description="Where the walk stands in `ids`: the cell in flight, else the one after the "
@@ -386,18 +385,17 @@ def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
 
 
 def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk | None:
-    """The newest arm with a cell out, on its own order; ``None`` where no arm walks:
-    `current_round` rows linger after a stop."""
+    """The newest arm with a cell out, on the cells it took then those out; ``None`` where no
+    arm walks: `current_round` rows linger after a stop."""
     current = state.current_round
     walking = [c for c in current.candidates if c.open_cells]
     if not live or state.round_closed() or not walking:
         return None
     row = walking[-1]
-    if not (ids := state.walk_orders.get(key := row.reading.arm.key)):
-        return None
-    out = row.open_cells[0]
-    cursor = ids.index(out) if out in ids else min(len(row.samples), len(ids) - 1)
-    return SampleWalk(ids=ids, cursor=cursor, key=f"{hop.cycle_id}:{current.round}:{key}")
+    taken = [s.position for s in row.samples]
+    ids = taken + [c for c in row.open_cells if c not in taken]
+    key = f"{hop.cycle_id}:{current.round}:{row.reading.arm.key}"
+    return SampleWalk(ids=ids, cursor=ids.index(row.open_cells[0]), key=key)
 
 
 class ServedDashboard(DashboardFacts):

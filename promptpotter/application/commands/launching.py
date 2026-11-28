@@ -60,6 +60,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.checkin_draft import DraftFile
+from promptpotter.domain.command_effects import LaunchedEffect, LaunchedJob
 from promptpotter.domain.command_events import CommandEffect
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
@@ -84,13 +85,7 @@ from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
-from promptpotter.domain.records.run_records import (
-    ArmAct,
-    CycleStart,
-    LaunchedEffect,
-    LaunchedJob,
-    OriginSource,
-)
+from promptpotter.domain.records.lineage import ArmAct, CycleStart, OriginSource
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (

@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
+from promptpotter.domain.command_effects import StandingEffect
 from promptpotter.domain.command_events import (
     COMMAND_LOG_ADAPTER,
     COMMAND_TRANSITIONS,
@@ -37,7 +38,6 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
 )
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
-from promptpotter.domain.records.run_records import StandingEffect
 from promptpotter.infrastructure.holders import hold_released, producer_alive
 from promptpotter.infrastructure.store.io import WORKSPACE_STATE_DIR, append_line, appending
 from promptpotter.infrastructure.store.read_model import LineIndex

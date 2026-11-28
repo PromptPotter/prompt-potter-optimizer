@@ -25,6 +25,7 @@ from promptpotter.application.cycle_reads import (
 )
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.read_workers import off_loop
+from promptpotter.domain.command_effects import LaunchAnswer
 from promptpotter.domain.command_kinds import (
     COMMAND_ID_CHARS,
     PAYLOAD_MODEL_FOR_KIND,
@@ -34,7 +35,6 @@ from promptpotter.domain.command_kinds import (
     Door,
     IngestUploadPayload,
 )
-from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.presentation.api.deps import (
     IdempotencyKeyDep,
     JobRegistryDep,

@@ -6622,7 +6622,7 @@
           "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PairedReading"
+                "$ref": "#/components/schemas/ReadPair"
               },
               {
                 "type": "null"
@@ -7127,7 +7127,7 @@
       },
       "EvidencePower": {
         "additionalProperties": false,
-        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject\nit would take to resolve the biggest gap the roster already shows. What a pair's WIDTH permits\nat any effect size is that pair's own ``estimate.p_floor``.",
+        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject\nit would take to resolve the biggest gap the roster already shows. What a pair's WIDTH permits\nat any effect size is that pair's own lift's floor (`MeasuredLift.floor_binds`).",
         "properties": {
           "cells_for_largest_gap": {
             "anyOf": [
@@ -8697,7 +8697,7 @@
       },
       "HierarchyCampaign": {
         "additionalProperties": false,
-        "description": "A campaign as the listing serves it: its state and line stats are its line cycle's.",
+        "description": "A campaign as the listing serves it, with the Delete its row offers.",
         "properties": {
           "address": {
             "description": "Server-minted and stable: the key of every row and every open set. A cycle's is its `CyclePath` on the wire (`encodeCyclePath`).",
@@ -16003,7 +16003,7 @@
       },
       "SampleWalk": {
         "additionalProperties": false,
-        "description": "The scoring walk of the arm being measured, on its own order, plus a cursor. Its cells taken\nlead, so a race that re-chooses its rows at a decision never moves a taken cell; past the\ncursor is chosen, never promised — an eliminator can stop the arm before its tail.",
+        "description": "The scoring walk of the arm being measured, plus a cursor: the cells it took, then those\nout. A race re-chooses its untaken rows at each decision, so nothing past the cells out is\nserved as promised.",
         "properties": {
           "cursor": {
             "description": "Where the walk stands in `ids`: the cell in flight, else the one after the last taken.",
@@ -16011,7 +16011,7 @@
             "type": "integer"
           },
           "ids": {
-            "description": "The arm's rows through its budget as its last turn filed them: those it took, in the order it took them, then its untaken in the order its race chose.",
+            "description": "The arm's rows it took, in the order it took them, then those out now.",
             "items": {
               "type": "integer"
             },
@@ -17203,6 +17203,7 @@
               "health",
               "hold",
               "launch_clock",
+              "level_series",
               "llm_call",
               "llm_call_progress",
               "llm_call_start",
@@ -18049,7 +18050,7 @@
       },
       "SubtreeCampaign": {
         "additionalProperties": false,
-        "description": "A campaign as the subtree read serves it: every level under it.",
+        "description": "A campaign as the subtree read serves it: every level under it, and no act of a listed\nrow's (an inner campaign is deleted with its outer, never on its own).",
         "properties": {
           "address": {
             "description": "Server-minted and stable: the key of every row and every open set. A cycle's is its `CyclePath` on the wire (`encodeCyclePath`).",
@@ -18063,14 +18064,6 @@
             },
             "title": "Children",
             "type": "array"
-          },
-          "delete": {
-            "$ref": "#/components/schemas/DeleteAct",
-            "default": {
-              "keep_results": "Keep its manifest, reports and summary trace; delete only what resuming, auditing and mirroring it needs.",
-              "kind": "delete-campaign",
-              "says": "Delete a campaign for good; other campaigns still reuse its cached measurements."
-            }
           },
           "entry_kind": {
             "const": "campaign",

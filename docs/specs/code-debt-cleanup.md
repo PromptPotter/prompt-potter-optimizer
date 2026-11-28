@@ -19,19 +19,20 @@ its own under `domain/records/`, read by kind; a pass that measures is one recor
 a value another derives; no field without a reader. No I/O, no async; a rename wipes run data, so shapes
 settle before L4 spends.
 
-**Unexamined:** `domain/records/run_records.py`, `domain/results_health.py`, `domain/arm_reading.py`,
-`domain/wire_record.py`, `domain/export.py`, `domain/candidate_diff.py`, `shared/errors.py`
+**Unexamined:** none (w11-records2 read `results_health.py`, `arm_reading.py`, `wire_record.py`,
+`export.py`, `candidate_diff.py` and `shared/errors.py`; what it found is a row below). Of the 51 models a
+`RoundStatement` nests, 2 name a reader on themselves and 43 are read in several modules.
 
 - **The layering is fictional at runtime**: the package holds no function-local import and its
-  runtime file graph is acyclic, but 81 `TYPE_CHECKING` imports lie on a file-level cycle after
-  layers (122 at its base), so a type-only block hides each knot rather than cuts it. Every other
+  runtime file graph is acyclic, but 51 `TYPE_CHECKING` imports lie on a file-level cycle after
+  w11-records2 (57 at its base), so a type-only block hides each knot rather than cuts it. Every other
   type-only import is hoisted, keeping only the two that keep `promptpotter --help` off httpx and
   rich, the layer crossings and the Harbor extras. The knots left:
   - the store hub and its parts: `stores` ↔ `session_pointer`, `account_spend`, `account_trail`,
     `archive_queries`, `dataset_access`, `spend_book`, `run_scope`, `connectors/protocol`. A
     narrower parameter cannot close these, so each part needs the protocol it reads in a module of
     its own;
-  - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`;
+  - the domain: `pipeline_params` and `search_point` ↔ `pipeline_schema` (area 07's files);
   - bench ↔ the plugin contract: bench reads `optimizer_contract.py`'s `CycleRead`, member
     protocols and `NODE_MEMBERS`, which name the bench's `NodeContext` and `RoundContext`. Moving
     `CycleRead` alone re-formed runtime cycles.
@@ -39,52 +40,22 @@ settle before L4 spends.
   Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
   layers. **Re-test:** the `type_cycles` row of `BASELINE` falls to 0.
 - **Names collide across layers**: two modules each named `head_to_head.py`, `hierarchy.py`,
-  `bench.py`, `power.py`, `wounds.py` and `cells.py`; `ledger_scan.py:176 CycleFacts` beside
-  `evidence/read.py:360 _CycleFacts`. Root: a name is one thing; each pair renames the one that stopped
+  `power.py` and `cells.py` (`domain/cells.py` holds L4's `Seat` and `PinnedCell` beside the served
+  cell views, a split rather than a rename); `ledger_scan.py::CycleFacts` beside
+  `evidence/read.py::_CycleFacts`. Root: a name is one thing; each pair renames the one that stopped
   describing its contents, with its doc and `CLAUDE.md` row. **Re-test:**
-  `git ls-files promptpotter | xargs -n1 basename | sort | uniq -d | grep -v __init__` loses the six.
-- **`run_records.py` is a module of 38 records and ~35 non-records**: `domain/records/run_records.py`
-  declares 38 `CycleRecord` kinds beside charge lines (`Bill`, `Release`, `Lapse`), command-ack effects
-  (`LaunchedEffect`, `VerifySaturated`), the user-agent parser (`device_of`), fork specs and
-  `sibling_cycle_id`. Action: one module per record family under `domain/records/` (phase/stop, round,
-  pass, provider, spend, LLM call, lineage, wiring, workspace), each non-record to its owner. **Rides
-  with:** area 01's chain. **Re-test:** `git grep -cE "^class \w+\(.*CycleRecord" --
-  promptpotter/domain/records/run_records.py` is 0.
+  `git ls-files promptpotter | xargs -n1 basename | sort | uniq -d | grep -v __init__` loses the four.
 - **A closed round banks its election twice**: `runner/round.py` appends an `ElectionRecord` from
   `result.election`, and the round's `RoundClosedRecord` carries the same `Election` through
   `results.py::RoundOutcome.election`; `ledger_scan.py` reads the first. Action: the ledger states the
   election once, the other reader reads that record. **Rides with:** area 01's chain. **Re-test:**
   `git grep -c "ElectionRecord(" -- promptpotter` is 0, or `RoundOutcome` holds no `election`.
-- **`Election.deciding_pair` admits a pair that is not read**: `domain/results.py::Election.deciding_pair`
-  is `PairedReading | None`, so `scoring/selection.py` asserts `ReadingState.READ` away. Action: type it
-  `ReadPair | None`, narrowed where potter's election builds it (a behaviour-key move,
-  named). **Rides with:** area 01's chain. **Re-test:** no `assert pair.state` in `selection.py`.
-- **A round file stores a served word**: `arm_reading.py::ArmReading.vs_reference_name` is a
-  `@computed_field`, dumped into each round file's scoreboard and read back by `RoundFileView.tsx`.
-  Root: the round file holds facts, the round read words them. **Rides with:** area 01's chain.
-  **Re-test:** a `RoundResult` dump holds no `vs_reference_name`.
-- **Round health folds through three carriers**: `results_health.py::compute_degradation_health` has one
-  caller (`compute_round_health`), which passes every argument, yet it defaults them and folds `or {}`,
-  then copies the counts into `_RoundCounts` and again into `DegradationHealth`; `classify_sample_failure`
-  and `compute_node_failure_rates` are public with no outside reader. Action: one fold, no defaults, one
-  carrier. **Rides with:** area 01's chain. **Re-test:** `git grep -c "or {}" --
-  promptpotter/domain/results_health.py` is 0.
 - **What a child moved over its parent is computed twice**: `candidate_diff.py::candidate_delta` diffs
   flattened prompt maps (read by `l1.py`, `validators.py`, `panels.py`, `earned_blocks.py`) beside
   `opt_search_point.py::OptSearchPoint.loci_moved_from` over `loci()` (read by `export.py`,
   `hierarchy_subtree.py`); `flatten_prompts`/`flatten_sp_summary` are a third spelling of a locus, and
   `parent_param_value` falls back `or {}` twice. Action: `CandidateDelta` is built from `loci()`.
   **Rides with:** area 01's chain. **Re-test:** one of `candidate_delta`, `loci_moved_from` is left.
-- **An unknown error category reads as UNKNOWN**: `shared/errors.py::error_category` catches `ValueError`
-  and returns `None`, and its one reader (`domain/scoring.py:291`) maps that to `ErrorCategory.UNKNOWN`, so a
-  category this build does not know is relabelled, never refused. Action: the cell reader parses
-  `ErrorCategory(cat)` strictly. Same shape one layer up: `errors.py::graceful` swallows a fault into a
-  log at `main.py` and `api/middleware/visits.py`. **Rides with:** area 01's chain. **Re-test:** `git grep -c "except
-  ValueError" -- promptpotter/shared/errors.py` is 0.
-- **Backend wire records drop undeclared keys**: `wire_record.py::typed_record` sets `extra="ignore"` on a
-  record with no `rest` field, so `NodeWarning`, `Diagnostics` and `JudgeReading` silently drop a key the
-  backend added. **Held:** a decision, whether backend wire is tolerant by design. **Re-test:** the
-  generated `read` refuses an undeclared key, or the doc states the tolerance.
 
 ## 02 · Store, ledger, projections, landing
 
@@ -183,6 +154,12 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   that depend on it stand until the store's next write or a restart — the definition loader stamps
   its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
   cells ETag moves.
+- **A line's walks are a flat list every reader re-scans per individual** (w11-reads, 11-28):
+  `campaign_store/ledger_scan.py::line_walks` returns `list[IndividualWalk]`. `closed_rounds.py::LineCells` keys it
+  once for the reads, but `passes.py:220` and `domain/results.py:329` still filter it per individual.
+  Root: `line_walks` serves the walks keyed by individual. **Rides with:** area 02's chain (with 01's
+  `results.py`). **Re-test:** `git grep -n "individual_id ==" -- promptpotter/application/scoring
+  promptpotter/domain/results.py` is empty.
 - **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
   `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
   index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
@@ -414,7 +391,7 @@ bill.
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
   **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
-- **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
+- **A nested run's send is filed once, on the run that sent it**: `domain/records/money.py::TokenUsageRecord`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
   the money fold branches on it, and `store/CLAUDE.md` warns that money "banks twice" where a reader
   forgets (`mirrored` 14/6). The next row holds its root and its cut. Under **A nested spend book is
@@ -432,7 +409,7 @@ bill.
   `mirrored` go. It closes the three rows above together.
 
   It was cut by w11-spend, because its holders sit outside area 05: the live projection,
-  `ledger_scan.py`, `hierarchy.py`, `run_records.py`, `run_observers.py` and `runner/inner/tasks.py`.
+  `ledger_scan.py`, `hierarchy.py`, `records/money.py`, `run_observers.py` and `runner/inner/tasks.py`.
   **Rides with:** one chain owning areas 02, 05 and 11 at once. **Re-test:** `mirrored` is 0, and
   pausing an outer run mid inner round makes the inner row read its cut sends as unreported.
 - **A landing that drops other accounts' run data refunds nobody** (w11-spend, 11-28). On 11-26 a
@@ -472,6 +449,31 @@ bill.
   no unit and no empty-state line. Expected one served state ("nothing billed: unmetered") on all
   three; seen three. Root: one served spend headline the surfaces render, an empty series said, not
   drawn. **Rides with:** `area 05's chain` — **Re-test:** on the walk world the three name one state.
+  Walk #2 (11-28, 390×844): still three. The sidebar says "SPEND unmetered", the masthead and the run
+  row "$0.00", the run dock "$0.00 of $0.0250 spent", and "Spend by round" draws its empty 0–1.0 axis,
+  while the served `metered_line` reads "this cycle $0.00 (billed + priced at our rate)".
+- **A measurand's USD reads four fixed places beside the three-digit rule** (w11-walk2, 11-28): on the
+  walk world, `justlogic.d234` → Dashboard → Leader, "AVG COST / CELL" reads "$0.0000 → $0.0000". That
+  is the evidence read's `cost` side channel (`application/evidence/read.py`), formatted by
+  `promptpotter/domain/paired_reading.py::UNIT_FORMATS`'s `usd` row at 4 fixed digits. The money rule is
+  `promptpotter/domain/spend.py::usd_text`'s: three significant digits under a dollar. So a cell's cost
+  of $0.000123 reads "$0.0001". Expected: one money format. Seen: two. Root: the `usd` unit formats
+  through `usd_text`, and its lift says the same. **Rides with:** `area 05's chain` — **Re-test:**
+  `git grep -n '"usd": UnitFormat' -- promptpotter/domain/paired_reading.py` names no fixed digit count.
+- **A free account's shipped dataset opens refused** (w11-walk2, 11-28): on an auth-on offline world
+  with `OPENROUTER_API_KEY` set on the box, sign in as a fresh non-host account, then press
+  email-tagging. The check-in's Start is disabled and says "the task model openai/gpt-oss-20b is not
+  part of the free tier yet. To ask for it, open an issue: https://… or message us on LinkedIn:
+  https://…". The dataset launches `openai/gpt-oss-20b`
+  (`promptpotter/assets/datasets/email-tagging/dataset.yaml`), while `promptpotter/assets/free_tier.yaml`
+  lists only `openai/gpt-oss-20b:nitro` and `qwen/qwen3.7-flash`.
+  `promptpotter/application/free_tier.py::free_tier_overlay` lays a tier param only where the config
+  leaves it unset, and never the model. The refusal also opens in lower case and spells both links as
+  raw URLs. Without a box key, the same draft says only "No key for a provider", with its sentence
+  behind a tap. Expected: a free account meets a startable check-in on a shipped dataset, or a refusal
+  that offers the tier's model. Seen: every pick refused. Root: the tier lays its first task model
+  where the dataset's is off it, as it lays a param's lowest value. **Rides with:** `area 05's chain`.
+  **Re-test:** a fresh free account's email-tagging check-in serves no `not_on_free_tier`.
 
 ## 06 · Jobs, launch, commands
 
@@ -534,6 +536,8 @@ written under the gate.
   `steer` does not. Root: the preview asks `launch_preflight`'s send half of the fork's config
   (`mint_and_start.py::ForkLaunch.sends`). **Rides with:** `area 06's chain` — **Re-test:** on the walk
   world with no key, the fork preview serves `no_api_key` and Confirm is disabled.
+  Walk #2 (11-28, 390×844): still. On `justlogic.d234`, tap C1.3, then Steer & fork. `fork-preview`
+  answers `{"steer":"clean"}`, Confirm is enabled, and pressing it answers 422 `no_api_key`.
 - **A launch released refused reads as Detached, Start still offered** (w11-walk, 11-27): Start on
   the auth-off offline world (key added) mints the cycle, its job is released refused
   (`jobs/refused/<id>.json`: `backend_unreachable`), and `GET /hierarchy/<campaign>::<cycle>` serves
@@ -546,6 +550,33 @@ written under the gate.
   report. One line with **A queued launch's ending files where an unasked one does**, whose root (a
   launch's ending is its command's) serves it. **Rides with:** `area 06's chain` — **Re-test:** after
   a refused launch the cycle's served state names the refusal's code.
+  Walk #2 (11-28): still. On the cold world, a check-in's Start mints `email-tagging__ed682a`, and its
+  job is released `backend_unreachable`. The cycle serves `detached` with `admission.refusal` null.
+  Once the key is removed, the dock shows the next launch's `no_api_key`, never the refusal the last
+  launch met.
+- **The run dock says a launch's refusal as a send that happened** (w11-walk2, 11-28): on the walk
+  world, open `justlogic.d234`, a finished run where nothing was pressed. Every view's run dock pins
+  "No openrouter key is held by this account or this box, so nothing was sent. Add your own openrouter
+  key …". That is the cycle's served `admission.refusal` for its next act (more rounds), worded by
+  `promptpotter/shared/errors.py::NoApiKeyError`, the error a send raises. At 390×844 the pinned line
+  takes about a sixth of the screen under a 4-row masthead. Expected: the refusal names the act it
+  bars ("More rounds need an openrouter key"), in the dock's collapsed line. Seen: a past-tense send
+  outcome on every view. Root: a preflight refusal carries its act's own sentence, and the send-time
+  error keeps "nothing was sent". **Rides with:** `area 06's chain`. **Re-test:** the walk world's
+  finished campaign shows no "nothing was sent" before any press.
+- **A check-in offers Propose on a draft it would refuse, and a failed propose speaks the parser**
+  (w11-walk2, 11-28): on the cold world, upload a 10-row CSV, then press "Propose it from the rows".
+  - With a key held, the offline world answers 503 `resolver_failed`: "origin resolver turn failed:
+    Optimizer prompt response failed Pydantic validation after 2 attempt(s): 1 errors".
+    `application/commands/origin_resolving.py` wraps the exception's text
+    (`infrastructure/llm/json_parse.py`).
+  - With no key, the button is still offered, and pressing it answers 422 `no_api_key`. Start on the
+    same draft is disabled with that refusal.
+
+  Expected: Propose is disabled with the refusal the draft serves, and a failed turn says one operator
+  sentence. Root: a paid act on a draft reads its refusal off the draft read, as Start does, and
+  `resolver_failed` carries a typed cause, never the exception's text. **Rides with:** `area 06's
+  chain`. **Re-test:** a keyless upload's Propose is disabled, and no served message holds "Pydantic".
 
 ## 07 · Config, pipeline, datasets
 
@@ -614,7 +645,7 @@ sole route for a backend tunable.
   their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
   `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
   area 04's (`observed_config`). **Re-test:** `git grep -c "NodeCall.model_validate(" --
-  promptpotter/application/scoring/measurement_log.py promptpotter/domain/wounds.py` is 0 (2 now).
+  promptpotter/application/scoring/measurement_log.py promptpotter/domain/failures.py` is 0 (2 now).
 - **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
   field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
   (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch
@@ -622,12 +653,36 @@ sole route for a backend tunable.
   RST backticks and a seconds/minutes contradiction. Root: a served field's operator line is its own
   served text, never the model's docstring. **Rides with:** `area 07's chain` — **Re-test:** no served field
   `description` the Run bounds form renders holds a double backtick or names a unit its label does not.
+  Walk #2 (11-28, 390×844): still. On an upload's Run bounds, "Halt at fitness" reads "Stop
+  ``target_hit`` … ``None`` → no such stop", and "Wall-clock cap (minutes)" reads "Seconds ONE launch
+  runs".
 - **Picking a dataset twice opens two identical check-ins** (w11-walk, 11-27): each press of a dataset
   in `webapp/components/ingest/DatasetPickList.tsx::DatasetPickList` files `open-dataset-draft`, so a
   second press mints a second draft; the pick list shows two "email-tagging · just now" rows and the
   sidebar two "email-tagging unstarted" campaigns, nothing telling them apart. Expected: a dataset with
   an open check-in reopens it (or the rows say what differs). **Rides with:** `area 07's chain` —
   **Re-test:** two presses of one dataset leave one open check-in.
+- **A Hub dataset the box cannot fetch opens as a 500** (w11-walk2, 11-28): on the cold world, press
+  "+ New campaign", then "justlogic/d234 — JustLogic — deductive reasoning". `open-dataset-draft`
+  answers 500 `internal_error`, and the chat says "Internal server error Anything you sent may not have
+  been applied." The server raised `FileNotFoundError` (Couldn't find 'michaelchenkj/JustLogic' on the
+  Hugging Face Hub) from `promptpotter/application/datasets/loaders.py::_load_dataset`, through
+  `promptpotter/application/datasets/startability.py::checkin_bank`. The pick list also offers the
+  dataset with "—" rows, beside email-tagging's 15. Expected: a typed refusal (the dataset's rows are
+  unreachable, from where) that the pick says. A 500 reads as `transient`, so the webapp retries it.
+  Root: a dataset's row source fails typed at its loader's door. **Rides with:** `area 07's chain`.
+  **Re-test:** with the Hub unreachable, the pick answers a typed 4xx/503 naming the source.
+- **A check-in's mode pick reads back as another mode of the same chain** (w11-walk2, 11-28): on the
+  cold world, upload a CSV, open Pipeline, and pick `llm_only` from "default · 1 step / llm_only ·
+  1 step". `edit-draft-campaign {"mode":"llm_only"}` answers 200. The draft then serves `mode: default`,
+  the select snaps back, and the summary still says "default · 1 step". Termnorm serves both modes
+  with `steps: ["llm_only"]`, and
+  `promptpotter/application/datasets/draft_build.py::draft_wire` names the mode as the first whose
+  steps equal the active chain. Expected: the pick holds, or one chain has one mode name. Seen: a 200
+  that reads back undone, which is a state the system enters but cannot report. Root: the draft serves
+  the mode it holds (`EditDraftPatch.mode`), never one re-derived from steps. Or, if two names for
+  one chain is the defect, the connector declares one. **Rides with:** `area 07's chain`.
+  **Re-test:** picking each served mode reads it back as the draft's `mode`.
 
 ## 08 · Connectors, backends, LLM clients
 
@@ -708,7 +763,7 @@ imports an optimizer package.
   `char_cap=400`, `char_cap=2400`) beside `potter/dispatch/bundle.py`'s caps, and `layer_state.py`'s
   `_r_l1_layout` re-derives `potter/dispatch/prompts.py::node_layout`; `potter/validators.py` books its
   no-op, duplicate and repeat verdicts under the placeholder axis `variant`, no locus, which
-  `domain/wounds.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
+  `domain/failures.py`'s docstring lists for two of the three. Root: one owner per rule and per cap; a
   whole-candidate verdict names no axis. **Rides with:** area 09's chain. **Re-test:**
   `git grep -c 'axis="variant"' -- promptpotter` is 0 and `layer_state.py` names no `char_cap=` literal.
 - **Selection and the race are written once per peer, not in the backbone** (w10-survey):
@@ -764,6 +819,8 @@ imports an optimizer package.
   campaign's chat. Expected: an info a run keeps is no news (`KnobClashes.tsx`'s own rule), or one
   operator sentence. **Rides with:** `area 09's chain` — **Re-test:** the walk world's campaign chat
   shows no coupling the config keeps.
+  Walk #2 (11-28, 390×844): still. Both walk-world campaigns show the full `per_round_resubset`
+  paragraph in red-keyed monospace, above their chat and in the sidebar's node panel.
 
 ## 10 · L4
 
@@ -816,38 +873,23 @@ never a copy of history.
 **Unexamined:** `views/render/phase.py`, `render/export.py`,
 `render/primitives.py`, `domain/narration.py`, `served_dashboard.py`, `hierarchy.py`, `hierarchy_subtree.py`
 
-- **Head-to-head re-reads every pair's bench per GET** (w10-survey): `evidence/head_to_head.py::head_to_head`
-  picks the reference by `_agree` over every pair of graded rows and re-guards each row, and `_contrasts`
-  guards every arm pair; each `_guard` reaches `bench/line.py::pair_on_bench`, a full `read_pair`, so a
-  request costs O(n²) reads (O(k²·m²) in `_contrasts`), and `_read` re-folds `standing_rounds` and the spend
+- **Head-to-head re-reads every pair's bench per GET** (w10-survey): `evidence/head_to_head.py::_read_apart`
+  reads each pair of graded rows once per request (every guard looks its pairs up), still a full
+  `bench/line.py::pair_on_bench` per pair per GET, and `_read` re-folds `standing_rounds` and the spend
   scan per campaign. Root: "the same bench set read alike" is a banked fact of two passes, served from the
-  line's ledger. **Rides with:** area 11's chain, beside **The live reads re-serve history per poll**.
-  **Re-test:** `git grep -c "pair_on_bench" -- promptpotter/application/evidence/head_to_head.py` is 0 (2 now).
-- **The consumer spells the lift's verdict** (w10-survey): `views/evidence.py::_contrast_row` and
-  `views/evidence.py::_pair_row` compute `lift.p_value <= lift.p_floor`; `views/evidence.py::_ranking_lines`,
-  `evidence/head_to_head.py::_read_alike` and `views/render/phase.py` each spell `side == "spans"`.
-  `domain/paired_reading.py::MeasuredLift` serves the floor and the side but not "the floor binds" or "the
-  interval excludes zero". Root: every score is served; the verdict is a field of the lift. Also
-  `evidence/metric_catalogue.py::CHANNELS` is a second word for `domain/fitness_fold.py::CELL_CHANNELS`:
-  delete it. **Rides with:** area 11's chain. **Re-test:**
-  `git grep -cE "p_floor|\.side == \"spans\"" -- promptpotter/application/views promptpotter/application/evidence`
-  is 0 (5 now).
-- **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `_cycle_cells`
-  and `_campaign_edits` cost O((R·A)²) per request, `snapshot_frame` re-folds per connect, and a ray
-  page re-folds per "older". Root: a value is its aggregate plus the live round, never a copy of its
-  history. The wire half is closed (a frame naming the closed series' `series_version` it holds re-sends
-  no closed round, `served_dashboard.py::ServedDashboard.series_held`); the server still folds and
-  hashes every closed round per poll to decide it. **Re-test:** `_cycle_cells` per request is O(R·A).
+  line's ledger: a record kind. **Rides with:** a lineage-fold chain after w11-records2.
+  **Re-test:** `git grep -c "pair_on_bench" -- promptpotter/application/evidence/head_to_head.py` is 0 (1 now).
+- **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `snapshot_frame`
+  re-folds per connect, a ray page re-folds per "older", and the server folds and hashes every closed
+  round per poll to decide `served_dashboard.py::ServedDashboard.series_held` (the wire half is closed:
+  a held series re-sends no closed round). `_cycle_cells` and `_campaign_edits` read each walk once
+  (`scoring/closed_rounds.py::LineCells`). Root: a value is its aggregate plus the live round, never a
+  copy of its history. **Re-test:** a poll naming the series it holds reads no closed round.
 - **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::earlier_measured`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
   ~90 candidates (`hierarchy_subtree.py:242-318`). Action: "closer to" and descent are folded once per
   candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def earlier_measured" -- promptpotter/application/hierarchy_subtree.py` is empty.
-- **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
-  subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
-  `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is
-  not a listed entry; it shares a base, not the listed one's acts. **Re-test:** the deep read's
-  inner campaign serves no `delete`.
 - **The account feed never re-asks an exhibit's reads when the host's store moves**: a follower's
   view stands still. Action: the feed's subject includes the exhibit's. **Re-test:** the host's
   round closes; the follower's dashboard moves without a reload.
@@ -861,11 +903,11 @@ never a copy of history.
   descent, the moment and the root are refused off the exhibit (landing 89's fix pass), each a
   check. Action: a `Stores` narrowed to the exhibit's campaign, so no read can name another, and the
   served files carry no principal a follower may not see. **Rides with:** the next access chain.
-  **Re-test:** the exhibit's hierarchy ETag holds while the host edits a draft.
-- **A follower's live tail outlives its switch**: `cycle_reads.py`'s SSE stream re-checks the carrier
-  alone, so turning "Try & learn" off keeps the exhibit's tail open until a reconnect (a block ends it).
-  Action: the stream re-reads `exhibit_stores` per frame batch. **Re-test:** switch off mid-stream;
-  the stream ends.
+  **Re-test:** the exhibit's hierarchy ETag holds while the host edits a draft. w11-reads (11-28): this
+  row is the root of the two above it. `exhibit.py::read_stores` hands the follower the host's
+  `Stores`, so the feed, the session's shape and the follow check are each spelled per reader. The
+  narrowed `Stores` lives in `infrastructure/store/stores.py`, and the three rows ride it (areas 13
+  and 02).
 - **`cycle_reads.py` copies the live round's candidates into a second shape** (w7-line):
   `application/cycle_reads.py:136` copies `current_round.candidates` whole. Door: its reader takes
   the served line. **Re-test:** no copy of `current_round.candidates` outside the fold. Blocked
@@ -879,26 +921,12 @@ never a copy of history.
   **Held:** unreproduced at `2c7dff34e` (w7-small: `/campaigns/gone/pipeline` answers 404 with and
   without `at=`, over every hop shape); if the 400 recurs, capture the exact `at` the stale tab sent.
   **Re-test:** each campaign read of a deleted campaign answers 404.
-- **A restatement reads as a round** (w9-pass): the narration emits a "Round N" line for a restatement,
-  and a fork child's readout may print a full block for the restated branch round. Root: a restatement
-  is a close of the round it restates, worded as one. **Rides with:** area 11's chain. **Re-test:** a
-  resumed offline leg's narration and readout name the restatement as one.
-- **The served walk axis is a declared order** (ml-5, 11-25):
-  `promptpotter/application/served_dashboard.py::_walk` — the walk's axis is
-  `LiveDashboardState.walk_orders`, the declared row order a walk re-files at each decision, not the
-  cells taken — the root: the axis derives from the cells taken — **Rides with:** `area 11's chain`
-  — **Re-test:** `git grep -n "walk_orders" -- promptpotter` reads no declared list in `_walk`.
 - **Readout words every look-ahead press as expiring** (readings-4/flight-ux, 11-18): `promptpotter/application/views/readout.py::_handle_sample_started`
   — an every-round depth is narrated "(armed — expires when this round finishes scoring)" because
   `SampleStartedRecord` carries `sample_lookahead`/`sample_abreast` but no `auto` — the record
   should carry whether the press expires, so the narration reads a fact — **Rides with:** `area 11's
   chain` — **Re-test:** `git grep -n "expires when this round" -- promptpotter`; still one hit means
   it stands.
-- **Closed rounds folded twice per readout** (w7-text, 11-26): `promptpotter/application/scoring/measurement_log.py::cycle_hard_samples`
-  — `closed_rounds` is folded in `cycle_hard_samples` and again in the readout's own fold
-  (`views/readout.py` line ~348) — the projection has no round fold of its own to share — **Rides
-  with:** `area 11's chain` — **Re-test:** `git grep -n "closed_rounds(" -- promptpotter/application/views/readout.py
-  promptpotter/application/scoring/measurement_log.py` shows two folds per readout.
 
 ## 12 · Surfaces: CLI, REST API, MCP, webapp
 
@@ -997,6 +1025,20 @@ the served contract is generated and the browser derives nothing; mobile first.
   derives `nodeLocked`; `NodeSurface.tsx:245` counts tunables; `L1Variants.tsx:62` casts an untyped
   value to a hand-declared `Variant[]`. Action: `/pipeline?at=` serves each flag and count, and the
   variant shape is generated. **Rides with:** area 11's chain. **Re-test:** `git grep -cE "axisMenu|as Variant" -- webapp/components` is 0.
+- **A provider key goes on one tap, with no confirm and no undo** (w11-walk2, 11-28): on the cold
+  world, at 390×844, go to Account → API keys and add an openrouter key ("…abcd added just now"), then
+  tap Remove. `remove-api-key` answers 202 with `subject: ""`, and the key is gone. Re-adding it means
+  pasting the whole secret again, which only its last four characters are ever shown of. Expected: the
+  destructive press asks once, as a campaign's delete does, and its ack names the key it moved.
+  **Rides with:** `area 12's chain`. **Re-test:** one tap on Remove leaves the key held until
+  confirmed.
+- **A started check-in keeps re-reading its consumed draft** (w11-walk2, 11-28): on the cold world,
+  open an email-tagging check-in with a key held, and press Start. `start-checkin` answers 200, the
+  view moves to the minted campaign, and `GET /drafts/<id>` then answers 404
+  `command_target_not_found` 2–4 times, each a console error (`webapp/lib/hooks/useIngestFlow.ts`'s
+  `draftRead`). A read's 404 is coded as a command's. Expected: Start's ack retires the draft's read,
+  so a 404 on a GONE draft is asked once at most (I7), and coded as a read's. **Rides with:** `area 12's
+  chain`. **Re-test:** after Start, the console shows no `/drafts/` 404.
 
 ## 13 · Identity, accounts, access
 
@@ -1015,6 +1057,20 @@ survivor.
   its text, outcome and time) that the admin bot's `/trail` or `health` reads, every caller filing
   through it. **Rides with:** area 13's next chain. **Re-test:** with no admin bot configured, a
   sign-up refused `accounts_full` leaves a `skipped` outcome an operator read serves.
+- **An account cannot find how to delete itself** (w11-walk2, 11-28): on an auth-on world, signed in
+  as a non-host account, Account → Profile offers Sign out and nothing else. `delete-account` is
+  `promptpotter/domain/command_kinds.py::_HOST_ADMINISTERS` ("the host administers from its terminal
+  or its bot"), and no surface tells the account so. Expected: Profile says who deletes an account and
+  how to ask, from the served press's reason. Erasure on request is a user's right (GDPR/FADP). Seen:
+  silence. **Held:** whether an account may file its own deletion is an operator decision. Until it
+  is made, the served reason renders. **Re-test:** Profile names the door to deletion.
+- **An empty visits digest says counting began at its own minute** (w11-walk2, 11-28): with no
+  outside request kept, `promptpotter/application/app_visits.py::visits_digest` takes `began` from the
+  records it is handed, so with none, `began` = `now`. It reads "People per day, oldest to today: — ·
+  — · — · — · — · — · — (counting began Sat 28 Nov 02:56)", where today reads "—" (unknown), not 0.
+  Expected: today reads 0, and "counting began" is the store's first day. Root: the digest reads when
+  the visit store began counting, never the earliest record. **Rides with:** `area 13's chain`.
+  **Re-test:** `visits_digest([], day=…, now=…)` reads today as 0.
 
 ## 14 · Gate, offline world, tests
 
@@ -1034,6 +1090,12 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+- **CI's touch walk finds the upload control under the remote control at landscape-844** (w11-reads,
+  11-28): `e2e/walk/responsive.spec.ts:26` has been red on Linux since `0c6f59846`, CI and the cloud
+  gate both: `"Attach a dataset file" is under div.remote-control`. It is green on the Windows desk,
+  where that shell draws no dock and the attach button sits at y 385–429 of 390. The range changed no
+  `webapp/` file, so on Linux the zero-campaign shell is viewing a cycle. **Rides with:** w11-ci-touch
+  (dispatched). **Re-test:** the spec is green on Linux, and the report names why a cycle is viewed.
 - **The build stamp hashes from an empty index** (w11-tests3, 11-28): `webapp/vite.config.ts::webappTree`
   still adds every `webapp/` file into an empty scratch index on each build, while
   `health.py::webapp_bundle` now seeds from the checkout's. Same root, on the build side. **Rides
@@ -1128,6 +1190,17 @@ budgets.
 - **The trace's canonical labels move on a resume into the end pass** (w8-tests3): `offline_run.py::decided`
   reads C0 as `parent@R1` there. **Rides with:** area 14's chain. **Re-test:** a resumed leg's labels
   match its straight twin's.
+- **The offline trace reads a dead path and orders inner campaigns by their JSON** (w11-records2,
+  11-28):
+  - `scripts/offline_run.py::LEDGER`'s `round_closed` pick maps `"ruler_excluded"` to
+    `election.ruler.excluded`, but `Election.ruler` no longer exists, so that trace field is always
+    absent.
+  - The trace sorts an L4 leg's inner campaigns by their whole JSON (`offline_run.py:1148`). A ledger
+    reshape therefore reorders them, and that reads as moved decisions.
+
+  Root: every trace path names a live field, and the inner set is keyed by the inner cell's identity.
+  **Rides with:** area 14's chain. **Re-test:** a trace path naming no model field fails the check, and
+  records2's reshape reads `potter/l4` UNMOVED.
 - **No offline leg draws a mixed-benchmark round** (draw-strata, 11-18):
   `scripts/offline_run.py::run_l4` — the L4 leg (`L4_DATASET = "promptpotter-self/e2e"`) seats one
   search and one held-out cell on one benchmark, so `build_round_order`'s interleave and
@@ -1148,6 +1221,15 @@ budgets.
   no walk can watch a round live, pause, resume or fork on divergence. Root: the child inherits the
   world's backend posture from the server that spawned it. **Rides with:** `area 14's chain` —
   **Re-test:** Start on the cold world's email-tagging check-in closes round 0.
+  Walk #2 (11-28): still, so watch live, pause, resume, a self-pause and a cancel during a fork's cut
+  were not walked. With a key added, Start's job is released at `jobs/refused/<id>.json`:
+  `backend_unreachable`, "TERMNORM_ENDPOINTS is unset". The capability refresh still dials out (403).
+- **The offline world answers no check-in resolver turn** (w11-walk2, 11-28): on the cold world with a
+  key held, an upload's "Propose it from the rows" answers 503 `resolver_failed`, because the
+  `Router`'s optimizer reply fails the resolver's output schema twice. So no walk reaches an upload's
+  proposed origin. It does reach the Pipeline and Run bounds sections, which render beside the failure.
+  Root: `scripts/offline_world.py`'s fake optimizer answers each schema a check-in asks.
+  **Rides with:** `area 14's chain`. **Re-test:** Propose on a cold-world upload lands an origin.
 - **A rule the suite reaches only through a round is decided where no table can reach it** (w10-tests
   link 1): the slowest `offline` facts walk a campaign to reach one decision, e.g.
   `tests/test_scoring.py::test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed`

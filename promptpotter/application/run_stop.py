@@ -22,7 +22,7 @@ from promptpotter.shared.statistics import anytime_level_lower
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import GateMode, OptimizationConfig
-    from promptpotter.domain.records.run_records import RebaseRequest
+    from promptpotter.domain.fork import RebaseRequest
     from promptpotter.domain.round_health import DegradationHealth
     from promptpotter.domain.run_standing import RunStanding
     from promptpotter.domain.scoring import GradedCell

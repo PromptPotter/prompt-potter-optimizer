@@ -49,11 +49,6 @@ class MetricSpec(StrictModel):
 _UNNAMED_UNITS: frozenset[MeasurandUnit] = frozenset({"rate", "score", "theta"})
 
 
-# The core cell's, which the per-sample formula namespace is cut from, so a channel here IS a
-# `scoring:` term; a connector's own (`Connector.cell_terms`) are what its rows carry.
-CHANNELS: tuple[str, ...] = CELL_CHANNELS
-
-
 def cell_channels(rows: Iterable[GradedCell]) -> dict[str, dict[str, float]]:
     """Keyed by the row's `query`: a per-campaign `position` names a different cell across campaigns."""
     sums: dict[str, dict[str, list[float]]] = {}
@@ -235,7 +230,7 @@ def compile_metric(expression: str, available: frozenset[str]) -> CompiledExpres
     """Checked against every core channel and the selection's own: a core one no row answers is
     unscorable, never refused."""
     compiled = compile_expression(expression, source="compare metric expression")
-    known = set(CHANNELS) | available
+    known = set(CELL_CHANNELS) | available
     if unknown := compiled.names - known:
         raise BadRequestError(
             f"Metric expression {expression!r} names {sorted(unknown)}, which no cell carries. "

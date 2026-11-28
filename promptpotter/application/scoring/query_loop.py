@@ -42,11 +42,11 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.records.fold_basis import FoldBasisRecord
-from promptpotter.domain.records.run_records import (
-    ArmAct,
-    FlightWaiting,
+from promptpotter.domain.records.lineage import ArmAct
+from promptpotter.domain.records.provider import FlightWaiting
+from promptpotter.domain.records.rounds import RoundWarningRecord
+from promptpotter.domain.records.sample_passes import (
     RaceCatchUpRecord,
-    RoundWarningRecord,
     SampleScoredRecord,
     SampleStartedRecord,
 )

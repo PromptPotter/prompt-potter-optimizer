@@ -15,6 +15,7 @@ import type {
   DashboardCandidate,
   Filable,
   SubtreeCampaign,
+  HierarchyCampaign,
   HierarchyCandidate,
   SubtreeCycle,
   SubtreeCycleEntryFacts,
@@ -459,6 +460,13 @@ export function subtreeCycle(
   };
 }
 
+// What a listed campaign's row deletes; a subtree's campaign serves no act of its own.
+export const LISTED_DELETE: HierarchyCampaign["delete"] = {
+  kind: "delete-campaign",
+  says: "Remove a campaign for good.",
+  keep_results: null,
+};
+
 export function subtreeCampaign(
   over: Partial<SubtreeCampaign> & Pick<SubtreeCampaign, "address">,
 ): SubtreeCampaign {
@@ -470,7 +478,6 @@ export function subtreeCampaign(
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
     entry_kind: "campaign",
-    delete: { kind: "delete-campaign", says: "Remove a campaign for good.", keep_results: null },
     children: [],
     facts: {
       label: null,

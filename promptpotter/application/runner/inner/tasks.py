@@ -384,10 +384,8 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
 def _round_zero_ruler(session: Session) -> int:
     """The version the cycle's round 0 closed on, off its close, so a resume and a replay pin the
     one the first launch did; until round 0 closes, the clock the origin opens on."""
-    held = session.store.campaigns.standing_rounds(session.hop, moment=None).rounds.get(0)
-    if held is None:
-        return session.store.ruler.version()
-    return held.close.level_series.stamp.version
+    held = session.store.campaigns.standing_rounds(session.hop, moment=None).series.get(0)
+    return session.store.ruler.version() if held is None else held.stamp.version
 
 
 def inner_spawn_context() -> InnerSpawnContext | None:

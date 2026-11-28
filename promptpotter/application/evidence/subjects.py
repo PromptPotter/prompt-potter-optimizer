@@ -5,7 +5,7 @@ from pydantic import Field
 from promptpotter.domain.arms import ArmStateKind
 from promptpotter.domain.cycle_paths import SUBJECT_ARITY, CycleHop, SubjectKind
 from promptpotter.domain.paired_reading import Estimate
-from promptpotter.domain.records.run_records import OPERATOR_ORIGIN_SOURCES
+from promptpotter.domain.records.lineage import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import StrictModel

@@ -554,6 +554,16 @@ class MeasuredLift(FrozenModel):
     flips: FlipCounts
     family: TestFamily | None
 
+    @property
+    def separated(self) -> bool:
+        """The interval excludes zero: the lift's one verdict, never re-spelled by a reader."""
+        return self.side != "spans"
+
+    @property
+    def floor_binds(self) -> bool:
+        """`p_value` sits at `p_floor`: the cells that differ, not the effect, limit the claim."""
+        return self.p_value <= self.p_floor
+
     @model_validator(mode="after")
     def _one_population(self) -> Self:
         if not math.isclose(self.rate_b - self.rate_a, self.estimate.value, abs_tol=1e-9):

@@ -23,6 +23,7 @@ from promptpotter.application.bench.node_context import (
     NodeContext,
     bank_proposals,
     closed_round,
+    line_series,
     reread_walk,
 )
 from promptpotter.application.bench.resume_and_fork.decisions import decision
@@ -50,6 +51,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.command_kinds import SubmittedArm
+from promptpotter.domain.failures import ValidationFailure, ValidationReason
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.paired_reading import (
@@ -65,17 +67,10 @@ from promptpotter.domain.phase_acts import (
 )
 from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION
-from promptpotter.domain.records.run_records import (
-    ArmAct,
-    ArmRecord,
-    ArmsGate,
-    ElectionRecord,
-    PanelCoverage,
-    PhaseRecord,
-    RoundWarningRecord,
-    Running,
-    RunPhaseRecord,
-)
+from promptpotter.domain.records.decision import PanelCoverage
+from promptpotter.domain.records.lineage import ArmAct
+from promptpotter.domain.records.rounds import ArmRecord, ElectionRecord, RoundWarningRecord
+from promptpotter.domain.records.run_phase import ArmsGate, PhaseRecord, Running, RunPhaseRecord
 from promptpotter.domain.results import Election, RoundResult, round_document_digest
 from promptpotter.domain.run_standing import (
     LineOutlay,
@@ -86,7 +81,6 @@ from promptpotter.domain.run_standing import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.errors import SendRefusedError, fault_said
@@ -602,12 +596,13 @@ async def close_round(
     close = closed_round(
         closing,
         cycle.rounds,
-        cycle.difficulty,
         lives=cycle.config.optimization.lives,
         position_of=cycle.session.bank.position_of,
         outlay=line_outlay(session, cycle.optimizer.phases),
     )
     cycle.standing = close.run_standing
+    # Before the close it reads beside: a series no close stands on is read by nothing.
+    append_record(line_series(closing, cycle.rounds, cycle.difficulty))
     offset = append_record(close)
     assert offset is not None, "a round closes on the run's ledger, never a muted one"
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))

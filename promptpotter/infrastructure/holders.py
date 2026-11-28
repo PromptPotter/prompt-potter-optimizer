@@ -13,7 +13,8 @@ from promptpotter.config.paths import QUEUED_JOBS_DIR
 from promptpotter.domain.cycle_paths import validate_path_component
 from promptpotter.domain.job import JOB_ADAPTER, Job, ScoringPass
 from promptpotter.domain.phases import LaunchStage, RunPhase
-from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
+from promptpotter.domain.records.money import Hold
+from promptpotter.domain.records.run_phase import RunPhaseRecord
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.io import open_text_robust
 from promptpotter.infrastructure.store.layout import CycleLayout

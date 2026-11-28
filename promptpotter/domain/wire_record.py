@@ -3,6 +3,9 @@
 Kept over plain frozen pydantic models for speed alone, measured (2026-11-05): with the six classes as
 pydantic models writing byte-identical JSON, a cold fold of 100k records takes 1.27x as long over a
 ledger and 1.43x over the archive.
+
+A record with no ``rest`` field is deaf to an undeclared key, by design: a pluggable backend may add one,
+and a record that must refuse it says so on itself (`FiledAnswer.from_wire`).
 """
 
 from __future__ import annotations

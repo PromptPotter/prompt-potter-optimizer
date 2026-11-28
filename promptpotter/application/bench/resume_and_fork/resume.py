@@ -8,7 +8,8 @@ from promptpotter.application.bench.resume_and_fork.ab_replay import line_diverg
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_run_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
-from promptpotter.domain.records.run_records import ArmAct, ForkTrigger
+from promptpotter.domain.fork import ForkTrigger
+from promptpotter.domain.records.lineage import ArmAct
 from promptpotter.domain.results import RoundResult, round_document_digest
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds

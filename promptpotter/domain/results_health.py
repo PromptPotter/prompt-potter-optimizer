@@ -181,7 +181,7 @@ def _failure_kind(step_statuses: Mapping[str, str], warning: NodeWarning) -> str
     return warning.kind
 
 
-def classify_sample_failure(
+def _sample_failure(
     step_statuses: Mapping[str, str],
     warnings: Sequence[NodeWarning],
 ) -> tuple[str | None, str | None]:
@@ -217,7 +217,7 @@ def classify_sample_failure(
 
 def row_failure(facts: MeasuredCell) -> tuple[str | None, str | None]:
     diagnostics = facts.pipeline.diagnostics
-    return classify_sample_failure(diagnostics.step_statuses, diagnostics.warnings)
+    return _sample_failure(diagnostics.step_statuses, diagnostics.warnings)
 
 
 def is_degraded(facts: MeasuredCell) -> bool:
@@ -233,82 +233,10 @@ def evidence_starved_node(rates: dict[str, float]) -> str | None:
     )
 
 
-def compute_degradation_health(
-    *,
-    attempted: int,
-    structural_count: int,
-    transient_count: int,
-    prior_clean_rounds: int,
-    consecutive_degraded_rounds: int,
-    no_result_count: int,
-    hole_count: int,
-    not_attempted: int,
-    unscored: int,
-    dominant_node: str | None = None,
-    last_error: str | None = None,
-    constant_floor: ConstantFloor | None = None,
-    node_failure_rates: dict[str, float] | None = None,
-    node_warnings: dict[str, list[str]] | None = None,
-    is_origin: bool = False,
-) -> DegradationHealth:
-    """Never add a PRECISION clause: a Wilson width is not a failure RATE, and grades every small-n round degraded."""
-    counts = _RoundCounts(
-        attempted=attempted,
-        structural=structural_count,
-        transient=transient_count,
-        no_result=no_result_count,
-        holes=hole_count,
-        not_attempted=not_attempted,
-        unscored=unscored,
-        prior_clean_rounds=prior_clean_rounds,
-        consecutive_degraded_rounds=consecutive_degraded_rounds,
-        node_failure_rates=node_failure_rates or {},
-        node_warnings=node_warnings or {},
-        is_origin=is_origin,
-    )
-    # A PRECONDITION for the ORIGIN alone: a later short round is re-measured, the origin never is.
-    if attempted <= 0 or (is_origin and attempted < counts.asked * MEASURED_COVERAGE_FLOOR):
-        return DegradationHealth(
-            grade="critical" if is_origin else "unmeasured",
-            cause="origin_unmeasured" if is_origin else None,
-            samples=attempted,
-            structural_count=structural_count,
-            hole_count=hole_count,
-            no_result_count=no_result_count,
-            not_attempted=not_attempted,
-            unscored=unscored,
-            last_error=last_error,
-            degraded_rate=0.0,
-            consecutive_degraded_rounds=0,
-            prior_clean_rounds=prior_clean_rounds,
-        )
-
-    grade, cause = _grade(counts)
-    if cause == "evidence_starved":
-        dominant_node = counts.starved_node
-    return DegradationHealth(
-        grade=grade,
-        cause=cause,
-        samples=attempted,
-        not_attempted=not_attempted,
-        unscored=unscored,
-        last_error=last_error,
-        structural_count=structural_count,
-        hole_count=hole_count,
-        no_result_count=no_result_count,
-        constant_floor=constant_floor,
-        degraded_rate=counts.degraded_rate,
-        consecutive_degraded_rounds=consecutive_degraded_rounds,
-        prior_clean_rounds=prior_clean_rounds,
-        dominant_node=dominant_node,
-        node_failure_rates=dict(counts.node_failure_rates),
-        node_warnings={n: list(v) for n, v in counts.node_warnings.items()},
-    )
-
-
 @dataclass(frozen=True)
 class _RoundCounts:
-    """Every rate divides by ``attempted``: read none before the coverage precondition passed."""
+    """A round's cells, folded once; every rate divides by ``attempted``, so read none before the
+    coverage precondition passed."""
 
     attempted: int
     structural: int
@@ -319,6 +247,9 @@ class _RoundCounts:
     unscored: int
     prior_clean_rounds: int
     consecutive_degraded_rounds: int
+    dominant_node: str | None
+    last_error: str | None
+    constant_floor: ConstantFloor | None
     node_failure_rates: dict[str, float]
     node_warnings: dict[str, list[str]]
     is_origin: bool
@@ -349,6 +280,45 @@ class _RoundCounts:
     def starved_node(self) -> str | None:
         # A starved node's per-sample failures are usually ``transient``, so structural attribution misses it.
         return evidence_starved_node(self.node_failure_rates)
+
+    def health(self) -> DegradationHealth:
+        """Never add a PRECISION clause: a Wilson width is not a failure RATE, and grades every small-n round degraded."""
+        attempted, is_origin = self.attempted, self.is_origin
+        # A PRECONDITION for the ORIGIN alone: a later short round is re-measured, the origin never is.
+        if attempted <= 0 or (is_origin and attempted < self.asked * MEASURED_COVERAGE_FLOOR):
+            return DegradationHealth(
+                grade="critical" if is_origin else "unmeasured",
+                cause="origin_unmeasured" if is_origin else None,
+                samples=attempted,
+                structural_count=self.structural,
+                hole_count=self.holes,
+                no_result_count=self.no_result,
+                not_attempted=self.not_attempted,
+                unscored=self.unscored,
+                last_error=self.last_error,
+                degraded_rate=0.0,
+                consecutive_degraded_rounds=0,
+                prior_clean_rounds=self.prior_clean_rounds,
+            )
+        grade, cause = _grade(self)
+        return DegradationHealth(
+            grade=grade,
+            cause=cause,
+            samples=attempted,
+            not_attempted=self.not_attempted,
+            unscored=self.unscored,
+            last_error=self.last_error,
+            structural_count=self.structural,
+            hole_count=self.holes,
+            no_result_count=self.no_result,
+            constant_floor=self.constant_floor,
+            degraded_rate=self.degraded_rate,
+            consecutive_degraded_rounds=self.consecutive_degraded_rounds,
+            prior_clean_rounds=self.prior_clean_rounds,
+            dominant_node=self.starved_node if cause == "evidence_starved" else self.dominant_node,
+            node_failure_rates=self.node_failure_rates,
+            node_warnings=self.node_warnings,
+        )
 
 
 def _grade(counts: _RoundCounts) -> tuple[HealthGrade, HealthCause | None]:
@@ -521,7 +491,7 @@ def assemble_prior_healths(
     return [r.health for r in rounds if r.round < round_num]
 
 
-def compute_node_failure_rates(results: Sequence[GradedCell]) -> dict[str, float]:
+def _node_failure_rates(results: Sequence[GradedCell]) -> dict[str, float]:
     total = len(results)
     if total <= 0:
         return {}
@@ -569,8 +539,8 @@ def compute_round_health(
     prior_healths: Sequence[DegradationHealth],
     # Cells the walk never sent: they have no row in ``results``.
     not_attempted: int,
-    is_origin: bool = False,
-    constant_floor: ConstantFloor | None = None,
+    is_origin: bool,
+    constant_floor: ConstantFloor | None,
 ) -> DegradationHealth:
     structural = transient = no_result = holes = 0
     # An errored cell's grade carries no `unscored`: only a measured row can lack a verdict.
@@ -599,27 +569,25 @@ def compute_round_health(
     dominant = (
         max(structural_nodes, key=lambda k: structural_nodes[k]) if structural_nodes else None
     )
-    node_failure_rates = compute_node_failure_rates(results)
-    node_warnings = _collect_node_warnings(results)
 
     # An ``unmeasured`` prior (a probe round, zero samples) is TRANSPARENT: neither clean nor a chain break.
     prior_clean = sum(1 for h in prior_healths if h.grade == "healthy")
     consecutive = 1 + _trailing_degraded(prior_healths) if structural + transient + holes > 0 else 0
 
-    return compute_degradation_health(
+    return _RoundCounts(
         attempted=len(results),
-        structural_count=structural,
-        transient_count=transient,
+        structural=structural,
+        transient=transient,
+        no_result=no_result,
+        holes=holes,
+        not_attempted=not_attempted,
+        unscored=unscored,
         prior_clean_rounds=prior_clean,
         consecutive_degraded_rounds=consecutive,
         dominant_node=dominant,
-        no_result_count=no_result,
-        hole_count=holes,
-        not_attempted=not_attempted,
-        unscored=unscored,
         last_error=last_error,
         constant_floor=constant_floor,
-        node_failure_rates=node_failure_rates,
-        node_warnings=node_warnings,
+        node_failure_rates=_node_failure_rates(results),
+        node_warnings=_collect_node_warnings(results),
         is_origin=is_origin,
-    )
+    ).health()

@@ -9,7 +9,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.records.cell_beat import CellBeatRecord
-from promptpotter.domain.records.run_records import LLMCallProgressRecord
+from promptpotter.domain.records.llm_calls import LLMCallProgressRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend

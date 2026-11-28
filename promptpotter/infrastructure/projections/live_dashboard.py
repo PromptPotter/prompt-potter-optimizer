@@ -14,7 +14,7 @@ from promptpotter.domain.arm_reading import (
     panel_counts,
     panel_cuts,
 )
-from promptpotter.domain.arms import Concluded, Measuring, arm_name
+from promptpotter.domain.arms import Concluded, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.connector import MeasuredUnit
@@ -43,31 +43,33 @@ from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.run_records import (
-    ArmRecord,
-    BackendRevision,
-    BackendWarningRecord,
-    CycleMintedRecord,
-    DefaultsDrift,
-    ElectionRecord,
-    Ended,
-    FlightRecord,
-    FlightWaiting,
+from promptpotter.domain.records.level_series import LevelSeriesRecord
+from promptpotter.domain.records.lineage import CycleMintedRecord
+from promptpotter.domain.records.llm_calls import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    PhaseRecord,
+)
+from promptpotter.domain.records.money import StandingBudgetRecord, TokenUsageRecord
+from promptpotter.domain.records.provider import (
+    BackendWarningRecord,
+    FlightRecord,
+    FlightWaiting,
     ProviderEasedRecord,
     ProviderHoldRecord,
-    RaceCatchUpRecord,
+)
+from promptpotter.domain.records.rounds import (
+    ArmRecord,
+    ElectionRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RunPhaseRecord,
-    RunWiringRecord,
+)
+from promptpotter.domain.records.run_phase import Ended, PhaseRecord, RunPhaseRecord
+from promptpotter.domain.records.run_wiring import BackendRevision, DefaultsDrift, RunWiringRecord
+from promptpotter.domain.records.sample_passes import (
+    RaceCatchUpRecord,
     SampleScoredRecord,
     SampleStartedRecord,
-    StandingBudgetRecord,
-    TokenUsageRecord,
 )
 from promptpotter.domain.results import Election
 from promptpotter.domain.round_audit import NodeBlock
@@ -82,7 +84,8 @@ from promptpotter.domain.scoring import (
     ground_truth_text,
     is_verifier_graded,
 )
-from promptpotter.domain.spend import SpendRollup, TokenAccount
+from promptpotter.domain.spend import TokenAccount
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -291,10 +294,6 @@ class LiveDashboardState(DashboardFacts):
 
     # The last close's; served only as each `ServedRound`'s readings of it.
     level_series: LevelSeries | None = None
-    # Each walking arm's rows through its budget as its last turn filed them, those taken leading:
-    # served only as `ServedDashboard.walk`'s axis.
-    walk_orders: dict[ArmKey, list[int]] = Field(default_factory=dict)
-
     waiting_since: float | None = None
 
     # The look-ahead gauge, served only as `ServedDashboard.lookahead`.
@@ -408,6 +407,8 @@ class LiveDashboardProjection(Projection):
         self.state: LiveDashboardState
         self._measurement_node: str
         self._standings: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
+        # Banked just before each close: the close takes its round's.
+        self._series: dict[int, LevelSeries] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
         self._launch()
 
@@ -512,6 +513,7 @@ class LiveDashboardProjection(Projection):
         s.round = round_num
         s.rounds = [r for r in s.rounds if r.round < round_num]
         self._standings = {n: held for n, held in self._standings.items() if n < round_num}
+        self._series = {n: held for n, held in self._series.items() if n < round_num}
         self._stand()
         self._narration.enter(round_num)
         self._reset_live(round_num)
@@ -534,8 +536,11 @@ class LiveDashboardProjection(Projection):
         if self._live != self.state.round:
             self._reset_live(self.state.round)
 
+    def _handle_level_series(self, record: LevelSeriesRecord) -> None:
+        self._series[record.round] = record.series
+
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._standings[record.round] = (record.level_series, record.run_standing)
+        self._standings[record.round] = (self._series.get(record.round), record.run_standing)
         self._stand()
         prior = [r for r in self.state.rounds if r.round != record.round]
         summary = self._with_bench(record.summary())
@@ -794,11 +799,6 @@ class LiveDashboardProjection(Projection):
                 "current_round": current,
                 "active": active,
                 "current_query_payload": oldest[0] if oldest else None,
-                "walk_orders": {
-                    key: walking.sample_order
-                    for key in self._narration.announced(self._live)
-                    if isinstance(walking := self._narration.state(self._live, key), Measuring)
-                },
                 "in_flight": in_flight,
                 "lookahead_allowed": allowed,
                 "lookahead_most": most,

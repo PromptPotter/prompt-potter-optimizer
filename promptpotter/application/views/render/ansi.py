@@ -27,6 +27,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
     group_diff_keys,
 )
+from promptpotter.domain.failures import COLLAPSE_WORDS, collapse_counts, collapse_reason
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ReadingState, level_text
@@ -51,18 +52,12 @@ from promptpotter.domain.phase_acts import (
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.run_records import RoundStatement
+from promptpotter.domain.records.rounds import RoundStatement
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading
-from promptpotter.domain.spend import (
-    RATE_PRICED_LABEL,
-    SpendBucket,
-    SpendRollup,
-    StopSpend,
-    usd_text,
-)
+from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
+from promptpotter.domain.spend_rollup import SpendBucket, SpendRollup, StopSpend
 from promptpotter.domain.verification import NoiseBand, VerifyReading
-from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts, collapse_reason
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_block
 

@@ -6,7 +6,7 @@ import abc
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 
-from promptpotter.domain.records.run_records import DecisionInputs, DecisionRecord
+from promptpotter.domain.records.decision import DecisionInputs, DecisionRecord
 from promptpotter.domain.results import RoundResult
 
 

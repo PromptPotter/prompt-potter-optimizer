@@ -346,7 +346,10 @@ def compute_composite_fitness(
         evaluators=evaluator_values,
         fitness_terms=sorted(terms & evaluator_values.keys()),
         fitness_band=band,
-        tokens=TokenAccount.from_measured_rows(cell.facts for cell in sheet),
+        # REPLAYED rows are excluded: their counts are the banked call's, a discount this run never bought.
+        tokens=TokenAccount.from_rows(
+            cell.facts.pipeline.step_tokens for cell in sheet if not cell.facts.cached
+        ),
     )
 
 

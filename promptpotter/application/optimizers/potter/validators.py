@@ -30,6 +30,13 @@ from promptpotter.domain.candidate_diff import (
     candidate_idea,
     same_idea,
 )
+from promptpotter.domain.failures import (
+    COLLAPSE_WORDS,
+    RuntimeFailure,
+    ValidationFailure,
+    ValidationReason,
+    fatal_validation_failures,
+)
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
@@ -37,13 +44,6 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.domain.wounds import (
-    COLLAPSE_WORDS,
-    RuntimeFailure,
-    ValidationFailure,
-    ValidationReason,
-    fatal_validation_failures,
-)
 
 
 def l1_prompt_fields_open(

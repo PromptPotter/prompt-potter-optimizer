@@ -149,6 +149,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.read_params import (
     CampaignPipelineParams,
     CycleDashboardParams,
+    CycleEventsParams,
     HierarchyParams,
     HierarchySubtreeParams,
 )
@@ -171,6 +172,7 @@ from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION, settings
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis
+from promptpotter.domain.command_effects import LaunchedEffect, LaunchedJob, StandingEffect
 from promptpotter.domain.command_events import (
     QUEUED_LAUNCH,
     WORKSPACE_SUBJECT,
@@ -258,20 +260,9 @@ from promptpotter.domain.prompt_block import (
     Snippet,
     snippet_id,
 )
-from promptpotter.domain.records.run_records import (
-    ArmsGate,
-    Bill,
-    CycleStart,
-    Ended,
-    Hold,
-    Lapse,
-    LaunchedEffect,
-    LaunchedJob,
-    Paused,
-    Running,
-    RunPhaseRecord,
-    StandingEffect,
-)
+from promptpotter.domain.records.lineage import CycleStart
+from promptpotter.domain.records.money import Bill, Hold, Lapse
+from promptpotter.domain.records.run_phase import ArmsGate, Ended, Paused, Running, RunPhaseRecord
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.said import Said, pins
@@ -1528,6 +1519,20 @@ def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(
     assert viewed(inner), "a follower could not open the exhibit's own inner run"
     with pytest.raises(NotFoundError):
         viewed(private, inner)
+
+
+async def test_a_followers_live_tail_ends_at_the_tick_its_switch_goes_off(
+    exhibit: _Exhibit,
+) -> None:
+    hop, follower = exhibit
+    frames = CycleEventsParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id).answer(
+        Caller(follower)
+    )
+    await anext(frames)  # the snapshot, read off the host's stores
+    off = account.UserSettings(demo_mode_enabled=False)
+    await asyncio.to_thread(account.set_user_settings, follower, off)
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(anext(frames), timeout=5)
 
 
 def test_a_blocked_account_one_with_its_switch_off_or_a_box_naming_none_reads_no_exhibit(

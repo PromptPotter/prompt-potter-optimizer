@@ -8,7 +8,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 

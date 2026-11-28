@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.records.run_records import ProviderEasedRecord, ProviderHoldRecord
+from promptpotter.domain.records.provider import ProviderEasedRecord, ProviderHoldRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import bound_account
 from promptpotter.infrastructure.llm.telemetry import bound_ledger

@@ -22,7 +22,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import ArmedCaps
-from promptpotter.domain.records.run_records import ArmAct
+from promptpotter.domain.records.lineage import ArmAct
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal

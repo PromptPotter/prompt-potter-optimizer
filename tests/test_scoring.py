@@ -287,6 +287,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.crowning_bar import CrowningBar, NextParent
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.failures import ValidationReason
 from promptpotter.domain.fitness_fold import (
     cell_channels_of,
     compute_composite_fitness,
@@ -295,6 +296,7 @@ from promptpotter.domain.fitness_fold import (
     fold_cells,
     level_band,
 )
+from promptpotter.domain.fork import RebaseRequest
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -345,14 +347,8 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.records.held_out import PassGradedRecord
-from promptpotter.domain.records.run_records import (
-    Ended,
-    RebaseRequest,
-    RoundClosedRecord,
-    RoundWarningRecord,
-    Running,
-    RunPhaseRecord,
-)
+from promptpotter.domain.records.rounds import RoundClosedRecord, RoundWarningRecord
+from promptpotter.domain.records.run_phase import Ended, Running, RunPhaseRecord
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import RulerScope, RulerStamp
@@ -391,7 +387,6 @@ from promptpotter.domain.verification import (
     VerifyPass,
     VerifyStrategy,
 )
-from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
@@ -672,6 +667,14 @@ def test_a_cell_read_off_the_wire_keeps_its_facts_and_drops_any_grade_it_arrived
     assert (facts.cost_s, facts.elapsed_s, facts.shown_s) == (1.5, 2.0, 1.5), (
         "latency reads the step timings, the elapsed the total"
     )
+
+
+def test_a_cell_naming_a_category_this_build_does_not_know_is_refused_never_charged(
+    wire_cell: _WireCell,
+) -> None:
+    banked, *_ = wire_cell
+    with pytest.raises(ValueError, match="NEWER_CATEGORY"):
+        MeasuredCell.from_wire({**banked, "error": "e", "error_category": "NEWER_CATEGORY"})
 
 
 def test_a_replys_lines_rank_only_under_the_formula_reading_them(wire_cell: _WireCell) -> None:

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 from promptpotter.domain.records import CycleRecord
-from promptpotter.domain.records.run_records import (
-    Bill,
-    CallPrice,
-    PricedKeyRecord,
-    TokenUsageRecord,
-)
+from promptpotter.domain.records.money import Bill, CallPrice, PricedKeyRecord, TokenUsageRecord
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import compute_usd

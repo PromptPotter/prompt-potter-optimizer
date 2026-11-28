@@ -46,6 +46,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.checkin_draft import OriginResolution
+from promptpotter.domain.command_effects import LaunchAnswer
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     CancelPayload,
@@ -70,7 +71,6 @@ from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.phases import stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.strict_model import UPLOAD_READ_BYTES
 from promptpotter.presentation.cli.first_run import ensure_api_key

@@ -76,15 +76,9 @@ from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.pipeline_params import PipelineParams, moved_leaves
 from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.records.lineage import CycleMintedRecord, CycleStart, OriginSource
 from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import (
-    BackendRevision,
-    CycleMintedRecord,
-    CycleStart,
-    DefaultsDrift,
-    OriginSource,
-    RunWiringRecord,
-)
+from promptpotter.domain.records.run_wiring import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.treatment import Treatment

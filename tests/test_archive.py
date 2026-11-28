@@ -140,6 +140,7 @@ from promptpotter.domain.cycle_paths import (
     Subject,
 )
 from promptpotter.domain.fitness_fold import FoldBasis
+from promptpotter.domain.fork import ConfigOverrides, ForkSpec, ForkTrigger
 from promptpotter.domain.hierarchy import (
     HierarchyCampaign,
     HierarchyCandidate,
@@ -154,24 +155,17 @@ from promptpotter.domain.narration import Narration
 from promptpotter.domain.origin_panel import OriginPanel, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.records.run_records import (
-    ArmRecord,
-    ConfigOverrides,
+from promptpotter.domain.records.decision import OriginGatePass
+from promptpotter.domain.records.lineage import (
     CycleMintedRecord,
-    CycleShareRecord,
     CycleStart,
     CycleSupersededRecord,
-    Ended,
-    ForkSpec,
-    ForkTrigger,
-    OriginGatePass,
-    PricedKeyRecord,
-    RoundEnteredRecord,
-    RoundWarningRecord,
-    RunPhaseRecord,
-    SampleScoredRecord,
     SpawnedBy,
 )
+from promptpotter.domain.records.money import CycleShareRecord, PricedKeyRecord
+from promptpotter.domain.records.rounds import ArmRecord, RoundEnteredRecord, RoundWarningRecord
+from promptpotter.domain.records.run_phase import Ended, RunPhaseRecord
+from promptpotter.domain.records.sample_passes import SampleScoredRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import OnDivergence, RunMode
@@ -388,7 +382,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> No
     for at, said, configs, facts in (
         (1, "first", LLM_ONLY, {}),
         (2, "second", LLM_ONLY, {}),
-        (3, "ERROR", LLM_ONLY, {"error_category": "transient"}),
+        (3, "ERROR", LLM_ONLY, {"error_category": "UNKNOWN"}),
         (4, "elsewhere", other, {}),
     ):
         row = MeasuredCell.from_wire({"sample_key": "k1", "predicted": said, **facts})

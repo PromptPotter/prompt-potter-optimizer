@@ -13,11 +13,8 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
-from promptpotter.domain.records.run_records import (
-    FlightRecord,
-    FlightWaiting,
-    PhaseRecord,
-)
+from promptpotter.domain.records.provider import FlightRecord, FlightWaiting
+from promptpotter.domain.records.run_phase import PhaseRecord
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import append_record, bound_round
 from promptpotter.infrastructure.producer_lock import (

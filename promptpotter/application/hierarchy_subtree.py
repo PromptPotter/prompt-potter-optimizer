@@ -34,6 +34,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
+from promptpotter.domain.fork import ForkDirection
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
     CandidateStanding,
@@ -54,7 +55,7 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
-from promptpotter.domain.records.run_records import ForkDirection, SpawnedBy
+from promptpotter.domain.records.lineage import SpawnedBy
 from promptpotter.domain.results import Election
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import FrozenModel
@@ -430,8 +431,11 @@ def unplaced_reason(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
     return f"No candidate holds it: {asked}, so it hangs under the cycle."
 
 
-def _fields(entry: FrozenModel) -> dict[str, Any]:
-    return {name: getattr(entry, name) for name in type(entry).model_fields}
+def _fields(entry: FrozenModel, into: type[FrozenModel]) -> dict[str, Any]:
+    """What `into` declares of the listed `entry`: a listed row's acts stay on the listing."""
+    return {
+        name: getattr(entry, name) for name in into.model_fields if name in type(entry).model_fields
+    }
 
 
 def _standing(c: _Candidate, *, stood_on: bool) -> CandidateStanding:
@@ -475,11 +479,11 @@ class _Build:
         cleans = CommandKind.CLEANUP_EMPTY_CYCLES in kinds
         children = [self._cycle(cycle, cycles) for cycle in cycles]
         return SubtreeCampaign(
-            **_fields(entry)
+            **_fields(entry, SubtreeCampaign)
             | {
                 "children": children,
                 "facts": SubtreeCampaignFacts(
-                    **_fields(entry.facts),
+                    **_fields(entry.facts, SubtreeCampaignFacts),
                     deletable_stubs=len(deletable_stubs(stores, campaign.root_hop))
                     if cleans
                     else 0,
@@ -614,11 +618,11 @@ class _Build:
             )
         hung = cycle.hangs_from
         return SubtreeCycle(
-            **_fields(cycle.entry)
+            **_fields(cycle.entry, SubtreeCycle)
             | {
                 "children": [*rounds, *cycle.unplaced],
                 "facts": SubtreeCycleEntryFacts(
-                    **_fields(cycle.entry.facts),
+                    **_fields(cycle.entry.facts, SubtreeCycleEntryFacts),
                     origin=head.crown(0) if 0 in head.owner.candidates else None,
                     from_candidate=None
                     if cycle.index.fork is None or hung is None

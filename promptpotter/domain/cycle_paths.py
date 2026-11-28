@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, NamedTuple, NewType, get_args
 
 from pydantic import AfterValidator
@@ -310,3 +311,16 @@ class Subject(NamedTuple):
             return cycle
         stepped = f"{cycle}/r{self.round}"
         return f"{stepped}/{self.candidate_id}" if self.candidate_id else stepped
+
+
+def parent_address(cycle_dir: Path, parent_dir: Path) -> str:
+    """What a mint record names its parent by: a path, so a cycle in another tree is one too."""
+    return PurePosixPath(*Path(os.path.relpath(parent_dir, cycle_dir)).parts).as_posix()
+
+
+def sibling_cycle_id(parent: str | None) -> str | None:
+    """The parent's cycle id where it is a sibling in the same campaign; ``None`` for a root or a cycle cut from another tree."""
+    if parent is None:
+        return None
+    parts = PurePosixPath(parent).parts
+    return parts[1] if len(parts) == 2 and parts[0] == ".." else None

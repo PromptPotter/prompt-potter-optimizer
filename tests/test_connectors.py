@@ -28,7 +28,7 @@ from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-from promptpotter.domain.records.run_records import TokenUsageRecord
+from promptpotter.domain.records.money import TokenUsageRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog

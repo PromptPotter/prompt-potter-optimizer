@@ -151,7 +151,7 @@ function CampaignRow({
   controls,
   children,
 }: {
-  campaign: HierarchyCampaign;
+  campaign: HierarchyCampaign | SubtreeCampaign;
   controls?: ReactNode;
   children: ReactNode;
 }) {

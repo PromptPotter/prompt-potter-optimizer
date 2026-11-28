@@ -11,6 +11,7 @@ from pydantic import Field
 from pydantic_core import to_json
 
 from promptpotter.application.caller import Caller
+from promptpotter.application.exhibit import read_stores
 from promptpotter.application.hierarchy import account_version, store_version
 from promptpotter.application.hierarchy_subtree import subtree_cycle
 from promptpotter.application.jobs.machine_status import machine_version
@@ -232,8 +233,17 @@ async def cycle_event_frames(
         )
     )
     async for _ in _signed_ticks(caller, _TAIL_POLL_INTERVAL_S):
+        if not await asyncio.to_thread(_still_reads, caller, cycle):
+            return
         for envelope in await asyncio.to_thread(tail.read_new):
             yield envelope
+
+
+def _still_reads(caller: Caller, cycle: ViewedCycle) -> bool:
+    """The caller still reads this cycle from the tenant it opened on (`exhibit.py::read_stores`):
+    a follower whose "Try & learn" went off reads its own, where the exhibit is not found."""
+    root = read_stores(caller.stores, cycle.path[0].campaign_id)
+    return root.tenant_id == cycle.stores.tenant_id
 
 
 class FrameStamp(StrictModel):

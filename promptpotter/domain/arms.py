@@ -6,6 +6,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, Self, Typ
 
 from pydantic import ConfigDict, Field, model_validator
 
+from promptpotter.domain.failures import (
+    RuntimeFailure,
+    ValidationFailure,
+    fatal_validation_failures,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -13,11 +18,6 @@ from promptpotter.domain.said import Tone
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_answer_collapsed
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.domain.wounds import (
-    RuntimeFailure,
-    ValidationFailure,
-    fatal_validation_failures,
-)
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole

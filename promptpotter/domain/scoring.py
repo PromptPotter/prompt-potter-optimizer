@@ -38,7 +38,6 @@ from promptpotter.domain.wire_record import (
 from promptpotter.shared.errors import (
     BadRequestError,
     ErrorCategory,
-    error_category,
     is_error_result,
 )
 from promptpotter.shared.worded import Worded
@@ -261,8 +260,11 @@ class MeasuredCell:
         return _CELL.read(
             row,
             sample_key=key,
+            # A category this build does not know refuses the row, never reads as UNKNOWN.
             error_category=(
-                (error_category(row) or ErrorCategory.UNKNOWN) if is_error_result(row) else None
+                ErrorCategory(text(row["error_category"], "MeasuredCell.error_category"))
+                if is_error_result(row)
+                else None
             ),
         )
 

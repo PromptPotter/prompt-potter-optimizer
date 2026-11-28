@@ -226,7 +226,7 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
 - **`RoundResult.proposed` means "proposed in THIS round"** — a retained individual read off every
   cell would be counted k+1 times.
 - **One tenant δ ruler, one clock** — every θ is read on it, less the parent line's rows. Its case:
-  a sweep finds two readers, PoBB's race and L4's `level_series` on `round_closed`, and no θ on a
+  a sweep finds two readers, PoBB's race and L4's `level_series` (a record of its own beside each close), and no θ on a
   round's statement, since the round is won on paired verdicts. Yet those two readers are the
   instrument. PoBB cuts an arm across subsets its rivals never shared, so only a fixed δ makes
   "a better arm" one claim on that field. L4 compares levels across rounds, forks and inner

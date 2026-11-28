@@ -396,7 +396,11 @@ BASELINE = {
     # w11-tests3 (+2): the bundle check's scratch index seeds from the checkout's own.
     # w11-web2 (+22): a command route refuses its body by the model it declares
     # (`commands.py::_CommandRoute`), where the app's handler dug it out of `request.scope`.
-    "package_lines": 113991,
+    # w11-records2 (+113): `run_records.py` splits into ten record families and four non-record
+    # modules, each with its own header and imports (+139); the spend rollups' module (+23).
+    # w11-reads (+56): a line's cells keyed once per individual (`LineCells`), one pair read per
+    # head-to-head request, a restatement's narration, and a follower's tail ending at its switch.
+    "package_lines": 114160,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -440,7 +444,7 @@ BASELINE = {
     # since only an entry lands.
     "deferred_imports": 7,
     # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
-    "type_cycles": 81,
+    "type_cycles": 51,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
@@ -801,7 +805,7 @@ def _recorded_models() -> list[object]:
 
 # Read by a door no name match sees, each named: a mark is a reader, never an exemption.
 _READ_UNSEEN: dict[tuple[str, str], str] = {
-    ("VerifySaturated", "already_measured"): "its sentence, `run_records.py::VERIFY_WORDS`",
+    ("VerifySaturated", "already_measured"): "its sentence, `command_effects.py::VERIFY_WORDS`",
     ("ErrorRecord", "traceback"): "the operator, reading the ledger line",
     ("MemberAddress", "pass_role"): "`scoring/paired.py::read_pair`'s address equality",
     ("PromptExport", "artifact_version"): "`export.py::parse_prompt_export`, by `raw.get`",

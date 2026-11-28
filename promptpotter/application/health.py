@@ -33,7 +33,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.records.run_records import HealthReader, HealthRecord, HealthState
+from promptpotter.domain.records.workspace import HealthReader, HealthRecord, HealthState
 from promptpotter.infrastructure.identity.accounts import build_identity_bundle
 from promptpotter.infrastructure.identity.grants import default_identity_paths
 from promptpotter.infrastructure.identity.oidc import CodeExchangeError

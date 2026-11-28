@@ -36,7 +36,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_kinds import ForkCyclePayload
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun
-from promptpotter.domain.records.run_records import CycleStart
+from promptpotter.domain.records.lineage import CycleStart
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.wallet import Send

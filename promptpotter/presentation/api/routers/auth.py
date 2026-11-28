@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, browser_sign_in, health
-from promptpotter.domain.records.run_records import device_of
+from promptpotter.domain.visit_device import device_of
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.identity.oidc import (
     SUPPORTED_PROVIDERS,

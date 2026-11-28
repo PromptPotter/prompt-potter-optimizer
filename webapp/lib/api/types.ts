@@ -29,9 +29,11 @@ export type ListedCampaign = HierarchyResponse["entries"][number];
 // What the forest and a bar draw: a run, or one candidate of one. Narrow on `entry_kind` once.
 export type LineageNode = SubtreeCycle | HierarchyCandidate;
 
-// Any entry a row or a card renders, the listing's or a subtree's: each `Subtree*` type extends its
-// listing one. A round is a node of the tree, never a row.
+// Any entry the listing serves, and (`RowEntry`) any a row or a card renders: a `SubtreeCycle`
+// extends its listing one, a `SubtreeCampaign` shares only its base (none of a listed row's acts).
+// A round is a node of the tree, never a row.
 export type HierarchyEntry = HierarchyCampaign | HierarchyCycle | HierarchyCandidate;
+export type RowEntry = HierarchyEntry | SubtreeCampaign;
 // served: `domain/hierarchy.py::HierarchyEntry` — what `GET /hierarchy/{address}` answers.
 export type SubtreeEntry = SubtreeCampaign | SubtreeCycle | HierarchyRound | HierarchyCandidate;
 export type CycleMint = CycleEntryFacts["mint"];
