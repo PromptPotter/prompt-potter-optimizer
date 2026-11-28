@@ -20,23 +20,15 @@ for arg in "$@"; do
 done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
-APP_NAME="${APP_NAME:-myapp}"
-SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
+# deploy.config, the unit's names, checkout, data root and box key, and `as_unit`: every verb's door.
+source "$HERE/verb.sh"
 BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-$SERVICE_NAME-admin-bot}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
 WEBAPP_DIR="${WEBAPP_DIR:-webapp}"
 BIND_PORT="${BIND_PORT:-8001}"
 HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
-# The data root, which the unit carries as `Environment=PROMPTPOTTER_HOME` (install-service.sh) and
-# every command run BY HAND from the checkout must be handed explicitly. Unset = the tree still
-# lives under $INSTALL_DIR and the default resolves to it.
-DATA_DIR="${DATA_DIR:-}"
-# The box key the unit holds as its credential (install-service.sh): a landing seals under it.
-BOX_KEY="${BOX_KEY:-/etc/$SERVICE_NAME/box.key}"
 # The ONE env file, which the app and every verb read themselves (install-service.sh).
 ENV_FILE="$INSTALL_DIR/.env"
 
@@ -45,8 +37,6 @@ source "$HERE/brand-env.sh"
 # wait_healthy — shared with every other script that starts something.
 source "$HERE/health.sh"
 source "$HERE/uv.sh"
-# unit_hardening — the units' block, which `as_unit` runs every verb under.
-source "$HERE/hardening.sh"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
@@ -68,20 +58,6 @@ fetch_target() {
 checkout() {
   git -C "$1" reset --hard --quiet "$2"
   ok "$(basename "$1") at $(git -C "$1" describe --tags --always) ($(git -C "$1" rev-parse --short HEAD))"
-}
-# A verb under the unit's environment and its hardening: this shell holds neither its data root nor
-# its write surface, so a verb run here would judge a tree the service never reads.
-as_unit() {
-  local line props=()
-  while IFS= read -r line; do
-    [[ -z "$line" || "$line" == \#* ]] || props+=(-p "$line")
-  done < <(unit_hardening "${DATA_DIR:-$INSTALL_DIR}")
-  sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" "${props[@]}" \
-    -p WorkingDirectory="$INSTALL_DIR" \
-    -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
-    -p LoadCredential=box.key:"$BOX_KEY" \
-    /bin/sh -c 'BOX_KEY_FILE="$CREDENTIALS_DIRECTORY/box.key" exec "$0" -m promptpotter "$@"' \
-    "$INSTALL_DIR/.venv/bin/python" "$@"
 }
 has_bot() { systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; }
 # The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code leaves

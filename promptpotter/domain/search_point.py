@@ -37,8 +37,7 @@ class NodeConfig(NodeCall, OptimizerPromptEdits):
         return {k: getattr(self, k) for k in sorted(CALL_CONFIG_KEYS) if k in self.model_fields_set}
 
     def prompt_edits(self) -> dict[str, str]:
-        # Read by attribute, as `call_settings` is: `NodeCall`'s plain serializer ignores `include`.
-        return {f: v for f in PROMPT_FIELDS if (v := getattr(self, f)) is not None}
+        return self.model_dump(include=set(PROMPT_FIELDS))
 
 
 def missing_template_vars(

@@ -309,14 +309,13 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.pipeline_manifest import resolved_key
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
-from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams, resolved_key
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
@@ -1851,7 +1850,7 @@ def test_an_upload_searches_the_model_axis_its_connectors_menu_bounds() -> None:
     )
     upload_graph = parse_pipeline_response(
         served_termnorm.over(
-            with_node_templates(upload_pipeline_json(CONNECTORS.get("termnorm"), {}))
+            with_node_templates(upload_pipeline_json(CONNECTORS.get("termnorm"), None, {}))
         )
     )
     answering = upload_graph.get_node("llm_only")
@@ -2096,6 +2095,37 @@ def knobbed_upload(built_stores: Stores) -> _KnobbedUpload:
     knobbed = apply_draft_patch(upload, knob_plan)
     upload_laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
     return _KnobbedUpload(landed.draft_id, knob_plan, knobbed, upload_laid)
+
+
+def test_a_mode_pick_switches_an_upload_between_its_connectors_pipelines(
+    built_stores: Stores, offline: Router
+) -> None:
+    # TermNorm serves a `default` beyond the upload chain (`llm_only`): a pick runs it, and the
+    # definition its Start writes walks it.
+    offline.backend.nodes = {
+        "web_search": prompt_node("web_search", {"instruction": "Search it."}),
+        "llm_only": LLM_ONLY_NODE,
+    }
+    landed = asyncio.run(
+        ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\n", filename="up.csv")
+    )
+    upload = owned_draft(built_stores, landed.draft_id)
+    assert list(
+        draft_pipeline(
+            built_stores, upload, asyncio.run(draft_served(built_stores, upload))
+        ).chain.active_steps
+    ) == ["llm_only"]
+    plan = asyncio.run(
+        plan_draft_patch(built_stores, upload, EditDraftPatch.model_validate({"mode": "default"}))
+    )
+    picked = apply_draft_patch(upload, plan)
+    laid = draft_pipeline(built_stores, picked, plan.served)
+    assert list(laid.chain.active_steps) == ["web_search", "llm_only"], (
+        "a check-in's mode pick left the upload on its connector's upload chain"
+    )
+    assert laid.local["pipelines"] == {"default": ["web_search", "llm_only"]}, (
+        "the definition an upload's Start writes walks another chain than was picked"
+    )
 
 
 def test_an_uploads_draft_splits_once_between_definition_and_campaign(

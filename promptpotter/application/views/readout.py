@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import operator
-import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -138,11 +137,10 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.terminal_text import strip_terminal
 
 # A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
 StatusFn = Callable[[str], None]
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class ReadoutMissedInitError(RuntimeError):
@@ -213,7 +211,7 @@ class ReadoutProjection(Projection):
         if self._readout is None:
             return
         try:
-            append_line(self._readout, _ANSI_RE.sub("", line).encode("utf-8"))
+            append_line(self._readout, strip_terminal(line).encode("utf-8"))
         except (OSError, NotFoundError):
             # Said once, as the ledger's `derived_file_stale`: a readout that just ends reads as a
             # run that stopped.

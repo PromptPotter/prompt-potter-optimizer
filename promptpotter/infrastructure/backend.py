@@ -90,7 +90,9 @@ def _clock(data: dict[str, Any], spent_s: float) -> None:
 
 
 @dataclass
-class _CellSends:
+class CellSends:
+    """One cell's resends, each warned on its ledger: a run the API server hosts has no console."""
+
     query: str
     budget: SendBudget
     recovered: bool = False
@@ -108,8 +110,10 @@ class _CellSends:
             )
         )
 
-    def wait_after(self, outcome: SendOutcome) -> float | None:
-        return self.budget.resend_wait() if outcome.resendable else None
+    def wait_after(self, outcome: SendOutcome, cause: str) -> float | None:
+        if not outcome.resendable:
+            return None
+        return self.budget.resend_wait(f"backend cell {self.query!r}", cause)
 
 
 class MachineSlots:
@@ -194,6 +198,11 @@ class BackendClient:
             if connector.cells_hold_the_machine
             else None
         )
+        # A machine-held cell is counted once, by the pool every process shares: arming counts this
+        # client's phases alone and each cell waits on its slot (`MachineSlots.hold`).
+        self._phases: set[CellsOut] = (
+            set() if self._machine_slots is not None else _SENDING.setdefault(self._machine, set())
+        )
 
     @property
     def connector(self) -> Connector:
@@ -202,22 +211,20 @@ class BackendClient:
     @contextlib.contextmanager
     def sending(self, phase: CellsOut) -> Iterator[None]:
         """*phase*'s calls out count against ``max_cells_in_flight`` beside every other phase on
-        this machine while it sends."""
-        held = _SENDING.setdefault(self._machine, set())
-        held.add(phase)
+        this machine while it sends; a machine-held connector's, beside this client's alone."""
+        self._phases.add(phase)
         try:
             yield
         finally:
-            held.discard(phase)
+            self._phases.discard(phase)
 
     def cells_out(self) -> int:
-        return sum(phase.out() for phase in _SENDING.get(self._machine, ()))
+        return sum(phase.out() for phase in self._phases)
 
     def room(self, phase: CellsOut) -> int:
         """The cells *phase* may still send: the ceiling past every phase's calls out, less one for
         each other phase holding none while *phase* holds some, or the first to send starves it."""
-        held = _SENDING.get(self._machine, set())
-        waiting = sum(1 for other in held if other is not phase and not other.out())
+        waiting = sum(1 for other in self._phases if other is not phase and not other.out())
         return (
             self._connector.max_cells_in_flight - self.cells_out() - (waiting if phase.out() else 0)
         )
@@ -354,7 +361,7 @@ class BackendClient:
         paid_by: KeySource,
     ) -> tuple[SendOutcome, dict[str, Any] | None, S]:
         client = self.http
-        sends = _CellSends(query, drawn_budget())
+        sends = CellSends(query, drawn_budget())
         while True:
             wait: float | None = None
             unreachable: tuple[httpx.TransportError, SendOutcome] | None = None
@@ -374,12 +381,13 @@ class BackendClient:
                         if not outcome.sent:
                             unreachable = exc, outcome
                         else:
-                            wait = sends.wait_after(outcome)
+                            error_class = exc.__class__.__name__
+                            wait = sends.wait_after(outcome, error_class)
                             sends.warn(
                                 "transport_error",
                                 wait_s=wait or 0.0,
                                 resending=wait is not None,
-                                error_class=exc.__class__.__name__,
+                                error_class=error_class,
                                 final=wait is None,
                             )
                             if wait is None:
@@ -419,20 +427,13 @@ class BackendClient:
         client: httpx.AsyncClient,
         resp: httpx.Response,
         outcome: SendOutcome,
-        sends: _CellSends,
+        sends: CellSends,
     ) -> float | None:
         code = resp.status_code
         if outcome.resendable and (refused := self._guard.resend_refused(resp)) is not None:
             # The backend's own hole, never a bound of ours: a resume re-measures it.
             raise cell_failure(f"HTTP {code} {refused}", ErrorCategory.SERVER, spent={})
-        if (wait := sends.wait_after(outcome)) is not None:
-            logger.warning(
-                "Backend %d (attempt %d/%d); waiting %.1fs",
-                code,
-                sends.budget.resent,
-                sends.budget.attempts,
-                wait,
-            )
+        if (wait := sends.wait_after(outcome, f"HTTP {code}")) is not None:
             sends.warn("server_error", wait_s=wait, resending=True, status_code=code)
         elif (
             code == 400
@@ -444,7 +445,7 @@ class BackendClient:
         return wait
 
     async def _wait_out_outage(
-        self, unreachable: httpx.TransportError, outcome: SendOutcome, sends: _CellSends
+        self, unreachable: httpx.TransportError, outcome: SendOutcome, sends: CellSends
     ) -> None:
         error_class = unreachable.__class__.__name__
         if sends.down_since is None:

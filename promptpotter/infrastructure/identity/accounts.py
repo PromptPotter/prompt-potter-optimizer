@@ -5,14 +5,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
+from promptpotter.config.paths import ACCOUNTS_LOCK
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.infrastructure.identity import bulletin_board
 from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
     PrincipalGrant,
     check_blocklist,
-    default_identity_paths,
     read_grant,
     resolve_effective_capabilities,
 )
@@ -73,7 +72,7 @@ def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> st
                 )
             )
         bulletin_board.rekey(
-            default_identity_paths().bulletins, old_id=TERMINAL_IDENTITY_ID, new_id=user_id
+            IdentityPaths(projects_root).bulletins, old_id=TERMINAL_IDENTITY_ID, new_id=user_id
         )
         default_dir.rename(user_dir)
         logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
@@ -148,12 +147,17 @@ def _session_capabilities(access_state: AccessState) -> frozenset[str]:
 def _delegated_identity(
     presented: IdentityContext, grant: PrincipalGrant, bundle: IdentityBundle
 ) -> IdentityContext:
-    if grant.is_denied:
-        # A sub-principal's entitlement IS its grant, never the blocklist: revoked reads blocked.
+    delegator = (
+        None
+        if grant.is_denied
+        else UserStore(tenant_workspace(bundle.paths.projects_root, grant.delegated_by)).load()
+    )
+    if delegator is None:
+        # A sub-principal's entitlement IS its grant, never the blocklist: revoked reads blocked,
+        # and so does a grant onto no standing account, whose first act would open it.
         return replace(presented, access_state="blocked", capabilities=frozenset())
     # A delegate stands on its delegator's access: blocking the delegator blocks it (bl4.B7).
-    delegator = UserStore(tenant_workspace(default_projects_root(), grant.delegated_by)).load()
-    access_state = resolve_access_state(None if delegator is None else delegator.email, bundle)
+    access_state = resolve_access_state(delegator.email, bundle)
     return replace(
         presented,
         user_id=UserId(grant.delegated_by),
@@ -216,7 +220,7 @@ def _token_identity(carrier: Carrier, bundle: IdentityBundle) -> IdentityContext
     user = (
         None
         if token is None
-        else UserStore(tenant_workspace(default_projects_root(), token.user_id)).load()
+        else UserStore(tenant_workspace(bundle.paths.projects_root, token.user_id)).load()
     )
     if token is None or user is None:
         raise UnauthorizedError(

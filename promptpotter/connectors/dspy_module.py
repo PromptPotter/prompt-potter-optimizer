@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -24,7 +23,11 @@ from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
 from promptpotter.infrastructure.llm.registry import providers
-from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
+from promptpotter.infrastructure.llm.send_failure import (
+    NOT_THE_PROMPT,
+    FailedSendError,
+    failed_send,
+)
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
@@ -38,14 +41,10 @@ from promptpotter.infrastructure.llm.wallet import sending_key
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellUnscoreableError,
-    ErrorCategory,
     SendRefusedError,
     cell_failure,
 )
 from promptpotter.shared.extras import Extra
-
-logger = logging.getLogger(__name__)
-
 
 PROGRAM_NODE = "program"
 
@@ -97,14 +96,6 @@ def _configured(
 
 
 _LM_KEYS = frozenset({"model", "temperature", "max_tokens"})
-
-_NOT_THE_PROMPT = frozenset(
-    {
-        ErrorCategory.PROVIDER_THROTTLED,
-        ErrorCategory.PROVIDER_CREDIT,
-        ErrorCategory.CONNECTION,
-    }
-)
 
 _SEND = CallLabel(PROGRAM_NODE, "backend")
 # One run of the caller's program, its resends included.
@@ -205,19 +196,12 @@ class _ProgramCalls:
             if bill is not None:
                 outcome = outcome._replace(reported=ReportedSpend((bill,)))
             admission.close(outcome)
-        wait = self.budget.resend_wait() if outcome.resendable else None
+        cause = type(failure).__name__
+        wait = self.budget.resend_wait(self.what, cause) if outcome.resendable else None
         if wait is not None:
-            logger.warning(
-                "%s: %s (attempt %d/%d); waiting %.1fs",
-                self.what,
-                type(failure).__name__,
-                self.budget.resent,
-                self.budget.attempts,
-                wait,
-            )
             await held_wait(wait, self.what)
             return True
-        if outcome.failure in _NOT_THE_PROMPT:
+        if outcome.failure in NOT_THE_PROMPT:
             raise self.end(
                 cell_failure(
                     f"{self.what}: {outcome.detail[:300]}",

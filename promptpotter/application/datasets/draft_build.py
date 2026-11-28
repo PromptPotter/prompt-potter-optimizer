@@ -6,7 +6,11 @@ from typing import Any
 
 from pydantic import Field
 
-from promptpotter.application.datasets.draft_campaign import DraftCriterion, owned_draft
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCriterion,
+    mode_exclusions,
+    owned_draft,
+)
 from promptpotter.application.datasets.origin_readiness import (
     SETUP_STEP_TITLES,
     OriginReadiness,
@@ -25,7 +29,7 @@ from promptpotter.application.pipeline_responses import CampaignPipelineResponse
 from promptpotter.application.read_workers import off_loop
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
-from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
+from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep, UploadBasis
 from promptpotter.domain.command_events import CommandRecord, draft_subject
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.draft_edit import EditDraftPatch
@@ -56,9 +60,9 @@ class PipelineMode(StrictModel):
 
     name: str
     steps: list[str]
-    exclude_nodes: list[str] | None = Field(
-        description="What picking it sends as `config.exclude_nodes`; null where the draft's "
-        "chain does not hold its steps, so no exclusion runs it."
+    pickable: bool = Field(
+        description="Whether `EditDraftPatch.mode` takes it: always on an upload; on a reused "
+        "dataset, where its chain holds the steps."
     )
 
 
@@ -143,13 +147,15 @@ def _dependencies(running: PipelineSchema) -> tuple[PipelineDependency, ...]:
     )
 
 
-def _modes(served: ServedPipeline, declared: PipelineSchema) -> list[PipelineMode]:
-    held = declared.active_steps
+def _modes(
+    served: ServedPipeline, draft: DraftFile, declared: PipelineSchema
+) -> list[PipelineMode]:
+    upload = isinstance(draft.basis, UploadBasis)
     return [
         PipelineMode(
             name=name,
             steps=steps,
-            exclude_nodes=[n for n in held if n not in steps] if set(steps) <= set(held) else None,
+            pickable=upload or mode_exclusions(declared, steps) is not None,
         )
         for name, steps in declared_pipelines(served.over({})).items()
     ]
@@ -269,7 +275,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
     pipeline = draft_pipeline(stores, draft, served)
     declared = pipeline.config.optimization.budget
     active = list(pipeline.chain.active_steps)
-    modes = _modes(served, pipeline.declared)
+    modes = _modes(served, draft, pipeline.declared)
     refusal, launch = _launch(stores, draft, declared)
     return DraftCampaignWire(
         draft_id=draft.draft_id,

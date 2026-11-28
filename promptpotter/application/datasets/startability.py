@@ -26,7 +26,6 @@ from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_kept_table
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
@@ -47,7 +46,6 @@ from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
     NotFoundError,
-    PayloadInvalidError,
     PotterError,
     fault_said,
 )
@@ -86,16 +84,9 @@ def rows_block(bank: Bank) -> StartBlock | None:
     return None if labelled_rows(bank.samples) else StartBlock.EMPTY
 
 
-def _connector(dataset: ResolvedDataset) -> Connector | None:
-    try:
-        return runnable_definition(dataset).owner
-    except DEFINITION_READ_ERRORS:
-        return None
-
-
 def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
-    """What every cell of the dataset imports beyond core."""
-    return connector.extra if (connector := _connector(dataset)) is not None else None
+    """What every cell of the dataset imports beyond core; an unreadable definition raises."""
+    return runnable_definition(dataset).owner.extra
 
 
 def dataset_extra(dataset: ResolvedDataset) -> Extra | None:
@@ -134,15 +125,15 @@ class DatasetReading:
 def dataset_reading(stores: Stores, name: str) -> DatasetReading:
     """A SURVEY: one unreadable dataset lists as blocked by that, never as startable or absent."""
     dataset = resolve_dataset(stores, name)
-    # Asked before any row is read: reading a panel may import the very extra that is absent.
-    if _absent(_connector_extra(dataset)) is not None:
-        return DatasetReading(None, StartBlock.MISSING_EXTRA)
     try:
+        # Asked before any row is read: reading a panel may import the very extra that is absent.
+        if _absent(_connector_extra(dataset)) is not None:
+            return DatasetReading(None, StartBlock.MISSING_EXTRA)
         held = held_bank(stores, dataset)
         block = _held_block(dataset, held)
     except BackendUnreachableError:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
-    except (FileUnreadableError, PayloadInvalidError, ConflictError) as refused:
+    except (*DEFINITION_READ_ERRORS, ConflictError) as refused:
         return DatasetReading(None, StartBlock.UNREADABLE, refused)
     except (ValueError, OSError) as fault:
         unread = FileUnreadableError(FileKind.BANK, path=name, reason=fault_said(fault)[0])
@@ -176,16 +167,18 @@ def upload_source(draft: DraftFile, upload: UploadBasis) -> dict[str, Any]:
     }
 
 
-def draft_bank(stores: Stores, draft: DraftFile) -> Bank | None:
-    """What the draft's Start partitions; ``None`` while it has none to read: a read never fetches
-    a bank, and never cuts an upload by columns the gate has not confirmed."""
+def draft_bank(stores: Stores, draft: DraftFile, dataset: ResolvedDataset | None) -> Bank | None:
+    """What the draft's Start partitions, *dataset* what its basis resolved to; ``None`` while it
+    has none to read: a read never fetches a bank, and never cuts an upload by columns the gate
+    has not confirmed."""
     match draft.basis:
         case UploadBasis() as upload:
             if not columns_confirmed(draft):
                 return None
             return Bank.of(cut_bank(stores, upload_source(draft, upload)))
-        case DatasetBasis(dataset=name):
-            return held_bank(stores, resolve_dataset(stores, name))
+        case DatasetBasis():
+            assert dataset is not None, "a reused basis resolves its dataset"
+            return held_bank(stores, dataset)
         case _:
             assert_never(draft.basis)
 
@@ -219,7 +212,7 @@ def offer_connectors() -> set[str] | None:
     """The connectors the offer reaches; ``None`` where it is unset and every install dataset runs."""
     if settings.dataset_offer is None:
         return None
-    return {c.name for d in _offer().values() if (c := _connector(d)) is not None}
+    return {runnable_definition(d).owner.name for d in _offer().values()}
 
 
 def offer_faults() -> list[str]:

@@ -10,12 +10,12 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import (
     LineConfig,
     RootRunsWith,
+    campaign_connector,
     campaign_runs_with,
     line_config,
     resolved,
 )
 from promptpotter.application.runner.bench import cycle_bench, cycle_curve, cycle_verify
-from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import ArmReading, fitness_terms_text
 from promptpotter.domain.bench import BenchCurve, BenchScore
@@ -372,7 +372,7 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
                 kind="lifecycle", value=status, label=LIFECYCLE_STATUS_LABELS[status].lower()
             )
         )
-    if is_self_optimization(campaign.connector):
+    if campaign_connector(campaign).self_optimization:
         tags.append(HierarchyTag(kind="self_optimization", value="l4", label="L4"))
     if isinstance(purpose := campaign.declaration.purpose, Compare):
         arm = purpose.arm

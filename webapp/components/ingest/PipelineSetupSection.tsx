@@ -14,7 +14,7 @@ export function pipelineLabel(draft: DraftCampaignWire): string {
   return `${draft.mode ?? "custom"} · ${stepCount(draft.active_steps.length)}`;
 }
 
-// A node picked here opens the `node` view; a Mode sends the exclusions the server serves for it.
+// A node picked here opens the `node` view; a Mode sends its name, which the server maps to the chain.
 export function PipelineSetupSection({
   draft,
   onApply,
@@ -46,12 +46,9 @@ export function PipelineSetupSection({
                     options={draft.modes.map((m) => ({
                       value: m.name,
                       label: `${m.name} · ${stepCount(m.steps.length)}`,
-                      disabled: m.exclude_nodes === null,
+                      disabled: !m.pickable,
                     }))}
-                    onChange={(name) => {
-                      const picked = draft.modes.find((m) => m.name === name);
-                      if (picked?.exclude_nodes) onApply({ config: { exclude_nodes: picked.exclude_nodes } });
-                    }}
+                    onChange={(name) => onApply({ mode: name })}
                   />
                 </label>
               ) : null}{" "}

@@ -23,7 +23,6 @@ from promptpotter.infrastructure.llm.base import (
     Tool,
     ToolCall,
     hold_ceiling,
-    post_json,
     send_bound,
     sent_effort,
     strip_titles,
@@ -444,7 +443,9 @@ class OpenAICompatibleClient:
                                 ticket, headers=outcome.headers, body=outcome.detail
                             )
                             continue
-                        wait = budget.resend_wait() if outcome.resendable else None
+                        what = f"{self._provider_name} {label.node}"
+                        cause = type(exc).__name__
+                        wait = budget.resend_wait(what, cause) if outcome.resendable else None
                         if wait is None:
                             # The wire's failure carries its close, a raw `ConnectionError` too;
                             # a typed refusal, a model's missing remedy or a bug raises as itself.
@@ -452,15 +453,6 @@ class OpenAICompatibleClient:
                             if not wire and outcome.failure is not ErrorCategory.CONNECTION:
                                 raise
                             raise FailedSendError(outcome) from exc
-                        logger.warning(
-                            "%s: %s on %s (attempt %d/%d); waiting %.1fs",
-                            self._provider_name,
-                            type(exc).__name__,
-                            label.node,
-                            budget.resent,
-                            budget.attempts,
-                            wait,
-                        )
                     else:
                         backpressure.eased(ticket)
                         apply_discovered_caps(
@@ -477,12 +469,20 @@ class OpenAICompatibleClient:
             await held_wait(wait, f"{label.node} {self._provider_name}")
 
     async def _post(self, body: dict[str, Any]) -> httpx.Response:
-        return await post_json(
-            wire_client(self._spec.base_url, timeout_s=self._spec.timeout),
+        http = wire_client(self._spec.base_url, timeout_s=self._spec.timeout)
+        reply = await http.post(
             "chat/completions",
-            body,
+            json=body,
             headers={"Authorization": f"Bearer {self._key.secret.get_secret_value()}"},
         )
+        if not reply.is_success:
+            # httpx's own message names the status alone; the provider's words are the diagnosis.
+            raise httpx.HTTPStatusError(
+                f"HTTP {reply.status_code} from {reply.url}: {reply.text[:500]}",
+                request=reply.request,
+                response=reply,
+            )
+        return reply
 
     async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
         response_model, response_schema = request.response_model, request.response_schema

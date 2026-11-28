@@ -270,9 +270,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/datasets/origin_resolve.py::raised_commands::ValidationError": (
         "a check-in finding the draft's patch model refuses is no finding"
     ),
-    "application/datasets/startability.py::_connector::DEFINITION_READ_ERRORS": (
-        "asked before any row is read; the listing's reading serves the definition's refusal"
-    ),
     "application/evidence/read.py::_at::(BadRequestError, NotFoundError, ValueError)": (
         "an address that names nothing answers None, by contract"
     ),

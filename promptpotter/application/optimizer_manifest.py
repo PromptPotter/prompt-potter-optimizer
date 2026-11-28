@@ -43,8 +43,8 @@ from promptpotter.domain.pipeline_manifest import (
     PipelineManifest,
     laid_config,
     prompt_key,
-    resolved_key,
 )
+from promptpotter.domain.pipeline_params import resolved_key
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,

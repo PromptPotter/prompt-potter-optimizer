@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import draft_criterion
+from promptpotter.application.datasets.draft_campaign import draft_criterion, mode_exclusions
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import (
     answer_terms_from_rows,
@@ -46,12 +46,16 @@ from promptpotter.domain.pipeline_schema import (
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     PipelineNode,
+    PipelineSchema,
     description_key,
     description_path,
     description_paths,
     narrowing_of,
 )
-from promptpotter.infrastructure.store.dataset_access import claim_own_definition
+from promptpotter.infrastructure.store.dataset_access import (
+    claim_own_definition,
+    declared_pipelines,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -92,7 +96,10 @@ async def plan_draft_patch(
         and isinstance(draft.basis, UploadBasis)
         and patch.connector != draft.basis.connector
     ):
-        changes["basis"] = draft.basis.model_copy(update={"connector": patch.connector})
+        # A chain is its connector's pipeline: a switch runs the new one's upload chain.
+        changes["basis"] = draft.basis.model_copy(
+            update={"connector": patch.connector, "chain": None}
+        )
     served = (
         await draft_served(stores, draft.patch(basis=changes["basis"]))
         if "basis" in changes
@@ -116,6 +123,8 @@ async def plan_draft_patch(
             config["scoring"] = _folded_scoring(
                 was.config.scoring, sent["scoring"], campaign_terms(served.connector)
             )
+    if patch.mode is not None:
+        config = _picked_mode(changes, draft, config, patch.mode, served, was.declared)
     if patch.node_output is not None:
         if (declared := was.chain.get_node(patch.node_output.node)) is None:
             raise PayloadInvalidError(
@@ -189,6 +198,33 @@ def _refusals(pipeline: DraftPipeline, *, fence: FreeFence | None) -> tuple[list
     )
     outside = [] if fence is None else outside_free_tier(config, selected, params, schema, fence)
     return unpriced_routes(config, selected, params, schema), outside
+
+
+def _picked_mode(
+    changes: dict[str, Any],
+    draft: DraftFile,
+    config: dict[str, Any],
+    mode: str,
+    served: ServedPipeline,
+    held: PipelineSchema,
+) -> dict[str, Any]:
+    """An upload's definition runs *mode*'s steps, so its exclusions go with the chain they
+    excluded from; a reused dataset's runs its own chain less what *mode* leaves out."""
+    modes = declared_pipelines(served.over({}))
+    if (steps := modes.get(mode)) is None:
+        raise PayloadInvalidError(f"patch.mode {mode!r} is none of {sorted(modes)}.")
+    basis = changes.get("basis", draft.basis)
+    if isinstance(basis, UploadBasis):
+        changes["basis"] = UploadBasis(
+            connector=basis.connector, kept=basis.kept, chain=tuple(steps)
+        )
+        return {k: v for k, v in config.items() if k != "exclude_nodes"}
+    if (excluded := mode_exclusions(held, steps)) is None:
+        raise PayloadInvalidError(
+            f"patch.mode {mode!r}: {draft.dataset_name!r} runs {list(held.active_steps)}, "
+            f"which does not hold {steps}."
+        )
+    return {**config, "exclude_nodes": excluded}
 
 
 def _block(value: object) -> dict[str, Any]:

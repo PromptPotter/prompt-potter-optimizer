@@ -25,16 +25,17 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import accounts, bulletin_board, tokens
 from promptpotter.infrastructure.identity import grants as grant_files
 from promptpotter.infrastructure.identity.grants import (
+    IdentityPaths,
     PrincipalGrant,
     default_identity_paths,
     grant_principal,
-    identity_paths,
     list_grants,
     revoke_principal,
 )
 from promptpotter.infrastructure.identity.oidc import OIDCSessionStore
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import providers
+from promptpotter.infrastructure.outbound import NoticeOutcome
 from promptpotter.infrastructure.store.account_trail import (
     TrailLine,
     in_time_order,
@@ -313,6 +314,11 @@ def record_refusal(stores: Stores, *, subject: str) -> None:
     _record(stores, "request_refused", subject=subject)
 
 
+def record_operator_notice(stores: Stores, outcome: NoticeOutcome) -> None:
+    """Whether the operator was told of this account's opening, on the trail the operator's `/trail` reads."""
+    _record(stores, "operator_notified", subject=outcome)
+
+
 def record_upload(stores: Stores, *, filename: str, kept: Path) -> None:
     """Names the kept bytes beside the refusal that may follow, so the trail leads to the file."""
     _record(stores, "uploaded", subject=f"{filename} -> uploads/{kept.name}")
@@ -524,7 +530,7 @@ def delete_account(projects_root: Path, user_id: str, *, actor: str) -> AccountD
     keys, and its run data). Held under the accounts lock and the admission gate, so no sign-in
     reopens it and no launch admits meanwhile; refused for the host's and while it runs anything."""
     workspace = tenant_workspace(projects_root, user_id)
-    paths = identity_paths(projects_root)
+    paths = IdentityPaths(projects_root)
     registry = JobRegistry.attach(jobs_dir(projects_root))
     with held_lock(projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT), registry.admission_gate():
         user = UserStore(workspace).load()
@@ -622,6 +628,10 @@ def _entry(token: tokens.ApiToken) -> TokenEntry:
     )
 
 
+def _tokens_file(stores: Stores) -> Path:
+    return IdentityPaths(stores.projects_root).tokens
+
+
 def mint_token(stores: Stores, name: str, scope_names: Iterable[str]) -> MintedToken:
     """Its scopes are what the account may delegate and holds, so a bearer never outranks it; the
     host mints none, as every request would refuse it (`accounts.py::account_identity`)."""
@@ -646,7 +656,7 @@ def mint_token(stores: Stores, name: str, scope_names: Iterable[str]) -> MintedT
             next_acts=(NextAct(field="scopes", value="only what your account holds"),),
         )
     secret, token = tokens.mint_token(
-        default_identity_paths().tokens,
+        _tokens_file(stores),
         # Its first act opens the account, so the bearer names one.
         user_id=account_of(stores).user_id,
         name=name,
@@ -656,7 +666,7 @@ def mint_token(stores: Stores, name: str, scope_names: Iterable[str]) -> MintedT
 
 
 def account_tokens(stores: Stores) -> AccountTokens:
-    held = tokens.account_tokens(default_identity_paths().tokens, str(stores.identity.user_id))
+    held = tokens.account_tokens(_tokens_file(stores), str(stores.identity.user_id))
     return AccountTokens(
         tokens=[_entry(token) for token in held],
         # The host mints none (`mint_token`), so it is offered no scope to mint with.
@@ -668,7 +678,7 @@ def account_tokens(stores: Stores) -> AccountTokens:
 
 def revoke_token(stores: Stores, token_id: str) -> None:
     if not tokens.revoke_token(
-        default_identity_paths().tokens, user_id=str(stores.identity.user_id), token_id=token_id
+        _tokens_file(stores), user_id=str(stores.identity.user_id), token_id=token_id
     ):
         raise NotFoundError(
             f"No live token {token_id!r} on your account.",

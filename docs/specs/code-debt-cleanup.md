@@ -542,9 +542,6 @@ runs, the second consuming the first. Params are one fold (`ParamLayers`); an op
 dataset file is a partial laid on its chain (`dataset_access.py::definition_chain`), and the overlay is the
 sole route for a backend tunable.
 
-**Unexamined:** `config_map.py`, `pipeline_responses.py`, `domain/pipeline_parsing.py`,
-`domain/pipeline_schema.py`, `campaign_config.py`
-
 - **Params are not one fold** (w10-survey): `pipeline_resolve.py::bind_resolution` lays starting prompts
   through `pipeline_resolve.py::_apply_starting_prompts` after `ParamLayers.fold`, and
   `fold_output_contract` is a second post-fold at `pipeline_resolve.py::resolved_output_schemas`,
@@ -554,55 +551,57 @@ sole route for a backend tunable.
   block's per-key merge are `ParamLayer`s or `CAMPAIGN_RULE`, so params are final once folded. **Rides
   with:** area 07's chain. **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def;
   4 now) and `git grep -c "_folded_scoring" -- promptpotter` is 0 (2 now).
-- **The second seam re-resolves the dataset by name** (w10-survey): `pipeline_resolve.py` calls
-  `resolve_dataset(` five times (`_draft_dataset`, `_draft_local`, `draft_backend`, `draft_layers`,
-  `resolve_pipeline_for_dataset`) and `datasets/startability.py` four more, so one request resolves one
-  dataset several times instead of consuming the first seam's `ResolvedDataset`. Root: one resolved dataset
-  per request, passed in. **Rides with:** **A dataset read is a third resolution**. **Re-test:**
-  `git grep -c "resolve_dataset(" -- promptpotter/application/pipeline_resolve.py` is at most 1 (5 now).
-- **A definition that cannot be read becomes "no extra needed"** (w10-survey):
-  `datasets/startability.py::_connector` turns a `DEFINITION_READ_ERRORS` fault into `None`, so
-  `dataset_extra` reads it as "needs none" and `offer_connectors` drops the dataset. Root: an unreadable
-  definition is `StartBlock.UNREADABLE` or raises. `datasets/loaders.py::_bank` also keeps a source default
-  in code (`src.get("shuffled", True)`), which belongs in the dataset file or `defaults.yaml`. **Re-test:**
-  `git grep -c "except DEFINITION_READ_ERRORS" -- promptpotter/application` is 1 (2 now) and
-  `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py` is 0.
-- **A check-in cannot switch an upload between its connector's pipelines**: a draft edit has no chain
-  key, so a mode outside the held chain is disabled (`PipelineSetupSection.tsx`), and
-  `draft_build.py::_modes` ignores a definition's own `pipelines`. Action: a mode pick sets the draft's
-  `pipelines.default`, its definition half. **Re-test:** pick TermNorm's `default` on an upload; the
-  draft's `active_steps` is that chain.
+- **A source default lives in code** (w10-survey): `datasets/loaders.py::_bank` keeps
+  `src.get("shuffled", True)`, which belongs in the dataset file or `defaults.yaml`. **Rides with:** area
+  07's chain. **Re-test:** `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py`
+  is 0 (1 now).
+- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/ingest.py::draft_from_dataset`
+  resolves the dataset, then `datasets/startability.py::checkin_bank` resolves it again by name;
+  `datasets/loaders.py::resolve_bank`, `held_bank` and `fetch_bank` each read the definition the
+  `ResolvedDataset` already carries; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source`
+  looks up again. Root: the seam's answer (`ResolvedDataset`, `DraftSource`) is handed down, never a name.
+  **Rides with:** area 07's chain. **Re-test:** `git grep -c "checkin_bank(" --
+  promptpotter/application/datasets/ingest.py` is 0 (1 now).
+- **A knob's provenance is diffed, not read off the fold** (w11-config): `config_map.py::_knob_rows` calls a
+  bench knob `default` where its value equals `defaults.yaml`'s, so a campaign that states the default reads as
+  unstated; `campaign_config.py::OptimizerChoice.arm_gate` keeps a code default (`"off"`) the
+  `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
+  map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
+  **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
+- **A refusal is swallowed into nothing** (w11-config): `datasets/origin_resolve.py::raised_commands` drops a
+  finding whose patch fails `EditDraftPatch` with `continue`, and `datasets/harbor_panel.py::write_task_panel`
+  drops a row with no documents; neither files what it dropped, and `harbor_panel.py::_panel_yaml` hardcodes
+  `terminus-2` / `docker` the dataset file should name. Root: a dropped finding or row is a reported
+  refusal; the panel's agent and environment are the dataset's. **Rides with:** area 07's chain.
+  **Re-test:** `git grep -c "except ValidationError" -- promptpotter/application/datasets/origin_resolve.py`
+  is 0 (1 now) and `git grep -c "name: terminus-2" -- promptpotter/application/datasets/harbor_panel.py` is
+  0 (1 now).
+- **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
+  `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
+  connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
+  definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
+  `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
   patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
   before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
-  (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
-  closes the pipeline-switch row. **Rides with:** cfg.
-- **The pipeline carrier is typed only at its door**: `PipelineNode.current_config` is a `NodeCall`
-  now, but two laid dumps still read the model by string: `measurement_log.py::_span` reads a cell's
-  `node_configs` (the archive address, `measurement_archive.py::config_key`'s `list[tuple[str, dict]]`)
-  and `injections/wounds.py::_format_runtime_failure_group` reads `RuntimeFailure.observed_config`,
-  laid as a dict by `scoring/arm_states.py`. Action: the archive address and `observed_config` carry
-  a `NodeCall` per node, each hash reading its laid dump. **Re-test:**
-  `git grep -cE "cfg\.get\(\"(model|provider)\"" -- promptpotter` is 0.
-- **A campaign names its connector, and five readers look it up again** (w9-payer):
-  `Campaign.connector` / `Environment.connector` are `str`, so `wiring.py:258`,
-  `admission.py::campaign_sends`, `mint_and_start.py:123`, `mask/load.py:206` and
-  `pipeline_resolve.py:1043` each call `CONNECTORS.get`. Root: the campaign domain
-  (`domain/campaign.py`) holds the `Connector`. **Re-test:**
-  `git grep -c "CONNECTORS.get(.*campaign.connector)" -- promptpotter` is 1.
-- **A dataset read is a third resolution** (w7-res3, w7-rows6):
-  `pipeline_resolve.py::resolve_pipeline_for_dataset` parses and narrows a schema beside `RunResolution`.
-  Root: one resolution, the dataset read a projection of it. **Rides with:** area 07's chain (one typed
-  node document). **Re-test:** the function is gone or reads `RunResolution`.
-- **A call's plain serializer drops `include=`** (valid-3, 11-14): `promptpotter/domain/pipeline_params.py::NodeCall` —
-  `_dump` is a plain model serializer taking no serialization info, so `model_dump(include=...)` returns
-  every key; `promptpotter/domain/search_point.py::prompt_edits` read by attribute as a workaround
-  (items 631) — the model dump honours `include`/`exclude` like every other model, so no caller reads
-  by attribute to dodge it — **Rides with:** `area 07's chain` — **Re-test:** `NodeCall(...).model_dump(include={"model"})`
-  returns only `model`.
+  (6 modules define one: `potter/records.py`, `pipeline_overlay`, `pipeline_params`, `pipeline_parsing`,
+  `pipeline_schema`, `search_point`; 22 name `NodeCall`, 31 carry the bag). The untyped edges show it:
+  `datasets/prompts.py::pipeline_node_overlay` skips a non-dict node or config silently,
+  `pipeline_parsing.py::_registered` answers `None` for a family no registry holds,
+  `ManifestNode.optimizer` is a `dict[str, Any]`, `pipeline_schema.py::node_config_schema` takes optional
+  `values` / `sources` that act as fallbacks, and `layer_fold.py::_laid` ignores a non-list SUBSET value.
+  Action: one typed node document with knobs a view on it; the steer a named layer.
+  **Rides with:** area 07's chain.
+- **The pipeline carrier is typed only at its door**: the archive address
+  (`measurement_archive.py::config_key`'s `list[tuple[str, dict]]`) and `RuntimeFailure.observed_config`
+  (laid as a dict by `scoring/arm_states.py`; an abort's holds the whole document) stay dicts, typed at
+  their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
+  `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
+  area 04's (`observed_config`). **Re-test:** `git grep -c "NodeCall.model_validate(" --
+  promptpotter/application/scoring/measurement_log.py promptpotter/domain/wounds.py` is 0 (2 now).
 - **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
   field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
   (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch
@@ -623,19 +622,32 @@ sole route for a backend tunable.
 `CONNECTOR`; core never infers what a connector should declare; clients are `ProviderSpec` instances; provider
 selection explicit.
 
-**Unexamined:** `connectors/dspy_module.py`, `infrastructure/llm/openai_compat.py`,
-`infrastructure/llm/base.py`
+**Unexamined:** none (w11-connectors read `connectors/harbor.py`, `connectors/dspy_module.py`,
+`infrastructure/llm/openai_compat.py` and `infrastructure/llm/base.py` against the Target).
 
-- **`connectors/harbor.py` is six responsibilities in one module** (w10-survey, 1,545 lines; ~110 bind
-  `CONNECTOR`): roster pinning (`_pinned_roster`, `_registry_roster`, `pin_roster`), the container and image
-  harness (`_agent_install_script`, `_trial_config`), the agent model and sender (`_AgentModel`,
-  `_install_model`), the trial runner (`_run_episode`, `_back_off`) and trial-result parsing
-  (`_read_trajectory`, `_trial_failures`, `_digest`: about 400 lines of pure folds over `TrialResult`) sit
-  beside the contract. Root: "a built-in is one module binding `CONNECTOR`" holds for a connector small
-  enough to be one module; harbor is a package. Action: `connectors/harbor/` whose `__init__.py` binds
-  `CONNECTOR`, with `roster.py`, `harness.py`, `agent_model.py`, `trial.py`, `parse.py`; first check the
-  one-module probes. **Rides with:** area 08's chain. **Re-test:**
-  `wc -l promptpotter/connectors/harbor.py` is under 400.
+- **A harbor trial's harness fault escapes raw** (recovered, 2026-11): `connectors/harbor.py::_attempt`
+  wraps only the image reuse and the package cache in `docker_host.py::machine_step`; a fault from
+  `Trial.create` or `trial.run` that is no `OSError`/`TimeoutError` reaches the cell as UNKNOWN, charged as
+  the prompt's. Root: the connector declares Harbor's harness faults as `CONNECTION`, never core reading
+  them. **Rides with:** area 08's chain, with one measured fault class. **Re-test:** a `Trial.create`
+  raising Harbor's own docker error ends the cell `CONNECTION`, retried.
+- **dspy's send raises its raw failure** (recovered, w8): `connectors/dspy_module.py::_ProgramCalls._settle`
+  closes a status-less failure outside `send_failure.py::NOT_THE_PROMPT` and returns, so the program
+  re-raises litellm's exception, which `application/scoring/sample_measurement.py` classifies again
+  through `failed_send`. Root: raise `FailedSendError` carrying the closed outcome. **Rides with:** area
+  04's chain (the second reader). **Re-test:** `git grep -c "failed_send" -- promptpotter/application` == 0.
+- **The offline world sleeps an LLM resend on the wall clock** (recovered, w7): `scripts/offline_world.py`'s
+  `unslept` replaces only `infrastructure/backend.py`'s binding of `send_pacing.py::held_wait`, so
+  `openai_compat.py`'s resend waits real seconds offline; and a fault raised inside the world's LLM reply
+  is closed as a failed send before it raises as itself (`OpenAICompatibleClient._admitted_send`).
+  Root: the world answers the sleep at `send_pacing.py`, the one owner. **Rides with:** area 14's chain.
+  **Re-test:** a 5xx scripted on the offline LLM resends in no wall time.
+- **A remote backend's cells ask the bound account** (recovered): `infrastructure/backend.py::BackendClient.cells_paid_by`
+  reads `bound_account` for a backend that sends on its own keys, harmless while every sending entry
+  binds one. Root: the payer is asked only of a connector that `holds_own_sends` or is host-paid
+  (`wallet.py::cells_paid_by`). **Rides with:** area 05's chain. **Re-test:** a remote cell scored under
+  no bound account is admitted.
+
 - **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
   `terminus-2`, `application/datasets/loaders.py::_harbor_tasks` loads the roster,
   `presentation/cli/commands/writes.py` imports `pin_roster`, and `domain/scoring.py` and
@@ -643,15 +655,6 @@ selection explicit.
   owns; `application/pipeline_resolve.py` keeps a "twin" of `connectors/harbor.py::INSTRUMENT_KEY`. Root: a
   connector declares its panel, dataset loader and reward key; core reads the declaration. **Re-test:**
   `git grep -nE "env_reward" -- 'promptpotter/*.py' ':!promptpotter/connectors/harbor.py'` is empty.
-- **Connectors repeat one mechanism** (w10-survey): `connectors/dspy_module.py::_NOT_THE_PROMPT` and
-  `connectors/harbor.py::_NOT_THE_PROMPT` (adds `SERVER`) name one concept twice;
-  `connectors/harbor.py::_back_off`, `infrastructure/backend.py` and `infrastructure/llm/openai_compat.py`
-  each write the warn-then-record retry around `resend_wait`; `connectors/harbor.py::_TERMINAL_ESC` is a
-  third ANSI regex beside `application/views/render/primitives.py::_ANSI_RE` and
-  `application/views/readout.py::_ANSI_RE`; harbor reaches Harbor's private `_env_vars`,
-  `_prompt_template`, `_llm`, `_extra_env` and `_get_combined_install_command` (7 sites, all in
-  `harbor.py`). Root: one retry-and-record, one ANSI strip in `shared/`, one denylist. **Re-test:**
-  `git grep -c "_NOT_THE_PROMPT = " -- 'promptpotter/*.py'` lists one file.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -663,7 +666,9 @@ selection explicit.
   Action: the probe reads `/version` and refuses another contract; the revision folds into TermNorm's
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
-  `connectors/termnorm.py` probes `/version`.
+  `connectors/termnorm.py` probes `/version`. The probe half is built on `hold/w11-termnorm-version`
+  (87e964e05, w11-connectors). It lands once TermNorm's master serves `GET /version`: until then it
+  refuses every termnorm launch.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.
@@ -677,22 +682,17 @@ selection explicit.
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
-  file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
-  in-process count per backend. The two count different subjects: `infrastructure/backend.py::_SENDING` this
-  process's calls by `(connector, base_url)`, which `query_loop.py`'s `room()`/`freed()` schedule
-  from; `MachineSlots` containers across processes by `connector.name`, by file locks a probe
-  cannot read machine-wide (POSIX `fcntl` locks are per-process). Decided (2026-11-19): for a
-  machine-held connector the in-process count gives way and arming waits on the pool, one count of
-  one fact. **Rides with:** a store or spend lane. **Re-test:** no machine-held connector's arming
-  reads `_SENDING`.
-- **The sweep unlinks a dead producer's lock before the reaper reads it** (w7-small, not re-tested):
-  `docker_host.py::reap_dead_producers` then never reaps that producer's containers. **Rides with:**
-  area 08's chain. **Re-test:** a producer killed mid-run leaves no container after one sweep.
 - **A draft serves every optimizer model twice, once under an empty provider** (w11-walk, 11-27):
   `GET /drafts/{id}`'s `draft.pipeline.optimizer_setup.model_capabilities` carries each model under
   `openrouter` and again under the empty string. Expected one entry per (provider, model). **Rides with:**
   `area 08's chain` — **Re-test:** no `model_capabilities` key is the empty string.
+- **The box keeps 21 dead producers' locks** (`jobs/producers/`), though one sweep reaps a dead
+  producer's containers and then its lock (re-tested 2026-11-27 off a dead lock and a scripted
+  `docker ps`; the w7-small symptom, a lock unlinked before the reaper reads it, holds no more). What
+  keeps them is a sweep that never reaches `docker_host.py::reap_dead_producers` or raises in it: a
+  raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
+  next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
+  `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 
@@ -1090,40 +1090,14 @@ survivor.
 **Unexamined:** none (w10-identity read `application/account.py`, `app_visits.py` and
 `infrastructure/identity/` against the Target).
 
-- **A grants file that does not load reads as no grants, which fails OPEN for a denied one**
-  (`identity/grants.py::read_grant`): its `FileUnreadableError` is logged and read as no grant, so a
-  sub-principal whose grant was DENIED (empty `delegated_by`: own tenant, no command rungs) resolves in
-  `accounts.py::account_identity` as an ordinary account holding the whole owner set, while every live
-  delegate drops to its own tenant. The same reader takes a grant whose delegator holds no `user.json`
-  as active (`_delegated_identity` reads the blocklist with no email), and the delegate's first act
-  opens the delegator's account (`account.py::account_of`). Action: a grants file that does not load
-  refuses the identity it was asked for (503, the box's config broken), never reads as none; a grant
-  resolves only onto a delegator whose account stands. Both halves are reads that fail open, and
-  neither waits on the operator's open delegation questions (who edits grants, whether a delegate is
-  its own tenant), which govern only how a grant is written. **Rides with:** area 13's next chain,
-  first. **Re-test:** with `grants.json` truncated, a denied sub-principal's `/auth/me` lists no
-  `campaign.*` rung.
-- **One token row that fails validation blocks every bearer on the install** (w10-identity):
-  `identity/tokens.py::_tokens` refuses the whole file. Root: a per-row load where an unloadable row
-  reads as unknown (401 for that bearer alone), and a rewrite keeps the unloadable rows' bytes.
-  **Rides with:** area 13's next chain. **Re-test:** one corrupted row in the tokens file leaves
-  every other bearer's `/auth/me` answering.
-- **An ID token naming several audiences is accepted without its authorized party** (w10-identity):
-  `identity/oidc.py::verify_id_token` takes an `aud` list holding the client id without checking
-  `azp`, so a multi-audience token issued to another client passes. Root: when `aud` names several,
-  `azp` must equal the client id. **Rides with:** area 13's next chain, first. **Re-test:** a test
-  token with `aud` [client, other] and `azp` other is refused.
-- **The delegated identity reads the default data root, not the install's** (w10-identity):
-  `accounts.py::_delegated_identity` and `_token_identity` read `default_projects_root()` while the
-  bundle carries the install's paths: a global standing in for a keyed subject. **Rides with:** area
-  13's next chain. **Re-test:** `git grep -c default_projects_root -- promptpotter/infrastructure/identity/accounts.py` is 0.
-- **The box's own terminal opens no account's key** (w10-seal): the unit and `update.sh::as_unit` are
-  handed the box key as a systemd credential, but a verb the login user runs by hand names no
-  `BOX_KEY_FILE`, so one reading an account's keys (`wallet_store.py::TenantApiKeyStore.load`) refuses
-  `sealed_keys_unopened`. Root: the box's terminal is handed the same credential (one door every
-  hand-run verb takes, as `as_unit` is), never a copy of the key. **Rides with:** area 13's next
-  chain. **Re-test:** on the box, a hand-run verb reading an account that holds a key opens it.
-
+- **An operator notice with no account behind it leaves no readable outcome** (w11-access): a sign-up's
+  notice files its outcome on the new account's trail (`account.py::record_operator_notice`), but
+  `browser_sign_in.py::ring`'s refusal lines (a sign-up refused at the ceiling, a sign-in that could
+  not be recorded) and `notices.py`'s health and landing notices drop what `notify_operator` returns,
+  so a skipped or refused one is a log line alone. Root: a box-level notice log (one row per notice:
+  its text, outcome and time) that the admin bot's `/trail` or `health` reads, every caller filing
+  through it. **Rides with:** area 13's next chain. **Re-test:** with no admin bot configured, a
+  sign-up refused `accounts_full` leaves a `skipped` outcome an operator read serves.
 
 ## 14 · Gate, offline world, tests
 

@@ -21,6 +21,9 @@ class UploadBasis(FrozenModel):
     connector: str
     # The kept file's name under `TenantDatasetStore.upload_path`.
     kept: str
+    # The chain its definition's `pipelines.default` runs, a pipeline its connector declares
+    # (`EditDraftPatch.mode`); `None` runs the connector's upload chain.
+    chain: tuple[str, ...] | None = None
 
 
 class DatasetBasis(FrozenModel):
@@ -94,7 +97,7 @@ class OriginResolution(StrictModel):
 
 class DraftFile(FrozenModel):
     """`draft.json`, the check-in's draft. ``config`` is a partial `CampaignConfig`: the keys the
-    draft sets, its edit layer over its basis (`pipeline_resolve.py::draft_layers`)."""
+    draft sets, its edit layer over its basis (`pipeline_resolve.py::DraftSource.layers`)."""
 
     # Its address, beside the file: the directory `DraftStore` keeps it in, stamped by `at`.
     _draft_id: str = PrivateAttr()

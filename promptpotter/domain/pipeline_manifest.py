@@ -7,18 +7,11 @@ from typing import Any, Literal, Self
 from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, lay_nodes
+from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, lay_nodes, resolved_key
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import PayloadInvalidError
-
-
-def resolved_key(family: object, version: object) -> str | None:
-    """The `resolved_prompts` / `resolved_schemas` key a family and version name."""
-    if not family:
-        return None
-    return f"{family}/{version}" if version is not None else str(family)
 
 
 def prompt_key(config: NodeConfig) -> str | None:

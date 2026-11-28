@@ -177,12 +177,12 @@ def _format_runtime_failure_group(
     """N failures on one backend across a varying param axis are ONE discovery, collapsed to one line."""
     clusters: dict[tuple[str | None, str, str, str], list[RuntimeFailure]] = defaultdict(list)
     for rf in rfs:
-        cfg = rf.observed_config
+        call = rf.observed_call
         key = (
             rf.node,
             rf.dominant_warning,
-            str(cfg.get("provider", "")),
-            str(cfg.get("model", "")),
+            call.provider or "",
+            call.model or "",
         )
         clusters[key].append(rf)
 

@@ -7,7 +7,13 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.application.account import AccountCeilingError, Arrival, SignInRefusal, sign_in
+from promptpotter.application.account import (
+    AccountCeilingError,
+    Arrival,
+    SignInRefusal,
+    record_operator_notice,
+    sign_in,
+)
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_projects_root
@@ -126,7 +132,7 @@ def ring(signed: SignedIn | SignInRefused) -> None:
     email, user_id = signed.arrival.user.email, signed.arrival.user.user_id
     # Read once the account is on disk, so the arriving account is inside the total.
     total = count_accounts(default_projects_root())
-    notify_operator(
+    told = notify_operator(
         f"New PromptPotter account: {email or f'(no email) {user_id}'}\n"
         f"Accounts now: {total}\n"
         f"Access: {signed.identity.access_state}\n"
@@ -134,6 +140,9 @@ def ring(signed: SignedIn | SignInRefused) -> None:
         + (f"\nRevoke it with:  /block {email}" if email else ""),
         # A stranger's arrival is the one decision this channel offers: /block it now, or not.
         ring=True,
+    )
+    record_operator_notice(
+        build_stores(signed.identity, projects_root=default_projects_root()), told
     )
     # Fires regardless of access: a blocked account is still a contact worth keeping.
     forward_new_account_to_crm(

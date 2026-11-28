@@ -49,14 +49,14 @@ def tell_poll(token: str, refused: str | None) -> None:
 def tell_power(was: PowerLevel) -> PowerLevel:
     """The level now; an unheard notice keeps the old one, so it is told again next time."""
     now, notice = power_change(was)
-    if notice is not None and not notify_operator(notice.text, ring=notice.ring):
+    if notice is not None and notify_operator(notice.text, ring=notice.ring) != "sent":
         return was
     return now
 
 
 def tell_visits_digest() -> None:
     digest = due_digest()
-    if digest is not None and notify_operator(digest.text, ring=digest.ring):
+    if digest is not None and notify_operator(digest.text, ring=digest.ring) == "sent":
         mark_told(digest)
 
 

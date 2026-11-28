@@ -58,63 +58,13 @@
         "identity/tokens.json"
       ],
       "shape": {
-        "$defs": {
-          "ApiToken": {
-            "additionalProperties": false,
-            "properties": {
-              "created_at": {
-                "title": "Created At",
-                "type": "string"
-              },
-              "id": {
-                "title": "Id",
-                "type": "string"
-              },
-              "name": {
-                "title": "Name",
-                "type": "string"
-              },
-              "revoked_at": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Revoked At"
-              },
-              "scopes": {
-                "items": {
-                  "type": "string"
-                },
-                "title": "Scopes",
-                "type": "array",
-                "uniqueItems": true
-              },
-              "user_id": {
-                "title": "User Id",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "user_id",
-              "name",
-              "scopes",
-              "created_at"
-            ],
-            "title": "ApiToken",
-            "type": "object"
-          }
-        },
         "additionalProperties": false,
+        "description": "Keyed by the plaintext's SHA-256 hex, each row unread: a row loads alone (`_tokens`).",
         "properties": {
           "tokens": {
             "additionalProperties": {
-              "$ref": "#/$defs/ApiToken"
+              "additionalProperties": true,
+              "type": "object"
             },
             "title": "Tokens",
             "type": "object"

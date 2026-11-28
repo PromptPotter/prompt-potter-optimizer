@@ -251,6 +251,9 @@ async def verify_id_token(
     audiences = aud if isinstance(aud, list) else [aud]
     if expected_audience not in audiences:
         raise IDTokenInvalidError(f"aud mismatch: {aud!r} does not include {expected_audience!r}")
+    # Several audiences: the token is ours only if we are its authorized party (OIDC Core 3.1.3.7).
+    if len(audiences) > 1 and payload.get("azp") != expected_audience:
+        raise IDTokenInvalidError(f"azp {payload.get('azp')!r} is not {expected_audience!r}")
 
     now = int(time.time())
     exp = payload.get("exp")

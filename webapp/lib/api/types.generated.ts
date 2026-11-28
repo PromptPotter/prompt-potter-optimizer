@@ -4371,9 +4371,9 @@ export interface CellTerm {
 export interface PipelineMode {
   name: string;
   steps: string[];
-  /** What picking it sends as `config.exclude_nodes`; null where the draft's chain
-   * does not hold its steps, so no exclusion runs it. */
-  exclude_nodes: string[] | null;
+  /** Whether `EditDraftPatch.mode` takes it: always on an upload; on a reused
+   * dataset, where its chain holds the steps. */
+  pickable: boolean;
 }
 
 /** One input the draft's active pipeline needs. Soft: unfulfilled, it does not
@@ -4460,6 +4460,9 @@ export interface EditDraftCampaignPayload {
 export interface EditDraftPatch {
   slug: string | null;
   connector: string | null;
+  /** A pipeline the draft's connector declares (`modes`): an upload runs its steps;
+   * a reused dataset excludes the nodes its chain holds beyond them. */
+  mode: string | null;
   raw_task_description: string | null;
   /** Laid over the draft's config by `CampaignConfig`'s rule per key: an absent key
    * leaves its value, `null` drops the draft's own so the layer below shows
@@ -5818,7 +5821,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "bbe6116f85532481";
+export const SERVED_CONTRACT = "25156584bc751b57";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

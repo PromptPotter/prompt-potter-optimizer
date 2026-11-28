@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import re
 import threading
@@ -27,6 +28,8 @@ from promptpotter.shared.errors import (
     SendRefusedError,
 )
 
+logger = logging.getLogger(__name__)
+
 # The first send and each resend after a 5xx or a broken connection; a 429 spends none.
 SEND_ATTEMPTS: int = 5
 HELD_POLL_S: float = 0.25
@@ -47,11 +50,16 @@ class SendBudget:
     def attempt(self) -> int:
         return self.resent + 1
 
-    def resend_wait(self, *, base_s: float = 1.0) -> float | None:
+    def resend_wait(self, what: str, cause: str, *, base_s: float = 1.0) -> float | None:
+        """The next resend's wait, warned as *what* failing on *cause*; ``None``: none is left."""
         if self.attempt >= self.attempts:
             return None
         self.resent += 1
-        return base_s * float(2 ** (self.resent - 1))
+        wait = base_s * float(2 ** (self.resent - 1))
+        logger.warning(
+            "%s: %s (attempt %d/%d); waiting %.1fs", what, cause, self.resent, self.attempts, wait
+        )
+        return wait
 
     def give_back(self, seconds: float) -> None:
         """The clock bounds the provider WORKING, never the wait for it."""

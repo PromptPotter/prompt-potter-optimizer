@@ -9,7 +9,6 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel
 
-from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
     build_panel,
     resolve_bank,
@@ -18,7 +17,11 @@ from promptpotter.application.datasets.loaders import (
 from promptpotter.application.datasets.prompts import pipeline_node_overlay
 from promptpotter.application.datasets.tabular_ingest import read_answer_terms_file
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
+from promptpotter.application.pipeline_resolve import (
+    ServedPipeline,
+    campaign_connector,
+    served_pipeline,
+)
 from promptpotter.application.scoring.evaluators import (
     connector_report_owner,
     observation_key_refusals,
@@ -255,7 +258,7 @@ async def bind_cycle_session(stores: Stores, at: CampaignCycle) -> AsyncIterator
     async with _session(
         stores,
         resolve_dataset(stores, at.campaign.dataset_name),
-        connectors.CONNECTORS.get(at.campaign.connector),
+        campaign_connector(at.campaign),
         identity=stores.identity,
     ) as session:
         yield session.bound(at)

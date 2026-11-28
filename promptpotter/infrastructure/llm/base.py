@@ -215,7 +215,8 @@ _POOLS: dict[asyncio.AbstractEventLoop, dict[tuple[str, float], httpx.AsyncClien
 
 
 def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
-    """One pool per host on the running loop, holding no key: each send carries its own (`post_json`).
+    """One pool per host on the running loop, holding no key: each send carries its own
+    (`openai_compat.py::OpenAICompatibleClient._post`).
 
     Resends nothing: `OpenAICompatibleClient._admitted_send` is the one loop, and each resend a bill."""
     for closed in [loop for loop in _POOLS if loop.is_closed()]:
@@ -232,20 +233,6 @@ def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
             ),
         )
     return client
-
-
-async def post_json(
-    http: httpx.AsyncClient, path: str, body: dict[str, Any], *, headers: dict[str, str]
-) -> httpx.Response:
-    reply = await http.post(path, json=body, headers=headers)
-    if not reply.is_success:
-        # httpx's own message names the status alone; the provider's words are the diagnosis.
-        raise httpx.HTTPStatusError(
-            f"HTTP {reply.status_code} from {reply.url}: {reply.text[:500]}",
-            request=reply.request,
-            response=reply,
-        )
-    return reply
 
 
 def send_bound(ceiling: RateCeiling | None, *, sent: object, max_tokens: int | None) -> SendBound:
