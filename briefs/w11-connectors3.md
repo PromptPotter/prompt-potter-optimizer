@@ -25,7 +25,8 @@ Census: `connectors/**` and `infrastructure/backend.py`. Give each module with n
 
 OWNS: `connectors/**`, `infrastructure/backend.py`, `infrastructure/docker_host.py`, `infrastructure/llm/**`
 less `pricing.py`, `application/datasets/harbor_panel.py`, the settings fields link 2 removes, and their
-tests. Other chains running at the same time: w11-spend2 (area 05's files, `wallet.py` included: call
+tests. Do not edit `domain/pipeline_overlay.py` or `layer_fold.py`, which w11-config3 owns; a tunable
+rides the overlay as it stands at base. Other chains running at the same time: w11-config3, w11-spend2 (area 05's files, `wallet.py` included: call
 `sending_key`, do not change it) and w11-jobs3 (`jobs/**`).
 
 DONE WHEN:
