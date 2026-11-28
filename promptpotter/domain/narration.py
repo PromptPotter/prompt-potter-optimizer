@@ -14,24 +14,22 @@ from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutc
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.fold_basis import FoldBasisRecord
-from promptpotter.domain.records.run_records import (
-    ArmRecord,
-    ArmsGate,
+from promptpotter.domain.records.llm_calls import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    PhaseRecord,
-    ProviderEasedRecord,
-    ProviderHoldRecord,
+)
+from promptpotter.domain.records.provider import ProviderEasedRecord, ProviderHoldRecord
+from promptpotter.domain.records.rounds import (
+    ArmRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundStatement,
     RoundWarningRecord,
-    Running,
-    RunPhaseRecord,
-    SampleScoredRecord,
 )
+from promptpotter.domain.records.run_phase import ArmsGate, PhaseRecord, Running, RunPhaseRecord
+from promptpotter.domain.records.sample_passes import SampleScoredRecord
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell

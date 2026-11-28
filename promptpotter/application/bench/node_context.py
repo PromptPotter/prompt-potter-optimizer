@@ -43,6 +43,7 @@ from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.failures import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
@@ -62,16 +63,17 @@ from promptpotter.domain.phase_acts import FitnessFact, StepClosed, StepOpened, 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import Access, BlockPool, DemoPool, Pool, PoolEntry
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.decision import DecisionInputs
+from promptpotter.domain.records.level_series import LevelSeriesRecord
+from promptpotter.domain.records.rounds import (
     ArmRecord,
-    DecisionInputs,
-    PhaseRecord,
-    RaceStandingRecord,
     RoundClosedRecord,
     RoundProposedRecord,
     RoundStatement,
     WalkRead,
 )
+from promptpotter.domain.records.run_phase import PhaseRecord
+from promptpotter.domain.records.sample_passes import RaceStandingRecord
 from promptpotter.domain.results import Reelection, RoundResult, round_document_digest
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import LineOutlay, RunStanding, walked_position
@@ -80,7 +82,6 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import Delivery
-from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope
@@ -110,7 +111,6 @@ def own_rows(line: Sequence[RoundResult], parent: ArmKey) -> CellSheet:
 def closed_round(
     closing: RoundResult,
     prior: Sequence[RoundResult],
-    difficulty: DifficultyView,
     *,
     lives: LivesConfig | None,
     position_of: Mapping[str, int],
@@ -120,8 +120,16 @@ def closed_round(
     restatement reads under its round's own, never the launch restating it."""
     line = [*(rr for rr in prior if rr.round < closing.round), closing]
     standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
+    return RoundClosedRecord.of(line, position_of, standing)
+
+
+def line_series(
+    closing: RoundResult, prior: Sequence[RoundResult], difficulty: DifficultyView
+) -> LevelSeriesRecord:
+    """*closing*'s line read on the δ scale at its close, banked beside the close."""
+    line = [*(rr for rr in prior if rr.round < closing.round), closing]
     [series] = difficulty.level_series([line])
-    return RoundClosedRecord.of(line, position_of, series, standing)
+    return LevelSeriesRecord(round=closing.round, series=series)
 
 
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
@@ -303,7 +311,6 @@ class Lineage(CycleRead):
         return closed_round(
             rr,
             cycle.rounds,
-            cycle.difficulty,
             lives=cycle.config.optimization.lives,
             position_of=session.bank.position_of,
             outlay=standing.rounds[at.round].close.run_standing.outlay,

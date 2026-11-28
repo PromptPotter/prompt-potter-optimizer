@@ -9,17 +9,14 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple, assert_never
 from promptpotter.domain.command_events import draft_of, subject_of
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.run_phase import Ended, Paused, RunPhaseRecord, declared_stop
+from promptpotter.domain.records.workspace import (
     AccountEventRecord,
     BankedStop,
-    Device,
-    Ended,
-    Paused,
-    RunPhaseRecord,
     TrailTombstoneRecord,
-    declared_stop,
 )
 from promptpotter.domain.spend import Budget, CeilingMeter
+from promptpotter.domain.visit_device import Device
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_spend import bank_spend
 from promptpotter.infrastructure.store.io import DRAFTS_DIR

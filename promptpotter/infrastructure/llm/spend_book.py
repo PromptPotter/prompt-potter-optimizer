@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.money import (
     Bill,
     CallPrice,
     CycleShareRecord,

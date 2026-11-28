@@ -34,6 +34,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
+from promptpotter.domain.fork import ForkDirection
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
     CandidateStanding,
@@ -54,7 +55,7 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
-from promptpotter.domain.records.run_records import ForkDirection, SpawnedBy
+from promptpotter.domain.records.lineage import SpawnedBy
 from promptpotter.domain.results import Election
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import FrozenModel

@@ -31,7 +31,7 @@ from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InPro
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.records.run_records import BackendRevision, PipelineRead
+from promptpotter.domain.records.run_wiring import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities

@@ -49,9 +49,10 @@ from promptpotter.domain.paired_reading import (
     MeasuredLift,
     ReadingState,
 )
-from promptpotter.domain.records.run_records import ArmAct
+from promptpotter.domain.records.lineage import ArmAct
 from promptpotter.domain.scoring import Scorer
-from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend_rollup import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LEDGER_SPEND
 from promptpotter.infrastructure.store.read_model import read_line

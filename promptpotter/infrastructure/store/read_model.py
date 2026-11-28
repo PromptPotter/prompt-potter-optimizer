@@ -30,9 +30,7 @@ from pydantic import ValidationError
 from promptpotter.config.paths import LEDGER_FOLDS_DIR, user_data_root
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
-from promptpotter.domain.records.run_records import (
-    stale_file_warning,
-)
+from promptpotter.domain.records.rounds import stale_file_warning
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     ABSENT,

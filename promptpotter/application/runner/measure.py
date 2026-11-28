@@ -82,9 +82,7 @@ from promptpotter.domain.paired_reading import (
     UnreadPair,
     UnreadState,
 )
-from promptpotter.domain.records.run_records import (
-    ArmRecord,
-)
+from promptpotter.domain.records.rounds import ArmRecord
 from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.run_standing import (
     LineStep,

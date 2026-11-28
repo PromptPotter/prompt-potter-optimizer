@@ -25,7 +25,7 @@ from promptpotter.domain.origin_panel import (
     RoundEnding,
     line_by_individual,
 )
-from promptpotter.domain.paired_reading import ArmKey, PairedReading, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadPair, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.scoring import (
@@ -109,7 +109,7 @@ class Election(FrozenModel):
     vs_reference: dict[ArmKey, PairedReading] = Field(default_factory=dict)
     # `Selector.elects_on`: the column of `RoundView.candidates` the round was WON on.
     elects_on: DisplayMetric
-    deciding_pair: PairedReading | None = Field(
+    deciding_pair: ReadPair | None = Field(
         default=None,
         description="`leading` (`b`) over `parent` (`a`) on the cells its selector paired them "
         "on: the reading the round was decided on. Null where the selector banks none.",

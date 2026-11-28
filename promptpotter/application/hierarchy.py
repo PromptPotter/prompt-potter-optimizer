@@ -67,12 +67,12 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import (
     LifetimeSpend,
-    MeteredSpend,
     UserSpend,
     calls_rate_priced,
     rate_priced_text,
     usd_text,
 )
+from promptpotter.domain.spend_rollup import MeteredSpend
 from promptpotter.infrastructure.run_state import producer_stamps
 from promptpotter.infrastructure.store.account_spend import (
     billed_spend,

@@ -94,33 +94,40 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.fold_basis import FoldBasisRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.run_records import (
-    ArmRecord,
-    ArmsGate,
-    CycleFinalRecord,
-    ElectionRecord,
-    Ended,
+from promptpotter.domain.records.level_series import LevelSeriesRecord
+from promptpotter.domain.records.lineage import CycleFinalRecord
+from promptpotter.domain.records.llm_calls import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    Paused,
-    PhaseRecord,
-    ProviderEasedRecord,
-    ProviderHoldRecord,
-    RaceCatchUpRecord,
-    RaceStandingRecord,
+)
+from promptpotter.domain.records.provider import ProviderEasedRecord, ProviderHoldRecord
+from promptpotter.domain.records.rounds import (
+    ArmRecord,
+    ElectionRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundStatement,
     RoundWarningRecord,
+)
+from promptpotter.domain.records.run_phase import (
+    ArmsGate,
+    Ended,
+    Paused,
+    PhaseRecord,
     RunPhaseRecord,
-    RunWiringRecord,
+)
+from promptpotter.domain.records.run_wiring import RunWiringRecord
+from promptpotter.domain.records.sample_passes import (
+    RaceCatchUpRecord,
+    RaceStandingRecord,
     SampleScoredRecord,
     SampleStartedRecord,
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.said import GLYPH
 from promptpotter.domain.sample import sample_tag
 from promptpotter.infrastructure.projections.audit_trail import round_audits
@@ -169,6 +176,8 @@ class ReadoutProjection(Projection):
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
+        # The δ scale's reading at each close, banked just before it.
+        self._series: dict[int, LevelSeries] = {}
         # The fold of `closed_rounds` over the statements it was read at.
         self._folded: tuple[tuple[RoundStatement, ...], list[RoundResult]] | None = None
         self.sample_counter = 0
@@ -260,8 +269,9 @@ class ReadoutProjection(Projection):
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
         if isinstance(act, InitClosed) and self._hop is not None:
             chain = self._campaigns.chain(self._hop)
-            standing = read_line(chain, STANDING_ROUNDS).rounds
-            self._closed = {n: held.close for n, held in standing.items()}
+            scanned = read_line(chain, STANDING_ROUNDS)
+            self._closed = {n: held.close for n, held in scanned.rounds.items()}
+            self._series = dict(scanned.series)
             if (resolved := read_line(chain, RESOLVED_RUN)).moved_panel is not None:
                 self._write(
                     f"  {YELLOW}{GLYPH['warn']} a DIFFERENT panel than cycle "
@@ -317,7 +327,7 @@ class ReadoutProjection(Projection):
         if not self._closed:
             return
         closed = [self._closed[n].summary() for n in sorted(self._closed)]
-        last_scale = self._closed[max(self._closed)].level_series
+        last_scale = self._series[max(self._closed)]
         for line in render_holds(served_rounds(closed, {}, last_scale)):
             self._write(line)
         _, audits, review = self._reviewed()
@@ -381,6 +391,9 @@ class ReadoutProjection(Projection):
 
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
         self._say(record)
+
+    def _handle_level_series(self, record: LevelSeriesRecord) -> None:
+        self._series[record.round] = record.series
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         """A round already closed here is stated again: a restatement announces nothing."""
@@ -603,7 +616,7 @@ class ReadoutProjection(Projection):
 
     def on_round_complete(self, round_result: RoundClosedRecord) -> None:
         self.sample_counter = 0
-        series = round_result.level_series
+        series = self._series[round_result.round]
 
         # Never `self._round_num`: the block race advances it before this round's summary prints.
         rn = round_result.round

@@ -56,6 +56,7 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import CROWNING_RULE
+from promptpotter.domain.failures import RuntimeFailure, ValidationReason
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -63,7 +64,7 @@ from promptpotter.domain.paired_reading import RoundArm
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, BlockPool, DemoPool, PoolEntry
-from promptpotter.domain.records.run_records import RoundWarningRecord
+from promptpotter.domain.records.rounds import RoundWarningRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -73,7 +74,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
-from promptpotter.domain.wounds import RuntimeFailure, ValidationReason
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.infrastructure.run_scope import RunScope, scoped
 from promptpotter.shared.errors import PromptCompositionError

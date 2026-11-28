@@ -36,7 +36,7 @@ from promptpotter.domain.phases import (
     stop_said,
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.records.run_records import RoundClosedRecord
+from promptpotter.domain.records.rounds import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import AbilityReading, LevelSeries

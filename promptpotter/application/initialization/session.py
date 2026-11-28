@@ -13,12 +13,9 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.fitness_fold import FoldBasis
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.records.lineage import ArmAct
 from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import (
-    ArmAct,
-    BackendRevision,
-    PipelineRead,
-)
+from promptpotter.domain.records.run_wiring import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank, Grading
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.search_point import TaskDecomposition

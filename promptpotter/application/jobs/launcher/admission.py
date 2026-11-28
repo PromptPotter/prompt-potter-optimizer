@@ -70,13 +70,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.spend import (
-    MONEY_AXES,
-    NOTHING_METERED,
-    Budget,
-    CeilingMeter,
-    HeldBudget,
-)
+from promptpotter.domain.spend import MONEY_AXES, NOTHING_METERED, Budget, CeilingMeter, HeldBudget
 from promptpotter.infrastructure.llm.spend_book import SpendBook, draws_on
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped

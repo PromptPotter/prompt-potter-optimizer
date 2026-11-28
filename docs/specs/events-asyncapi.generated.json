@@ -2129,6 +2129,7 @@
             "health": "#/components/schemas/HealthRecord",
             "hold": "#/components/schemas/Hold",
             "launch_clock": "#/components/schemas/LaunchClockRecord",
+            "level_series": "#/components/schemas/LevelSeriesRecord",
             "llm_call": "#/components/schemas/LLMCallRecord",
             "llm_call_progress": "#/components/schemas/LLMCallProgressRecord",
             "llm_call_start": "#/components/schemas/LLMCallStartRecord",
@@ -2218,6 +2219,9 @@
           },
           {
             "$ref": "#/components/schemas/LaunchClockRecord"
+          },
+          {
+            "$ref": "#/components/schemas/LevelSeriesRecord"
           },
           {
             "$ref": "#/components/schemas/LLMCallRecord"
@@ -2950,7 +2954,7 @@
           "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PairedReading"
+                "$ref": "#/components/schemas/ReadPair"
               },
               {
                 "type": "null"
@@ -3041,7 +3045,7 @@
           "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PairedReading"
+                "$ref": "#/components/schemas/ReadPair"
               },
               {
                 "type": "null"
@@ -4365,6 +4369,35 @@
           "levels"
         ],
         "title": "LevelSeries",
+        "type": "object"
+      },
+      "LevelSeriesRecord": {
+        "additionalProperties": false,
+        "description": "Banked beside each close: every standing round re-read on that close's one scale, so the\nseries moves with the clock. A restatement banks none; the next close re-reads every round.",
+        "properties": {
+          "record_type": {
+            "const": "level_series",
+            "default": "level_series",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "series": {
+            "$ref": "#/components/schemas/LevelSeries"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "series"
+        ],
+        "title": "LevelSeriesRecord",
         "type": "object"
       },
       "LiftCost": {
@@ -6749,6 +6782,7 @@
               "health",
               "hold",
               "launch_clock",
+              "level_series",
               "llm_call",
               "llm_call_progress",
               "llm_call_start",
@@ -7494,9 +7528,6 @@
           "health": {
             "$ref": "#/components/schemas/DegradationHealth"
           },
-          "level_series": {
-            "$ref": "#/components/schemas/LevelSeries"
-          },
           "optimizer_facts": {
             "items": {
               "$ref": "#/components/schemas/OptimizerFact"
@@ -7578,7 +7609,6 @@
           "cells",
           "panel_cells",
           "positions",
-          "level_series",
           "run_standing",
           "panel_precision"
         ],

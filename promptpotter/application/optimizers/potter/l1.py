@@ -77,6 +77,13 @@ from promptpotter.application.optimizers.variation.members import (
 )
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
+from promptpotter.domain.failures import (
+    COLLAPSE_WORDS,
+    RuntimeFailure,
+    ValidationFailure,
+    ValidationReason,
+    fatal_validation_failures,
+)
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
@@ -91,13 +98,6 @@ from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.wounds import (
-    COLLAPSE_WORDS,
-    RuntimeFailure,
-    ValidationFailure,
-    ValidationReason,
-    fatal_validation_failures,
-)
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 
 

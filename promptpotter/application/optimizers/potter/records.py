@@ -6,12 +6,12 @@ from typing import Any, cast
 
 from pydantic import Field
 
+from promptpotter.domain.failures import ValidationReason
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.pipeline_params import lay_nodes
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.domain.wounds import ValidationReason
 
 
 class L1Layout(StrictModel):

@@ -12,10 +12,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
-from promptpotter.domain.records.run_records import (
-    LLMCallRecord,
-    LLMCallStartRecord,
-)
+from promptpotter.domain.records.llm_calls import LLMCallRecord, LLMCallStartRecord
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel

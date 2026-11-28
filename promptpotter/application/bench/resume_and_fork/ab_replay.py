@@ -21,7 +21,7 @@ from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRoun
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.run_records import DecisionRecord
+from promptpotter.domain.records.decision import DecisionRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.shared.errors import DiagnosticError

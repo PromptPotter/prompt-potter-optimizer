@@ -22,6 +22,7 @@ from promptpotter.application.datasets.ingest import (
 )
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.config.settings import TERMS_VERSION
+from promptpotter.domain.command_effects import DraftOpenedEffect
 from promptpotter.domain.command_kinds import (
     AcceptTermsPayload,
     ArchiveCampaignPayload,
@@ -40,7 +41,6 @@ from promptpotter.domain.command_kinds import (
     SetUserSettingsPayload,
     UnarchiveCampaignPayload,
 )
-from promptpotter.domain.records.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 
 

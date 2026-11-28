@@ -2553,7 +2553,7 @@ export interface Election {
   elects_on: 'fitness' | 'composite';
   /** `leading` (`b`) over `parent` (`a`) on the cells its selector paired them on:
    * the reading the round was decided on. Null where the selector banks none. */
-  deciding_pair: ReadPair | UnreadPair | null;
+  deciding_pair: ReadPair | null;
   verdict_reason: string | null;
   reelection: Reelection | null;
 }
@@ -2619,7 +2619,7 @@ export interface StampedEnvelope {
   /** The served contract (`X-Served-Contract`), compared as a fetch's answer is. */
   contract: string;
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fold_basis' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fold_basis' | 'health' | 'hold' | 'launch_clock' | 'level_series' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'untaken_bought' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -5824,7 +5824,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "a9b321bb73e10642";
+export const SERVED_CONTRACT = "e22924451edb8f1e";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6530,6 +6530,11 @@ export const HIT_SPREAD_LABELS: Record<HitSpread, string> = {
   "always": "always hit",
 };
 
+// Mirror of domain/command_effects.py::VERIFY_WORDS, in display order.
+export const VERIFY_WORDS: Record<'saturated', string> = {
+  "saturated": "Every sample in the {dataset_name} search split is already measured for this config ({already_measured} total). Nothing to add.",
+};
+
 // Mirror of domain/command_kinds.py::ARCHIVE_MODE_INFO, in display order.
 export const ARCHIVE_MODE_INFO: Record<ArchiveMode, ArchiveModeInfo> = {
   "compact": { label: "Compact", sentence: "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay." },
@@ -6755,11 +6760,6 @@ export const PROMPT_FIELD_INFO: Record<string, PromptFieldInfo> = {
   "plan": { label: "Plan", hint: null, rows: null },
 };
 
-// Mirror of domain/records/run_records.py::VERIFY_WORDS, in display order.
-export const VERIFY_WORDS: Record<'saturated', string> = {
-  "saturated": "Every sample in the {dataset_name} search split is already measured for this config ({already_measured} total). Nothing to add.",
-};
-
 // Mirror of domain/round_health.py::HEALTH_CAUSE_INFO, in display order.
 export const HEALTH_CAUSE_INFO: Record<'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | 'transient', HealthCauseInfo> = {
   "origin_unmeasured": { title: "not measured", remedy: "Re-score the origin. If it stops in the same place, read the error on the last cell that was measured — the cause is upstream of the prompt. A cell measured but not graded is the formula's: fix the formula and re-read that cell, never re-buy it." },
@@ -6904,6 +6904,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],
   [HEATMAP_SCOPE_LABELS, ["cycle", "campaign", "dataset"]],
   [HIT_SPREAD_LABELS, ["unmeasured", "never", "partly", "always"]],
+  [VERIFY_WORDS, ["saturated"]],
   [ARCHIVE_MODE_INFO, ["compact", "restore", "purge-cold", "reclaim"]],
   [BACKEND_REACHABILITY_INFO, ["live", "unreachable", "missing_extra"]],
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
@@ -6924,7 +6925,6 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["packs", "partition"]],
   [PROMPT_FIELD_INFO, ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "shots", "plan"]],
-  [VERIFY_WORDS, ["saturated"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
   [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "prior_dominated"]],

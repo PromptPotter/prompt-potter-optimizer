@@ -38,12 +38,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
-from promptpotter.domain.records.run_records import (
-    ArmsGate,
-    PhaseRecord,
-    Running,
-    RunPhaseRecord,
-)
+from promptpotter.domain.records.run_phase import ArmsGate, PhaseRecord, Running, RunPhaseRecord
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import HeldBudget

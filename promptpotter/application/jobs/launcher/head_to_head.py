@@ -29,10 +29,10 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import ServedPipeline
+from promptpotter.domain.command_effects import LaunchedJob
 from promptpotter.domain.command_kinds import HeadToHeadRequest
 from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun
-from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.wallet import Send

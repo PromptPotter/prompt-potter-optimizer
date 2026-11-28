@@ -17,7 +17,7 @@ from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessW
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
-from promptpotter.domain.records.run_records import BackendWarningRecord
+from promptpotter.domain.records.provider import BackendWarningRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step

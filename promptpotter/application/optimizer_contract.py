@@ -38,7 +38,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.origin_panel import RoundEnding
-from promptpotter.domain.paired_reading import ArmKey, PairedReading
+from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadPair
 from promptpotter.domain.phase_acts import StepFact
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
@@ -451,7 +451,7 @@ class Selection:
     # What the selector keeps, best first: the next population, cut by a survival node where the
     # walk names one (`Survivor`), else whole.
     ranked: Sequence[OptSearchPoint]
-    deciding_pair: PairedReading | None = None
+    deciding_pair: ReadPair | None = None
 
     @property
     def selected(self) -> ArmKey | None:

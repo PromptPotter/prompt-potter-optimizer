@@ -106,7 +106,7 @@ from promptpotter.domain.scoring import (
     ScoringFormulaError,
     WalkedCell,
 )
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LEDGER_SPEND,

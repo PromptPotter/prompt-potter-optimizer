@@ -155,12 +155,14 @@ from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.run_records import ArmAct, CycleStart, OriginGatePass
+from promptpotter.domain.records.decision import OriginGatePass
+from promptpotter.domain.records.lineage import ArmAct, CycleStart
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
@@ -1645,9 +1647,9 @@ async def run_controlled(
     assert record is not None, "the arms joined no head-to-head"
     for name, (cycle, cid) in arms.items():
         hop = CycleHop(campaign_id=cid, cycle_id=cycle.name)
-        standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.values()
+        series = stores.campaigns.standing_rounds(hop, moment=None).series.values()
         own = RulerOwn(campaign=cid, since=record.ruler_version)
-        read = {r.close.level_series.stamp.own for r in standing}
+        read = {s.stamp.own for s in series}
         if read != {own}:
             raise SystemExit(
                 f"offline run: arm {name} read ruler reaches {read}, its head-to-head froze "
@@ -2012,7 +2014,10 @@ LEDGER: dict[str, tuple[str, Pick]] = {
     "round_entered": ("rounds_entered", {"round": "round"}),
     "round_closed": ("rounds_closed", {
         "round": "round", "ending": "election.ending", "ruler_excluded": "election.ruler.excluded",
-        "levels": Each("level_series.levels", {"theta": "theta", "se": "se", "cells": "cells", "caveat": "caveat"}),
+    }),
+    "level_series": ("level_series", {
+        "round": "round",
+        "levels": Each("series.levels", {"theta": "theta", "se": "se", "cells": "cells", "caveat": "caveat"}),
     }),
     "run_phase": ("run_phases", {"run_phase": "state.run_phase", "stop_reason": "state.stop_reason"}),
     "llm_call": ("optimizer_calls", {

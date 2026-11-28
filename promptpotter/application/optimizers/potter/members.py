@@ -124,6 +124,8 @@ from promptpotter.application.run_stop import StopLoop
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.dashboard_rows import OptimizerLimit
+from promptpotter.domain.failures import ValidationReason
+from promptpotter.domain.fork import RebaseRequest
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
 from promptpotter.domain.phase_acts import (
@@ -136,7 +138,7 @@ from promptpotter.domain.phase_acts import (
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
-from promptpotter.domain.records.run_records import RebaseRequest, RoundWarningRecord
+from promptpotter.domain.records.rounds import RoundWarningRecord
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit
@@ -145,7 +147,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 

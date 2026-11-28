@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from promptpotter.application.initialization.session import LaunchState, drawn_partition
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.run_records import RoundClosedRecord, RoundEnteredRecord
+from promptpotter.domain.records.rounds import RoundClosedRecord, RoundEnteredRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer, WalkedCell

@@ -12,11 +12,11 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.domain.failures import NurseOwner, RuntimeFailure
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 
 # Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
 _PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(

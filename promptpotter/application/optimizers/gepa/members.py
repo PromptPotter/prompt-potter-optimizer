@@ -44,7 +44,7 @@ from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSli
 from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.records.run_records import DecisionInputs
+from promptpotter.domain.records.decision import DecisionInputs
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell

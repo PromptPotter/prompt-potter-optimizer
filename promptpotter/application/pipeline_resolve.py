@@ -113,7 +113,7 @@ from promptpotter.domain.pipeline_schema import (
     running_only,
 )
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.run_wiring import (
     DefaultsDrift,
     DefaultsPin,
     PipelineRead,

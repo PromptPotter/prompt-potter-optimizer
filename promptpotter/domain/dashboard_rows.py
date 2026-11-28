@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed
+from promptpotter.domain.failures import ValidationFailure
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.opt_search_point import EvidenceGrounding, NodePrompt
@@ -38,7 +39,6 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.verification import VerifyReading
-from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.clock import duration_words
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar
-from promptpotter.domain.paired_reading import ArmKey, CellSetName, ReadingState
+from promptpotter.domain.paired_reading import ArmKey, CellSetName
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.scoring import ROW_GRADES
 
@@ -23,7 +23,6 @@ def crowning_cells(
         if election is None or election.selected != parent or election.deciding_pair is None:
             continue
         pair = election.deciding_pair
-        assert pair.state is ReadingState.READ, "a crown is decided on a read pair"
         own = rr.raced(ArmKey(parent)).by_key()
         against = rr.raced(ArmKey(pair.a.address.individual_id)).by_key()
         on = (

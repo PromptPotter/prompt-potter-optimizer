@@ -17,7 +17,8 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.phases import ProducerState, RunState, StopReason
 from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import CycleSupersededRecord, RunPhaseRecord
+from promptpotter.domain.records.lineage import CycleSupersededRecord
+from promptpotter.domain.records.run_phase import RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.run_state import derive_run_state

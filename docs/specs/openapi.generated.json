@@ -6622,7 +6622,7 @@
           "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PairedReading"
+                "$ref": "#/components/schemas/ReadPair"
               },
               {
                 "type": "null"
@@ -17203,6 +17203,7 @@
               "health",
               "hold",
               "launch_clock",
+              "level_series",
               "llm_call",
               "llm_call_progress",
               "llm_call_start",

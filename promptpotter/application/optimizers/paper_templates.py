@@ -6,10 +6,10 @@ from collections.abc import Callable, Sequence
 from promptpotter.application.bench.node_context import Children, Lineage, NodeContext, Target
 from promptpotter.application.optimizer_contract import RewriteKnobs
 from promptpotter.domain.arms import Proposal
+from promptpotter.domain.failures import ValidationFailure
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.wounds import ValidationFailure
 
 _PROMPT = re.compile(r"<prompt>(.*?)(?:</prompt>|\Z)", re.DOTALL)
 

@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import Any
 
+from promptpotter.domain.failures import ValidationFailure, ValidationReason
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
 from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
-from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 
 _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
     "string": (str,),

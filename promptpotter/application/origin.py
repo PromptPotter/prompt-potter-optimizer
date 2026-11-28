@@ -31,12 +31,8 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.records.run_records import (
-    OPERATOR_ORIGIN_SOURCES,
-    CycleStart,
-    OriginSource,
-    ScoringLockedRecord,
-)
+from promptpotter.domain.records.lineage import OPERATOR_ORIGIN_SOURCES, CycleStart, OriginSource
+from promptpotter.domain.records.run_wiring import ScoringLockedRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition

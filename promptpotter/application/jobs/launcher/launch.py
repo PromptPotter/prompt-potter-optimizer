@@ -19,11 +19,11 @@ from promptpotter.application.jobs.launcher.opening import Opening
 from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun, launched_as
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.command_effects import LaunchedJob
 from promptpotter.domain.command_events import QueuedLaunch
 from promptpotter.domain.command_kinds import Door
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun, Job
-from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 

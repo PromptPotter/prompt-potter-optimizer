@@ -59,6 +59,7 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.failures import ValidationReason
 from promptpotter.domain.fitness_fold import compute_composite_fitness
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
@@ -86,7 +87,6 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import GradedCell
-from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.identity import default_identity

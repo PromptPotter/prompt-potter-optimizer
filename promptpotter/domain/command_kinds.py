@@ -33,6 +33,7 @@ from promptpotter.domain.draft_edit import (
     EditDraftPatch,
     OptimizationOverrides,
 )
+from promptpotter.domain.fork import ConfigOverrides
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
@@ -43,7 +44,6 @@ from promptpotter.domain.phases import (
     RunAction,
 )
 from promptpotter.domain.pipeline_schema import ParamIntent
-from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget

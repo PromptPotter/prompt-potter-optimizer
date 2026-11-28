@@ -13,7 +13,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet
 from promptpotter.domain.pipeline_params import CellIdentity, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
-from promptpotter.domain.records.run_records import LaunchClockRecord
+from promptpotter.domain.records.lineage import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment

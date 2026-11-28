@@ -121,7 +121,7 @@ Until an L1 round closes, a resume re-enters round 0 and asks the origin gate ag
 
 A fork is a new cycle whose first record names its parent, the offset and the rounds it LIFTS (`0` = clean offshoot). Nothing is copied: the parent's prefix is walked. A fork inherits no standing budget (its money is the campaign ceiling).
 
-**A cut has a DIRECTION**: a steered fork is an `offshoot`; `scoring_divergence`, `operator_rewind` and an L2/L3 rebase **supersede**, retiring the parent at the cut unless a producer holds it; the trigger alone implies it (`domain/records/run_records.py::FORK_DIRECTION`), so no record stores it ([`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree).
+**A cut has a DIRECTION**: a steered fork is an `offshoot`; `scoring_divergence`, `operator_rewind` and an L2/L3 rebase **supersede**, retiring the parent at the cut unless a producer holds it; the trigger alone implies it (`domain/fork.py::FORK_DIRECTION`), so no record stores it ([`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree).
 
 ### Human in the loop
 

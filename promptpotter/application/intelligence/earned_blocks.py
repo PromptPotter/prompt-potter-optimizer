@@ -12,7 +12,7 @@ from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.paired_reading import MemberAddress, ReadingState, ReadPair
 from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import RoundStatement
+from promptpotter.domain.records.rounds import RoundStatement
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,

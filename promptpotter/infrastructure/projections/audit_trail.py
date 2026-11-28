@@ -3,15 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from promptpotter.domain.records.run_records import (
-    Ended,
-    LLMCallRecord,
-    Paused,
+from promptpotter.domain.records.llm_calls import LLMCallRecord
+from promptpotter.domain.records.rounds import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
-    RunPhaseRecord,
 )
+from promptpotter.domain.records.run_phase import Ended, Paused, RunPhaseRecord
 from promptpotter.domain.round_audit import (
     LoopWarning,
     NodeBlock,

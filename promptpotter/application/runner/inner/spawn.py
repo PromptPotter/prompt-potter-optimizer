@@ -59,11 +59,8 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.records.run_records import (
-    RunPhaseRecord,
-    SpawnedBy,
-    SpawnedRecord,
-)
+from promptpotter.domain.records.lineage import SpawnedBy, SpawnedRecord
+from promptpotter.domain.records.run_phase import RunPhaseRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample

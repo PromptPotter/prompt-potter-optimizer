@@ -6,8 +6,10 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
+from promptpotter.domain.cycle_paths import sibling_cycle_id
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import RoundHealth
+from promptpotter.domain.fork import ForkSpec
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     RunPhase,
@@ -16,11 +18,7 @@ from promptpotter.domain.phases import (
     run_phase_label,
 )
 from promptpotter.domain.records.error import ErrorRecord
-from promptpotter.domain.records.run_records import (
-    ForkSpec,
-    SpawnedBy,
-    sibling_cycle_id,
-)
+from promptpotter.domain.records.lineage import SpawnedBy
 from promptpotter.domain.run_standing import RunStanding, closed_after_origin
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel

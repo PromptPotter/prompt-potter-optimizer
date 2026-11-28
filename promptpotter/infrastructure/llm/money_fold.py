@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple, assert_never, get_args
 
 from pydantic import TypeAdapter
 
-from promptpotter.domain.records.run_records import (
+from promptpotter.domain.records.money import (
     Bill,
     ChargeLine,
     Hold,
@@ -26,12 +26,11 @@ from promptpotter.domain.spend import (
     Overshoot,
     PaidSpend,
     Remainder,
-    SpendRollup,
     UserSpend,
     draws_coupon,
-    metered,
     spend_slot,
 )
+from promptpotter.domain.spend_rollup import SpendRollup, metered
 from promptpotter.infrastructure.store.io import complete_lines
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 

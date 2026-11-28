@@ -18,6 +18,7 @@ from promptpotter.domain.paired_reading import (
     CellSetName,
     PairedReading,
     ReadingState,
+    ReadPair,
 )
 from promptpotter.domain.scoring import CellSheet
 
@@ -214,5 +215,8 @@ def elect_on_pairings(ctx: NodeContext, measured: MeasuredRound) -> Selection:
             coverage_floor=measured.coverage_floor,
             n_scored=len(measured.arms),
         ),
-        deciding_pair=None if leading is None else pairings[leading],
+        # A crown is decided on a read pair: a leader its pairing never read was decided on none.
+        deciding_pair=pair
+        if leading is not None and isinstance(pair := pairings[leading], ReadPair)
+        else None,
     )

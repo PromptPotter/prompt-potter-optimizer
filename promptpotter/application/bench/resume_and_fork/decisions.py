@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.domain.records.run_records import DecisionInputs, DecisionRecord
+from promptpotter.domain.records.decision import DecisionInputs, DecisionRecord
 
 
 def decision(

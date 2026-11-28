@@ -42,6 +42,7 @@ from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
 from promptpotter.domain.bench import COLUMN_GRADE, PASS_REFUSAL_INFO, BenchColumn, BenchScore
 from promptpotter.domain.campaign import CampaignCycle
+from promptpotter.domain.command_effects import VerifySaturated
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -57,7 +58,7 @@ from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.held_out import PassGradedRecord
-from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
+from promptpotter.domain.records.run_phase import PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import MAX_PASS_ROWS, ROW_GRADES, CellSheet, Scorer, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint

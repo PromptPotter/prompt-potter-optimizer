@@ -74,12 +74,14 @@ from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.run_records import LaunchClockRecord, PhaseRecord
+from promptpotter.domain.records.lineage import LaunchClockRecord
+from promptpotter.domain.records.run_phase import PhaseRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.run_standing import LineOutlay, declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, CellSheet, Scorer, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.verification import BenchPass, BenchPasses
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record

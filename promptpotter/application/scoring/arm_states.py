@@ -17,12 +17,12 @@ from promptpotter.domain.arms import (
     Refused,
     Skipped,
 )
+from promptpotter.domain.failures import NurseOwner, RuntimeFailure
 from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.sample import ArchiveEntry
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal
-from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory
 
 _CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCategory.PIPELINE.value})

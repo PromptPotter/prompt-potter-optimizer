@@ -11,7 +11,8 @@ from promptpotter.domain.l4.inner_facts import InnerCellFacts, series_reason_hea
 from promptpotter.domain.l4.proxies import floor_words
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.records.run_records import CycleFinalRecord, RoundStatement
+from promptpotter.domain.records.lineage import CycleFinalRecord
+from promptpotter.domain.records.rounds import RoundStatement
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.ruler import LevelSeries, withheld
 from promptpotter.infrastructure.projections.audit_trail import round_audits
@@ -126,13 +127,13 @@ def inner_transcript(
             "numbers remain."
         )
     head = _head(hop, ended.final, facts, floored=floored)
-    standing = campaigns.standing_rounds(hop, moment=None).rounds
-    closes = [standing[n].close for n in sorted(standing)]
+    scanned = campaigns.standing_rounds(hop, moment=None)
+    closes = [scanned.rounds[n].close for n in sorted(scanned.rounds)]
     if not closes:
         return f"{head}; it closed no round"
     audits = round_audits(Path(campaigns.cycle_dir(hop)), [c.round for c in closes])
     lines = [f"{head}; {len(closes) - 1} rounds closed past its origin"]
-    series = closes[-1].level_series
+    series = scanned.series[closes[-1].round]
     for (before, close), audit in zip(pairwise(closes), audits[1:], strict=True):
         lines.append(
             f"R{close.round} {_level(series, close.round)}; {_elected(close)}; {_fired(audit)}"

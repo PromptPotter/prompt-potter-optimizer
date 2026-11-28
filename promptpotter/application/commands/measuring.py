@@ -4,12 +4,12 @@ from promptpotter.application.commands.dispatcher import Applier, DispatchedToCy
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.scoring import passes
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.command_effects import VerifySaturated
 from promptpotter.domain.command_kinds import (
     HeldOutPayload,
     VerifyCandidatePayload,
 )
 from promptpotter.domain.records.held_out import PassGradedRecord
-from promptpotter.domain.records.run_records import VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.measurement_context import MeasurementRole
 

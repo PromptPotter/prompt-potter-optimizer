@@ -16,7 +16,7 @@ from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition, strip_rendered_prompt
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.worded import Worded
