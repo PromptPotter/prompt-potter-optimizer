@@ -158,7 +158,7 @@ read standing rounds off the ledger.
   per schema, so the wait sits on the backend's network edges (every symbol is present, but the box
   half is unchecked; bac873699, landing 41, changed the TermNorm term push, so that candidate's cost may
   have moved). A detached resume opens its session once now, in its own process (w8-launch4,
-  `run_job.py::HeldLaunch`). Action: time `probe_backend`,
+  `held.py::HeldLaunch`). Action: time `probe_backend`,
   `served_pipeline`, `ensure_model_capabilities` and the term push on the box for one paused cycle, then
   drop whichever one a resume re-does. **Rides with:** box (it needs the box measured), whose Owns gain
   `runner/run_init.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
@@ -403,13 +403,6 @@ bill.
   go through that roster) — the root: `step_tokens`' flat wire shape; `StepUsage` holds a
   `TokenAccount` and the wire flattens it — **Rides with:** `area 05's chain` — **Re-test:** a new
   `TokenAccount` part reaches `StepUsage` without a second field edit.
-- **A mint's job names its hop before its cycle share lands** (w8-launch4, 11-27; trim, 11-27):
-  `promptpotter/application/jobs/shares.py::cycle_share` — raises "no share landed there" for a live
-  job whose cycle has no `CycleShareRecord` yet; unreachable today only because a fresh campaign id
-  is unknown before its manifest, and nothing enforces it — a job holds its hop only once its share
-  is filed (one write, or a job without a share reads as zero) — **Rides with:** `area 05's chain` —
-  **Re-test:** a sibling admitted on the campaign during a mint window reads a share, never raises.
-  (items 68, 134)
 - **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
   `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
   `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with
@@ -441,6 +434,10 @@ bill.
   that offers the tier's model. Seen: every pick refused. Root: the tier lays its first task model
   where the dataset's is off it, as it lays a param's lowest value. **Rides with:** `area 05's chain`.
   **Re-test:** a fresh free account's email-tagging check-in serves no `not_on_free_tier`.
+- **A landed job's cycle is asked twice** (w11-jobs3, 11-28): `shares.py::_refuse_unshared` tests
+  `other.hop is None` beside `Job.on_campaign`, which already implies it, only so the type narrows. Root:
+  `Job.on_campaign` answers the landed hop. **Rides with:** area 05's chain. **Re-test:** no `hop is None`
+  guard beside an `on_campaign` call.
 
 ## 06 · Jobs, launch, commands
 
@@ -453,19 +450,11 @@ written under the gate.
 `jobs/launcher/head_to_head.py`, `jobs/reaper.py`, `store/command_log.py`, `domain/command_kinds.py`,
 `jobs/launcher/admission.py`
 
-- **Two jobs/ smells from w11-jobs2's census** (11-28):
-  - `jobs/account_activity.py` is a billing-activity read that lives in `jobs/`, though it reads as
-    area 05's or area 11's.
-  - `launcher/admission.py::launch_preflight` resolves `cycle_config` twice per read: once itself, and
-    once through `campaign_sends`.
-
-  Root: the read moves to its area, and the preflight hands its resolved config down. **Rides with:**
-  area 06's chain. **Re-test:** `jobs/` holds no billing read, and one `cycle_config` call per
-  preflight.
-- **`jobs/launcher/run_job.py` no longer runs a job** (w11-runner, 11-28): the held run moved to
-  `runner/entry.py`, leaving `JobSpec`, `HeldLaunch` and `spawn_job`, so the module's name says what it
-  stopped doing. Root: rename it (e.g. `launcher/held.py`) with its doc and `CLAUDE.md` rows. **Rides
-  with:** area 06's chain. **Re-test:** no module under `jobs/` is named for a run it does not hold.
+- **An arm's admission is held twice** (w11-jobs3, 11-28): `jobs/launcher/head_to_head.py::AdmittedHeadToHead.admitted`
+  pairs each `Opening` with its `HeldBudget`, while `Opening.share` already holds the share that budget
+  names; `opening.py::Opening.land_cut` is a two-line wrapper with one caller (`ForkLaunch.stand`). Root:
+  the opening carries what its admission granted, so the pair and the wrapper go. **Rides with:** area
+  06's chain. **Re-test:** `git grep -c "tuple\[Opening, HeldBudget\]" -- promptpotter` is 0.
 - **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
   each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
@@ -483,7 +472,7 @@ written under the gate.
   cross-process wake on the command log's end write (a lock handoff or a file watch). **Rides with:**
   area 06's chain. **Re-test:** neither constant exists and no test patches a poll.
 - **A promoted launch's stderr is discarded until its cycle exists** (w10-jobs): `JobRegistry.promote`
-  spawns its child with `log=None`, so a child dying before `run_job.py` opens the cycle's job log
+  spawns its child with `log=None`, so a child dying before `held.py::spawn_job` opens the cycle's job log
   says nothing. Root: the child's output has a home from its spawn, named by its job. **Rides with:**
   area 06's chain. **Re-test:** `git grep -n "log=None" -- promptpotter/application/jobs` is empty.
 - **A queued launch's ending files where an unasked one does** (w10-jobs): a released queued launch
@@ -497,11 +486,6 @@ written under the gate.
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
-- **A launch not yet landed carries a hop of two empty strings** (w11-tests4, 11-28):
-  `domain/job.py::UNRESOLVED_HOP` stands for a job whose campaign and cycle do not exist yet, and 9
-  readers compare against it. A tenth (`application/hierarchy.py::store_version`) 500'd on it until w11-tests4
-  added the skip. Root: `Job.hop` is `None` until LAND, so a reader must ask. **Rides with:** area 06's
-  chain. **Re-test:** `git grep -c "UNRESOLVED_HOP" -- promptpotter` is 0.
 - **A fork's preview does not serve the refusal its launch meets** (w11-walk, 11-27): on the walk world
   with no key, Steer & fork's "Confirm steered fork" is enabled and its press answers 422
   `no_api_key`; the cycle's own Start serves it (`admission.py::launch_preflight`), the fork preview's

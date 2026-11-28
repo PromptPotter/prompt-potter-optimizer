@@ -40,6 +40,8 @@ class Opening:
     job_registry: JobRegistry
     job: Job
     cut: ForkCut | None = None
+    # What its admission shared it of its campaign's ceiling: its LAND files it on its cycle.
+    share: Budget | None = None
     _stamps: CycleHop | None = None
     _running: bool = False
     _handed: bool = False
@@ -102,21 +104,18 @@ class Opening:
         """The cycle its job writes from here, which a raise stamps; ``None`` stamps none."""
         self._stamps = hop
 
-    def name(self, hop: CycleHop) -> None:
-        """The job onto the cycle its mint is about to write, before any write of it: a landing
-        asks the job of that campaign alone (`landing.py::plan_landing`)."""
+    def land(self, hop: CycleHop) -> None:
+        """Its job onto the cycle a mint wrote, once its ledger exists and before its campaign is
+        listed, or onto a fork's cut, with the share its admission granted (`land_job`)."""
+        if self.share is None:
+            raise RuntimeError(f"job {self.job_id} lands before its admission shared it")
         self.owns(hop)
-        self.job_registry.move(self.job_id, LaunchMove.LAND, hop=hop)
+        land_job(self.stores, self.job_registry, self.job_id, hop, self.share)
 
-    def land(self, hop: CycleHop, held: HeldBudget) -> None:
-        """Its share and its claim onto the cycle it named, once minted."""
-        claim_share(self.stores, self.job_registry, self.job_id, hop, held.share)
-
-    def land_cut(self, cut: ForkCut, held: HeldBudget) -> None:
+    def land_cut(self, cut: ForkCut) -> None:
         """The job onto the child a fork's admission cut, which its exit withdraws until taken."""
         self.cut = cut
-        self.owns(cut.child)
-        land_job(self.stores, self.job_registry, self.job_id, cut.child, held.share)
+        self.land(cut.child)
 
     def take_cut(self) -> None:
         """The fork's act on its parent: from here its cut is the parent's line, never withdrawn."""
@@ -167,18 +166,11 @@ def claim_cycle(stores: Stores, hop: CycleHop, job_id: str) -> None:
 def land_job(
     stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
 ) -> None:
-    """THE LAND of a launch onto a cycle it did not mint (a fork's cut, a running one onto its
-    fork): its job's hop, its share and its claim of the cycle together under the gate."""
+    """THE LAND of a launch onto a cycle it did not open on (a mint's, a fork's cut, a running one
+    onto its fork): its job's hop, its share and its claim of the cycle in one write under the
+    gate, so no sibling reads the job on its campaign unshared."""
     with job_registry.admission_gate():
         job_registry.move(job_id, LaunchMove.LAND, hop=hop)
-        claim_share(stores, job_registry, job_id, hop, allotment)
-
-
-def claim_share(
-    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
-) -> None:
-    """The cycle its job names: its share and its claim, under the gate."""
-    with job_registry.admission_gate():
         hold_moved(stores, hop, allotment)
         claim_cycle(stores, hop, job_id)
 

@@ -122,7 +122,7 @@ class _Meter(NamedTuple):
     refusal: str
 
 
-def _new_campaign(stores: Stores, holder: JobHolder, hop: CycleHop) -> bool:
+def _new_campaign(stores: Stores, holder: JobHolder, hop: CycleHop | None) -> bool:
     """A stranger's fresh mint, a check-in's Start included (it names no cycle yet), never a fork
     (it names its campaign): what the launch rate (per server process) and the daily ceiling (per
     home) meter. The host is exempt: they bound a stranger on its key."""
@@ -138,7 +138,7 @@ def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
     )
 
 
-def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | None:
+def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop | None) -> _Meter | None:
     match holder:
         case CampaignLaunch():
             if not _new_campaign(stores, holder, hop):
@@ -168,7 +168,9 @@ def _metered_held(meter: _Meter, now: float) -> float:
 
 
 @contextmanager
-def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -> Iterator[None]:
+def slot_rate(
+    stores: Stores, holder: JobHolder, hop: CycleHop | None, *, asked: int
+) -> Iterator[None]:
     """Refused at the slot door, debited *asked* tokens when its body admits: the caller holds the
     admission gate across both, so no two asks read one bucket; a refused ask spends no token."""
     if (meter := _slot_meter(stores, holder, hop)) is None:
@@ -234,7 +236,7 @@ def check_launch_quotas(
     stores: Stores,
     job_registry: JobRegistry,
     holder: CampaignLaunch,
-    hop: CycleHop,
+    hop: CycleHop | None,
     launches: int,
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, then the

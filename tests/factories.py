@@ -26,10 +26,10 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.launcher.held import HeldRun
 from promptpotter.application.jobs.launcher.launch import admit
 from promptpotter.application.jobs.launcher.mint_and_start import FreshMint, Hosted
 from promptpotter.application.jobs.launcher.opening import claim_cycle
-from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import run_spec
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (

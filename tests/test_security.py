@@ -117,8 +117,8 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead, CheckinArms
+from promptpotter.application.jobs.launcher.held import JobSpec
 from promptpotter.application.jobs.launcher.launch import Launched
-from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status, machine_version
 from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
@@ -235,7 +235,7 @@ from promptpotter.domain.hierarchy import (
     SubtreeCampaign,
     entries_under,
 )
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
+from promptpotter.domain.job import CampaignLaunch, Job, LaunchMove, ScoringPass
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
     inner_cell_facts,
@@ -3312,7 +3312,7 @@ def test_a_job_file_that_does_not_load_is_named_in_machine_status_and_the_rest_l
     registry = JobRegistry.attach(tmp_path / "jobs")
     kept = registry.create(
         user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / "w"),
-        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+        hop=None, holder=CampaignLaunch("ds1"),
     )  # fmt: skip
     torn = tmp_path / "jobs" / "torn.json"
     torn.write_text("{", encoding="utf-8")
@@ -3340,7 +3340,7 @@ def test_a_job_v0_8_21_wrote_with_how_its_run_ended_lands_counted_by_the_quota_a
     for i, fields in enumerate(was):
         job = registry.create(
             user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / str(i)),
-            hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+            hop=None, holder=CampaignLaunch("ds1"),
         )  # fmt: skip
         path = jobs_dir(projects_root) / f"{job.job_id}.json"
         write_json(path, json.loads(path.read_bytes()) | fields)
@@ -3369,14 +3369,40 @@ def test_a_job_v0_8_21_spelled_off_the_long_root_still_holds_its_campaign_past_t
     registry = JobRegistry.attach(jobs_dir(projects_root))
     job = registry.create(
         user_id="u", principal_id="u", workspace=WorkspaceDir(was / PROJECTS_DIR / "u"),
-        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+        hop=CycleHop(campaign_id="c", cycle_id="k"), holder=CampaignLaunch("ds1"),
     )  # fmt: skip
     assert job.workspace != str(projects_root / "u"), "the job was spelled from the long root"
     staged = {one.path: one.data for one in MIGRATIONS["job workspaces"](projects_root, {})}
     landed = JobRegistry.as_staged(jobs_dir(projects_root), staged).get(job.job_id)
-    assert landed is not None and landed.on_campaign(
-        WorkspaceDir(projects_root / "u"), job.campaign_id
-    ), "a run in flight across the landing lost its campaign"
+    assert landed is not None and landed.on_campaign(WorkspaceDir(projects_root / "u"), "c"), (
+        "a run in flight across the landing lost its campaign"
+    )
+
+
+def test_a_job_v0_8_21_wrote_with_its_cycle_as_two_strings_lands_on_its_hop_or_none(
+    tmp_path: Path,
+) -> None:
+    projects_root = default_projects_root()
+    registry = JobRegistry.attach(jobs_dir(projects_root))
+    was = ({"campaign_id": "c", "cycle_id": "k"}, {"campaign_id": "", "cycle_id": ""})
+    jobs = []
+    for i, fields in enumerate(was):
+        job = registry.create(
+            user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / str(i)),
+            hop=None, holder=CampaignLaunch("ds1"),
+        )  # fmt: skip
+        path = jobs_dir(projects_root) / f"{job.job_id}.json"
+        held = json.loads(path.read_bytes())
+        del held["hop"]
+        write_json(path, held | fields)
+        jobs.append(job)
+    staged = {one.path: one.data for one in MIGRATIONS["job hops"](projects_root, {})}
+    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged)
+    read = [landed.get(job.job_id) for job in jobs]
+    assert [None if job is None else job.hop for job in read] == [
+        CycleHop(campaign_id="c", cycle_id="k"),
+        None,
+    ], "a job in flight across the landing lost its cycle, or an unlanded one gained one"
 
 
 def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_survivor() -> None:
@@ -3469,7 +3495,7 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     # A mint's job names its cycle before the mint writes any of it.
     holders = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 1)
     (holding,) = request_jobs(
-        stores=built_stores, job_registry=holders, holder=CampaignLaunch("ds1"), hop=UNRESOLVED_HOP
+        stores=built_stores, job_registry=holders, holder=CampaignLaunch("ds1"), hop=None
     )
     holders.move(holding.job_id, LaunchMove.ADMIT)
     holders.move(holding.job_id, LaunchMove.LAND, hop=torn_hop)
@@ -4615,6 +4641,7 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
         await asyncio.to_thread(ledger.append, RunPhaseRecord(state=Running()))
         await asyncio.to_thread(release_cycle, cycle_dir)
         stop = RunPhaseRecord.stop(StopReason.TARGET_HIT)
+        assert job.hop is not None, "the held job names no cycle"
         await asyncio.to_thread(stores.declare_stop, job.hop, stop)
         await asyncio.to_thread(queuing.release, job.job_id)
 
@@ -5381,7 +5408,7 @@ async def test_an_accounts_deletion_drops_every_survivor_row_it_owns_its_dismiss
     registry = JobRegistry.attach(jobs_dir(default_projects_root()))
     asked = await asyncio.to_thread(
         registry.create, user_id="ada", principal_id="ada", workspace=WorkspaceDir(ada.base_dir),
-        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+        hop=None, holder=CampaignLaunch("ds1"),
     )  # fmt: skip
     with pytest.raises(ConflictError) as running:
         await _filed(host, deleted, Door.TERMINAL)

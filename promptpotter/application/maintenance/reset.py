@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job
+from promptpotter.domain.job import CampaignLaunch, Job
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.data_root import LIVE_LOCKS, Fate, Kind, classify
 from promptpotter.infrastructure.store.draft_store import DraftStore
@@ -85,13 +85,11 @@ def _reaches(job: Job, root: Path) -> bool:
     log, its ledger) and its campaign, its draft too; a mint in flight names no campaign yet, so
     all of its workspace."""
     workspace = WorkspaceDir(Path(job.workspace).resolve())
-    if workspace.is_relative_to(root) or (
-        job.hop == UNRESOLVED_HOP and root.is_relative_to(workspace)
-    ):
-        return True
     if not root.is_relative_to(workspace):
-        return False
-    owned = [campaign_root_dir_for(workspace, job.campaign_id)]
+        return workspace.is_relative_to(root)
+    if job.hop is None or workspace.is_relative_to(root):
+        return True
+    owned = [campaign_root_dir_for(workspace, job.hop.campaign_id)]
     if isinstance(job.holder, CampaignLaunch) and job.holder.draft_id is not None:
         owned.append(draft_dir_for(workspace, job.holder.draft_id))
     if any(root.is_relative_to(one) or one.is_relative_to(root) for one in owned):

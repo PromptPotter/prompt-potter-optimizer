@@ -2444,7 +2444,7 @@
       },
       "CampaignLaunch": {
         "additionalProperties": false,
-        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
+        "description": "A campaign run: its hop is ``None`` until a fresh mint or a fork's cut lands it.",
         "properties": {
           "campaign_id": {
             "anyOf": [

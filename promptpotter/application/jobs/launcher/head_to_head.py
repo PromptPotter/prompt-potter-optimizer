@@ -14,9 +14,9 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import admit_arms, refuse_unreachable
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
+from promptpotter.application.jobs.launcher.held import HeldRun
 from promptpotter.application.jobs.launcher.launch import LaunchOutcome
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     CyclePlan,
     OpenedCycle,
@@ -176,9 +176,7 @@ class AdmittedHeadToHead(LaunchOutcome):
                     closing.push_async_exit(opening)
                     every.push_async_exit(closing)
                 async for cycle in _mint(self.source, self.plans, [o for o, _ in self.admitted]):
-                    opening, held = self.admitted[len(minted)]
                     minted.append(cycle)
-                    await asyncio.to_thread(opening.land, cycle.hop, held)
                 every.pop_all()
         finally:
             if isinstance(self.source, CheckinArms):

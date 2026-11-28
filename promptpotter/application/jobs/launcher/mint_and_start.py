@@ -38,7 +38,7 @@ from promptpotter.domain.command_kinds import ForkCyclePayload
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun
 from promptpotter.domain.records.lineage import CycleStart
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -139,10 +139,10 @@ class LaunchRequest:
         raise NotImplementedError
 
     def open(self, opening: Opening) -> AbstractAsyncContextManager[OpenedCycle]:
-        """A mint's job names the cycle before the mint writes any of it (`Opening.name`)."""
+        """A mint lands its job on the cycle once its ledger exists (`Opening.land`)."""
         raise NotImplementedError
 
-    def stand(self, _opening: Opening, _held: HeldBudget) -> LaunchRequest:
+    def stand(self, _opening: Opening) -> LaunchRequest:
         """What it opens once admitted, under its admission's gate: itself, unless a kind cuts."""
         return self
 
@@ -260,11 +260,11 @@ class ForkLaunch(LaunchRequest):
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self._config(stores).config, self.connector(stores))
 
-    def stand(self, opening: Opening, held: HeldBudget) -> ExistingCycle:
+    def stand(self, opening: Opening) -> ExistingCycle:
         """Cut under its admission's gate, its share landed on the child: no sibling admitted after
         it reads the campaign without that share, and a refusal before here cut nothing."""
         cut = cut_operator_fork(opening.stores, self.payload, self.start)
-        opening.land_cut(cut, held)
+        opening.land_cut(cut)
         return ExistingCycle(self.parent._replace(cycle_id=cut.child.cycle_id), self.budget)
 
 

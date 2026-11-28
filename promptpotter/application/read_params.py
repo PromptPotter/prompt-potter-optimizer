@@ -14,6 +14,12 @@ from typing import Any, ClassVar, Literal
 from pydantic import Field
 
 from promptpotter.application import account, cycle_files
+from promptpotter.application.account_activity import (
+    ActivityGroupBy,
+    ActivityResponse,
+    ActivityWindow,
+    account_activity,
+)
 from promptpotter.application.backend_listing import (
     BackendHealthResponse,
     BackendResponse,
@@ -50,12 +56,6 @@ from promptpotter.application.exhibit import read_stores
 from promptpotter.application.head_to_head_price import HeadToHeadPrice, price_head_to_head
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_moment
-from promptpotter.application.jobs.account_activity import (
-    ActivityGroupBy,
-    ActivityResponse,
-    ActivityWindow,
-    account_activity,
-)
 from promptpotter.application.jobs.machine_status import (
     MachineStatusResponse,
     served_machine_status,

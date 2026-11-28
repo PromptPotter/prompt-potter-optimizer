@@ -303,8 +303,8 @@ export interface MachineSlot {
   started_at: string | null;
 }
 
-/** A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names
- * the cycle. */
+/** A campaign run: its hop is ``None`` until a fresh mint or a fork's cut lands
+ * it. */
 export interface CampaignLaunch {
   dataset_name: string;
   draft_id: string | null;
@@ -5823,7 +5823,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "fdd02f150eaff040";
+export const SERVED_CONTRACT = "44d5451bd7d089c2";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6110,6 +6110,11 @@ export interface SignInRefusalInfo {
   tone: Tone;
 }
 
+export interface ActivityWindowInfo {
+  label: string;
+  seconds: number;
+}
+
 export interface CouplingSeverityInfo {
   tone: Tone;
 }
@@ -6117,11 +6122,6 @@ export interface CouplingSeverityInfo {
 export interface GuardStateInfo {
   label: string;
   sentence: string;
-}
-
-export interface ActivityWindowInfo {
-  label: string;
-  seconds: number;
 }
 
 export interface SteerOutsideInfo {
@@ -6278,6 +6278,19 @@ export const SIGN_IN_REFUSAL_INFO: Record<'state_invalid_or_expired' | 'code_exc
   "accounts_full": { label: "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.", tone: "warn" },
 };
 
+// Mirror of application/account_activity.py::ACTIVITY_WINDOW_INFO, in display order.
+export const ACTIVITY_WINDOW_INFO: Record<'15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y', ActivityWindowInfo> = {
+  "15m": { label: "Past 15 min", seconds: 900 },
+  "30m": { label: "Past 30 min", seconds: 1800 },
+  "1h": { label: "Past hour", seconds: 3600 },
+  "3h": { label: "Past 3 hours", seconds: 10800 },
+  "1d": { label: "Past day", seconds: 86400 },
+  "2d": { label: "Past 2 days", seconds: 172800 },
+  "1w": { label: "Past week", seconds: 604800 },
+  "1mo": { label: "Past month", seconds: 2592000 },
+  "1y": { label: "Past year", seconds: 31536000 },
+};
+
 // Mirror of application/config_map.py::COUPLING_SEVERITY_INFO, in display order.
 export const COUPLING_SEVERITY_INFO: Record<'refused' | 'collision' | 'inert', CouplingSeverityInfo> = {
   "refused": { tone: "danger" },
@@ -6339,19 +6352,6 @@ export const SUBJECT_KIND_LABELS: Record<'campaign' | 'cycle' | 'candidate', str
   "campaign": "origin",
   "cycle": "branch head",
   "candidate": "searchpoint",
-};
-
-// Mirror of application/jobs/account_activity.py::ACTIVITY_WINDOW_INFO, in display order.
-export const ACTIVITY_WINDOW_INFO: Record<'15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y', ActivityWindowInfo> = {
-  "15m": { label: "Past 15 min", seconds: 900 },
-  "30m": { label: "Past 30 min", seconds: 1800 },
-  "1h": { label: "Past hour", seconds: 3600 },
-  "3h": { label: "Past 3 hours", seconds: 10800 },
-  "1d": { label: "Past day", seconds: 86400 },
-  "2d": { label: "Past 2 days", seconds: 172800 },
-  "1w": { label: "Past week", seconds: 604800 },
-  "1mo": { label: "Past month", seconds: 2592000 },
-  "1y": { label: "Past year", seconds: 31536000 },
 };
 
 // Mirror of application/jobs/capacity.py::SLOT_BOUND_WORDS, in display order.
@@ -6877,6 +6877,7 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
 // Each table's keys in display order (lib/api/words.ts walks a table by it).
 export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
   [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
+  [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],
   [COUPLING_SEVERITY_INFO, ["refused", "collision", "inert"]],
   [KNOB_SOURCE_SET_BY, ["default", "dataset", "campaign", "free_tier", "start", "manifest"]],
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
@@ -6884,7 +6885,6 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [GUARD_STATE_INFO, ["controlled", "uncontrolled", "differs"]],
   [VERDICT_ABSENT_INFO, ["under_two_cells", "pending"]],
   [SUBJECT_KIND_LABELS, ["campaign", "cycle", "candidate"]],
-  [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],
   [SLOT_BOUND_WORDS, ["throttle", "machine"]],
   [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
   [SCORE_LENS_LABELS, ["score:fitness"]],

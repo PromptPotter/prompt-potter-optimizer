@@ -25,9 +25,9 @@ from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import refuse_campaign
+from promptpotter.application.jobs.launcher.held import HeldRun, JobSpec, stores_of
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec, stores_of
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.shares import declare_round_allowance
 from promptpotter.application.jobs.spawning import tell_spawner
@@ -570,7 +570,7 @@ async def run_held(
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:
-    """A detached launch's run, in the process `run_job.py::spawn_job` started."""
+    """A detached launch's run, in the process `held.py::spawn_job` started."""
     stores = stores_of(spec)
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
     # The job, its claim with it, now lives and dies with THIS process: a run killed before it

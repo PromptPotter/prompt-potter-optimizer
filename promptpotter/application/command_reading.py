@@ -13,7 +13,7 @@ from promptpotter.domain.command_effects import LaunchedEffect, LaunchedJob
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.command_kinds import CommandKind, acts_filed, filable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job
+from promptpotter.domain.job import CampaignLaunch, Job
 from promptpotter.domain.phases import (
     RUN_PHASE_INFO,
     STOP_REASON_INFO,
@@ -115,7 +115,7 @@ class _OnCycle(NamedTuple):
 
 def _on_cycle(stores: Stores, job: Job) -> _OnCycle:
     """Its cycle's hold, while the run waits on an answer; its stop, once it ended there."""
-    if job.hop == UNRESOLVED_HOP:
+    if job.hop is None:
         return _OnCycle()
     state = stores.run_state(job.hop)
     if job.released:

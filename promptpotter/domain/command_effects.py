@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Literal
 
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, Job
+from promptpotter.domain.job import Job
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
 
@@ -43,12 +43,8 @@ class LaunchedJob(FrozenModel):
     @classmethod
     def of(cls, job: Job, hop: CycleHop | None = None) -> LaunchedJob:
         """*hop* the cycle its hold took; unsaid, the one the job already knows."""
-        if hop is None and job.hop != UNRESOLVED_HOP:
-            hop = job.hop
-        named = (
-            job if hop is None else replace(job, campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
-        )
-        return cls(job_id=job.job_id, hop=hop, what=named.what)
+        hop = hop or job.hop
+        return cls(job_id=job.job_id, hop=hop, what=replace(job, hop=hop).what)
 
 
 class LaunchedEffect(FrozenModel):

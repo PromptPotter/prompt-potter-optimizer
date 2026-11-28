@@ -43,7 +43,7 @@ from promptpotter.config.paths import default_projects_root, jobs_dir, user_data
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.job import JOB_ADAPTER, UNRESOLVED_HOP, Job
+from promptpotter.domain.job import JOB_ADAPTER, Job
 from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.strict_model import FrozenModel
@@ -540,10 +540,9 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
 
 
 def _minting(jobs: Sequence[Job], unit: Path, data_root: Path) -> str | None:
-    """Who mints the campaign *unit*: a mint's job names its cycle before writing any of it
-    (`opening.py::Opening.name`), so a job naming none writes no campaign."""
-    named = [job for job in jobs if job.hop != UNRESOLVED_HOP]
-    return holder_in_reach(named, (unit,), _locks(data_root, unit))
+    """Who mints the campaign *unit*: a mint lands its job on the cycle only past its first writes
+    (`opening.py::Opening.land`), so a live job landed nowhere reaches its whole workspace."""
+    return holder_in_reach(jobs, (unit,), _locks(data_root, unit))
 
 
 def _stamp(projects_root: Path) -> Path:
