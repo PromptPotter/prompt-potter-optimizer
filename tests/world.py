@@ -33,7 +33,6 @@ from offline_world import (
     NOT_A_KEY,
     PROVIDER_KEYS,
     FakeBackend,
-    FakeLLM,
     Router,
     install_network,
     refuse_network,
@@ -437,7 +436,7 @@ def offline_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     for key in PROVIDER_KEYS:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
-    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+    world = Router.idle()
     restore = install_network(world)
     send_pacing.cache_clear()
     try:

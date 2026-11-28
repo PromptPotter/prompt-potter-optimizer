@@ -8,3 +8,7 @@ export const COLD_HOME = process.env.PP_E2E_COLD_HOME || path.join(os.tmpdir(), 
 // the gate hands each run its own (`PP_E2E_WALK_HOME`), so two gates never walk one copy.
 export const WALK_HOME =
   process.env.PP_E2E_WALK_HOME || path.join(os.tmpdir(), "promptpotter-e2e-walk");
+
+// The walk runs on the phone (`touch`); a spec whose layout exists only at desktop width carries
+// this tag, and only it runs again at that width (`walk`).
+export const DESKTOP = { tag: "@desktop" } as const;

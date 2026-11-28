@@ -2,6 +2,7 @@ import type { APIRequestContext } from "@playwright/test";
 import type { HierarchyCycle, SubtreeEntry } from "@/lib/api/types";
 import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns, DASHBOARD_VIEWS } from "../harness";
+import { DESKTOP } from "../world";
 
 const API = "/api/v1";
 
@@ -40,8 +41,8 @@ async function outerServing(request: APIRequestContext): Promise<Found | null> {
   return null;
 }
 
-test("a seat cell drills into the inner run that measured it", async ({ page, request, isMobile }) => {
-  test.skip(isMobile, "a phone's sidebar is the list screen, never beside the view it drills from (responsive.spec)");
+// A phone's sidebar is the list screen, never beside the view it drills from (responsive.spec).
+test("a seat cell drills into the inner run that measured it", DESKTOP, async ({ page, request }) => {
   const found = await outerServing(request);
   // The walk world nests an L4 campaign (`gate.py::_walk_world`), so a world without one is a failure.
   expect(found, "no campaign in this workspace serves a seat cell").not.toBeNull();

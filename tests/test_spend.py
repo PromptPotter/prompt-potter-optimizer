@@ -182,7 +182,7 @@ from promptpotter.domain.command_kinds import (
     MintHeadToHeadPayload,
     StartCheckinPayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import ArmedCaps
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
@@ -370,6 +370,7 @@ from promptpotter.shared.identity import (
     IdentityContext,
     TenantId,
     UserId,
+    acting_principal,
     default_identity,
 )
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -402,9 +403,9 @@ def _held(
 ) -> HeldBudget:
     """Admitted alone, on a job of its own: the cycle's share is the whole of its money axes."""
     job = registry.create(
-        user_id="solo",
-        principal_id="solo",
-        workspace=WorkspaceDir(registry.jobs_dir),
+        user_id=str(stores.identity.user_id),
+        principal_id=acting_principal(stores.identity).id,
+        workspace=stores.campaigns.workspace,
         hop=UNRESOLVED_HOP,
         holder=EmbeddedRun("ds1"),
     )
@@ -3335,9 +3336,9 @@ def _account_stores(
 def _running(stores: Stores, registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
     """Another run of the account holding *reserve*, admitted or still at its gate."""
     held = registry.create(
-        user_id="sub-9",
-        principal_id="sub-9",
-        workspace=WorkspaceDir(registry.jobs_dir),
+        user_id=str(stores.identity.user_id),
+        principal_id=acting_principal(stores.identity).id,
+        workspace=stores.campaigns.workspace,
         hop=UNRESOLVED_HOP,
         holder=CampaignLaunch(dataset_name="d"),
     )

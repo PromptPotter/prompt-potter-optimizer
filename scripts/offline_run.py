@@ -32,8 +32,10 @@ import types
 from collections import Counter, defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from math import isclose
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from statistics import fmean
+from typing import TYPE_CHECKING, Any, NoReturn, get_args
 
 # Its own tree, never the venv's editable one: a child's cwd is its workspace, so a relative
 # PYTHONPATH falls through to whichever tree installed the venv.
@@ -82,7 +84,7 @@ from promptpotter.application.embedded_run import (
     run_campaign,
     run_head_to_head,
 )
-from promptpotter.application.evidence.head_to_head import GuardState
+from promptpotter.application.evidence.head_to_head import GuardState, HeadToHead
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import CallTool, HostSession
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
@@ -145,7 +147,7 @@ from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.run_records import CycleStart, OriginGatePass
+from promptpotter.domain.records.run_records import ArmAct, CycleStart, OriginGatePass
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
@@ -1595,6 +1597,10 @@ async def run_controlled(
         subjects.append(cid)
     arms = await run_arms(workspace, arm_names, rounds=rounds, rows=rows)
     subjects += [cid for _, cid in arms.values()]
+    if foreign:
+        # A capo campaign on the arms' origin, outside the head-to-head, minted after it.
+        _, lone = await run_one("capo", workspace, rounds=rounds, rows=rows, out=workspace / "lone")
+        subjects.append(lone)
     stores = build_stores(default_identity(), projects_root=default_projects_root())
 
     def walks(campaign_id: str) -> CampaignWalks:
@@ -1651,6 +1657,8 @@ async def run_controlled(
         f"{[(c.a.optimizer, c.b.optimizer, c.guard.state.value) for c in table.contrasts]}, "
         f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
+    if foreign:
+        one_family(stores, [(cycle.name, cid) for cycle, cid in arms.values()])
     # An act on an arm is admitted, and takes its campaign out (decisions.md § 0009).
     name, (cycle, cid) = next(iter(arms.items()))
     forked = await CommandDispatcher(stores, inline=Inline()).dispatch(
@@ -1668,6 +1676,91 @@ async def run_controlled(
     if row.guard.state is not GuardState.UNCONTROLLED:
         raise SystemExit(f"offline run: arm {name} forked and still reads {row.guard.state}")
     print(f"arm {name}: forked, and left its comparison: {row.guard.sentence}")
+    if foreign:
+        head_to_head_read(stores, [cid for _, cid in arms.values()], subjects[-1], table)
+
+
+def one_family(stores: Stores, arms: list[tuple[str, str]]) -> None:
+    """The arms alone (*arms*: each one's cycle and campaign, oldest first) read controlled, each
+    pair of treatments one contrast, corrected as one family, whether an arm is read as its
+    campaign or its cycle beside it."""
+    cids = [cid for _, cid in arms]
+    table = subject_evidence(stores, [Subject(c) for c in cids]).head_to_head
+    assert table is not None
+    if table.verdict is not True or {r.guard.state for r in table.rows} != {GuardState.CONTROLLED}:
+        raise SystemExit(f"offline run: the arms alone read {[r.guard for r in table.rows]}")
+    names = [r.optimizer for r in table.rows]
+    pairs = [(c.a.optimizer, c.b.optimizer) for c in table.contrasts]
+    if pairs != [(a, b) for i, a in enumerate(names) for b in names[i + 1 :]]:
+        raise SystemExit(f"offline run: the contrasts {pairs} are not each pair, the older arm `a`")
+    lifts = []
+    for contrast in table.contrasts:
+        lift = contrast.lift
+        assert lift is not None and lift.family is not None and contrast.q_value is not None
+        if (lift.family.id, lift.family.n_tests) != ("h2h", len(pairs)) or not isclose(
+            lift.estimate.value, fmean(contrast.differences.values())
+        ):
+            raise SystemExit(f"offline run: contrast {pairs} read as family {lift.family}")
+        if contrast.q_value > lift.family.p_adjusted:
+            raise SystemExit("offline run: BH gated harder than Holm")
+        lifts.append(lift)
+    first = min(lifts, key=lambda x: x.p_value)
+    assert first.family is not None
+    if not isclose(first.family.p_adjusted, min(1.0, len(pairs) * first.p_value)):
+        raise SystemExit("offline run: the smallest p is not Holm-adjusted by the family's size")
+    cycle_subject = Subject(cids[0], arms[0][0])
+    for roster in ([cycle_subject, *map(Subject, cids[1:])], [cycle_subject, *map(Subject, cids)]):
+        again = subject_evidence(stores, roster).head_to_head
+        if again is None or again.contrasts != table.contrasts:
+            raise SystemExit("offline run: a cycle read beside its campaign moved the contrasts")
+    print(f"head-to-head: {len(pairs)} contrasts, controlled, corrected as one family")
+
+
+def head_to_head_read(stores: Stores, arms: list[str], lone: str, beside: HeadToHead) -> None:
+    """What a head-to-head of three arms reads, beside a campaign outside it (*beside*, read
+    before the first arm forked): one family per guard state, each treatment one arm over its
+    replicates, the act that takes an arm out, and the command it was filed as."""
+
+    def fail(what: str) -> NoReturn:
+        raise SystemExit(f"offline run: the head-to-head {what}")
+
+    filed = [record.kind for _, record in stores.commands.book().lines()]
+    if filed.count(CommandKind.HEAD_TO_HEAD) != 1:
+        fail(f"was filed as {filed}, never once as its command")
+    states = {r.campaign_id: r.guard.state for r in beside.rows}
+    if states[lone] is not GuardState.UNCONTROLLED or {states[c] for c in arms} != {
+        GuardState.CONTROLLED
+    }:
+        fail(f"read its arms and the campaign outside it as {states}")
+    # A controlled and an uncontrolled contrast never share a family; one that differs (the
+    # foreign campaign's origin) is in none (decisions.md § 0009).
+    tested: Counter[GuardState] = Counter(
+        c.guard.state for c in beside.contrasts if c.guard.state is not GuardState.DIFFERS
+    )
+    for contrast in beside.contrasts:
+        lift = contrast.lift
+        family = None if lift is None else lift.family
+        if lift is None or (family is None) is not (contrast.guard.state is GuardState.DIFFERS):
+            fail(f"put a contrast reading {contrast.guard.state} in family {family}")
+        if family is not None and family.n_tests != tested[contrast.guard.state]:
+            fail(f"corrected contrasts across guard states as one family: {dict(tested)}")
+    if GuardState.UNCONTROLLED not in tested:
+        fail(f"tested no contrast the campaign outside it joined: {dict(tested)}")
+    [capo] = [c for c in beside.contrasts if {c.a.optimizer, c.b.optimizer} == {"capo", "gepa"}]
+    if capo.a.replicates != [arms[1], lone]:
+        fail(f"read capo's treatment over {capo.a.replicates}, not its arm and the one outside")
+    print(f"head-to-head: the campaign outside it joins capo's arm, families {dict(tested)}")
+    # Only the second and third arms: the first's fork already took it out.
+    for cid, act in zip(arms[1:], (ArmAct.REWIND, ArmAct.SKIP), strict=True):
+        campaign = stores.campaigns.load_campaign(cid)
+        assert campaign is not None
+        stores.campaigns.act(stores.campaigns.live_cycle(campaign.root_hop), act)
+    after = subject_evidence(stores, [Subject(c) for c in arms]).head_to_head
+    assert after is not None
+    acted = [{r.campaign_id: r.guard.state for r in after.rows}[c] for c in arms[1:]]
+    if acted != [GuardState.UNCONTROLLED, GuardState.DIFFERS]:
+        fail(f"read a rewound and a skipped arm as {acted}")
+    print("head-to-head: a rewind takes an arm out, a skipped step reads as differing")
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:
@@ -2965,7 +3058,7 @@ def main() -> int:
     ap.add_argument(
         "--optimizer",
         action="append",
-        help="default: every installed optimizer; under --controlled, the arms (potter and capo)",
+        help="default: every installed optimizer; under --controlled, the arms (potter, capo and gepa)",
     )
     ap.add_argument(
         "--rounds",
@@ -2978,7 +3071,7 @@ def main() -> int:
     ap.add_argument(
         "--controlled",
         action="store_true",
-        help="run two arms of one head-to-head beside a foreign campaign, and without it",
+        help="run three arms of one head-to-head beside a foreign campaign, and without it",
     )
     ap.add_argument(
         "--straight",
@@ -3041,7 +3134,7 @@ def main() -> int:
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
     home = named_home()
     check_every_treatment()
-    arm_names = args.optimizer or ["potter", "capo"]
+    arm_names = args.optimizer or ["potter", "capo", "gepa"]
     names = (
         list(CONTROLLED)
         if args.controlled

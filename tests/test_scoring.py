@@ -105,7 +105,6 @@ from promptpotter.application.evidence.head_to_head import (
     GuardState,
     pair_guard,
 )
-from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import (
     IDEMPOTENCY_KEY,
     CallTool,
@@ -280,7 +279,6 @@ from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_events import CommandAckRecord
 from promptpotter.domain.command_kinds import (
     CancelPayload,
-    CommandKind,
     CommandPayload,
     Door,
     HeldOutPayload,
@@ -351,7 +349,6 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.run_records import (
-    ArmAct,
     Ended,
     RebaseRequest,
     RoundClosedRecord,
@@ -4135,62 +4132,6 @@ def test_an_arm_differences_each_rows_replicate_means_and_clusters_on_the_row() 
     ), "the row is the cluster: its replicate pairings are never independent rows"
 
 
-@pytest.fixture(scope="module")
-def head_to_head(tmp_path_factory: pytest.TempPathFactory) -> Shared:
-    """potter, capo and gepa as the arms of head-to-head `h2h`, and a capo campaign outside it:
-    ~3.6 s once, read by three facts (~25 ms each)."""
-
-    async def ran(w: World) -> tuple[list[str], str]:
-        arms = await w.head_to_head({k: k for k in ("potter", "capo", "gepa")}, "h2h", rows=60)
-        lone = await w.campaign("capo", rows=60)
-        return [a.session.campaign_id for a in arms], lone.session.campaign_id
-
-    return shared_run(tmp_path_factory, ran)
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_head_to_heads_arms_are_controlled_and_corrected_as_one_family(
-    world: World, head_to_head: Shared
-) -> None:
-    stores = world.adopt(head_to_head).stores
-    arms, _ = head_to_head.made
-    table = subject_evidence(stores, [Subject(c) for c in arms]).head_to_head
-    assert table is not None and table.verdict is True
-    assert [r.guard.state for r in table.rows] == [GuardState.CONTROLLED] * 3
-    assert [(c.a.optimizer, c.b.optimizer) for c in table.contrasts] == [
-        ("potter", "capo"),
-        ("potter", "gepa"),
-        ("capo", "gepa"),
-    ], "each treatment is one arm, the older arm `a`"
-    for contrast in table.contrasts:
-        lift = contrast.lift
-        assert lift is not None and lift.family is not None
-        assert (lift.family.id, lift.family.n_tests) == ("h2h", 3)
-        assert lift.estimate.value == pytest.approx(fmean(contrast.differences.values()))
-        assert contrast.q_value is not None and contrast.q_value <= lift.family.p_adjusted, (
-            "BH never gates harder than Holm"
-        )
-    ranked = sorted(
-        (c.lift for c in table.contrasts if c.lift is not None), key=lambda x: x.p_value
-    )
-    assert ranked[0].family is not None
-    assert ranked[0].family.p_adjusted == pytest.approx(min(1.0, 3 * ranked[0].p_value))
-    potter = Subject(arms[0], stores.campaigns.campaign_cycle_dirs(arms[0])[0].name)
-    for roster in ([potter, *map(Subject, arms[1:])], [potter, *map(Subject, arms)]):
-        again = subject_evidence(stores, roster).head_to_head
-        assert again is not None and again.contrasts == table.contrasts, (
-            "a cycle read as a subject of its own beside its campaign"
-        )
-
-
-def test_an_embedded_head_to_head_is_filed_as_its_command(head_to_head: Shared) -> None:
-    with head_to_head.reading() as stores:
-        filed = [record.kind for _, record in stores.commands.book().lines()]
-    assert filed == [CommandKind.HEAD_TO_HEAD, CommandKind.MINT_CAMPAIGN], (
-        f"an embedded head-to-head went unfiled: {filed}"
-    )
-
-
 def test_a_head_to_head_mint_raising_at_its_second_arm_leaves_the_first_stamped(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4212,48 +4153,6 @@ def test_a_head_to_head_mint_raising_at_its_second_arm_leaves_the_first_stamped(
     assert stops and isinstance(stops[-1].state, Ended), (
         "an arm minted before its sibling's raise was left unstamped"
     )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_campaign_outside_the_head_to_head_joins_its_treatments_arm_uncorrected_with_it(
-    world: World, head_to_head: Shared
-) -> None:
-    stores = world.adopt(head_to_head).stores
-    arms, lone = head_to_head.made
-    table = subject_evidence(stores, [Subject(c) for c in (*arms, lone)]).head_to_head
-    assert table is not None and table.verdict is True
-    states = {r.campaign_id: r.guard.state for r in table.rows}
-    assert states[lone] is GuardState.UNCONTROLLED and states[arms[1]] is GuardState.CONTROLLED
-    [capo] = [c for c in table.contrasts if {c.a.optimizer, c.b.optimizer} == {"potter", "capo"}]
-    assert capo.b.replicates == [arms[1], lone], "one treatment is one arm, over its replicates"
-    tested = Counter(c.guard.state for c in table.contrasts if c.lift is not None)
-    for contrast in table.contrasts:
-        assert contrast.lift is not None and contrast.lift.family is not None
-        assert contrast.lift.family.n_tests == tested[contrast.guard.state], (
-            "a controlled and an uncontrolled contrast were corrected as one family"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_act_on_an_arm_takes_it_out_of_its_head_to_head(
-    world: World, head_to_head: Shared
-) -> None:
-    # A rewind or a fork leaves the comparison; a skipped step is a human's hand on the run.
-    stores = world.adopt(head_to_head).stores
-    arms, _ = head_to_head.made
-    acted = dict(zip(arms, (ArmAct.REWIND, ArmAct.FORK, ArmAct.SKIP), strict=True))
-    for cid, act in acted.items():
-        campaign = stores.campaigns.load_campaign(cid)
-        assert campaign is not None
-        stores.campaigns.act(stores.campaigns.live_cycle(campaign.root_hop), act)
-    table = subject_evidence(stores, [Subject(c) for c in arms]).head_to_head
-    assert table is not None
-    states = {r.campaign_id: r.guard.state for r in table.rows}
-    assert [states[c] for c in arms] == [
-        GuardState.UNCONTROLLED,
-        GuardState.UNCONTROLLED,
-        GuardState.DIFFERS,
-    ], f"{acted} left another standing than {states}"
 
 
 def test_a_two_valued_scorers_headline_separates_on_its_paired_flips() -> None:

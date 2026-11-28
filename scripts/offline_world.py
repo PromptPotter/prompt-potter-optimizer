@@ -563,6 +563,11 @@ class Router:
         self.openrouter_dead = False
         self.unrouted: set[str] = set()
 
+    @classmethod
+    def idle(cls) -> Router:
+        """The world before anyone says what it answers: every LLM call `ok`, a backend of no rows."""
+        return cls(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+
     def route(
         self, request: httpx.Request, body: bytes
     ) -> httpx.Response | Awaitable[httpx.Response]:
@@ -744,7 +749,7 @@ def run_child(code: str, *argv: str) -> None:
     for key in PROVIDER_KEYS:
         setattr(settings, key, SecretStr(NOT_A_KEY))
     settings.RATE_LIMITS = {}
-    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+    world = Router.idle()
     install_network(world)
     sys.argv = [sys.argv[0], *argv]
     try:
