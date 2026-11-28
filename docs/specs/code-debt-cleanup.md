@@ -1069,34 +1069,11 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
-- **The bundle check times out under the gate's load** (w10-records' landing): the full gate's
-  playwright went red in 37 s, because the e2e serve refused: `application/health.py::webapp_bundle`
-  ran `git add -A -- webapp` into an empty scratch index with `timeout=10` and timed out; alone on
-  the same tree it was green (449.9 s). An empty index stats and hashes every `webapp/` file on every
-  check, so its cost grows with the tree and the desk's load. Root: the scratch index starts as a
-  copy of the checkout's own, so only changed files are hashed, stamped as
-  `webapp/vite.config.ts::webappTree` stamps (check that both name one tree). **Rides with:** the next
-  chain touching `application/health.py`. **Re-test:** the full gate's playwright is green on the
-  desk beside its pytest.
-  Second case (w10-tests' landing): `touch` phone-412 "every view fits its viewport" failed in
-  `webapp/e2e/harness.ts::drawn`, with a read still open past `expect.timeout` (15 s), while
-  offline-run (903 s) and pytest (638 s) ran beside it; alone it was green (252 s). Third case
-  (w11-store/plugin/scoring): `touch` landscape-844 the same, plus `cold` onboarding-signed-in's
-  `fake_issuer.ts::waitForHealth` past its 60 s. Playwright took 962 s against 290 s alone, and pytest
-  1194 s against 638 s, yet the desk was not CPU-bound: playwright ran at 0.74 cpu/wall against 1.83
-  alone, pytest at 0.49, and the checks running together summed about 5 of 16 cores. The schedule
-  packed them up to `free_mb` (3817 MB free; playwright 1680 + offline-run 1240 + pytest 435 MB
-  declared). Measured across the next full gate (w11-config/access/connectors, green, 1589 s),
-  130 samples at 15 s each:
-  - Disk was idle: 95% idle time, queue 0.0.
-  - Total CPU averaged 40% of 16 cores.
-  - Available memory averaged 1802 MB, falling to 685 MB, with paging bursts up to 3862 pages/s.
-  - Defender's `MsMpEng` used 1.15 cores on average and peaked at 2.6.
-
-  Root: on-access scanning and memory, not cores or disk. The schedule budgets `free_mb` once, at the
-  start, and counts no scanner. Budget memory against what is available as checks start, and make
-  `drawn` and `waitForHealth` wait on what the server says rather than on a clock. Defender exclusions
-  are the operator's call, and none is set. **Rides with:** area 14's chain, as its first link.
+- **The build stamp hashes from an empty index** (w11-tests3, 11-28): `webapp/vite.config.ts::webappTree`
+  still adds every `webapp/` file into an empty scratch index on each build, while
+  `health.py::webapp_bundle` now seeds from the checkout's. Same root, on the build side. **Rides
+  with:** the next chain touching `webapp/vite.config.ts`. **Re-test:** the stamp seeds from the
+  checkout's index, and both name one tree.
 - **Smells the test-shape split left** (reported by its builders): w7-tests opened the peer facts
   through real run init, and the pytest wall went from 77.8 s to 87 s; w7-tests2 shares the bench
   line (`tests/test_scoring.py::banked_line`) and binds each fact's account in
@@ -1167,13 +1144,10 @@ budgets.
   decisions and cells MOVED" with every count equal; `--only offline-run` on the same tree was green.
   A green rerun is a gate or desk defect, never a pass: a twin's pause point or its replay depends on
   something the leg does not pin. **Re-test:** five desk runs of the leg read UNMOVED.
-- **Tests seat what a world door should make** (w9-entry, w9-pass): no offline leg exercises CAPO's
-  `locked_in` path, so w9-pass's catch-up is proven by unit tests alone. **Rides with:** area 14's
-  chain. **Re-test:** a world leg settles a CAPO race `locked_in`.
 - **No door holds a world cycle mid-walk, a refused inner rebase or a raised mid-run ceiling**
   (w11-tests2). Each is hand-seated:
-  - `RunPhaseRecord(Running())`, 7 times: `factories.walking_cycle`, test_security ×5, test_scoring
-    and test_spend.
+  - A run phase seated `state=Running()`, 9 times: `factories.walking_cycle`, test_security,
+    test_scoring and test_spend.
   - test_spend's `execute_round` patch: no offline leg drives an L4 inner run to a refused rebase,
     because potter declines inner forks with no θ in the sandbox.
   - test_spend's mid-run ceiling, through `StandingBudgetRecord` and `hold_moved`: set-limits clamps
@@ -1181,36 +1155,14 @@ budgets.
 
   Root: the world holds a cycle mid-walk. The inner stop rule becomes a pure function in
   `application/runner/inner/spawn.py`, and a ceiling raise has a door. **Rides with:** area 14's chain,
-  with w11-runner (the inner stop rule). **Re-test:** `git grep -c "RunPhaseRecord(Running())" -- tests`
-  is 0, and test_spend patches no `execute_round`.
+  with w11-runner (the inner stop rule). **Re-test:** `git grep -c "state=Running()" -- tests` is 0,
+  and test_spend patches no `execute_round`.
 - **A torn-bill fact takes 3.08 s** (w11-tests2):
   `test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill` runs over the 2 s budget.
   **Rides with:** area 14's chain. **Re-test:** `pytest --durations=10` does not list it.
-- **`gate.py --changed` proves nothing for a committed link** (w7-ver2, HO1063): on a clean tree it runs 0
-  checks, and its `specs` go red when their generator rewrites. **Rides with:** area 14's chain.
-  **Re-test:** `--changed` after a commit checks that commit's files, and a regenerated spec reads green.
 - **The trace's canonical labels move on a resume into the end pass** (w8-tests3): `offline_run.py::decided`
   reads C0 as `parent@R1` there. **Rides with:** area 14's chain. **Re-test:** a resumed leg's labels
   match its straight twin's.
-- **The surface ledger measures against origin/main, not the chain's base** (w8-web2, 11-27; w8-web,
-  w8-resolve2, w8-l4): `scripts/complexity_ledger.py::_MAIN` — the `surface-ledger` check reads each
-  row at the merge-base with `origin/main`, so a `release/next` base starts red with its inherited
-  rise, and `BASELINE`'s exact `package_lines` leaves a chain growing one line red until another
-  deletes (item 71) — the gate measures against the base the chain forked from, as
-  `gate.py::_branch_base` already names it for `--changed` — **Rides with:** `area 14's chain` —
-  **Re-test:** `python scripts/gate.py --only surface-ledger` on a branch off an unlanded
-  `release/next` reads green when the chain raised nothing.
-- **The offline world reports no cached_tokens** (usage-2, 11-19): `scripts/offline_world.py::USAGE`
-  — `prompt_tokens_details` holds only `cache_write_tokens`, so every offline prefix reads
-  "unreported" where OpenRouter reports a cold 0 — the world's usage carries `cached_tokens` as the
-  provider does — **Rides with:** `area 14's chain` — **Re-test:** `git grep -c cached_tokens --
-  scripts/offline_world.py` is above 0.
-- **The offline-run check is landing tier, so `--changed` misses a script break** (bkeys-4, 11-19):
-  `scripts/gate.py::_offline_leg` — `gate.py --changed` skips the offline-run check, so a break in
-  `scripts/offline_run.py` itself (e.g. a `CellSheet` that cannot parse from JSON in the trace) shows
-  only at equals-main — a `--changed` pass runs the offline run whenever `scripts/offline_run.py` or
-  the world it reads changes — **Rides with:** `area 14's chain` — **Re-test:** edit
-  `scripts/offline_run.py`, run `gate.py --changed`; the offline-run check runs. (items 454, 459)
 - **No offline leg draws a mixed-benchmark round** (draw-strata, 11-18):
   `scripts/offline_run.py::run_l4` — the L4 leg (`L4_DATASET = "promptpotter-self/e2e"`) seats one
   search and one held-out cell on one benchmark, so `build_round_order`'s interleave and

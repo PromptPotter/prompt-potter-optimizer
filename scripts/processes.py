@@ -245,6 +245,31 @@ def git(*args: str, input: str | None = None) -> Outcome:
     return run(["git", *args], REPO, input=input)
 
 
+def branch_base() -> tuple[str, str]:
+    """The line the branch was cut from and its merge-base with HEAD: its upstream when set, else
+    the `origin/land/*`, `origin/release/*` or `origin/main` whose merge-base is the fewest commits
+    behind HEAD. What `gate.py --changed` and the surface ledger both read a branch against."""
+    code, upstream = git("rev-parse", "--abbrev-ref", "@{upstream}")
+    if code == 0 and upstream.strip():
+        candidates = [upstream.strip()]
+    else:
+        _, refs = git(
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/remotes/origin/land",
+            "refs/remotes/origin/release",
+        )
+        candidates = [*filter(None, refs.split("\n")), "origin/main"]
+    found: list[tuple[int, str, str]] = []
+    for ref in candidates:
+        code, base = git("merge-base", "HEAD", ref)
+        if code == 0:
+            _, ahead = git("rev-list", "--count", f"{base.strip()}..HEAD")
+            found.append((int(ahead), ref, base.strip()))
+    _, ref, base = min(found)
+    return ref, base
+
+
 def _locked(fd: int) -> bool:
     # Byte 0 is the lock; the holder's name is written after it, where a waiter can read it.
     os.lseek(fd, 0, os.SEEK_SET)

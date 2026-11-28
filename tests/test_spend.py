@@ -1161,12 +1161,19 @@ def test_a_ledger_index_read_in_a_race_with_its_writer_sees_no_torn_bill(
             racing = not written.is_set()
             seen.append(_tailed(index)[:2])
 
-    reader = threading.Thread(target=read)
-    reader.start()
-    _bill_calls(index, 10)
-    _seed(index, "third")
-    written.set()
-    reader.join()
+    # A spinning reader holds the GIL a whole switch interval each time the writer's I/O lets it
+    # go, so the writer waits ~5 ms per syscall (3 s on Windows): it takes the GIL back at once.
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        reader = threading.Thread(target=read)
+        reader.start()
+        _bill_calls(index, 10)
+        _seed(index, "third")
+        written.set()
+        reader.join()
+    finally:
+        sys.setswitchinterval(switch)
     assert all(usd == calls for usd, calls in seen), (
         f"a reader racing the writer saw a torn bill: {[s for s in seen if s[0] != s[1]][:3]}"
     )

@@ -44,12 +44,13 @@ from processes import (
     OFFLINE_RUN_CHILDREN_MAX,
     REPO,
     Outcome,
-    RamBudget,
     alive,
+    branch_base,
     clone_cache,
     clone_root,
     close_job,
     end_children_with_this_process,
+    free_mb,
     git,
     long_path,
     metered,
@@ -106,7 +107,7 @@ class Selection:
             if not moved and not fresh:
                 # A clean tree changed nothing since HEAD, so a committed link is read against
                 # where its branch left the line it was cut from.
-                ref, base = _branch_base()
+                ref, base = branch_base()
                 note = (
                     f"gate --changed: tree clean, reading against merge-base {base[:9]} with {ref}"
                 )
@@ -128,25 +129,6 @@ class Selection:
             ),
             staged_paths=tuple(path for row in rows for path in row[1:]),
         )
-
-
-def _branch_base() -> tuple[str, str]:
-    """The line the branch was cut from and its merge-base with HEAD: its upstream when set, else
-    the `origin/land/*` or `origin/main` whose merge-base is the fewest commits behind HEAD."""
-    code, upstream = git("rev-parse", "--abbrev-ref", "@{upstream}")
-    if code == 0 and upstream.strip():
-        candidates = [upstream.strip()]
-    else:
-        _, refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/land")
-        candidates = [*filter(None, refs.split("\n")), "origin/main"]
-    found: list[tuple[int, str, str]] = []
-    for ref in candidates:
-        code, base = git("merge-base", "HEAD", ref)
-        if code == 0:
-            _, ahead = git("rev-list", "--count", f"{base.strip()}..HEAD")
-            found.append((int(ahead), ref, base.strip()))
-    _, ref, base = min(found)
-    return ref, base
 
 
 def _name_status(against: str) -> list[list[str]]:
@@ -1431,7 +1413,8 @@ class Check:
     # the one platform a job meters.
     mb: int
     # `commit`: the pre-commit set, cheap and writing nothing a sibling gate reads, so a gate of
-    # only these never queues; `landing` proves a landing, so `--changed` leaves it out.
+    # only these never queues; `landing` proves a landing, so `--changed` leaves it out unless a
+    # script it reads moved (`_query`).
     tier: Literal["commit", "edit", "landing"] = "edit"
     # The cores it keeps busy, its CPU-s over its wall measured alone (`time gate.py --only NAME`,
     # after `#`); the schedule never runs more beside each other than the box has.
@@ -2008,12 +1991,13 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     return Result(check, rc, out, time.monotonic() - began, key)
 
 
-def _schedule(
-    checks: Sequence[Check], sel: Selection, store: LastGreen | None, free_mb: int
-) -> list[Result]:
-    """Each check once its producers are done, beside every other the box's free memory and cores
-    still hold; first the one most others wait on, then the widest. One too big for the box runs
-    when nothing else does, and none starts past a timed check waiting for it to empty. While a
+def _schedule(checks: Sequence[Check], sel: Selection, store: LastGreen | None) -> list[Result]:
+    """Each check once its producers are done, beside every other the box's cores and memory still
+    hold, memory read as it would start: what is available then, less every running check's cap,
+    since a scanner or a process the gate never launched holds some. One that does not fit is held
+    and asked again on a beat as memory frees; first the one most others wait on, then the widest.
+    One too big for the box runs when nothing else does, and none starts past a timed check
+    waiting for it to empty. While a
     timed check waits on its producers only they start, so it starts on a box they leave empty
     rather than once every check begun beside them has drained it."""
     done: dict[Check, Result] = {}
@@ -2078,12 +2062,13 @@ def _schedule(
                 for c in checks
                 if c not in done and c not in running and done.keys() >= set(_producers(c, checks))
             ]
-            held = holding()
+            held, short = holding(), False
             for check in sorted(ready, key=lambda c: (-waiting[c], -cores(c), -c.mb)):
                 if held is not None and check not in held:
                     continue
-                mb = sum(c.mb for c in running) + check.mb
-                if running and (mb > free_mb or sum(map(cores, running)) + cores(check) > _CORES):
+                over = bool(running) and sum(c.mb for c in running) + check.mb > free_mb()
+                short = short or over
+                if over or (running and sum(map(cores, running)) + cores(check) > _CORES):
                     # Behind a running timed check it waits out that check, not the narrow ones.
                     if check.started is not None and all(c.started is None for c in running):
                         break
@@ -2095,9 +2080,13 @@ def _schedule(
                     threading.Thread(
                         target=watch_start, args=(check, check.started), daemon=True
                     ).start()
-            moved.wait()
+            # Held on memory, it is asked again as the box frees some, not only as a check ends.
+            moved.wait(_MEMORY_BEAT_S if short else None)
     return [done[check] for check in checks]
 
+
+# How often a check held on memory reads the box again.
+_MEMORY_BEAT_S = 2.0
 
 # The one remote ref a push proves.
 _PROVEN_REF = "refs/heads/main"
@@ -2345,10 +2334,16 @@ def _query(args: argparse.Namespace, sel: Selection) -> list[Check]:
             c for c in checks if any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
         ]
     if sel.changed is not None and not asked:
+        # A landing check is left to the landing, unless what changed is a script it reads that the
+        # gate itself is not (`offline_run.py`, the world it reads): a break there shows nowhere else.
         checks = [
             c
             for c in checks
-            if c.tier != "landing" and any(reads(path, c.inputs() or ()) for path in sel.changed)
+            if any(
+                reads(path, c.inputs() or ())
+                and (c.tier != "landing" or (path.startswith("scripts/") and path not in _GATE))
+                for path in sel.changed
+            )
         ]
     return sorted(checks if args.staged else _with_builders(checks), key=CHECKS.index)
 
@@ -2507,7 +2502,7 @@ def main() -> int:
     # A CI runner has no sibling to queue behind, so it takes the lock like a desk does.
     unqueued = all(c.tier == "commit" for c in checks)
     queue_behind_siblings(f"gate[{label}]", exempt=unqueued)
-    budget = RamBudget.read()
+    free_at_start = free_mb()
 
     # `--staged` checks less than any key names, so it neither reads nor records a green, and CI
     # keeps none; the walk world is keyed all the same, on the tree that builds it.
@@ -2527,7 +2522,7 @@ def main() -> int:
         os.environ["PROMPTPOTTER_ENV_FILE"] = str(Path(home) / ".env")
         # Off the data root, as the box's credential is (`identity/sealing.py::key_path`).
         os.environ["BOX_KEY_FILE"] = f"{home}.box.key"
-        results = _schedule(checks, sel, store, budget.free_mb)
+        results = _schedule(checks, sel, store)
     Path(f"{home}.box.key").unlink(missing_ok=True)
     total = time.monotonic() - started
     if store is not None:
@@ -2539,7 +2534,7 @@ def main() -> int:
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
     busy = sum(r.secs for r in results)
-    timed = f"{total:.1f}s ({busy:.1f}s of checks, at {budget.free_mb} MB free on {_CORES} cores)"
+    timed = f"{total:.1f}s ({busy:.1f}s of checks, at {free_at_start} MB free on {_CORES} cores)"
     if failed:
         print(
             "\nChange the failing fact where it is DECIDED, not where it shows. Green on rerun, or"
