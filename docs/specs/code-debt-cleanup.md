@@ -64,8 +64,8 @@ archive one content-addressed tree filed by the dataset a row measured, `Measure
 A line's fold is stated once and read by one keyed read `(hop, scope, fold)`. Survivors migrate, everything
 else is wiped at a landing. The store holds no money rule and no served shape.
 
-**Unexamined:** `store/campaign_store/store.py`, `store/stores.py`, `store/layout.py`,
-`maintenance/archive_maintenance.py`, `maintenance/landing_key.py`, `store/io.py`, `store/data_root.py`
+**Unexamined:** `maintenance/archive_maintenance.py` (w11-store2 read every module under `store/**`
+and `landing_key.py`; what it found is a row below).
 
 - **The feed's version spans a whole store**: a campaign is a subject its writers stamp
   (`io.py::stamp`), and a subtree reads its family's campaigns alone (`Stores.stamps`), but every
@@ -75,7 +75,9 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `reads.ts::draftRead` follows bare `store:` beside `account`, since Start's refusal reads the wallet
   every ledger's bill moves, so an inner sandbox's append re-asks it; `cycle_reads.py::_COUNTING` is
   one lock over every account's walk. Action: a view keys on its campaign's stamp, and a sandbox is
-  found off its owner's stamp, never a walk. **Rides with:** a version chain of its own.
+  found off its owner's stamp, never a walk. Beside it, an install or research definition edit
+  ticks no feed (those tiers sit off every stamp); the cells ETag does move
+  (`dataset_access.py::definition_version`). **Rides with:** a version chain of its own.
   **Re-test:** `draftRead`'s subject is not `store:`.
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
@@ -102,11 +104,6 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **Which ledgers answer for a hop is decided at each reader**: a fold over a line is one
-  `read_model.py::read_line` of a `Line`, but its spans are built at each caller (`CampaignStore.chain`,
-  `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
-  fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
-  sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -118,61 +115,31 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   run folder stays indented; only `dashboard.json`, which nothing reads back, is a candidate for compact. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
-- **A landing key's first derivation costs ~2.3 s per code version** (tw-v, tw-v2): it is derived
-  once per process and filed by the package's bytes in the data root (`landing_key.py::landing_key`),
-  but `shared/import_walk.py::import_closure` normalizes each module from its own parse
-  (`hashing.py::normalized_tree`), beside `hashing.py::normalized_module`'s memo, and
-  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over every kind, so the first
-  entry after a code edit, and a child in a fresh data root, pays it. tw-v2's memo (`arc/tw-v2`
-  604b03eb2) was not taken: +47 production lines. **Rides with:** after wave 6. **Re-test:**
-  `landing_key.py::derived_landing_key()` takes under 0.5 s cold, with production no larger.
-- **The landing key over-keys by module** (bkeys-4, 11-19; items 451, 456, 462):
-  `promptpotter/application/maintenance/landing_key.py::loading_modules` — keys the whole import closure of every reader,
-  so a prose-free edit to any module a load could import re-lands every root, a cost not a
-  wipe — key the functions a load calls, not their modules — **Rides with:**
-  `area 02's chain` — **Re-test:** an edit to an unreached function in
-  `promptpotter/domain/paired_reading.py` leaves `derived_landing_key()` unchanged.
-- **A replay feed spells the prefix-chain keys beside `file_keys`** (store-5a, 11-19):
-  `promptpotter/infrastructure/store/measurement_archive.py::ReplayFeed.__init__` — builds
-  `config_key(node_configs[:n])` per prefix, beside `file_keys(entry)` and without its
-  `entry.config_key` fallback — the file-key chain is a function of `node_configs` alone, one
-  spelling — **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -c "config_key(.*\[:n\])" -- promptpotter/infrastructure/store/measurement_archive.py` is 1.
 - **`list_campaigns` drops an unreadable manifest into a log** (hubs-2, 11-18):
   `promptpotter/infrastructure/store/campaign_store/store.py::CampaignStore.list_campaigns` —
   `logger.warning` then `continue`: the account holds a campaign no surface reports — the
   survey has a typed unreadable row — **Rides with:** `area 02's chain` — **Re-test:** a
   campaign with a corrupt manifest appears in the listing as unreadable.
-- **The dataset definition's `source` merges one level** (cite-fold, 11-18):
-  `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — `source |=`
-  is a shallow merge beside `merge_node_blocks` — `source` folds through `fold_layers` —
-  **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -c "source |=" -- promptpotter/infrastructure/store/dataset_access.py` is 0.
-- **An authored dataset definition has no writer** (w7-ver, 11-27):
-  `promptpotter/infrastructure/store/dataset_access.py::read_dataset_definition` — an install or
-  research definition edit moves no stamp (those tiers sit off the data root's subjects), so reads
-  that depend on it stand until the store's next write or a restart — the definition loader stamps
-  its tier root — **Rides with:** `area 02's chain` — **Re-test:** edit an install definition; the
-  cells ETag moves.
 - **A line's walks are a flat list every reader re-scans per individual** (w11-reads, 11-28):
   `campaign_store/ledger_scan.py::line_walks` returns `list[IndividualWalk]`. `closed_rounds.py::LineCells` keys it
   once for the reads, but `passes.py:220` and `domain/results.py:329` still filter it per individual.
   Root: `line_walks` serves the walks keyed by individual. **Rides with:** area 02's chain (with 01's
   `results.py`). **Re-test:** `git grep -n "individual_id ==" -- promptpotter/application/scoring
   promptpotter/domain/results.py` is empty.
-- **`store.py` holds two folds a `Line` should state** (w11-store, 11-28):
-  `promptpotter/infrastructure/store/campaign_store/store.py::fold_cycle_index` composes a cycle's
-  index off its chain beside `ledger_scan.py`'s lines, and `store.py::_ledger_meters` sums each
-  ledger's `MoneyFold` meters in a loop of its own — each is a `read_model.py::Line` over its fold —
-  **Rides with:** `area 02's chain` — **Re-test:**
-  `git grep -cE "def (fold_cycle_index|_ledger_meters)" -- promptpotter/infrastructure/store/campaign_store/store.py` is 0.
-- **The `Stores` hub holds a cycle's stop machine and the definition writer** (w11-store, 11-28):
+- **A sandbox whose owner file does not parse is kept and reported nowhere** (w11-store2, 11-28):
+  `promptpotter/infrastructure/store/layout.py::read_sandbox_owner` logs the parse error and reads
+  `None`, which every caller takes as "keep"; the trail and the delete skip it, so its spend and its
+  disk stand under no surface. Root: an unreadable owner is a typed row the storage report lists —
+  **Rides with:** `area 02's chain` — **Re-test:** a sandbox with a corrupt owner file appears in
+  `storage_report.py`'s report.
+- **The `Stores` hub holds a cycle's stop machine** (w11-store, 11-28):
   `promptpotter/infrastructure/store/stores.py::Stores.declare_ended` (with `declare_stop`,
   `mark_superseded`, `mark_producer_vanished`) runs the producer-lock ending on the hub every
-  bench import reaches, and `Stores.write_own_definition` is the dataset tier's writer — the
-  ending belongs to the campaign store's append door, the writer to the dataset store — **Rides
-  with:** `area 02's chain` — **Re-test:**
-  `git grep -cE "def (declare_ended|write_own_definition)" -- promptpotter/infrastructure/store/stores.py` is 0.
+  bench import reaches; the ending belongs to the campaign store's append door, which cannot void
+  the inbox yet: a `CampaignStore` carries no subject chain (`CampaignStore.in_sandbox` builds one
+  off a sandbox whose `store/layout.py::SandboxOwner` names one hop). Root: the campaign store carries its
+  `inside` and the account's `CommandLog` — **Rides with:** `area 02's chain` — **Re-test:**
+  `git grep -cE "def declare_ended" -- promptpotter/infrastructure/store/stores.py` is 0.
 
 ## 03 · Runner, round, bench
 

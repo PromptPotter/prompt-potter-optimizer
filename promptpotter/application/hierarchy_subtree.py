@@ -544,7 +544,7 @@ class _Build:
                 if offset is None
                 else Moment(stores.campaigns.ledger(cycle.hop), offset - 1)
             )
-            got = read_cycle(stores, cycle.hop, cycle.index, moment=moment)
+            got = read_cycle(stores, cycle.hop, moment=moment)
             cut, parent = cycle.index.forked_at_offset, cycle.parent
             below = None if parent is None or cut is None else self._read(stores, parent, cut)
             read = cycle.at[offset] = _Read(cycle, got, below)

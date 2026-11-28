@@ -138,7 +138,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import Projection, read_line
+from promptpotter.infrastructure.store.read_model import Projection
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import NotFoundError
@@ -267,11 +267,10 @@ class ReadoutProjection(Projection):
             self._round_num = record.round
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
         if isinstance(act, InitClosed) and self._hop is not None:
-            chain = self._campaigns.chain(self._hop)
-            scanned = read_line(chain, STANDING_ROUNDS)
+            scanned = self._campaigns.read(self._hop, STANDING_ROUNDS)
             self._closed = {n: held.close for n, held in scanned.rounds.items()}
             self._series = dict(scanned.series)
-            if (resolved := read_line(chain, RESOLVED_RUN)).moved_panel is not None:
+            if (resolved := self._campaigns.read(self._hop, RESOLVED_RUN)).moved_panel is not None:
                 self._write(
                     f"  {YELLOW}{GLYPH['warn']} a DIFFERENT panel than cycle "
                     f"{resolved.experiment_cycle_id} measured: its roster stands, and this run's "
@@ -318,9 +317,7 @@ class ReadoutProjection(Projection):
         scale, the optimizer's review and the hard samples."""
         hop, config = self._hop, self._res.config
         assert hop is not None, "a run stops on the readout it opened"
-        for line in render_spend_breakdown(
-            read_line(self._campaigns.chain(hop), LEDGER_SPEND).spend
-        ):
+        for line in render_spend_breakdown(self._campaigns.read(hop, LEDGER_SPEND).spend):
             self._write(f"{DIM}{line}{RESET}")
         # A run stopped before its origin closed has no round and may have no scorer either.
         if not self._closed:

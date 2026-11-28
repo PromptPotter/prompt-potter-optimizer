@@ -402,7 +402,9 @@ BASELINE = {
     # head-to-head request, a restatement's narration, and a follower's tail ending at its switch.
     # w11-tests4 (+7): `spawning.py::command`, the one door the offline world swaps so a launch's
     # child runs in it (+5); `hierarchy.py::store_version` skips a launch not yet landed (+2).
-    "package_lines": 114167,
+    # w11-store2 (+5): a `Line` names the ledgers that answer for it (`LineScope`, +50), against the
+    # landing key's import walk and the hub's definition writer going (−45).
+    "package_lines": 114172,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

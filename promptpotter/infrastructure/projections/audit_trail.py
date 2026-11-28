@@ -18,13 +18,12 @@ from promptpotter.domain.round_audit import (
     RoundAudit,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    STANDING_ROUNDS,
+    OWN_ROUNDS,
     CycleFactsFold,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
-    LedgerSpan,
     RecordClasses,
     read_line,
 )
@@ -141,7 +140,7 @@ def _ran_by(cycle_dir: Path, round_num: int) -> Path:
     while True:
         ledger = CycleLayout(cycle_dir).ledger
         minted = LedgerIndex.of(ledger).view(CycleFactsFold).minted
-        entered = read_line([LedgerSpan(ledger)], STANDING_ROUNDS).entered
+        entered = read_line(cycle_dir, OWN_ROUNDS).entered
         parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
         if parent is None or (entered is not None and round_num >= entered):
             return ledger

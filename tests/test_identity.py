@@ -384,6 +384,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
     runnable_definition,
     with_node_templates,
+    write_own_definition,
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
@@ -403,7 +404,6 @@ from promptpotter.infrastructure.store.read_model import (
     Projection,
     derived,
     file_sig,
-    read_line,
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
@@ -1398,7 +1398,8 @@ def test_the_one_writer_refuses_a_name_another_tier_holds(tiered: Stores) -> Non
     shadowed = entries_version([tiered])
 
     def write_own(name: str) -> Path:
-        return tiered.write_own_definition(
+        return write_own_definition(
+            tiered,
             name,
             source={"recipe": "rows", "items": []},
             pipeline=_TERMNORM["pipeline"],
@@ -2590,7 +2591,7 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
     write_yaml(family, upgraded)
     root = steered.root
-    read = read_line(stores.campaigns.chain(root.hop), RESOLVED_RUN).read
+    read = stores.campaigns.read(root.hop, RESOLVED_RUN).read
     assert read is not None
     recorded = read.knob_layers["l1_generate"]
     sources = {
@@ -3272,7 +3273,7 @@ def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(held:
     for panel in (measured, moved, measured):
         client.workload = replace(client.workload, experiment=panel)
         opened.record_resolved_run()
-        resolved = read_line(opened.store.campaigns.chain(hop), RESOLVED_RUN)
+        resolved = opened.store.campaigns.read(hop, RESOLVED_RUN)
         assert resolved.experiment == measured.model_dump(mode="json"), (
             "a later launch's roster displaced the one every round measured"
         )

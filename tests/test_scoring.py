@@ -3876,7 +3876,7 @@ def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds
                 strict=True,
             ),
         )
-        return line_walks(built_stores.campaigns.chain(cycle_hop))
+        return line_walks(built_stores.campaigns.cycle_dir(cycle_hop), moment=None)
 
     first = filed_cycle("cycle_a", dict(enumerate(asks_one_thing)))
     assert len(individual_cells(first, "c0", RoleScope.REPORT)) == 2, "one query, two cells"

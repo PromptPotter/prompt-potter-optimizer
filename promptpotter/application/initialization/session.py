@@ -24,7 +24,6 @@ from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import RESOLVED_RUN
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
-from promptpotter.infrastructure.store.read_model import read_line
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import MINT_FRESH, ConflictError, FileKind, FileUnreadableError
@@ -166,7 +165,7 @@ class Session:
                 code="campaign_roster_unreadable",
                 next_acts=(MINT_FRESH,),
             )
-        minted = read_line(self.store.campaigns.chain(hop), RESOLVED_RUN).read
+        minted = self.store.campaigns.read(hop, RESOLVED_RUN).read
         return replace(
             self,
             campaign=at.campaign,

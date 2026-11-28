@@ -5202,7 +5202,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`read_model.py::CHAIN`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [
@@ -18453,7 +18453,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`read_model.py::CHAIN`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [

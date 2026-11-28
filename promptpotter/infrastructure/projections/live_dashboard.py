@@ -88,7 +88,6 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -97,6 +96,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
     Projection,
+    fork_chain,
 )
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -820,7 +820,7 @@ class DashboardCheckout(Projection):
     derives: ClassVar[str] = "dashboard.json"
 
     def __init__(self, cycle_dir: CycleDir) -> None:
-        *self._prefix, own = ledger_chain(cycle_dir, moment=None)
+        *self._prefix, own = fork_chain(cycle_dir)
         self._index = LedgerIndex.of(own.path)
         self._path = CycleLayout(Path(cycle_dir)).dashboard
         self._lock = threading.Lock()
@@ -919,14 +919,14 @@ class RunLimitsProjection(Projection):
 
 def fold_at(cut: CycleAt) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
-    *prefix, own = ledger_chain(cut.cycle, moment=None)
+    *prefix, own = fork_chain(cut.cycle)
     return LedgerIndex.of(own.path).view(
         LiveDashboardProjection, _until(cut), start=_start(LiveDashboardProjection, prefix)
     )
 
 
 def run_limits_at(cut: CycleAt) -> RunLimits | None:
-    *prefix, own = ledger_chain(cut.cycle, moment=None)
+    *prefix, own = fork_chain(cut.cycle)
     return LedgerIndex.of(own.path).view(
         RunLimitsProjection, _until(cut), start=_start(RunLimitsProjection, prefix)
     )

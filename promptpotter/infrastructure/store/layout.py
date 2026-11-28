@@ -100,11 +100,14 @@ def campaign_cycles_dir(campaign_root: Path) -> Path:
     return campaign_root / CYCLES_DIR
 
 
+def campaign_cycle_dirs(campaign_root: Path) -> list[Path]:
+    return sorted(p for p in campaign_cycles_dir(campaign_root).glob("*") if p.is_dir())
+
+
 def cycle_ledgers(campaign_root: Path) -> list[Path]:
-    cycles = campaign_cycles_dir(campaign_root)
     return [
         ledger
-        for cycle_dir in sorted(p for p in cycles.glob("*") if p.is_dir())
+        for cycle_dir in campaign_cycle_dirs(campaign_root)
         if (ledger := CycleLayout(cycle_dir).ledger).is_file()
     ]
 

@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from itertools import groupby
 from pathlib import Path, PurePosixPath
-from typing import Unpack, get_args
+from typing import Unpack
 
 from pydantic import BaseModel
 
@@ -19,9 +19,9 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
 )
 from promptpotter.domain.campaign_config import LaidSpan
-from promptpotter.domain.cycle_index import CycleIndex, IndexRound
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop, Subject, WorkspaceDir
-from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
+from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
@@ -37,7 +37,7 @@ from promptpotter.domain.records.run_wiring import (
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.holders import CycleHolder, holder_of
-from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.projections.live_dashboard import (
@@ -50,7 +50,10 @@ from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ARM_ACTS,
     CAMPAIGN_CEILING,
-    CELL_FORMULA,
+    CAMPAIGN_METERED,
+    CYCLE_INDEX,
+    CYCLE_METERED,
+    OWN_ROUNDS,
     RESOLVED_RUN,
     STANDING_ROUNDS,
     CycleFactsFold,
@@ -77,6 +80,7 @@ from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
     SandboxOwner,
+    campaign_cycle_dirs,
     campaign_cycles_dir,
     campaign_root_dir_for,
     campaigns_root_dir_for,
@@ -88,8 +92,10 @@ from promptpotter.infrastructure.store.layout import (
     read_sandbox_owner,
 )
 from promptpotter.infrastructure.store.read_model import (
+    CHAIN,
+    CYCLE,
     LedgerIndex,
-    LedgerSpan,
+    Line,
     Moment,
     Projection,
     each_last,
@@ -128,57 +134,6 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             for p in [f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir)]:
                 unlink_robust(p)
             prune_empty_dirs(cdir)
-
-
-def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:
-    total = dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED)
-    for ledger in ledgers:
-        if ledger.is_file():
-            for meter, counted in money_on(ledger).metered.items():
-                total[meter] = total[meter].plus(counted)
-    return total
-
-
-def fold_cycle_index(chain: Sequence[LedgerSpan]) -> CycleIndex | None:
-    """A cycle's index off its hop's chain (`CampaignStore.chain`): its own facts are its own
-    ledger's, the chain's last span; its rounds stand over the whole chain."""
-    own = chain[-1]
-    facts = LedgerIndex.of(own.path).view(CycleFactsFold, own.until)
-    minted = facts.minted
-    if minted is None:
-        return None
-    standing = read_line(chain, STANDING_ROUNDS)
-    ended, final = facts.ended, facts.final
-    return CycleIndex(
-        cycle_id=CycleLayout.of_ledger(own.path).cycle_dir.name,
-        created_at=minted.timestamp,
-        updated_at=facts.updated_at,
-        parent=minted.parent,
-        forked_at_offset=minted.forked_at_offset,
-        cut_round=minted.cut_round,
-        fork=facts.fork,
-        spawned_by=facts.spawned_by,
-        scorer_cell_formula=read_line(chain, CELL_FORMULA),
-        interventions=list(facts.interventions),
-        stop_reason=None if ended is None else ended.stop_reason,
-        finished_at=facts.ended_at,
-        interrupted_round=None if final is None else final.interrupted_round,
-        error=facts.error,
-        final=None if final is None else final.final,
-        superseded_by=facts.superseded_by,
-        rounds=[
-            IndexRound(
-                round=n,
-                fitness=None if (fold := held.close.fold) is None else fold.fitness,
-                health=RoundHealth.of(n, held.close.health),
-            )
-            for n, held in standing.rounds.items()
-        ],
-        elects_on=standing.elections[max(standing.elections)].elects_on
-        if standing.elections
-        else None,
-        standing=standing.standing,
-    )
 
 
 class CycleIndexProjection(Projection):
@@ -245,6 +200,15 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
+    def read[V, L](self, hop: CycleHop, line: Line[V, L], *, moment: Moment | None = None) -> L:
+        """THE keyed read of a line at *hop*: the ledgers answering are the line's own scope's."""
+        at = (
+            self.campaign_root_dir(hop.campaign_id)
+            if line.over.of_campaign
+            else self.cycle_dir(hop)
+        )
+        return read_line(at, line, moment=moment)
+
     def append(self, hop: CycleHop, *records: CycleRecord) -> int | None:
         """THE append door of a named cycle, a run's own declarations included; ``None``: a muted
         run scope muted it. Each record lands under a one-shot hold of the cycle's `index.json`
@@ -300,8 +264,7 @@ class CampaignStore:
         return sorted(p for p in root.iterdir() if CampaignLayout(p).manifest.is_file())
 
     def campaign_cycle_dirs(self, campaign_id: str) -> list[Path]:
-        cycles = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
-        return sorted(p for p in cycles.glob("*") if p.is_dir())
+        return campaign_cycle_dirs(self.campaign_root_dir(campaign_id))
 
     def campaign_cycle_hops(self, campaign_id: str) -> list[CycleHop]:
         return [
@@ -318,21 +281,10 @@ class CampaignStore:
         counted = bank.metered.get((campaign_id, meter), NOTHING_METERED)
         if bank.deleted(campaign_id):
             return counted
-        return _ledger_meters(self.campaign_cycle_ledgers(campaign_id))[meter].plus(counted)
+        return read_line(self.campaign_root_dir(campaign_id), CAMPAIGN_METERED)[meter].plus(counted)
 
     def cycle_metered(self, hop: CycleHop, meter: CeilingMeter) -> Budget:
-        return _ledger_meters([self.ledger(hop)])[meter]
-
-    def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
-        """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
-        widest: dict[Path, int | None] = {}
-        for hop in self.campaign_cycle_hops(campaign_id):
-            for path, until in self.chain(hop):
-                if not path.is_file():
-                    continue
-                held = widest.get(path, 0)
-                widest[path] = None if until is None or held is None else max(held, until)
-        return [LedgerSpan(path, until) for path, until in widest.items()]
+        return self.read(hop, CYCLE_METERED)[meter]
 
     def iter_cycle_ledgers(self) -> list[Path]:
         return [
@@ -488,7 +440,7 @@ class CampaignStore:
             self,
             self.campaign_cycle_hops(campaign_id),
             subject=Subject(campaign_id),
-            metered=_ledger_meters(self.campaign_cycle_ledgers(campaign_id)),
+            metered=read_line(self.campaign_root_dir(campaign_id), CAMPAIGN_METERED),
         )
 
     def delete_campaign(
@@ -533,12 +485,12 @@ class CampaignStore:
                 inner,
                 list(hops),
                 subject=Subject(campaign_id, inside=(owner.hop,)),
-                metered=_ledger_meters([]),
+                metered=CAMPAIGN_METERED.start(),
             )
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
-        return fold_cycle_index(self.chain(hop, moment=moment))
+        return self.read(hop, CYCLE_INDEX, moment=moment).cycle
 
     def mint_cycle(self, hop: CycleHop, minted: CycleMintedRecord | None = None) -> None:
         """THE mint, idempotent by content: a re-mint of what stands is a no-op, another refuses.
@@ -564,12 +516,10 @@ class CampaignStore:
 
     def arm_acts(self, campaign_id: str) -> list[ArmAct]:
         """Off every cycle of the campaign: the arm is the campaign, whichever line an act ran on."""
-        return read_line(
-            (LedgerSpan(ledger) for ledger in self.campaign_cycle_ledgers(campaign_id)), ARM_ACTS
-        )
+        return read_line(self.campaign_root_dir(campaign_id), ARM_ACTS)
 
     def standing_rounds(self, hop: CycleHop, *, moment: Moment | None) -> StandingRounds:
-        return read_line(self.chain(hop, moment=moment), STANDING_ROUNDS)
+        return self.read(hop, STANDING_ROUNDS, moment=moment)
 
     def rewind_enters(self, hop: CycleHop, after_round: int) -> int:
         if not self.ledger(hop).exists():
@@ -605,11 +555,6 @@ class CampaignStore:
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
             out.append(hop)
         return out
-
-    def line_spans(self, hop: CycleHop) -> list[LedgerSpan]:
-        """Each ledger of the line from *hop*, read whole: what a superseded cycle did past its
-        cut is the line's too."""
-        return [LedgerSpan(self.ledger(h)) for h in self.line(hop)]
 
     def line_to(self, hop: CycleHop) -> list[CycleHop]:
         """The supersede chain ending at *hop*, oldest first: `line` walked back."""
@@ -655,8 +600,7 @@ class CampaignStore:
             return "not on disk"
         if index.minted_as == "root":
             return "family root — deletion is for sibling stubs only"
-        # Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
-        own = read_line([LedgerSpan(self.ledger(hop))], STANDING_ROUNDS).rounds
+        own = self.read(hop, OWN_ROUNDS).rounds
         if own:
             return f"closed {len(own)} round(s) of its own — cycle ran real work"
         here = Path(os.path.normpath(cycle_dir))
@@ -689,21 +633,19 @@ class CampaignStore:
             self,
             [hop],
             subject=Subject(hop.campaign_id, hop.cycle_id),
-            metered=_ledger_meters([self.ledger(hop)]),
+            metered=self.read(hop, CYCLE_METERED),
         )
         rmtree_robust(cycle_dir)
         return True, ""
 
     def last[R: CycleRecord](self, hop: CycleHop, record: type[R]) -> R | None:
         """The chain's last *record*, or the cycle's OWN where the record says a fork never inherits it."""
-        spans = self.chain(hop) if record.forks_inherit else [LedgerSpan(self.ledger(hop))]
-        return read_line(spans, last(record))
+        return self.read(hop, last(record, CHAIN if record.forks_inherit else CYCLE))
 
     def read_laid_spans(self, hop: CycleHop) -> list[LaidSpan]:
         """One per ledger of *hop*'s chain, its root's first: a child's lays over its parent's."""
-        chain = self.chain(hop)
-        minted: list[CycleMintedRecord | None] = read_line(chain, each_last(CycleMintedRecord))
-        locks: list[ScoringLockedRecord | None] = read_line(chain, each_last(ScoringLockedRecord))
+        minted = self.read(hop, each_last(CycleMintedRecord, CHAIN))
+        locks = self.read(hop, each_last(ScoringLockedRecord, CHAIN))
         return [
             LaidSpan(start=None if record is None else record.start, scoring_lock=lock)
             for record, lock in zip(minted, locks, strict=True)
@@ -715,7 +657,7 @@ class CampaignStore:
 
     def read_campaign_ceiling(self, campaign: Campaign) -> CampaignCeilingRecord:
         """Off the campaign's root, which every cycle of it reads."""
-        return read_line([LedgerSpan(self.ledger(campaign.root_hop))], CAMPAIGN_CEILING)
+        return self.read(campaign.root_hop, CAMPAIGN_CEILING)
 
     def campaign_cycle(self, hop: CycleHop) -> CampaignCycle:
         return CampaignCycle(self.campaign(hop.campaign_id), hop.cycle_id)
@@ -737,10 +679,6 @@ class CampaignStore:
             update={"budget": folded.budget.over(self.read_campaign_ceiling(at.campaign).budget)}
         )
 
-    def chain(self, hop: CycleHop, *, moment: Moment | None = None) -> list[LedgerSpan]:
-        """THE read of a hop's chain: its fork prefix, then its own ledger, cut at *moment*."""
-        return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=moment)
-
     def write_resolved_run(
         self,
         hop: CycleHop,
@@ -752,7 +690,7 @@ class CampaignStore:
         """Appended whenever this launch resolves other than the chain holds: a moved panel is
         banked as such, the landed roster standing (the readout says it at INIT's exit)."""
         doc = None if experiment is None else experiment.model_dump(mode="json", exclude_unset=True)
-        held = read_line(self.chain(hop), RESOLVED_RUN)
+        held = self.read(hop, RESOLVED_RUN)
         moved = doc if held.experiment is not None and doc not in (None, held.experiment) else None
         record = ResolvedRunRecord(
             read=read,

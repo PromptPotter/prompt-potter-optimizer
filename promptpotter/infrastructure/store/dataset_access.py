@@ -18,11 +18,18 @@ from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.layer_fold import Layer, fold_layers
+from promptpotter.domain.layer_fold import Layer, fold_layers, untyped_rule
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.io import parse_yaml
+from promptpotter.infrastructure.store.io import (
+    parse_yaml,
+    rmtree_robust,
+    unlink_robust,
+    write_bytes,
+    write_text,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.read_model import derived, file_sig, read_file
 from promptpotter.shared.errors import (
     DatasetAccessError,
@@ -228,7 +235,7 @@ def campaign_defaults() -> dict[str, Any]:
 
 def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | None:
     """Per section, root first: ``pipeline`` replaces its top-level keys and merges its nodes,
-    ``campaign`` layers depth-first, ``source`` merges by key, ``panel`` by ``panel_rule``, the deepest
+    ``campaign`` layers depth-first, ``source`` folds untyped, ``panel`` by ``panel_rule``, the deepest
     ``card`` stands whole; its connector's node templates lie under the nodes (`with_node_templates`).
     A layer that is no definition layer raises ``FileUnreadableError`` by its path."""
     if not is_dataset_dir(dataset.directory):
@@ -236,7 +243,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
     top: dict[str, Any] = {}
     nodes: dict[str, Any] = {}
     campaign: list[dict[str, Any]] = []
-    source: dict[str, Any] = {}
+    sources: list[Layer[str]] = []
     panels: list[Layer[str]] = []
     card: dict[str, Any] = {}
     panel_dir: Path | None = None
@@ -245,7 +252,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         nodes = merge_node_blocks(nodes, pipeline.get("nodes") or {})
         top |= {k: v for k, v in pipeline.items() if k != "nodes"}
         campaign.append(_section(layer, "campaign"))
-        source |= _section(layer, "source")
+        sources.append(Layer("source", _section(layer, "source")))
         if "card" in layer:
             card = _section(layer, "card")
         if "panel" in layer:
@@ -259,7 +266,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         dataset.directory,
         with_node_templates(top),
         tuple(campaign),
-        source,
+        fold_layers(untyped_rule, sources).document,
         panel or None,
         panel_dir,
         _card(card),
@@ -384,6 +391,51 @@ def claim_own_definition(stores: Stores, slug: str, *, new: bool) -> None:
     if held and (new or held[0].tier != "yours"):
         free = next(f"{slug}-{n}" for n in count(2) if not _holders(stores, f"{slug}-{n}"))
         raise SlugTakenError(slug, free)
+
+
+def write_own_definition(
+    stores: Stores,
+    slug: str,
+    *,
+    source: dict[str, Any],
+    pipeline: dict[str, Any],
+    campaign: dict[str, Any],
+    description: str,
+    framing: TaskDecomposition,
+    origin: dict[str, dict[str, Any]],
+) -> Path:
+    """THE writer of an account's definition, claimed over every tier (`claim_own_definition`).
+    WHOLE files: the tenant tier lays no defaults or family under it."""
+    claim_own_definition(stores, slug, new=False)
+    dst = stores.tenant_datasets.dataset_dir(slug)
+    staged = dst / _STAGED_DIR
+    rmtree_robust(staged)
+    write_text(staged / FRAMING_FILE, render_framing_file(description, framing))
+    if origin:
+        write_yaml(staged / ORIGIN_FILE, origin)
+    write_yaml(
+        staged / DEFINITION_FILE, {"source": source, "pipeline": pipeline, "campaign": campaign}
+    )
+    # The commit: from here the swap is laid whole, by this call or by the landing.
+    staged.rename(dst / DEFINITION_SWAP_DIR)
+    complete_definition_swap(dst / DEFINITION_SWAP_DIR)
+    return dst
+
+
+_STAGED_DIR = ".staged"
+DEFINITION_SWAP_DIR = ".swap"
+# Definition last: its file is what makes the directory a dataset.
+_DEFINITION_SET = (FRAMING_FILE, ORIGIN_FILE, DEFINITION_FILE)
+
+
+def complete_definition_swap(swap: Path) -> None:
+    """Re-lays a committed swap whole, so a torn one completes on any re-run: a file it lacks goes."""
+    for name in _DEFINITION_SET:
+        if (swap / name).is_file():
+            write_bytes(swap.parent / name, (swap / name).read_bytes())
+        else:
+            unlink_robust(swap.parent / name)
+    rmtree_robust(swap)
 
 
 def dataset_not_found(stores: Stores, name: str) -> DatasetAccessError:

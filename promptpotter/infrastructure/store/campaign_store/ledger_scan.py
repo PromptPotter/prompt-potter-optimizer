@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, assert_never, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.cycle_index import Intervention
+from promptpotter.domain.cycle_index import CycleIndex, IndexRound, Intervention
+from promptpotter.domain.cycle_paths import sibling_cycle_id
 from promptpotter.domain.cycle_result import WallClock
+from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.fork import ForkSpec
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
@@ -67,7 +70,7 @@ from promptpotter.domain.results import round_walks
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
-from promptpotter.domain.spend import Budget, spend_slot
+from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter, spend_slot
 from promptpotter.domain.spend_rollup import SpendRollup
 from promptpotter.domain.verification import (
     BenchPass,
@@ -78,10 +81,16 @@ from promptpotter.domain.verification import (
 from promptpotter.infrastructure.llm.money_fold import Money, MoneyFold
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
+    CAMPAIGN,
+    CAMPAIGN_WALKS,
+    CHAIN,
+    CYCLE,
     LastOf,
     LedgerIndex,
     LedgerSpan,
     Line,
+    LineScope,
+    Moment,
     RecordClasses,
     last,
     line_concat,
@@ -559,7 +568,7 @@ assert set(_MOVES_ROUNDS) <= set(_StandingFold.records)
 
 
 def moves_index(record: CycleRecord) -> bool:
-    """Whether *record* moves a cycle's index (`store.py::fold_cycle_index`): a fact its fold takes, or a round that stands."""
+    """Whether *record* moves a cycle's index (`CYCLE_INDEX`): a fact its fold takes, or a round that stands."""
     if isinstance(record, PhaseRecord):
         return _init_formula(record) is not None
     return isinstance(record, (*CycleFactsFold.records, *_MOVES_ROUNDS))
@@ -755,17 +764,29 @@ def _resolved_then(held: ResolvedRun, own: ResolvedRun, span: LedgerSpan) -> Res
     return held.then(own)
 
 
-RESOLVED_RUN = Line(_ResolvedRun, ResolvedRun, _resolved_then)
-# Every act that ran the line off its declared comparison, oldest first.
-ARM_ACTS = line_concat(_ArmActs)
-LAUNCH_CLOCKS = line_concat(_LaunchClocks)
+def _supersede_line(cycle_dir: Path) -> list[LedgerSpan]:
+    """Each ledger of the line from *cycle_dir*, read whole: what a superseded cycle did past its
+    cut is the line's too."""
+    line = [LedgerSpan(CycleLayout(cycle_dir).ledger)]
+    while successor := LedgerIndex.of(line[-1].path).view(CycleFactsFold).superseded_by:
+        line.append(LedgerSpan(CycleLayout(cycle_dir.parent / successor).ledger))
+    return line
+
+
+SUPERSEDE_LINE = LineScope(_supersede_line)
+RESOLVED_RUN = Line(_ResolvedRun, ResolvedRun, _resolved_then, CHAIN)
+# Every act that ran the campaign's arm off its declared comparison, oldest first.
+ARM_ACTS = line_concat(_ArmActs, CAMPAIGN)
+# Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends.
+LAUNCH_CLOCKS = line_concat(_LaunchClocks, SUPERSEDE_LINE)
 # The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none.
 CAMPAIGN_CEILING: Line[CampaignCeilingRecord | None, CampaignCeilingRecord] = Line(
-    last(CampaignCeilingRecord).fold,
+    last(CampaignCeilingRecord, CYCLE).fold,
     lambda: CampaignCeilingRecord(budget=Budget(), asked=Budget()),
     lambda held, own, _: held if own is None else own,
+    CYCLE,
 )
-GRADED_PASSES = line_concat(_Verification)
+GRADED_PASSES = line_concat(_Verification, CHAIN)
 
 
 def _bench_then(
@@ -792,8 +813,21 @@ def _bench_then(
 
 
 BENCH_PASSES: Line[list[PassGradedRecord], BenchPasses | None] = Line(
-    _Verification, lambda: None, _bench_then
+    _Verification, lambda: None, _bench_then, SUPERSEDE_LINE
 )
+
+
+def _own_record(cycle_dir: Path) -> list[LedgerSpan]:
+    """A sibling fork's lifted rounds are its parent's, so it reads its own ledger; a cycle cut from
+    ANOTHER tree has no parent cycle here, and its prefix is its own record."""
+    minted = LedgerIndex.of(CycleLayout(cycle_dir).ledger).view(CycleFactsFold).minted
+    parent = None if minted is None else minted.parent
+    lifted = parent is not None and sibling_cycle_id(parent) is None
+    return (CHAIN if lifted else CYCLE).spans(cycle_dir)
+
+
+# A cycle's own record, as the lineage tree reads it.
+OWN_RECORD = LineScope(_own_record)
 BENCH_READINGS: Line[list[PassGradedRecord], dict[tuple[int, ArmKey], BenchReading]] = Line(
     _Verification,
     dict,
@@ -806,18 +840,75 @@ BENCH_READINGS: Line[list[PassGradedRecord], dict[tuple[int, ArmKey], BenchReadi
             and isinstance(view.reading, BenchReading)
         }
     ),
-)
-CELL_FORMULA: Line[CycleFacts, str | None] = Line(
-    CycleFactsFold, lambda: None, lambda held, own, _: own.formula or held
+    OWN_RECORD,
 )
 STANDING_ROUNDS: Line[StandingRounds, StandingRounds] = Line(
-    _StandingFold, StandingRounds.none, lambda held, own, _: held.then(own)
+    _StandingFold, StandingRounds.none, lambda held, own, _: held.then(own), CHAIN
+)
+# Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
+OWN_ROUNDS = replace(STANDING_ROUNDS, over=CYCLE)
+RECORD_ROUNDS = replace(STANDING_ROUNDS, over=OWN_RECORD)
+
+
+class _IndexHeld(NamedTuple):
+    formula: str | None
+    standing: StandingRounds
+    cycle: CycleIndex | None
+
+
+def _index_then(held: _IndexHeld, facts: CycleFacts, span: LedgerSpan) -> _IndexHeld:
+    """A cycle's own facts are its own ledger's, the chain's last span; its rounds stand over the
+    whole chain."""
+    formula = facts.formula or held.formula
+    standing = held.standing.then(LedgerIndex.of(span.path).view(_StandingFold, span.until))
+    minted = facts.minted
+    if minted is None:
+        return _IndexHeld(formula, standing, None)
+    ended, final = facts.ended, facts.final
+    return _IndexHeld(
+        formula,
+        standing,
+        CycleIndex(
+            cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name,
+            created_at=minted.timestamp,
+            updated_at=facts.updated_at,
+            parent=minted.parent,
+            forked_at_offset=minted.forked_at_offset,
+            cut_round=minted.cut_round,
+            fork=facts.fork,
+            spawned_by=facts.spawned_by,
+            scorer_cell_formula=formula,
+            interventions=list(facts.interventions),
+            stop_reason=None if ended is None else ended.stop_reason,
+            finished_at=facts.ended_at,
+            interrupted_round=None if final is None else final.interrupted_round,
+            error=facts.error,
+            final=None if final is None else final.final,
+            superseded_by=facts.superseded_by,
+            rounds=[
+                IndexRound(
+                    round=n,
+                    fitness=None if (fold := held_round.close.fold) is None else fold.fitness,
+                    health=RoundHealth.of(n, held_round.close.health),
+                )
+                for n, held_round in standing.rounds.items()
+            ],
+            elects_on=standing.elections[max(standing.elections)].elects_on
+            if standing.elections
+            else None,
+            standing=standing.standing,
+        ),
+    )
+
+
+# A cycle's `index.json`: ``cycle`` is ``None`` before its own mint.
+CYCLE_INDEX: Line[CycleFacts, _IndexHeld] = Line(
+    CycleFactsFold, lambda: _IndexHeld(None, StandingRounds.none(), None), _index_then, CHAIN
 )
 
 
-def line_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[WalkedCell]]:
-    chain = list(spans)
-    standing = read_line(chain, STANDING_ROUNDS)
+def line_walks(cycle_dir: Path, *, moment: Moment | None) -> list[IndividualWalk[WalkedCell]]:
+    standing = read_line(cycle_dir, STANDING_ROUNDS, moment=moment)
     closed = standing.rounds
     walks = [walk for held in closed.values() for walk in held.close.walks()]
     # Per round: one individual walked in two open rounds is two walks.
@@ -834,7 +925,7 @@ def line_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[WalkedCell]]:
     # The whole chain: a fork inherits its parent's verify CELLS, though not its assurance.
     walks += [
         view.verification.walk()
-        for view in read_line(chain, GRADED_PASSES)
+        for view in read_line(cycle_dir, GRADED_PASSES, moment=moment)
         if view.verification.kind == MeasurementRole.VERIFY
     ]
     return walks
@@ -857,7 +948,7 @@ def _verify_then(held: VerifyLedger, own: list[PassGradedRecord], _: LedgerSpan)
 
 # Read on a cycle's own ledger: a fork inherits its parent's measurements, not its assurance.
 VERIFY_LEDGER: Line[list[PassGradedRecord], VerifyLedger] = Line(
-    _Verification, lambda: VerifyLedger({}, []), _verify_then
+    _Verification, lambda: VerifyLedger({}, []), _verify_then, CYCLE
 )
 
 
@@ -970,8 +1061,8 @@ def _launched[F: tuple[Any, ...]](
     )
 
 
-WALKED_ANSWERS = line_union(_Answers)
-PRICED_KEYS = line_union(_PricedKeys)
+WALKED_ANSWERS = line_union(_Answers, CAMPAIGN_WALKS)
+PRICED_KEYS = line_union(_PricedKeys, CAMPAIGN)
 
 
 def _spend_then(held: LedgerSpend, own: Money, _: LedgerSpan) -> LedgerSpend:
@@ -981,8 +1072,28 @@ def _spend_then(held: LedgerSpend, own: Money, _: LedgerSpan) -> LedgerSpend:
 
 
 LEDGER_SPEND: Line[Money, LedgerSpend] = Line(
-    MoneyFold, lambda: LedgerSpend(SpendRollup(), 0, 0.0), _spend_then
+    MoneyFold, lambda: LedgerSpend(SpendRollup(), 0, 0.0), _spend_then, CHAIN
 )
+# Every cycle's spend read whole: what the line has paid.
+LINE_SPEND = replace(LEDGER_SPEND, over=SUPERSEDE_LINE)
+# The cycle's own: a run's rollup is a snapshot each bank replaces, so two reads of one never move.
+CYCLE_SPEND = replace(LEDGER_SPEND, over=CYCLE)
+
+
+def _metered_then(
+    held: dict[CeilingMeter, Budget], own: Money, _: LedgerSpan
+) -> dict[CeilingMeter, Budget]:
+    return {meter: counted.plus(own.metered[meter]) for meter, counted in held.items()}
+
+
+# What the campaign's ceiling meters: each cycle's OWN appends once (a fork's prefix is its parent's).
+CAMPAIGN_METERED: Line[Money, dict[CeilingMeter, Budget]] = Line(
+    MoneyFold,
+    lambda: dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED),
+    _metered_then,
+    CAMPAIGN,
+)
+CYCLE_METERED = replace(CAMPAIGN_METERED, over=CYCLE)
 
 
 def _by_round_then(
@@ -994,8 +1105,13 @@ def _by_round_then(
 
 
 # Not clamped by a rewind: a round measured twice cost money both times.
-SPEND_BY_ROUND: Line[Money, dict[int, SpendRollup]] = Line(MoneyFold, dict, _by_round_then)
-TIMELINES: Line[Timeline, list[Timeline]] = Line(_Timeline, list, lambda held, own, _: [*held, own])
+SPEND_BY_ROUND: Line[Money, dict[int, SpendRollup]] = Line(MoneyFold, dict, _by_round_then, CHAIN)
+LINE_SPEND_BY_ROUND = replace(SPEND_BY_ROUND, over=SUPERSEDE_LINE)
+# This launch's clock over the line's ledgers.
+TIMELINES: Line[Timeline, list[Timeline]] = Line(
+    _Timeline, list, lambda held, own, _: [*held, own], SUPERSEDE_LINE
+)
+CYCLE_TIMELINES = replace(TIMELINES, over=CYCLE)
 
 
 def wall_clock_of(

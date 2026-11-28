@@ -1,56 +1,12 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from promptpotter.config.paths import short_form
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.records import CycleRecord
-from promptpotter.domain.records.lineage import CycleMintedRecord
 from promptpotter.infrastructure.store.io import WORKSPACE_STATE_DIR, append_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import (
-    LedgerIndex,
-    LedgerSpan,
-    Moment,
-    last,
-    read_line,
-)
-
-
-def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
-    minted = read_line([LedgerSpan(CycleLayout(cycle_dir).ledger)], last(CycleMintedRecord))
-    parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
-    return None if minted is None or parent is None else (minted, parent)
-
-
-def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
-    prefix: list[tuple[Path, int]] = []
-    child_dir = Path(cycle_dir)
-    # By dir, never id: two trees can hold the same cycle id. A mint names its parent off the
-    # child's own path, so the spelling alone is compared, with no filesystem call per hop.
-    seen = {os.path.normcase(short_form(child_dir))}
-    while (link := _fork_link(child_dir)) is not None:
-        minted, parent_dir = link
-        cut = minted.forked_at_offset
-        assert cut is not None
-        if (spelled := os.path.normcase(short_form(parent_dir))) in seen:
-            raise ValueError(
-                f"{child_dir}: parent {parent_dir} is already on this fork chain — "
-                "the mints describe a cycle, which no walk can resolve."
-            )
-        seen.add(spelled)
-        child_dir = parent_dir
-        prefix.append((CycleLayout(child_dir).ledger, cut))
-    return prefix[::-1]
-
-
-def ledger_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSpan]:
-    chain = [
-        *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir)),
-        LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
-    ]
-    return chain if moment is None else moment.spans(chain)
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 
 
 class CycleEventLog:

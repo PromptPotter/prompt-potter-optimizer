@@ -145,7 +145,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     with_node_templates,
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
-from promptpotter.infrastructure.store.read_model import derived, read_line
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -762,7 +762,7 @@ def resolved(stores: Stores, at: CampaignCycle) -> RunResolution:
     return RunResolution(
         cycle.config,
         drawn_partition(stores.campaigns, hop).verifier_graded,
-        recorded=_recorded_read(read_line(stores.campaigns.chain(hop), RESOLVED_RUN), hop),
+        recorded=_recorded_read(stores.campaigns.read(hop, RESOLVED_RUN), hop),
         cycle=cycle,
         workspace=stores.base_dir,
         menu_at=None,
@@ -1184,7 +1184,7 @@ def line_config(stores: Stores, at: CampaignCycle) -> LineConfig:
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     cycle = cycle_config(stores, campaign.root_cycle)
-    read = read_line(stores.campaigns.chain(campaign.root_hop), RESOLVED_RUN).read
+    read = stores.campaigns.read(campaign.root_hop, RESOLVED_RUN).read
     return (
         stable_hash(cycle.config.model_dump(mode="json")),
         stable_hash(cycle.start_overlay),

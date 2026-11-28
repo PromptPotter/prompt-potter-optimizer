@@ -209,7 +209,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
-from promptpotter.infrastructure.store.read_model import LedgerIndex, Moment, Projection, read_line
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Moment, Projection
 from promptpotter.infrastructure.store.session_pointer import (
     cleanup_stub_fork_if_empty,
     read_active_pointer,
@@ -701,9 +701,7 @@ def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
     assert forks.before < after, (
         "a cycle the campaign forked after the arm's scope opened is not its own"
     )
-    assert after <= read_line(walks.spans(), WALKED_ANSWERS), (
-        "the arm remembers an answer it never walked"
-    )
+    assert after <= walks.read(WALKED_ANSWERS), "the arm remembers an answer it never walked"
     with scoped(memory=arm):
         assert sample_fold_rows(stores, dataset_hash=bank.dataset_hash) == [], (
             "an arm read the shared fold every campaign writes"

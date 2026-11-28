@@ -747,7 +747,7 @@ export interface CycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first. */
   elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
-   * (`CampaignStore.chain`), what its dashboard's spend folds. */
+   * (`read_model.py::CHAIN`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -1360,7 +1360,7 @@ export interface SubtreeCycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first. */
   elects_on: 'fitness' | 'composite' | null;
   /** Its line's bill at the moment: its fork prefix's, then its own ledger's
-   * (`CampaignStore.chain`), what its dashboard's spend folds. */
+   * (`read_model.py::CHAIN`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -5822,7 +5822,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "618095ddd02a7894";
+export const SERVED_CONTRACT = "90de555a52321484";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
