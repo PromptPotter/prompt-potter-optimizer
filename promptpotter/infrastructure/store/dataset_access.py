@@ -274,11 +274,6 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
     )
 
 
-def read_dataset_pipeline(dataset: ResolvedDataset) -> dict[str, Any] | None:
-    definition = read_dataset_definition(dataset)
-    return None if definition is None else definition.pipeline
-
-
 def declared_pipelines(declaration: Mapping[str, Any]) -> dict[str, list[str]]:
     """A ``default`` left undeclared is every declared node in order, as the schema parser reads it."""
     nodes = declaration.get("nodes") or {}

@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.initialization.session import Session
@@ -141,16 +141,6 @@ class QueryLoopResult:
     stop_signal: StopSignal | None = None
 
 
-class WalkRecorder(Protocol):
-    def scores(self, results: Sequence[GradedCell]) -> ScoreSummary: ...
-
-    def take(self, cell: GradedCell) -> GradedCell:
-        """The cell at its address: filed here unless its claim filed it first."""
-        ...
-
-    def provenance(self, facts: MeasuredCell) -> str: ...
-
-
 @dataclass
 class QueryLoopState:
     search_point: JobSearchPoint
@@ -160,7 +150,7 @@ class QueryLoopState:
     feed: ReplayFeed | None
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
     recorded: MeasuredPass | None
-    recorder: WalkRecorder
+    recorder: _ArchiveRecorder
     # The archive's answers by sample key, first read when a row is first sent or taken, never at
     # open: a row the walk never reaches costs no read.
     filed: dict[str, FiledAnswer] | None = None

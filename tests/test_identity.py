@@ -380,7 +380,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     install_dataset,
     list_readable_datasets,
     read_dataset_definition,
-    read_dataset_pipeline,
     read_framing_file,
     resolve_dataset,
     runnable_definition,
@@ -3925,7 +3924,8 @@ def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path
 
 
 def test_answering_in_text_sends_no_contract_to_answer_into() -> None:
-    d234 = read_dataset_pipeline(_install("justlogic/d234"))
+    definition = read_dataset_definition(_install("justlogic/d234"))
+    d234 = None if definition is None else definition.pipeline
     assert d234 is not None
     # TermNorm serves its prompt's fields and no slot: its node template declares the slot.
     served_llm = {"type": "llm", "prompt_info": {"fields": list(PROMPT_INFO.fields)}}

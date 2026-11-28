@@ -479,13 +479,6 @@ def read_json(path: Path) -> Any:
         return json.load(f)
 
 
-def read_json_optional(path: Path) -> Any | None:
-    try:
-        return read_json(path)
-    except FileNotFoundError:
-        return None
-
-
 def read_json_tolerant(path: Path, default: Any = None) -> Any:
     try:
         return read_json(path)

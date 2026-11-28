@@ -28,7 +28,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
-    draft_budget,
+    draft_config,
     draft_pipeline,
     draft_sends,
     laid_config,
@@ -74,7 +74,7 @@ class CheckinStart(LaunchRequest):
         return self.served.endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
-        return draft_budget(stores, owned_draft(stores, self.claim.draft_id))
+        return draft_config(stores, owned_draft(stores, self.claim.draft_id)).optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return draft_sends(stores, owned_draft(stores, self.claim.draft_id))

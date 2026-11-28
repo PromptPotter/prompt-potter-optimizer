@@ -122,7 +122,6 @@ from promptpotter.domain.records.run_wiring import (
 from promptpotter.domain.sample import Bank, Grading, Sample
 from promptpotter.domain.scoring import Scorer, ScoringFormulaError
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
-from promptpotter.domain.spend import Budget
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
@@ -619,10 +618,6 @@ def _source_config(stores: Stores, source: DraftSource) -> CampaignConfig:
 
 def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
     return _source_config(stores, draft_source(stores, draft))
-
-
-def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
-    return draft_config(stores, draft).optimization.budget
 
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:

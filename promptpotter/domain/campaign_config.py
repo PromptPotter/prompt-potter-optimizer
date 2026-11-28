@@ -418,10 +418,6 @@ class CampaignConfig(StrictModel):
             )
         return self
 
-    def identity(self) -> dict[str, object]:
-        """What this config adds to a cell's identity beside its optimizer's ``Treatment``, less every default."""
-        return self.model_dump(mode="json", exclude_defaults=True, exclude=_TREATMENT_OWNED)
-
     def overlaid[N: str](self, *layers: Layer[N]) -> CampaignConfig:
         """*layers* laid over the keys this config's own layers set."""
         under: Folded[N] = Folded(self.model_dump(mode="json", exclude_unset=True))
@@ -479,9 +475,6 @@ def _started(overrides: ConfigOverrides) -> dict[str, Any]:
     if overrides.scoring:
         patch["scoring"] = overrides.scoring
     return patch
-
-
-_TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
 
 
 def _locked(lock: ScoringLockedRecord, held: Mapping[str, object]) -> dict[str, object]:
