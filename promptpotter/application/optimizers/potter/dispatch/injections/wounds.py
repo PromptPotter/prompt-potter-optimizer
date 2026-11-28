@@ -14,7 +14,7 @@ from promptpotter.application.optimizers.potter.dispatch.facade import PotterVie
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.domain.failures import NurseOwner, RuntimeFailure
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
+from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.validators import ValidatorOutcome
 
@@ -33,7 +33,7 @@ def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: PipelinePara
     current = pipeline_params.nodes.get(rf.node)
     if current is None:
         return False
-    observed = rf.observed_config
+    observed = rf.observed.node(rf.node).laid_keys()
     return all(observed.get(k) == getattr(current, k) for k in WHO_ANSWERS_KEYS if k in observed)
 
 
@@ -167,7 +167,8 @@ def _format_runtime_failure_lines(rf: RuntimeFailure, keys: set[str]) -> list[st
     )
     # The provider is the operator's lever, never L1's: shown only where the operator owns the fix.
     shown = keys | {"provider"} if rf.owner is NurseOwner.OPERATOR else keys
-    cfg_parts = [f"{k}={v}" for k, v in rf.observed_config.items() if k in shown]
+    observed = rf.observed.node(rf.node).laid_keys() if rf.node else {}
+    cfg_parts = [f"{k}={v}" for k, v in observed.items() if k in shown]
     return [head, f"      cfg: {', '.join(cfg_parts)}"] if cfg_parts else [head]
 
 
@@ -177,7 +178,7 @@ def _format_runtime_failure_group(
     """N failures on one backend across a varying param axis are ONE discovery, collapsed to one line."""
     clusters: dict[tuple[str | None, str, str, str], list[RuntimeFailure]] = defaultdict(list)
     for rf in rfs:
-        call = rf.observed_call
+        call = rf.observed.node(rf.node) if rf.node else NodeCall()
         key = (
             rf.node,
             rf.dominant_warning,
@@ -200,7 +201,7 @@ def _format_runtime_failure_group(
         out.append(f"    [owner={first.owner.value}] x{len(group)} — dom={warning}{on}")
         varied: dict[str, set[str]] = defaultdict(set)
         for rf in group:
-            for k, v in rf.observed_config.items():
+            for k, v in rf.observed.node(node).laid_keys().items() if node else ():
                 if k in keys and k != "model":
                     varied[k].add(str(v))
         varied_parts: list[str] = []

@@ -339,7 +339,7 @@ from promptpotter.domain.phases import (
     WalkEnd,
     stop_reason_outcome,
 )
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     PipelineNode,
@@ -1782,6 +1782,7 @@ def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
     with composed(["adaptive_queue", *walk[1:]]):
         queued = select_optimizer(
             OptimizerChoice(
+                arm_gate="off",
                 call_target=BENCH_TARGET,
                 optimizer=name,
                 nodes={"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})},
@@ -3868,7 +3869,7 @@ def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds
                     built_stores.archive,
                     [row.facts for row in rows],
                     filed_under(
-                        [("", {"individual": f"keyed_{cycle_id}"})],
+                        [("", NodeCall.model_validate({"individual": f"keyed_{cycle_id}"}))],
                         prompt_fields_id=f"keyed_{cycle_id}",
                     ),
                 ),

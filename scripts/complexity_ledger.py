@@ -415,7 +415,9 @@ BASELINE = {
     # replays it, and refuses a key not held, where it answered a bare 202 either way.
     # w11-connectors3 (−7): each connector's tunables are its own `EnvBlock`, and harbor's panel
     # recipe folds into its connector, against `settings.py`'s fields and `harbor_panel.py` going.
-    "package_lines": 114311,
+    # w11-config3 (+40): the archive carrier typed (`pipeline_params.py::NodeChain`, `laid_chain`)
+    # and the scoring block laid by the fold (`layer_fold.py::ScalarAs`, `campaign_config.py::ScoringBlock`).
+    "package_lines": 114351,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

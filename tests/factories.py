@@ -119,7 +119,7 @@ from promptpotter.domain.paired_reading import (
     UnreadPair,
 )
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, NodeChain, PipelineParams
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
     PipelineNode,
@@ -355,7 +355,7 @@ def arm_state(
                 degraded_rate=1.0,
                 degraded_count=total,
                 total_scored=total,
-                observed_config={},
+                observed=PipelineParams(),
                 first_seen_round=0 if position is None else position.round,
                 changes_description="",
                 owner=NurseOwner.L1,
@@ -461,12 +461,11 @@ def scorer_of(
     )
 
 
-type Configs = list[tuple[str, dict[str, Any]]]
-LLM_ONLY: Configs = [("llm_only", {"model": "X"})]
+LLM_ONLY: NodeChain = [("llm_only", NodeCall(model="X"))]
 
 
 def filed_under(
-    configs: Configs = LLM_ONLY, dataset_hash: str = "ds", *, prompt_fields_id: str = "pf"
+    configs: NodeChain = LLM_ONLY, dataset_hash: str = "ds", *, prompt_fields_id: str = "pf"
 ) -> ArchiveEntry:
     return ArchiveEntry(
         config_key=config_key(configs),
@@ -1159,7 +1158,8 @@ def bench_pass(
         "reads_before": 0,
     } | bend
     under = filed_under(
-        [("", {"individual": filed_as or f"bench_{individual}"})], prompt_fields_id=individual
+        [("", NodeCall.model_validate({"individual": filed_as or f"bench_{individual}"}))],
+        prompt_fields_id=individual,
     )
     return BenchPass(
         cells=filed(stores.archive, [row.facts for row in rows], under, role=MeasurementRole.BENCH),

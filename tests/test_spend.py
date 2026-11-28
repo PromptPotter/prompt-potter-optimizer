@@ -1207,7 +1207,7 @@ def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
         signed_in = IdentityContext(user_id=UserId(sub), tenant_id=TenantId(sub))
         return workspace(signed_in)
 
-    cell_entry = filed_under([("llm_only", {"model": "m"})])
+    cell_entry = filed_under([("llm_only", NodeCall(model="m"))])
     paid = MeasuredCell.from_wire(
         {
             "sample_key": "k",
@@ -1894,7 +1894,7 @@ def _archived_cell(stores: Stores, bank: Any) -> Any:
                 archive_row(s.query, pipeline_data={**steps, "step_timings": {"llm_only": seconds}})
                 for s in bank.bank.samples[rows]
             ],
-            filed_under([("llm_only", {"model": model})], bank.bank.dataset_hash),
+            filed_under([("llm_only", NodeCall(model=model))], bank.bank.dataset_hash),
         )
     on = [("llm_only", {"model": "X"})]
     return measured_cell_price(

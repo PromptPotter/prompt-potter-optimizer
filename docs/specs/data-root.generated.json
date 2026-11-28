@@ -1339,6 +1339,10 @@
       ],
       "shape": {
         "$defs": {
+          "NodeCall": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "PipelineParams": {
             "additionalProperties": true,
             "type": "object"
@@ -1360,8 +1364,7 @@
                   "type": "string"
                 },
                 {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/$defs/NodeCall"
                 }
               ],
               "type": "array"
@@ -1426,8 +1429,7 @@
                       "type": "string"
                     },
                     {
-                      "additionalProperties": true,
-                      "type": "object"
+                      "$ref": "#/$defs/NodeCall"
                     }
                   ],
                   "type": "array"
@@ -1451,6 +1453,10 @@
               "dataset_hash"
             ],
             "title": "ArchiveEntry",
+            "type": "object"
+          },
+          "NodeCall": {
+            "additionalProperties": true,
             "type": "object"
           },
           "PipelineParams": {

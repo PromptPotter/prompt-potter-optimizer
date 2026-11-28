@@ -111,15 +111,14 @@ def _row_cell(cell: GradedCell, *, key: str, position: int) -> CellRow:
 
 def _span(
     node: str,
-    cfg: dict[str, Any],
+    call: NodeCall,
     pd: PipelineData,
     recorded: Mapping[str, object],
     variables: dict[str, Any],
     output_keys: list[str],
 ) -> CellSpan:
     usage = pd.step_tokens.get(node)
-    prompt, config = split_rendered_prompt(cfg)
-    call = NodeCall.model_validate(config)
+    prompt, config = split_rendered_prompt(call.laid_keys())
     return CellSpan(
         node=node,
         model=(usage.model if usage else None) or call.model,
@@ -154,8 +153,8 @@ def _assemble(
         "question": pd.question,
     }
     spans = [
-        _span(node, cfg, pd, recorded, variables, list(filed.output_keys.get(node, ())))
-        for node, cfg in described.node_configs
+        _span(node, call, pd, recorded, variables, list(filed.output_keys.get(node, ())))
+        for node, call in described.node_configs
     ]
     attributed = {k for s in spans for k in s.outputs} | _SPAN_KEYS
     return Cell(

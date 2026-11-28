@@ -1017,9 +1017,16 @@ def _open_edges(selected: SelectedOptimizer) -> list[str]:
 
 
 def bench_choice(optimizer: str) -> OptimizerChoice:
-    """*optimizer* as a campaign editing none of it selects it, on `defaults.yaml`'s call target."""
-    target = campaign_defaults()["optimization"]["call_target"]
-    return OptimizerChoice.model_validate({"optimizer": optimizer, "call_target": target})
+    """*optimizer* as a campaign editing none of it selects it, on `defaults.yaml`'s call target
+    and gate."""
+    defaults = campaign_defaults()["optimization"]
+    return OptimizerChoice.model_validate(
+        {
+            "optimizer": optimizer,
+            "call_target": defaults["call_target"],
+            "arm_gate": defaults["arm_gate"],
+        }
+    )
 
 
 def select_optimizer(choice: OptimizerChoice) -> SelectedOptimizer:

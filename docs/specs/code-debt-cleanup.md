@@ -548,12 +548,13 @@ sole route for a backend tunable.
 - **Params are not one fold** (w10-survey): `pipeline_resolve.py::bind_resolution` lays starting prompts
   through `pipeline_resolve.py::_apply_starting_prompts` after `ParamLayers.fold`, and
   `fold_output_contract` is a second post-fold at `pipeline_resolve.py::resolved_output_schemas`,
-  `application/preflight.py` and `domain/opt_search_point.py`; `datasets/draft_patch.py::plan_draft_patch`
-  folds the config through `fold_layers(CAMPAIGN_RULE, ...)` and then overwrites `config["scoring"]` with
-  `datasets/draft_patch.py::_folded_scoring`. Root: starting prompts, the output contract and the scoring
-  block's per-key merge are `ParamLayer`s or `CAMPAIGN_RULE`, so params are final once folded. **Rides
-  with:** area 07's chain. **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def;
-  4 now) and `git grep -c "_folded_scoring" -- promptpotter` is 0 (2 now).
+  `application/preflight.py` and `domain/opt_search_point.py`. Root: starting prompts and the output
+  contract are `ParamLayer`s, so params are final once folded. **Rides with:** area 07's chain.
+  **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def; 4 now). w11-config3
+  cut it: `fold_output_contract` also runs in `application/preflight.py::refuse_off_contract`'s loop, and
+  `application/origin.py` calls the domain's `OptSearchPoint.configured`, so folding through `ParamLayers`
+  moves `configured` into `application/` (domain cannot import `pipeline_resolve`). The chain's Owns hold
+  `preflight.py`, `origin.py` and the candidate path's caller in `bench/node_context.py`.
 - **A resolved dataset is resolved again past the seam** (w11-config): `datasets/loaders.py::resolve_bank`,
   `held_bank` and `fetch_bank` each re-read the definition (`definition_source`) a `ResolvedDataset` does not
   carry; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source` looks up again. Root:
@@ -562,9 +563,11 @@ sole route for a backend tunable.
   `git grep -c "definition_source(dataset)" -- promptpotter/application/datasets/loaders.py` is 0 (5 now).
 - **A knob's provenance is diffed, not read off the fold** (w11-config): `config_map.py::_knob_rows` calls a
   bench knob `default` where its value equals `defaults.yaml`'s, so a campaign that states the default reads as
-  unstated; `campaign_config.py::OptimizerChoice.arm_gate` keeps a code default (`"off"`) the
-  `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
-  map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
+  unstated. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the map reads the stamp,
+  which needs the definition chain to stamp its `defaults.yaml` layer apart (`authored.py::_campaign_block`
+  lays every file as `dataset`) and the mint to record a bench key's stamp as it does a node key's
+  (`pipeline_resolve.py::LaidConfig`), a new mint field and so a wipe. **Rides with:** area 07's chain, with
+  area 02's (`application/datasets/authored.py`, `store/dataset_access.py::DatasetDefinition`).
   **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
 - **An origin finding with an unknown row is dropped unserved** (w11-config2, 11-28):
   `datasets/origin_resolve.py::raised_commands` drops through `_coerce` a finding whose row is unknown,
@@ -588,15 +591,14 @@ sole route for a backend tunable.
   **Rides with:** area 07's chain. w11-config2 counts 24 files naming `NodeCall`, and finds an edge
   of it: `datasets/ingest.py::_open_checkin_of` cannot tell an origin-opened draft from a plain pick
   (same `DatasetBasis`), so a plain pick may reopen it; the draft does not record its opener.
-- **The pipeline carrier is typed only at its door**: the archive address
-  (`measurement_archive.py::config_key`'s `list[tuple[str, dict]]`) and `RuntimeFailure.observed_config`
-  (laid as a dict by `scoring/arm_states.py`; an abort's holds the whole document) stay dicts, typed at
-  their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
-  `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
-  area 04's (`observed_config`). w11-config2 left it unbuilt for a design: `config_key` hashes
-  `("", {"prompt_fields_id"})` pairs that no `NodeCall` holds, and the scoring block's per-key merge
-  (the fold row above) has dial semantics `CAMPAIGN_RULE` lacks. **Re-test:** `git grep -c "NodeCall.model_validate(" --
-  promptpotter/application/scoring/measurement_log.py promptpotter/domain/failures.py` is 0 (2 now).
+  w11-config3 typed the archive carrier (`NodeChain`) and cut the rest. `NodeConfig`'s typed readers
+  are `bench/llm_call.py` (5: `provider`/`model` required, `temperature` a float), `optimizer_manifest.py`
+  (5) and `free_tier.py` (1); the steer's readers are potter's `l1.py`, `members.py`,
+  `dispatch/injections/layer_state.py` and `dispatch/prompts.py`, and its layer would ride
+  `NodeContext.knobs`. The chain's Owns hold those. Two edges of it:
+  `domain/pipeline_schema.py::PipelineSchema.sp_hash` answers `""` for a chain-less schema the archive
+  now refuses (the refusal belongs at the schema's read), and `ArchiveConfig.config_key` is stored beside
+  the `node_configs` it derives from.
 
 ## 08 · Connectors, backends, LLM clients
 

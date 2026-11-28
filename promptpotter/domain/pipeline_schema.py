@@ -11,7 +11,9 @@ from promptpotter.domain.pipeline_params import (
     PARAM_FORBIDDEN_KEYS,
     RESERVED_NODE_NAMES,
     NodeCall,
+    NodeChain,
     PipelineParams,
+    laid_chain,
 )
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -1242,21 +1244,22 @@ class PipelineSchema(FrozenModel):
 
         return self.model_copy(update={"declared_nodes": _narrowed(self.declared_nodes)})
 
-    def node_configs(self, pipeline_params: PipelineParams) -> list[tuple[str, dict[str, Any]]]:
+    def node_configs(self, pipeline_params: PipelineParams) -> NodeChain:
         """Off-chain nodes LEAD, configured ones only: trailing, ``ReplayFeed`` reads a reusable partial."""
         in_chain = {node.name for node in self.nodes}
-        laid = pipeline_params.laid_nodes
-        result: list[tuple[str, dict[str, Any]]] = [
-            (node.name, cfg)
+        result: NodeChain = [
+            (node.name, call)
             for node in self.declared_nodes
-            if node.name not in in_chain and (cfg := laid.get(node.name))
+            if node.name not in in_chain
+            and (call := pipeline_params.nodes.get(node.name))
+            and call.laid_keys()
         ]
-        result.extend((node.name, laid.get(node.name, {})) for node in self.nodes)
+        result.extend((node.name, pipeline_params.node(node.name)) for node in self.nodes)
         return result
 
     def sp_hash(self, pipeline_params: PipelineParams) -> str:
         configs = self.node_configs(pipeline_params)
-        return stable_hash(configs) if configs else ""
+        return stable_hash(laid_chain(configs)) if configs else ""
 
     def value_tree(self, *, prompt_delivery: Delivery) -> tuple[ValueLeaf, ...]:
         """``prompt_delivery`` is ``Connector.prompt_delivery``: a default would claim "always arrives"."""

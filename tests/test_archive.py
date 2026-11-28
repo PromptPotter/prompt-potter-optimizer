@@ -26,7 +26,6 @@ import httpx
 import pytest
 from factories import (
     LLM_ONLY,
-    Configs,
     archive_row,
     arm_key,
     arm_state,
@@ -155,6 +154,7 @@ from promptpotter.domain.narration import Narration
 from promptpotter.domain.origin_panel import OriginPanel, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
+from promptpotter.domain.pipeline_params import NodeCall, NodeChain
 from promptpotter.domain.records.decision import OriginGatePass
 from promptpotter.domain.records.lineage import (
     CycleMintedRecord,
@@ -240,18 +240,20 @@ _CAMPAIGN = "testds__20260101-000000"
 def test_a_full_chain_answer_never_replays_across_a_later_nodes_change(tmp_path: Path) -> None:
     archive = MeasurementArchive(tmp_path / "cells")
     # Filed LAST on purpose: wrongly served, it is the cell's most recent and no answer hides it.
-    chain: Configs = [(n, {}) for n in ("l1_generate", "l1_critique", "l2_context", "l3_plan")]
+    chain: NodeChain = [
+        (n, NodeCall()) for n in ("l1_generate", "l1_critique", "l2_context", "l3_plan")
+    ]
     for predicted, terminal in (("short_circuit", "l1_critique"), ("full_chain", "l3_plan")):
         filed(
             archive,
             [archive_row("q", predicted=predicted, pipeline_data={"terminal_node": terminal})],
             filed_under(chain, "promptpotter-self"),
         )
-    later_node_changed: Configs = [
-        ("l1_generate", {}),
-        ("l1_critique", {}),
-        ("l2_context", {"layout": {"problem_description": ["critique"]}}),
-        ("l3_plan", {}),
+    later_node_changed: NodeChain = [
+        ("l1_generate", NodeCall()),
+        ("l1_critique", NodeCall()),
+        ("l2_context", NodeCall.model_validate({"layout": {"problem_description": ["critique"]}})),
+        ("l3_plan", NodeCall()),
     ]
     served = [b.cell.predicted for b in ReplayFeed(archive, later_node_changed).advance().values()]
     assert served == ["short_circuit"], (
@@ -377,7 +379,7 @@ def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_wou
 def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> None:
     archive = built_stores.archive
     entry = filed_under(LLM_ONLY, "kept")
-    other: Configs = [("llm_only", {"model": "Y"})]
+    other: NodeChain = [("llm_only", NodeCall(model="Y"))]
     refs: list[str] = []
     for at, said, configs, facts in (
         (1, "first", LLM_ONLY, {}),
@@ -400,6 +402,8 @@ def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> No
     )
     described = {e.config_key for e in archive.list_all(dataset_hash="kept")}
     assert described == {config_key(LLM_ONLY), config_key(other)}
+    with pytest.raises(ValueError, match="no archive address"):
+        config_key([])  # one constant address would replay a chain-less point's cells as another's
     index = archive.path(ArchiveFile.INDEX)
     index.write_bytes(b"")
     assert archive.reindex(apply=False) == {"indexed": 2, "undescribed": 0}
@@ -483,7 +487,7 @@ def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     archive = built_stores.archive
-    tailed: Configs = [("llm_only", {"model": "T"})]
+    tailed: NodeChain = [("llm_only", NodeCall(model="T"))]
     reader = MeasurementArchive(archive.base_dir)
     feed = ReplayFeed(reader, tailed)
 
@@ -559,7 +563,7 @@ def test_four_writers_on_one_file_at_once_keep_every_row(built_stores: Stores) -
 
 
 class _Compacted(NamedTuple):
-    configs: Configs
+    configs: NodeChain
     bank: Bank
     refs: dict[str, str]
     whole: ArchiveEntry
@@ -570,7 +574,7 @@ def compacted_rows(built_stores: Stores) -> _Compacted:
     """The bank named `compacted` and its two rows, each holding every field compaction moves;
     TWO filings, so a restore clears each stamp."""
     archive = built_stores.archive
-    compacted: Configs = [("llm_only", {"model": "C"})]
+    compacted: NodeChain = [("llm_only", NodeCall(model="C"))]
     compacted_bank = Bank.of(Sample(id=0, query=f"q{sid}", ground_truth="g") for sid in (1, 2))
     compacted_hash = compacted_bank.dataset_hash
     built_stores.tenant_datasets.put_bank(compacted_bank)

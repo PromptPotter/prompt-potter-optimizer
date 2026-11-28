@@ -643,12 +643,16 @@ def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Sto
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
     select_optimizer(
         OptimizerChoice(
-            call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": earned_only}
+            arm_gate="off",
+            call_target=BENCH_TARGET,
+            optimizer="potter",
+            nodes={"block_pool": earned_only},
         )
     )
     with pytest.raises(PayloadInvalidError):
         select_optimizer(
             OptimizerChoice(
+                arm_gate="off",
                 call_target=BENCH_TARGET,
                 optimizer="potter",
                 nodes={"block_pool": earned_only, "l1_generate": closed},
@@ -656,7 +660,12 @@ def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Sto
         )
     stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
     named = select_optimizer(
-        OptimizerChoice(call_target=BENCH_TARGET, optimizer="capo", nodes={"demo_pool": stray_shot})
+        OptimizerChoice(
+            arm_gate="off",
+            call_target=BENCH_TARGET,
+            optimizer="capo",
+            nodes={"demo_pool": stray_shot},
+        )
     )
     unranked = _unranked()
     assert named.pool_refusals(
@@ -713,7 +722,10 @@ class _Packs:
         overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
         return select_optimizer(
             OptimizerChoice(
-                call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": overlay}
+                arm_gate="off",
+                call_target=BENCH_TARGET,
+                optimizer="potter",
+                nodes={"block_pool": overlay},
             )
         )
 
@@ -1667,7 +1679,12 @@ def test_a_potter_template_filling_an_undeclared_slot_is_refused_as_its_prompt()
     with pytest.raises(PotterError) as typo:
         select_optimizer(
             OptimizerChoice.model_validate(
-                {"call_target": BENCH_TARGET, "optimizer": "potter", "nodes": typo_overlay}
+                {
+                    "arm_gate": "off",
+                    "call_target": BENCH_TARGET,
+                    "optimizer": "potter",
+                    "nodes": typo_overlay,
+                }
             )
         )
     assert (typo.value.code, typo.value.http_status) == (
@@ -2834,6 +2851,35 @@ def test_a_declaration_refuses_a_list_its_lay_cannot_make() -> None:
             assert patch_between(rule, under, over) == patch, f"{under} -> {over} patched wrong"
 
 
+def test_a_scoring_block_lays_key_by_key_and_each_key_clears_its_sibling() -> None:
+    # Laid whole, a fork's dials would keep a locked composite beside them: a block naming two criteria.
+    rule = rules_of(CampaignConfig)
+    for under, patch, laid in (
+        ("a", {"dials": "x=1"}, {"per_sample": "a", "dials": "x=1"}),
+        (
+            {"per_sample": "a", "per_cell": "c"},
+            {"dials": "x=1"},
+            {"per_sample": "a", "dials": "x=1"},
+        ),
+        (
+            {"per_sample": "a", "dials": "d"},
+            {"per_cell": "c"},
+            {"per_sample": "a", "per_cell": "c"},
+        ),
+        (
+            {"matcher": "m", "per_cell": "c"},
+            {"per_sample": "p"},
+            {"per_cell": "c", "per_sample": "p"},
+        ),
+        ({"per_sample": "a", "per_cell": "c"}, {"per_cell": None}, "a"),
+        ({"per_sample": "a", "per_cell": "c"}, "b", "b"),
+    ):
+        layers = [Layer("u", {"scoring": under}), Layer("p", {"scoring": patch})]
+        assert fold_layers(rule, layers).document["scoring"] == laid, f"{patch} over {under}"
+        made = patch_between(rule, {"scoring": under}, {"scoring": laid})
+        assert fold_layers(rule, [layers[0], Layer("p", made)]).document["scoring"] == laid
+
+
 def _arming(stores: Stores) -> tuple[Session, ConfigLayers, list[Sample]]:
     """An arm's session on 35 rows holding 5 out: an arm is judged on its bench, and capo searches 30."""
     rows = samples(35, "TRUE", query="claim ")
@@ -3219,6 +3265,7 @@ def test_one_call_target_moves_every_optimizer_llm_node_a_node_routing_its_own_k
         own = moved.llm_nodes[0]
         routed = select_optimizer(
             OptimizerChoice(
+                arm_gate="off",
                 call_target=target,
                 optimizer=name,
                 nodes={own: ManifestNodeOverlay(config={"model": "own/model"})},

@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
 from promptpotter.domain.judges import JudgeSpec
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeChain, PipelineParams
 from promptpotter.domain.scoring import CELL_KEYS, MeasuredCell, all_verifier_graded
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
@@ -132,18 +132,16 @@ class ArchiveConfig(FrozenModel):
 
     # The archive's address: what its cells file under, the cell identity hashed in.
     config_key: str
-    # ``PipelineSchema.sp_hash``, what the arm sends; never indexes entries. Empty where the
-    # searchpoint resolves no node config.
+    # ``PipelineSchema.sp_hash``, what the arm sends; never indexes entries.
     prompt_fields_id: str
-    # Empty with it, and its cells are then never replayed.
-    node_configs: list[tuple[str, dict[str, Any]]]
+    node_configs: NodeChain
     pipeline_params: PipelineParams
 
     @property
     def individual(self) -> str:
         """The individual measured, by what it sends: one spans an entry per cell identity, so it
         names a row to a reader and is never the archive's address (``config_key``)."""
-        return self.prompt_fields_id or self.config_key
+        return self.prompt_fields_id
 
 
 class ArchiveEntry(ArchiveConfig):

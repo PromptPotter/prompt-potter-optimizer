@@ -8189,7 +8189,7 @@
             "type": "number"
           },
           "dominant_warning": {
-            "description": "``{node_name}:{warning_type}`` of the most frequent warning across the candidate's measurements; the prefix selects the node whose config is captured in ``observed_config``.",
+            "description": "``{node_name}:{warning_type}`` of the most frequent warning across the candidate's measurements; the prefix selects the node whose call ``observed`` captures.",
             "title": "Dominant Warning",
             "type": "string"
           },
@@ -8208,14 +8208,12 @@
                 "type": "null"
               }
             ],
-            "description": "The node whose config ``observed_config`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole config.",
+            "description": "The node whose call ``observed`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole document.",
             "title": "Node"
           },
-          "observed_config": {
-            "additionalProperties": true,
-            "description": "Snapshot of the failing node's effective config — the (param, value) tuples the `l1_config_not_in_runtime_failures` validator scans on subsequent rounds to reject re-proposals.",
-            "title": "Observed Config",
-            "type": "object"
+          "observed": {
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Snapshot of the effective params: the failing node's call alone, or an abort's whole document — the (param, value) pairs the `l1_config_not_in_runtime_failures` validator scans on subsequent rounds to reject re-proposals."
           },
           "owner": {
             "$ref": "#/components/schemas/NurseOwner",
@@ -8240,7 +8238,7 @@
           "degraded_rate",
           "degraded_count",
           "total_scored",
-          "observed_config"
+          "observed"
         ],
         "title": "RuntimeFailure",
         "type": "object"

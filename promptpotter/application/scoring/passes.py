@@ -6,7 +6,7 @@ import asyncio
 import random
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.difficulty import (
     judging_ruler,
@@ -57,6 +57,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import stop_refused
+from promptpotter.domain.pipeline_params import laid_chain
 from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.run_phase import PhaseRecord
 from promptpotter.domain.sample import Sample
@@ -298,8 +299,8 @@ async def verify_candidate(
         jsp = opened.points.measured(entry)
         sp_hash = jsp.sp_hash(schema)
         # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
-        predicate: dict[str, dict[str, Any]] = dict(
-            schema.node_configs(jsp.pipeline_params.keyed_by(session.cell_identity))
+        predicate = dict(
+            laid_chain(schema.node_configs(jsp.pipeline_params.keyed_by(session.cell_identity)))
         )
 
         # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.

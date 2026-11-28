@@ -40,10 +40,22 @@ class ScopedBy:
 
 
 @dataclass(frozen=True)
+class ScalarAs:
+    """Declared on a field holding a scalar or a mapping: a held scalar lays as the mapping's *key*,
+    and a mapping left holding that key alone reads back as its scalar."""
+
+    key: str
+
+
+@dataclass(frozen=True)
 class Laid:
     lay: Lay
     # The sibling a change of which clears this key, and that sibling's value where the fold holds none.
     scope: tuple[str, object] | None = None
+    scalar_as: str | None = None
+
+    def as_mapping(self, value: object) -> object:
+        return {self.scalar_as: value} if self.scalar_as and isinstance(value, str) else value
 
 
 @dataclass(frozen=True)
@@ -120,8 +132,8 @@ def _laid[N: str](
             out.pop(key, None)
             _unstamp(stamps, path, itself=True)
             continue
-        current = out.get(key)
-        lay = rule(path).lay
+        laid_at = rule(path)
+        current, lay = laid_at.as_mapping(out.get(key)), laid_at.lay
         if lay is Lay.SUBSET and isinstance(current, list):
             out[key] = _list_laid(lay, current, value) if isinstance(value, list) else current
         elif lay is Lay.UNION and isinstance(current, list) and isinstance(value, list):
@@ -142,7 +154,11 @@ def _laid[N: str](
             ):
                 laid.pop("route_order", None)
                 _unstamp(stamps, (*path, "route_order"), itself=True)
-            out[key] = laid
+            if laid_at.scalar_as is not None and laid.keys() == {laid_at.scalar_as}:
+                _unstamp(stamps, path, itself=False)
+                out[key] = laid[laid_at.scalar_as]
+            else:
+                out[key] = laid
         else:
             _unstamp(stamps, path, itself=False)
             out[key] = copy.deepcopy(value)
@@ -171,8 +187,9 @@ def patch_between(
         out[key] = None
     for key, value in over.items():
         path = (*at, key)
-        held = {} if key in rescoped else under.get(key)
-        lay = rule(path).lay
+        laid_at = rule(path)
+        held = {} if key in rescoped else laid_at.as_mapping(under.get(key))
+        lay, value = laid_at.lay, laid_at.as_mapping(value)
         if lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping) and isinstance(held, Mapping):
             sub = patch_between(rule, held, value, *path)
             if sub or key not in under or key in rescoped:
@@ -246,9 +263,10 @@ def _rule(model: type[BaseModel], at: tuple[str, ...]) -> Laid:
     if lay is None:
         lay = Lay.KEYS if _is_model(base) or get_origin(base) is dict else Lay.WHOLE
     scoped = next((m for m in metadata if isinstance(m, ScopedBy)), None)
+    scalar = next((m.key for m in metadata if isinstance(m, ScalarAs)), None)
     if scoped is None or owner is None:
-        return Laid(lay)
-    return Laid(lay, (scoped.sibling, owner.model_fields[scoped.sibling].default))
+        return Laid(lay, scalar_as=scalar)
+    return Laid(lay, (scoped.sibling, owner.model_fields[scoped.sibling].default), scalar)
 
 
 def _unwrapped(annotation: object) -> tuple[Any, list[object]]:
