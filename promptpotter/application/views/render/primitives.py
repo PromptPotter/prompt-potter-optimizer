@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 from collections.abc import Sequence
 from typing import Any, get_args
@@ -18,8 +17,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
-
-_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+from promptpotter.shared.terminal_text import strip_terminal
 
 
 def bench_readout(bench: BenchScore) -> str:
@@ -100,7 +98,7 @@ def fmt_pvalue(p: float | None) -> str:
 
 
 def _visible_len(text: str) -> int:
-    return len(_ANSI_RE.sub("", text))
+    return len(strip_terminal(text))
 
 
 def _truncate_visible(text: str, max_visible: int) -> str:

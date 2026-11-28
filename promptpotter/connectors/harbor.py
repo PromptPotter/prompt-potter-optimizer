@@ -44,10 +44,10 @@ from promptpotter.connectors.protocol import (
 )
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
-from promptpotter.domain.records.run_records import BackendWarningRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.domain.value_tree import Delivery
+from promptpotter.infrastructure.backend import CellSends
 from promptpotter.infrastructure.docker_host import (
     HOST_ROUTE,
     PACKAGE_CACHE_PROXY,
@@ -62,8 +62,12 @@ from promptpotter.infrastructure.docker_host import (
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.capabilities import context_window, sent_llm_bound
 from promptpotter.infrastructure.llm.registry import host_key_attr, openai_compat_spec, providers
-from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
-from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
+from promptpotter.infrastructure.llm.send_failure import (
+    NOT_THE_PROMPT,
+    FailedSendError,
+    failed_send,
+)
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     CallLabel,
@@ -72,7 +76,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     answered,
     reservation_left,
 )
-from promptpotter.infrastructure.llm.telemetry import append_record, rate_priced_usd
+from promptpotter.infrastructure.llm.telemetry import rate_priced_usd
 from promptpotter.infrastructure.llm.wallet import keyed_client, sending_key
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
@@ -90,6 +94,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.extras import Extra
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.terminal_text import strip_terminal
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
@@ -220,15 +225,6 @@ _FETCH_FAILURE = re.compile(
 )
 _HARNESS_TIMEOUTS = frozenset(
     {"EnvironmentStartTimeoutError", "AgentSetupTimeoutError", "VerifierTimeoutError"}
-)
-# What a send ends a cell on, never a score: the agent never saw the provider answer.
-_NOT_THE_PROMPT = frozenset(
-    {
-        ErrorCategory.PROVIDER_THROTTLED,
-        ErrorCategory.PROVIDER_CREDIT,
-        ErrorCategory.CONNECTION,
-        ErrorCategory.SERVER,
-    }
 )
 
 # FIXED, never a search axis: a candidate writing its own description could win by being uninviting.
@@ -627,11 +623,6 @@ def _write_skill(root: Path, prompt: str) -> Path:
     return root
 
 
-# Not `views/render/primitives.py::_ANSI_RE`: colour only, and in a layer this one may not import.
-_TERMINAL_ESC = re.compile(
-    r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[]()#][0-9A-Za-z]|\x1b.|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
-)
-
 _AGENT_DECISION_CAP = 1200
 _TERMINAL_TAIL_CAP = 600
 _VERIFIER_TAIL_CAP = 600
@@ -640,7 +631,7 @@ _OUTCOME_NOTE_CAP = 300
 
 
 def _tail(text: str, cap: int) -> str:
-    clean = _TERMINAL_ESC.sub("", text)
+    clean = strip_terminal(text)
     lines = [ln.rstrip() for ln in clean.splitlines()]
     out: list[str] = []
     size = 0
@@ -960,7 +951,7 @@ def _outcome_note(result: TrialResult) -> str | None:
         text = log.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    failures = _VERIFIER_FAILURE.findall(_TERMINAL_ESC.sub("", text))
+    failures = _VERIFIER_FAILURE.findall(strip_terminal(text))
     # The LAST: pytest closes on the line naming why.
     return failures[-1].strip()[:_OUTCOME_NOTE_CAP] if failures else None
 
@@ -1272,10 +1263,10 @@ class _AgentModel:
     def failure(self, result: TrialResult) -> tuple[str, ErrorCategory] | None:
         """What ended the episode that was never the prompt's doing; our own refusal raises."""
         if (ended := self._ended) is not None:
-            if ended.category not in _NOT_THE_PROMPT:
+            if ended.category not in NOT_THE_PROMPT:
                 raise ended
             return str(ended)[:300], ended.category
-        if (fault := self._fault) is not None and fault.failure in _NOT_THE_PROMPT:
+        if (fault := self._fault) is not None and fault.failure in NOT_THE_PROMPT:
             return fault.detail[:300], fault.failure
         if self._client.pushback(self._model) is not None and any(
             kind == "AgentTimeoutError" for kind, _ in _trial_failures(result)
@@ -1366,39 +1357,14 @@ async def _attempt(episode: _Episode) -> _Ran:
         return _Ran(result, elapsed, model.spent, model.cost_usd, model.failure(result))
 
 
-async def _back_off(
-    query: str, budget: SendBudget, wait_s: float, cause: str, category: ErrorCategory
-) -> None:
-    logger.warning(
-        "harbor task %r attempt %d/%d measured the infrastructure (%s); retrying in %.0fs",
-        query,
-        budget.resent,
-        budget.attempts,
-        cause,
-        wait_s,
-    )
-    # On the ledger too: a run the API server hosts has no console.
-    append_record(
-        BackendWarningRecord(
-            kind="infrastructure",
-            attempt=budget.resent,
-            max_attempts=budget.attempts,
-            wait_s=wait_s,
-            query=query,
-            detail=cause,
-            error_class=category.value,
-        )
-    )
-    await asyncio.sleep(wait_s)
-
-
 async def _run_episode(
     episode: _Episode,
 ) -> tuple[TrialResult, float, dict[str, dict[str, object]]]:
     query = episode.query
     # Discarded attempts included: a retried episode still ran the agent.
     attempts: list[dict[str, StepUsage]] = []
-    budget = drawn_budget()
+    sends = CellSends(query, drawn_budget())
+    budget = sends.budget
     while True:
         try:
             ran = await _attempt(episode)
@@ -1411,19 +1377,23 @@ async def _run_episode(
                 break
             cause, category = failure
         forget_package_cache()
+        what = f"harbor task {query!r} measured the infrastructure"
         wait = (
-            budget.resend_wait(base_s=_INFRA_BACKOFF_S)
+            budget.resend_wait(what, cause, base_s=_INFRA_BACKOFF_S)
             if category is ErrorCategory.CONNECTION
             else None
         )
         if wait is None:
             raise cell_failure(
-                f"harbor task {query!r} measured the infrastructure, not the agent, "
-                f"on attempt {budget.attempt}/{budget.attempts}: {cause}",
+                f"{what}, not the agent, on attempt {budget.attempt}/{budget.attempts}: {cause}",
                 category,
                 spent=_sum_spend(attempts),
             )
-        await _back_off(query, budget, wait, cause, category)
+        sends.warn(
+            "infrastructure", wait_s=wait, resending=True, detail=cause, error_class=category.value
+        )
+        # Never `held_wait`: the machine, not a provider, held this one, so no throttle stall.
+        await asyncio.sleep(wait)
     return result, elapsed, _sum_spend(attempts)
 
 

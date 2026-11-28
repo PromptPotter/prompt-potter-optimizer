@@ -378,7 +378,9 @@ BASELINE = {
     # its format and key and binds its account, slot and date, a tag binds the whole file, and a
     # lost key refuses with its remedy (`FileKind.SEALED_KEYS`) instead of being made anew.
     # Set to the measured count at the w10 landing.
-    "package_lines": 114204,
+    # w11-store (+157) set 114204; plugin −31, scoring −186, config +61, access +50, connectors −40
+    # (each its report's count): set to the measured count once they landed (−140).
+    "package_lines": 114064,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

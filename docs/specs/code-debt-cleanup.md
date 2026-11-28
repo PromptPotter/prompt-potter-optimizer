@@ -622,19 +622,32 @@ sole route for a backend tunable.
 `CONNECTOR`; core never infers what a connector should declare; clients are `ProviderSpec` instances; provider
 selection explicit.
 
-**Unexamined:** `connectors/dspy_module.py`, `infrastructure/llm/openai_compat.py`,
-`infrastructure/llm/base.py`
+**Unexamined:** none (w11-connectors read `connectors/harbor.py`, `connectors/dspy_module.py`,
+`infrastructure/llm/openai_compat.py` and `infrastructure/llm/base.py` against the Target).
 
-- **`connectors/harbor.py` is six responsibilities in one module** (w10-survey, 1,545 lines; ~110 bind
-  `CONNECTOR`): roster pinning (`_pinned_roster`, `_registry_roster`, `pin_roster`), the container and image
-  harness (`_agent_install_script`, `_trial_config`), the agent model and sender (`_AgentModel`,
-  `_install_model`), the trial runner (`_run_episode`, `_back_off`) and trial-result parsing
-  (`_read_trajectory`, `_trial_failures`, `_digest`: about 400 lines of pure folds over `TrialResult`) sit
-  beside the contract. Root: "a built-in is one module binding `CONNECTOR`" holds for a connector small
-  enough to be one module; harbor is a package. Action: `connectors/harbor/` whose `__init__.py` binds
-  `CONNECTOR`, with `roster.py`, `harness.py`, `agent_model.py`, `trial.py`, `parse.py`; first check the
-  one-module probes. **Rides with:** area 08's chain. **Re-test:**
-  `wc -l promptpotter/connectors/harbor.py` is under 400.
+- **A harbor trial's harness fault escapes raw** (recovered, 2026-11): `connectors/harbor.py::_attempt`
+  wraps only the image reuse and the package cache in `docker_host.py::machine_step`; a fault from
+  `Trial.create` or `trial.run` that is no `OSError`/`TimeoutError` reaches the cell as UNKNOWN, charged as
+  the prompt's. Root: the connector declares Harbor's harness faults as `CONNECTION`, never core reading
+  them. **Rides with:** area 08's chain, with one measured fault class. **Re-test:** a `Trial.create`
+  raising Harbor's own docker error ends the cell `CONNECTION`, retried.
+- **dspy's send raises its raw failure** (recovered, w8): `connectors/dspy_module.py::_ProgramCalls._settle`
+  closes a status-less failure outside `send_failure.py::NOT_THE_PROMPT` and returns, so the program
+  re-raises litellm's exception, which `application/scoring/sample_measurement.py` classifies again
+  through `failed_send`. Root: raise `FailedSendError` carrying the closed outcome. **Rides with:** area
+  04's chain (the second reader). **Re-test:** `git grep -c "failed_send" -- promptpotter/application` == 0.
+- **The offline world sleeps an LLM resend on the wall clock** (recovered, w7): `scripts/offline_world.py`'s
+  `unslept` replaces only `infrastructure/backend.py`'s binding of `send_pacing.py::held_wait`, so
+  `openai_compat.py`'s resend waits real seconds offline; and a fault raised inside the world's LLM reply
+  is closed as a failed send before it raises as itself (`OpenAICompatibleClient._admitted_send`).
+  Root: the world answers the sleep at `send_pacing.py`, the one owner. **Rides with:** area 14's chain.
+  **Re-test:** a 5xx scripted on the offline LLM resends in no wall time.
+- **A remote backend's cells ask the bound account** (recovered): `infrastructure/backend.py::BackendClient.cells_paid_by`
+  reads `bound_account` for a backend that sends on its own keys, harmless while every sending entry
+  binds one. Root: the payer is asked only of a connector that `holds_own_sends` or is host-paid
+  (`wallet.py::cells_paid_by`). **Rides with:** area 05's chain. **Re-test:** a remote cell scored under
+  no bound account is admitted.
+
 - **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
   `terminus-2`, `application/datasets/loaders.py::_harbor_tasks` loads the roster,
   `presentation/cli/commands/writes.py` imports `pin_roster`, and `domain/scoring.py` and
@@ -642,15 +655,6 @@ selection explicit.
   owns; `application/pipeline_resolve.py` keeps a "twin" of `connectors/harbor.py::INSTRUMENT_KEY`. Root: a
   connector declares its panel, dataset loader and reward key; core reads the declaration. **Re-test:**
   `git grep -nE "env_reward" -- 'promptpotter/*.py' ':!promptpotter/connectors/harbor.py'` is empty.
-- **Connectors repeat one mechanism** (w10-survey): `connectors/dspy_module.py::_NOT_THE_PROMPT` and
-  `connectors/harbor.py::_NOT_THE_PROMPT` (adds `SERVER`) name one concept twice;
-  `connectors/harbor.py::_back_off`, `infrastructure/backend.py` and `infrastructure/llm/openai_compat.py`
-  each write the warn-then-record retry around `resend_wait`; `connectors/harbor.py::_TERMINAL_ESC` is a
-  third ANSI regex beside `application/views/render/primitives.py::_ANSI_RE` and
-  `application/views/readout.py::_ANSI_RE`; harbor reaches Harbor's private `_env_vars`,
-  `_prompt_template`, `_llm`, `_extra_env` and `_get_combined_install_command` (7 sites, all in
-  `harbor.py`). Root: one retry-and-record, one ANSI strip in `shared/`, one denylist. **Re-test:**
-  `git grep -c "_NOT_THE_PROMPT = " -- 'promptpotter/*.py'` lists one file.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -662,7 +666,9 @@ selection explicit.
   Action: the probe reads `/version` and refuses another contract; the revision folds into TermNorm's
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
-  `connectors/termnorm.py` probes `/version`.
+  `connectors/termnorm.py` probes `/version`. The probe half is built on `hold/w11-termnorm-version`
+  (87e964e05, w11-connectors). It lands once TermNorm's master serves `GET /version`: until then it
+  refuses every termnorm launch.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.
@@ -676,22 +682,17 @@ selection explicit.
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
-  file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
-  in-process count per backend. The two count different subjects: `infrastructure/backend.py::_SENDING` this
-  process's calls by `(connector, base_url)`, which `query_loop.py`'s `room()`/`freed()` schedule
-  from; `MachineSlots` containers across processes by `connector.name`, by file locks a probe
-  cannot read machine-wide (POSIX `fcntl` locks are per-process). Decided (2026-11-19): for a
-  machine-held connector the in-process count gives way and arming waits on the pool, one count of
-  one fact. **Rides with:** a store or spend lane. **Re-test:** no machine-held connector's arming
-  reads `_SENDING`.
-- **The sweep unlinks a dead producer's lock before the reaper reads it** (w7-small, not re-tested):
-  `docker_host.py::reap_dead_producers` then never reaps that producer's containers. **Rides with:**
-  area 08's chain. **Re-test:** a producer killed mid-run leaves no container after one sweep.
 - **A draft serves every optimizer model twice, once under an empty provider** (w11-walk, 11-27):
   `GET /drafts/{id}`'s `draft.pipeline.optimizer_setup.model_capabilities` carries each model under
   `openrouter` and again under the empty string. Expected one entry per (provider, model). **Rides with:**
   `area 08's chain` — **Re-test:** no `model_capabilities` key is the empty string.
+- **The box keeps 21 dead producers' locks** (`jobs/producers/`), though one sweep reaps a dead
+  producer's containers and then its lock (re-tested 2026-11-27 off a dead lock and a scripted
+  `docker ps`; the w7-small symptom, a lock unlinked before the reaper reads it, holds no more). What
+  keeps them is a sweep that never reaches `docker_host.py::reap_dead_producers` or raises in it: a
+  raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
+  next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
+  `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 
