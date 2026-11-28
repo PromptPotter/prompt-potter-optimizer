@@ -68,7 +68,9 @@ export function fmtGap(seconds: number): string {
 }
 
 export function fmtUsd(n: number): string {
-  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  // `domain/spend.py::usd_text`'s rule: three significant digits under a dollar, else two places.
+  if (n === 0 || Math.abs(n) >= 1) return `$${n.toFixed(2)}`;
+  return `$${n.toFixed(2 - Math.floor(Math.log10(Math.abs(n))))}`;
 }
 
 export function fmtCompact(v: number): string {

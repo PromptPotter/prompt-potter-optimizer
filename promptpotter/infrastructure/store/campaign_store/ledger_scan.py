@@ -70,14 +70,13 @@ from promptpotter.domain.verification import (
     VerificationPass,
     VerifyReading,
 )
+from promptpotter.infrastructure.llm.money_fold import Money, MoneyFold
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LastOf,
     LedgerIndex,
     LedgerSpan,
     Line,
-    Money,
-    MoneyFold,
     RecordClasses,
     last,
     line_concat,

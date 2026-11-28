@@ -22,6 +22,7 @@ from promptpotter.domain.paired_reading import (
     lift_versus,
 )
 from promptpotter.domain.results import RoundOutcome, RoundResult
+from promptpotter.domain.spend import usd_text
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
 from promptpotter.shared.worded import Worded
@@ -227,6 +228,11 @@ def _climb(standing: RunStanding) -> Climb | None:
     gained = fmt.scale * lift
     usd, worked = standing.search_usd, standing.worked_s
     cost = LiftCost.of(pair, usd)
+    if cost.absent is not None:
+        searched = COST_ABSENCE_WORDS[cost.absent]
+    else:
+        assert usd is not None, "a lift priced per dollar names what the search incurred"
+        searched = f"{usd_text(usd)} of search"
     previous = standing.vs_previous_pick
     over = (
         previous.headline if previous is not None and previous.state is ReadingState.READ else None
@@ -250,7 +256,7 @@ def _climb(standing: RunStanding) -> Climb | None:
                 "Lift per search $",
                 "per $",
                 None if cost.lift_per_usd is None else lift_text(cost.lift_per_usd, unit),
-                f"${usd:.2f} of search" if cost.absent is None else COST_ABSENCE_WORDS[cost.absent],
+                searched,
             ),
             ClimbRate(
                 "lift_per_candidate",

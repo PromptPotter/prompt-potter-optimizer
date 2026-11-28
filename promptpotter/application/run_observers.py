@@ -57,10 +57,7 @@ def declare_run_stop(
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
-    book = run_scope().book
-    cycle, campaign = spend_counts(
-        session.store, session.hop, meter, hold_id=None if book is None else book.hold_id
-    )
+    cycle, campaign = spend_counts(session.store, session.hop, meter)
     spend = StopSpend(
         spent=observers.dashboard.spend,
         meter=meter,

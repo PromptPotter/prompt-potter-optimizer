@@ -144,7 +144,7 @@ class CapUnderRound(_Note):
     @property
     def costing(self) -> str:
         priced = (
-            f"a cell of this dataset has billed ${self.price:.5f} on these models"
+            f"a cell of this dataset has billed {usd_text(self.price)} on these models"
             if self.billed
             else f"the spend book admits a cell at up to {usd_text(self.price)}"
         )

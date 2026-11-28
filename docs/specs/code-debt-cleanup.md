@@ -136,10 +136,6 @@ else is wiped at a landing. The store holds no money rule and no served shape.
   `line_spans`, a lone `LedgerSpan`, `campaign_cycle_ledgers`). Root: the read is keyed `(hop, scope,
   fold)`, the scope naming its cycle, its line or its campaign. Sits under the launch-steer row and the
   sidebar-spend row. **Rides with:** after the measuring loop. **Re-test:** `git grep -c "read_line(\[LedgerSpan" -- promptpotter` is 0.
-- **`store/read_model.py` holds the money fold inside the ledger index**: `:906-1241` (`Spent`, `Money`,
-  `MoneyFold`, `money_on`, `charge_book_fold`), imported by 54 files. Root: the money fold is a module of
-  its own beside the spend book. **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:**
-  `git grep -n "^class Spent\|^def money_on" -- promptpotter/infrastructure/store/read_model.py` is empty.
 - **`domain/sample.py`'s name no longer describes it**: the file holds `Sample`, `Bank`, `ArchiveConfig`,
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
@@ -376,11 +372,6 @@ bill.
 **Unexamined:** `infrastructure/llm/pricing.py`, `jobs/shares.py`, `jobs/quota.py`, `spend_book.py`,
 `domain/spend.py`
 
-- **Money text has no sub-cent rule**: a cell's price at six places (`phase_acts.py::CapUnderRound.costing`,
-  `cli/commands/reads.py::_human`, and `potter/dispatch/injections/panels.py:1051-1052`) beside `domain/spend.py::usd_text`, which prints `$0.0000`
-  for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
-  **Decided 2026-11-27:** three significant digits under a dollar in `usd_text`, which feeds the webapp's `fmtUsd`. **Rides with:** forks 1.
-  **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host into every node config, and `bench/llm_call.py:231` pins the optimizer's
   own calls too. Decided: a model keeps its pin only where its
@@ -416,19 +407,35 @@ bill.
   **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
 - **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
-  `infrastructure/store/read_model.py:1132-1136` branches on it, and `store/CLAUDE.md` warns that money
-  "banks twice" where a reader forgets (`mirrored` 14/6). Root: the outer run's cost is a fold over its
-  inner ledgers. Under **A nested spend book is wired beside the cell that nests it** and
-  **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**. Reshapes run data.
-  **Rides with:** the store-root chain (wave 9, batch 2). **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
-- **A cycle's running job is found two ways**: `served_dashboard.py::spend_counts` (`:611`) takes this
-  cycle's `hold_id` from its caller (`run_scope().book` in `run_observers.py:59`, the held run's job in
-  `armed_caps`) and reads the siblings' through `_job_holding` (`:636`). Root: one reader of a cycle's
-  live job. **Re-test:** `spend_counts` takes no `hold_id`.
-- **`spend_counts` builds a full `SpendBook` per cycle to call `count()`**: `served_dashboard.py:617` fills
-  a zero-budget book per cycle; `jobs/quota.py:789` and `jobs/launcher/admission.py:595` build similar
-  zero-budget books. Root: `SpendBook` has no count-only constructor. **Re-test:**
-  `git grep -n "SpendBook(" -- promptpotter/application` names no zero-budget book.
+  the money fold branches on it, and `store/CLAUDE.md` warns that money "banks twice" where a reader
+  forgets (`mirrored` 14/6). The next row holds its root and its cut. Under **A nested spend book is
+  wired beside the cell that nests it** and **A cycle's sidebar spend reads its ledger alone, so a cut
+  send reads $0.000**. Reshapes run data. **Re-test:** `git grep -c "mirrored" -- promptpotter` is 0.
+- **An outer run's cost is folded from copies its inner runs write onto its ledger** (w11-spend, 11-28):
+  `spend_book.py::SpendBook.mirror` copies every inner send onto the root's ledger (node `inner:…`, kind
+  `enclosed_as`, round `InstrumentMode.root_round`), and the inner ledger keeps its own as
+  `TokenUsageRecord.mirrored`. Every outer read takes the copy: the book's meter, `ledger_scan.py::LEDGER_SPEND`'s
+  by-kind, by-round and `by_nested_node`, the live dashboard projection, and `account_spend.py::billed_spend`.
+  The bill itself already lands once, on the charge book under the outer job's hold tree.
+
+  Root: the outer's ledger folds take its inner ledgers (`stores.py::inner_sandbox_store` lists them).
+  Each inner send is filed once and names how its root files it (kind and round), so the copy and
+  `mirrored` go. It closes the three rows above together.
+
+  It was cut by w11-spend, because its holders sit outside area 05: the live projection,
+  `ledger_scan.py`, `hierarchy.py`, `run_records.py`, `run_observers.py` and `runner/inner/tasks.py`.
+  **Rides with:** one chain owning areas 02, 05 and 11 at once. **Re-test:** `mirrored` is 0, and
+  pausing an outer run mid inner round makes the inner row read its cut sends as unreported.
+- **A landing that drops other accounts' run data refunds nobody** (w11-spend, 11-28). On 11-26 a
+  deploy wiped a stranger's campaign, and the operator granted their coupon again by hand. The landing's
+  run-data wipe (`store/data_root.py`) folds the dropped campaigns' charges nowhere. **Operator's
+  choice, pending:**
+  - (a) Refund and notify at the landing: release each dropped account's charges for those campaigns,
+    and post the notice through `outbound.py`.
+  - (b) Migrate their runs, which makes run data a SURVIVOR.
+
+  **Rides with:** area 05's chain, once decided. **Re-test:** a landing that drops an account's campaign
+  restores its coupon.
 - **dbllmbench's cells send on the box's key read off `settings`, not `sending_key`** (w9-payer):
   `connectors/dbllmbench.py:182,205` hand the container `settings.<KEY>`, so an account's own key never
   pays a dbllmbench cell, and `holds_own_sends=False` is what holds its payer at the box. Root: the
@@ -450,15 +457,6 @@ bill.
   is filed (one write, or a job without a share reads as zero) — **Rides with:** `area 05's chain` —
   **Re-test:** a sibling admitted on the campaign during a mint window reads a share, never raises.
   (items 68, 134)
-- **A launch refused after admission counts toward the day's campaigns** (w11-walk, 11-27):
-  `promptpotter/application/jobs/quota.py::campaigns_today` keeps a job that was admitted, so a Start
-  released refused (no campaign minted) counts its job id, against the function's own "a refused launch
-  spent nothing". Route: a signed-in account on the offline world (`serve.mjs --auth=on`), dataset
-  email-tagging, Start (refused 422 `not_on_free_tier`), then Account → Usage & limits. Expected
-  "Campaigns today 0 of 1000" (Storage: 0 campaigns); seen "1 of 1000". Root: the count reads the
-  release's refusal (`promptpotter/application/jobs/registry.py::JobRegistry`, its `refusal`) as no
-  mint. **Rides with:** `area 05's chain` — **Re-test:** after a refused Start, `GET
-  /auth/quota-status` serves `campaigns_today` 0.
 - **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
   `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
   `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with

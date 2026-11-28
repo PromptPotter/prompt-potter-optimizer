@@ -43,6 +43,7 @@ from promptpotter.domain.spend import (
     usd_text,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.money_fold import Money, money_on, still_held
 from promptpotter.infrastructure.llm.telemetry import (
     billing_ledger,
     call_price,
@@ -52,7 +53,6 @@ from promptpotter.infrastructure.llm.telemetry import (
     token_usage_record,
 )
 from promptpotter.infrastructure.run_scope import run_scope, scoped
-from promptpotter.infrastructure.store.read_model import Money, money_on, still_held
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -226,78 +226,26 @@ class LiveCycle(NamedTuple):
 _ENCLOSED: TokenUsageKind = "backend"
 
 
-class SpendBook:
-    """A run's admission, read at each send off the one fold of money (`read_model.Money`): its
-    share off the ledger it meters, its reserve off its job's hold on the account."""
+class SpendMeter:
+    """What a job's sends count on the ledger it meters, read off the one fold of money
+    (`money_fold.Money`): a book's count, and a cycle's where no run admits a send."""
 
     def __init__(
-        self,
-        *,
-        declared: Budget,
-        share: Budget | LiveCycle,
-        charges: ChargeBook,
-        hold_id: str,
-        headroom: Budget,
-        metered_on: Path | None,
-        meters: CeilingMeter,
-        opened: float,
-        cycle: LiveCycle | None = None,
+        self, *, charges: ChargeBook, hold_id: str, metered_on: Path | None, meters: CeilingMeter
     ) -> None:
-        # The launch's own axis (`wall_clock_s`); money binds on the share and the reserve.
-        self.declared = declared.only(CYCLE_AXES)
-        self.share = share
         self.charges = charges
         # The job's hold every call and cell of this book draws on.
         self.hold_id = hold_id
-        # What the coupon admits on an axis the job's hold leaves unbounded: a paid call's.
-        self.headroom = headroom
         # The cycle's ledger its share meters (replays and a nested run's copies live there);
         # ``None`` meters what its job's hold drew.
         self.metered_on = metered_on
-        self.cycle = cycle
         self.meters = meters
-        # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
-        self.opened = opened
-        # The ledger a nested run's sends are copied onto, as this book's root.
-        self.ledger: CycleEventLog | None = None
-        # A nested run's book: each send is admitted against it AND every book enclosing it, which
-        # files it as `enclosed_as`: the kind of the enclosing pass that spawned the run.
-        self.enclosing: SpendBook | None = None
-        self.enclosed_as: TokenUsageKind = _ENCLOSED
-
-    # Each read live: a running change moves the cycle's standing record and the job's hold.
-    @property
-    def budget(self) -> Budget:
-        if self.cycle is None:
-            return self.declared
-        return self.declared.over(self.cycle.standing())
-
-    @property
-    def allotment(self) -> Budget:
-        share = self.share if isinstance(self.share, Budget) else self.share.share()
-        return share.only(MONEY_AXES)
-
-    @property
-    def reserve(self) -> Budget:
-        return self.headroom.over(self._money().holds[self.hold_id].bound)
 
     def _money(self) -> Money:
         return money_on(self.charges.path)
 
-    def root(self) -> SpendBook:
-        return self if self.enclosing is None else self.enclosing.root()
-
-    def clock_left(self) -> float | None:
-        """Seconds this launch may still run; ``None`` where no wall clock bounds it."""
-        limit = self.budget.wall_clock_s
-        return None if limit is None else limit - (time.monotonic() - self.opened)
-
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
-
-    def replays_free(self, cell_key: str) -> bool:
-        """A bill meter prices no replay; the other prices one the first time its campaign reads it."""
-        return not METER_PRICES_REPLAYS[self.meters] or campaign_priced(cell_key)
 
     @property
     def spent(self) -> UserSpend:
@@ -363,6 +311,72 @@ class SpendBook:
     def count(self) -> SpendCount:
         """THE share's count, by part: what its stop reads, and what every door serves."""
         return self._count(self._money(), host=False, beside=None)
+
+    @property
+    def _aside_id(self) -> str:
+        return f"{self.hold_id}:set-aside"
+
+
+class SpendBook(SpendMeter):
+    """A run's admission, read at each send: its share off the ledger it meters, its reserve off
+    its job's hold on the account."""
+
+    def __init__(
+        self,
+        *,
+        declared: Budget,
+        share: Budget | LiveCycle,
+        charges: ChargeBook,
+        hold_id: str,
+        headroom: Budget,
+        metered_on: Path | None,
+        meters: CeilingMeter,
+        opened: float,
+        cycle: LiveCycle | None = None,
+    ) -> None:
+        super().__init__(charges=charges, hold_id=hold_id, metered_on=metered_on, meters=meters)
+        # The launch's own axis (`wall_clock_s`); money binds on the share and the reserve.
+        self.declared = declared.only(CYCLE_AXES)
+        self.share = share
+        # What the coupon admits on an axis the job's hold leaves unbounded: a paid call's.
+        self.headroom = headroom
+        self.cycle = cycle
+        # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
+        self.opened = opened
+        # The ledger a nested run's sends are copied onto, as this book's root.
+        self.ledger: CycleEventLog | None = None
+        # A nested run's book: each send is admitted against it AND every book enclosing it, which
+        # files it as `enclosed_as`: the kind of the enclosing pass that spawned the run.
+        self.enclosing: SpendBook | None = None
+        self.enclosed_as: TokenUsageKind = _ENCLOSED
+
+    # Each read live: a running change moves the cycle's standing record and the job's hold.
+    @property
+    def budget(self) -> Budget:
+        if self.cycle is None:
+            return self.declared
+        return self.declared.over(self.cycle.standing())
+
+    @property
+    def allotment(self) -> Budget:
+        share = self.share if isinstance(self.share, Budget) else self.share.share()
+        return share.only(MONEY_AXES)
+
+    @property
+    def reserve(self) -> Budget:
+        return self.headroom.over(self._money().holds[self.hold_id].bound)
+
+    def root(self) -> SpendBook:
+        return self if self.enclosing is None else self.enclosing.root()
+
+    def clock_left(self) -> float | None:
+        """Seconds this launch may still run; ``None`` where no wall clock bounds it."""
+        limit = self.budget.wall_clock_s
+        return None if limit is None else limit - (time.monotonic() - self.opened)
+
+    def replays_free(self, cell_key: str) -> bool:
+        """A bill meter prices no replay; the other prices one the first time its campaign reads it."""
+        return not METER_PRICES_REPLAYS[self.meters] or campaign_priced(cell_key)
 
     def _left(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> Remainder:
         """What the share (*host*: the reserve) still admits."""
@@ -453,8 +467,10 @@ class SpendBook:
 
     def expected(self, bound: SendBound, node: str) -> SendBound:
         """What a call of *node* holds: its worst case *bound*, or with the cycle's `overshoot` on
-        the mean its node's calls in this run billed, on each axis *bound* bounds, never past it."""
-        if self.cycle is None or not self.cycle.overshoot():
+        the mean its node's calls in this run billed, on each axis *bound* bounds, never past it.
+        A nested run holds by its root's switch, whose book it spends under."""
+        cycle = self.root().cycle
+        if cycle is None or not cycle.overshoot():
             return bound
         if (calls := self._money().by_node.get((self.hold_id, node))) is None:
             return bound
@@ -554,10 +570,6 @@ class SpendBook:
             f"{count.unreported.token_amount:,} unreported, {count.out.token_amount:,} for calls "
             f"out and {count.set_aside.token_amount:,} set aside for the bench"
         )
-
-    @property
-    def _aside_id(self) -> str:
-        return f"{self.hold_id}:set-aside"
 
     def set_aside(self, usd: float, tokens: int, *, paid_by: KeySource) -> None:
         """The bench's set-aside, a hold under the job on the key source its cells draw, so every

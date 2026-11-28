@@ -382,7 +382,9 @@ BASELINE = {
     # (each its report's count): set to the measured count once they landed (−140).
     # w11-web (+17): the subtree read serves `SubtreeCampaignFacts.candidates`, the count the
     # lineage tree draws, in place of the browser's count of forked cycles.
-    "package_lines": 114081,
+    # w11-spend (+31): the sub-cent rule and its assert, the money fold's own module header and
+    # imports, and `SpendMeter`'s constructor.
+    "package_lines": 114112,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

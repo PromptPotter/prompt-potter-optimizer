@@ -141,6 +141,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     OriginIncompleteError,
     commit_upload_definition,
 )
+from promptpotter.application.jobs.launcher.opening import claim_cycle
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
@@ -3718,6 +3719,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     observers = enter_cycle(opened)
     with scoped(account=stores):
         book = spend_book(1.0, metered_on=ledger.path)
+    claim_cycle(stores, opened.hop, book.hold_id)
     bound = Budget(usd=0.25, tokens=0)
     for cell, parent, on in (
         ("lapsed-cell", book.hold_id, ledger.path),

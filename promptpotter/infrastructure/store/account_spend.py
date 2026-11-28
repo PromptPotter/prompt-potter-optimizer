@@ -26,14 +26,8 @@ from promptpotter.domain.spend import (
     UserSpend,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store.read_model import (
-    LedgerIndex,
-    RecordClasses,
-    Spent,
-    bill_paid,
-    money_on,
-    still_held,
-)
+from promptpotter.infrastructure.llm.money_fold import Spent, bill_paid, money_on, still_held
+from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
 
 if TYPE_CHECKING:

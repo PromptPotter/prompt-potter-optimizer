@@ -79,7 +79,7 @@ from promptpotter.domain.scoring import (
     is_hit,
 )
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.spend import TokenAccount
+from promptpotter.domain.spend import TokenAccount, usd_text
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -1060,6 +1060,6 @@ def _r_confounds(b: PotterView) -> list[Item]:
 def _r_budget_state(b: PotterView) -> list[Item]:
     parts = [f"ROUND {b.round_num}" + (f" of {b.budget_rounds}" if b.budget_rounds else "")]
     if b.spend_budget_usd:
-        used = f"${b.spend_used_usd:.2f}" if b.spend_used_usd is not None else "?"
-        parts.append(f"spend {used} of ${b.spend_budget_usd:.2f}")
+        used = "?" if b.spend_used_usd is None else usd_text(b.spend_used_usd)
+        parts.append(f"spend {used} of {usd_text(b.spend_budget_usd)}")
     return [Item(" · ".join(parts))]

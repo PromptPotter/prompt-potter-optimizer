@@ -310,19 +310,12 @@ visits analytics (**Decided 2026-11-27:** they stay in this repo) · whether res
 re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
 today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence; **Decided
 2026-11-27:** it does not, not now: §0.5 holds resume and fork-on-divergence load-bearing and the caches
-are evictable) · the sub-cent money rule (forks; **Decided 2026-11-27:** three significant digits under
-a dollar in `usd_text`, which feeds the webapp's `fmtUsd`) · which env
+are evictable) · which env
 file the box keeps (box) · a bench's total (**Decided 2026-11-27:** read the box's definition first, an
 operator read, then decide) · whether an upload's bytes are kept before the parse (**Decided 2026-11-27:**
 deferred, decided with the anon item) · a prompt field's order (**Decided 2026-11-27:** an operator
 setting, not an optimizer axis; a reorder re-keys every cell) · the host assistant's open questions
-(§ Host assistant) · whether
-`enable_2pl_graduation`, `degradation_fatal_fastpath`, `lift_reference` and `fitness_ceiling` /
-`rounds_to_ceiling` stay (asked 2026-11-12; **Decided 2026-11-27:** keep `degradation_fatal_fastpath`,
-which §0 names; delete `enable_2pl_graduation`, `lift_reference` and `fitness_ceiling` /
-`rounds_to_ceiling`, which no plan uses) · whether an inner L4 run inherits its outer
-run's overshoot switch (today set-limits refuses inner cycles, so an inner run always holds worst case;
-**Decided 2026-11-27:** it inherits it).
+(§ Host assistant).
 
 **Kept on the operator's word** (2026-11-12; a survey proposes none of them again): the n8n and
 dbllmbench connectors; the grounding and simpleqa judges; SealQA (a Harbor source recipe);

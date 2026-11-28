@@ -4400,6 +4400,10 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     spent = launch()
     registry.move(spent.job_id, LaunchMove.ADMIT)
     registry.release(spent.job_id)
+    # Refused at its release after admission: no campaign minted, so it spent nothing.
+    refused = launch()
+    registry.move(refused.job_id, LaunchMove.ADMIT)
+    registry.release(refused.job_id, PotterError("its launch was refused"))
     assert quota.campaigns_today(caller.stores, registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"
     )

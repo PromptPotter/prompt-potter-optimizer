@@ -33,8 +33,8 @@ from promptpotter.domain.spend import (
     HeldBudget,
     money_text,
 )
+from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.llm.wallet import Send
-from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores, tenant_stores
 from promptpotter.shared.errors import NextAct
 

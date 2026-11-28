@@ -44,6 +44,7 @@ from promptpotter.domain.spend import (
     money_text,
 )
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.money_fold import money_on
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.wallet import (
@@ -60,7 +61,6 @@ from promptpotter.infrastructure.llm.wallet import (
     unpaid,
 )
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
-from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
@@ -277,6 +277,8 @@ def campaigns_today(stores: Stores, job_registry: JobRegistry, user_id: str) -> 
             continue
         on = launch_campaign(job.holder, job.hop)
         campaign = None if on is None else stores.campaigns.load_campaign(on)
+        if campaign is None and job_registry.refusal(job.job_id) is not None:
+            continue  # refused at its release, past admission: no campaign was minted
         if campaign is None or campaign.created_at[:10] == job.created_at[:10]:
             minted.add(job.job_id if campaign is None else campaign.campaign_id)
     return len(minted)
