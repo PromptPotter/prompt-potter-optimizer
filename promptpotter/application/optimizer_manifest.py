@@ -1061,8 +1061,8 @@ def _files_hash(roots: Iterable[Path]) -> str:
 
 def behaviour_key(name: str, members: Sequence[NodeMember], manifests: Sequence[Path]) -> str:
     """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
-    world's version, so a rename on a line the world ran re-keys nothing, an edit to one it never
-    ran does. A manifest outside the package has no trace, so it keys by all it can run: its
+    world's version, so a rename on a line the world ran, or of a module an import names (an
+    import keys the names it binds), re-keys nothing; an edit to a line it never ran does. A manifest outside the package has no trace, so it keys by all it can run: its
     plugin members' top packages and its manifest directories as they stand, and the package code
     their imports and this module's reach (the run every optimizer takes), so an edit to code a
     plugin can reach re-keys it and an edit to a built-in it never imports never does. A built-in

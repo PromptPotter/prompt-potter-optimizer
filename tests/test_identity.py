@@ -8,6 +8,7 @@ scored on text it was never meant to carry.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import copy
@@ -61,7 +62,7 @@ from factories import (
     spend_book,
     workspace,
 )
-from offline_run import DATASET
+from offline_run import DATASET, _unvouched
 from offline_world import LLM_ONLY_NODE, Router, prompt_node
 from pydantic import BaseModel, Field, ValidationError
 from world import Shared, World, shared_run
@@ -1752,7 +1753,24 @@ def test_a_derived_read_is_keyed_by_its_files_signature(tmp_path: Path) -> None:
     )
 
 
-# 2. The config a campaign runs
+def test_a_members_import_keys_the_names_it_binds_never_its_module_path() -> None:
+    # A key that moved on a module rename would void every built-in's banked origins.
+    def key(source: str, ran: set[int]) -> list[str]:
+        return _unvouched(ast.parse(source).body, ran, "", inside=False)
+
+    base = "from a.b import x as y, z\nimport p.q\nimport r.s as t\ndef f():\n    from m import n\n"
+    for edits, ran, same in [
+        ({"a.b": "c.d", "p.q": "p.w", "r.s": "u.v", " m ": " k "}, set(), True),  # paths re-pointed
+        ({"a.b": ".b", "p.q": "p"}, set(), True),  # level and the dotted tail
+        ({"x as y": "x"}, set(), False),  # a bound name
+        ({"import n": "import o"}, set(), False),  # in a body the run never reached
+        ({"import n": "import o"}, {5}, True),  # in a body the run reached: its trace keys it
+    ]:
+        source = base
+        for old, new in edits.items():
+            source = source.replace(old, new)
+        assert (key(source, ran) == key(base, ran)) is same, source
+
 
 _PINNED = {
     "per_sample": "label_match(predicted, ground_truth)",

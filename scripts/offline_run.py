@@ -1911,7 +1911,8 @@ def _unvouched(nodes: list[Any], ran: set[int], path: str, *, inside: bool) -> l
     """Each statement's `ast.dump` (no positions: formatting and comments never key) under its
     nesting path, its bodies walked apart: every statement outside a function body, which runs at
     import whatever the run reached, and each one inside that the run never reached. A def keys
-    its decorators and defaults, never its name or parameters: its body's behaviour is the trace."""
+    its decorators and defaults, never its name or parameters: its body's behaviour is the trace.
+    An import keys only the names it binds (`_bound`), so renaming a module it names re-keys nothing."""
     keyed: list[str] = []
     for node in nodes:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -1927,12 +1928,21 @@ def _unvouched(nodes: list[Any], ran: set[int], path: str, *, inside: bool) -> l
             head = copy.copy(node)
             for field in bodies:
                 setattr(head, field, [])
-            keyed.append(path + ast.dump(head))
+            imports = isinstance(node, ast.Import | ast.ImportFrom)
+            keyed.append(path + (f"import {_bound(node)}" if imports else ast.dump(head)))
         for field in bodies:
             keyed += _unvouched(
                 getattr(node, field), ran, f"{path}{type(node).__name__}.{field}/", inside=inside
             )
     return keyed
+
+
+def _bound(node: ast.Import | ast.ImportFrom) -> str:
+    """The names an import binds: a from-import each alias's name and asname, never its module or
+    level; a plain import each alias's asname, else its dotted name's first component."""
+    if isinstance(node, ast.ImportFrom):
+        return ",".join(f"{a.name} as {a.asname}" if a.asname else a.name for a in node.names)
+    return ",".join(a.asname or a.name.split(".")[0] for a in node.names)
 
 
 def traced(out: Path) -> None:
