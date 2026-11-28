@@ -1090,12 +1090,6 @@ budgets.
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
-- **CI's touch walk finds the upload control under the remote control at landscape-844** (w11-reads,
-  11-28): `e2e/walk/responsive.spec.ts:26` has been red on Linux since `0c6f59846`, CI and the cloud
-  gate both: `"Attach a dataset file" is under div.remote-control`. It is green on the Windows desk,
-  where that shell draws no dock and the attach button sits at y 385–429 of 390. The range changed no
-  `webapp/` file, so on Linux the zero-campaign shell is viewing a cycle. **Rides with:** w11-ci-touch
-  (dispatched). **Re-test:** the spec is green on Linux, and the report names why a cycle is viewed.
 - **The build stamp hashes from an empty index** (w11-tests3, 11-28): `webapp/vite.config.ts::webappTree`
   still adds every `webapp/` file into an empty scratch index on each build, while
   `health.py::webapp_bundle` now seeds from the checkout's. Same root, on the build side. **Rides
