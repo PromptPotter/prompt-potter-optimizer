@@ -17,15 +17,13 @@ const SEGMENTS = PRESETS.map((p) => ({
 
 // A preset presses only while the open views are exactly its families.
 export function ViewTabs() {
-  const { views, open, close } = useWorkspace();
+  const { views, arrange } = useWorkspace();
   const lit = PRESETS.find(
     (p) => p.families.length === views.length && views.every((v) => p.families.includes(v.family)),
   );
   const show = (label: string) => {
     const preset = PRESETS.find((p) => p.label === label);
-    if (!preset) return;
-    for (const family of preset.families) open(family);
-    for (const v of views) if (!preset.families.includes(v.family)) close(v.family);
+    if (preset) arrange(preset.families);
   };
 
   return (

@@ -27,6 +27,13 @@ function draftsOf(caps: CapReading[]): Drafts {
   return out;
 }
 
+// A lift names its one axis by key: a computed literal would widen to any string's.
+function lifted(axis: CapAxis): Budget {
+  const budget: Budget = {};
+  budget[axis] = "unbounded";
+  return budget;
+}
+
 function capsKey(caps: CapReading[]): string {
   return caps.map((cap) => cap.armed).join("|");
 }
@@ -156,7 +163,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
                 disabled={disabled || pending}
                 onClick={() =>
                   void send(
-                    { budget: { [cap.axis]: "unbounded" } },
+                    { budget: lifted(cap.axis) },
                     `Applied — no ${info.title.toLowerCase()} from the next round; the other caps govern.`,
                   )
                 }

@@ -13,7 +13,7 @@ import {
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { useFiles } from "@/lib/hooks/useFiles";
-import { useWorkspace } from "@/lib/state/workspace";
+import type { CyclePath } from "@/lib/ids";
 import { PromptSegments } from "./PromptSegments";
 import type { NodeScope } from "@/lib/address";
 import { endSnippetDrag, useDraggedSnippet } from "@/lib/state/snippet-drag";
@@ -34,6 +34,9 @@ export interface PromptFieldsHandle {
   insert: (field: string, text: string) => void;
 }
 
+// Where an edit is written: a campaign's cycle (a steer's fork) or a check-in's draft.
+export type EditSubject = { path: CyclePath } | { checkin: string | null };
+
 // One prompt node's loci. `fields` is the roster the node declares: its served `prompt` rows.
 export function PromptFieldsEditor({
   ref,
@@ -50,7 +53,10 @@ export function PromptFieldsEditor({
   folded = false,
   locks,
   onLock,
+  writtenIn,
 }: {
+  // The subject an edit is written in, named by its host; null where nothing is written.
+  writtenIn: EditSubject | null;
   ref?: Ref<PromptFieldsHandle> | undefined;
   // The field a tapped snippet lands in, marked on its row; opening or focusing a field picks it.
   target?: string | null | undefined;
@@ -95,11 +101,12 @@ export function PromptFieldsEditor({
           })),
     [library],
   );
-  // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
-  const { viewed, checkin } = useWorkspace();
-  // Banked where its reader may file it: a campaign's reader off its tree, a check-in's the account.
-  const banks = useFiles(viewed?.path ?? (checkin ? "account" : null))("bank-snippet");
-  const experiment = banks ? (viewed?.root.campaignId ?? checkin?.draftId ?? null) : null;
+  // An edit is banked as a version of its snippet in the campaign or check-in it is written in, as
+  // its reader may file it: a campaign's reader off its tree, a check-in's the account.
+  const inCampaign = writtenIn !== null && "path" in writtenIn ? writtenIn.path : null;
+  const banks = useFiles(inCampaign ?? (writtenIn ? "account" : null))("bank-snippet");
+  const experiment =
+    !banks || writtenIn === null ? null : "path" in writtenIn ? (writtenIn.path[0]?.campaignId ?? null) : writtenIn.checkin;
   const bank = useCommand<"bank-snippet">("prompt-snippets", experiment);
   const sent = useRef(new Set<string>());
   // Typed since the last bank, by field: framed until the served library holds it, and never in

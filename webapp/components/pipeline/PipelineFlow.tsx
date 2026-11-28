@@ -69,7 +69,6 @@ function PipelinePlaceholder({ read }: { read: ReadResult<unknown> }) {
     <div
       className="wf-hero-node"
       aria-label={`Pipeline ${value}`}
-      aria-busy={loading || undefined}
       title={hint}
     >
       <div className="head">

@@ -153,8 +153,8 @@ export function NodeConfigEditor(props: {
         const barred = values.filter((v) => !pickable.includes(v));
         return (
           <div key={`${r.node}.${r.key}`} className="config-row">
-            <span className="config-label" title={r.description || undefined}>
-              {r.key}
+            <span className="config-label">
+              {r.description ? <Term content={r.description}>{r.key}</Term> : r.key}
               <EvolvedMark row={r} />
             </span>
             {/* A div: `ValueList` opens a `Popover`, which is flow content. */}
@@ -475,13 +475,14 @@ export function LockButton({
 }) {
   return (
     // A bare button: `.schema-field-row > .config-lock` places it in its grid column.
+    // Its label says the state; `aria-pressed` says a press flips it.
     <button
       type="button"
       className={cx("config-lock", locked && "is-locked")}
       onClick={onClick}
       disabled={readOnly}
       aria-pressed={locked}
-      title={locked ? "Origin-locked: click to let the optimizer tune it" : "Open to tuning: click to lock it at origin"}
+      title={locked ? "Origin-locked" : "Open to tuning"}
     >
       {locked ? "🔒" : "🔓"}
     </button>

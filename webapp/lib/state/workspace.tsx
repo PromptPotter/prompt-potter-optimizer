@@ -77,6 +77,8 @@ interface WorkspaceState {
   // The view the last `open` asked to see: a fresh object per ask, so an open view is scrolled to again.
   reveal: { family: FamilyId } | null;
   close: (family: FamilyId) => void;
+  // The open views become exactly `families`, in order, each keeping the key it had: one act.
+  arrange: (families: readonly FamilyId[]) => void;
   reportAddressGone: (address: string) => void;
   goneAddress: GoneAddress | null;
 }
@@ -345,6 +347,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const arrange = useCallback(
+    (families: readonly FamilyId[]) =>
+      startTransition(() => {
+        setScreen((s) => ({
+          ...s,
+          views: withViews(
+            families.map((family) => ({
+              family,
+              key: s.views.find((v) => v.family === family)?.key ?? null,
+            })),
+          ),
+        }));
+        const last = families.at(-1);
+        if (last) setReveal({ family: last });
+      }),
+    [],
+  );
+
   const pickCandidate = useCallback(
     (next: CandidatePick | null, path?: CyclePath) => {
       const here = hereRef.current;
@@ -396,6 +416,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       open,
       reveal,
       close,
+      arrange,
       reportAddressGone,
       goneAddress,
     }),
@@ -413,6 +434,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       open,
       reveal,
       close,
+      arrange,
       reportAddressGone,
       goneAddress,
     ],

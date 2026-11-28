@@ -59,17 +59,12 @@ from promptpotter.presentation.api.middleware.headers import ResponseHeadersMidd
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers.auth import auth_flow_router
-from promptpotter.presentation.api.routers.commands import commands_router
+from promptpotter.presentation.api.routers.commands import commands_router, refused_payload
 from promptpotter.presentation.api.routers.reads import READ_ROUTES, reads_router
 from promptpotter.presentation.mcp.server import HttpDoor
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import (
-    ContentTooLargeError,
-    PayloadInvalidError,
-    PotterError,
-    graceful,
-)
+from promptpotter.shared.errors import ContentTooLargeError, PotterError, graceful
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -241,16 +236,8 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    # Located in the payload, as every other entry point's refusal of the same model is.
-    located = (
-        {**error, "loc": error["loc"][1:]} if error["loc"][:1] == ("body",) else error
-        for error in exc.errors()
-    )
-    # The route's body model, so a union field refuses in the form `validating` names at every door.
-    body = getattr(request.scope.get("route"), "body_field", None)
-    body = body and body.field_info.annotation
-    model = body if isinstance(body, type) and issubclass(body, BaseModel) else None
-    return await potter_error_handler(request, PayloadInvalidError.refusing(located, model=model))
+    # A command's route refuses with its own model (`commands.py::_CommandRoute`); any other is here.
+    return await potter_error_handler(request, refused_payload(exc))
 
 
 _API = "/api/v1"

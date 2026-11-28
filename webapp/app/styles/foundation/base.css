@@ -7,6 +7,8 @@
 canvas{max-width:100%}
 /* The ONE field look: a surface sizes a field, never re-skins it. */
 input:not([type=checkbox],[type=radio],[type=file],[type=range]),select,textarea{font:inherit;padding:1px var(--space-4);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:Field;color:FieldText}
+/* Its refused state, said by the field's own `aria-invalid`. */
+:is(input,select,textarea)[aria-invalid=true]{border-color:var(--color-danger)}
 /* A field framed with its own controls (the composer's Tools, a snippet's tag): the frame wears the skin, the field inside none. */
 .chat-field{background:Field;border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
 .chat-field:focus-within{border-color:var(--color-accent)}

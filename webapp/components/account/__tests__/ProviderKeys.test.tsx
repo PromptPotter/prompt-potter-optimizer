@@ -35,14 +35,16 @@ function serve(reply: () => Response): Sent[] {
   return sent;
 }
 
-// The session's probe adopts the identity, which re-asks every read: the kinds stand after it.
+// The session's one probe answers the kinds too: they stand once it lands.
 async function view(coupon: CouponStatus) {
   render(
     <InWorkspace>
       <ProviderKeys coupon={coupon} />
     </InWorkspace>,
   );
-  await waitFor(() => expect(probes).toBeGreaterThan(1));
+  await waitFor(() => expect(probes).toBe(1));
+  await act(async () => {});
+  expect(probes).toBe(1);
 }
 
 describe("ProviderKeys", () => {

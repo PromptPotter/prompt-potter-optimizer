@@ -474,9 +474,6 @@
   font-family: var(--font-mono);
   font-size: var(--input-text-floor);
 }
-.cmp-expr-bad {
-  border-color: var(--color-danger);
-}
 
 .l4-factor-controls {
   display: flex;

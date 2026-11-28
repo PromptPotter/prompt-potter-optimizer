@@ -953,10 +953,10 @@ the served contract is generated and the browser derives nothing; mobile first.
   header. **Rides with:** the next box update. **Re-test:** in claude.ai, a custom connector at the
   box's MCP URL answers `tools/list`.
 - **Unverified, for the next change to each file**: `shell/CriticalAlertBanner` builds `Said` rows in the
-  browser; `ViewTabs.show` is many `open`/`close` calls, not one workspace act;
-  `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
-  `useActivePointer()` poll for one failure line; a `/hierarchy` 200 replaces every entry object
-  `lib/hooks/useRegistry.ts::useRegistry` indexes. The anti-rot pass re-finds them. **Rides with:** rel 3.
+  browser from `BACKEND_REACHABILITY_INFO` and orders them by `TONES`;
+  `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; a `/hierarchy` 200
+  replaces every entry object `lib/hooks/useRegistry.ts::useRegistry` indexes. The anti-rot pass
+  re-finds them. **Rides with:** rel 3.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,
@@ -964,50 +964,20 @@ the served contract is generated and the browser derives nothing; mobile first.
   **A hand-kept mirror of the served shapes**, **Served fields the browser never reads**. About 4,500
   TypeScript lines go. **Run data:** none. **Size:** large, a link per served fact. **Rides with:** webd.
   **Re-test:** `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
-- **A focus ring is re-skinned outside `base.css`**: `webapp/app/styles/domains/shell.css:64`
-  `.sidebar-filter-search:focus-visible{outline:none;border-color:…}` and `compare.css:477`'s
-  `.cmp-expr-bad{border-color}` state a field's look beside the skin. Root: the focus and invalid states of
-  a field skin in `foundation/base.css` (`:focus-visible`, `[aria-invalid=true]`). **Re-test:** no `outline`
-  or `border-color` on a field class outside `foundation/base.css`.
-- **A pane's data read in flight reports nothing, where it draws no `Loading`**: `ui/states.tsx::Loading`
-  marks its pane `aria-busy` (w11-web), but a `useRead` consumer that renders nothing while its read
-  flies still reports nothing, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
-  Root: every in-flight read renders `Loading` or `ReadState`. **Rides with:** w11-tests2 (`drawn`) and
-  area 12's chain. **Re-test:** `drawn` keeps only its `aria-busy` check and the walk stays green.
-- **A pane's phone layout keys on the screen, not its column** (webapp-1, 11-19): measurements.css,
-  scoring.css, dashboard-pipeline.css, remote.css and ui/IntervalRow.module.css still switch at
-  `@media (max-width: 640px)` though they draw in a narrower `.view` — the root: the `column`
-  container the fold reads — **Rides with:** `area 12's chain` — **Re-test:** `git grep -c "@media
-  (max-width: *640px)" -- webapp/components webapp/app/styles/domains` reaches the screen-only rules
-  alone.
-- **App lifespan state outlives shutdown** (tw-2, 11-25): `promptpotter/main.py::lifespan` — about 23 MB
-  stays held in-process after `TestClient(app)` exits — what lifespan opens (registry, MCP door,
-  identity bundle) should be released or owned per app instance — **Rides with:** `area 12's chain`
-  — **Re-test:** tracemalloc a `with TestClient(app)` enter/exit; retained bytes near 0 closes it.
-- **Vitest isolate:false makes vi.mock silently miss** (webd-1, live-3, 11-19): `webapp/vitest.config.ts` (`isolate`)
-  — a `vi.mock` of a module another file already loaded is ignored in the shared module graph — mocks
-  are unsafe there, so tests mount real providers or the gate refuses `vi.mock` of `@/lib/hooks/*`
-  (items 299, 317) — **Rides with:** `area 12's chain` — **Re-test:** `git grep -n "isolate" -- webapp/vitest.config.ts`
-  reads false.
-- **REST 422 finds its model through request.scope** (refuse-1, 11-19): `promptpotter/main.py::validation_error_handler`
-  — digs `request.scope["route"].body_field` because a `RequestValidationError` carries no model —
-  command routes should take the body untyped and run `validating`, keeping the schema through
-  `openapi_extra` — **Rides with:** `area 12's chain` — **Re-test:** `git grep -n "body_field" -- promptpotter/main.py`.
-- **Sign-in clears the read cache it just filled** (exhibit-acts-fix, 11-19): `webapp/lib/state/auth.tsx` (`clearReadCache`)
-  — adopting an identity remounts every read, so `/auth/me` is probed twice — the cache should be keyed
-  by identity, not cleared on anon-to-authed — **Rides with:** `area 12's chain` — **Re-test:** open
-  the page signed-in; count `/auth/me` requests, 2 means it stands.
-- **A pane's acts gate on the dashboard read, not the entry they act on** (exhibit-acts, 11-19):
-  `webapp/components/node-surface/PromptFieldsEditor.tsx::PromptFieldsEditor` — it picks where a
-  snippet banks by order (`viewed?.path ?? checkin`), so a viewed campaign wins over an open
-  check-in — the editor's host names the subject an edit is written in, never a fallback by order —
-  **Rides with:** `area 12's chain` — **Re-test:** follow the exhibit, open a check-in, edit a
-  snippet; it banks into the check-in.
-- **The Account view's phone band and token chips are unproven** (w11-walk, 11-27; cut by w11-web):
-  the ~150px empty band under the Account view's CHAT/ACCOUNT tabs and `ApiTokens.tsx`'s scope chips
-  running off the card did not reproduce in the auth-off walk world, which serves no grantable scope;
-  `ui/Chip.module.css`'s group now wraps. **Rides with:** w11-tests2 (an auth-on walk world).
-  **Re-test:** at 390px, signed in with a grantable scope, every element of Account lies inside its card.
+- **The walk still counts fetches beside the pane's `aria-busy`**: every `useRead` in flight now marks
+  its pane (`webapp/lib/state/busy.tsx`, w11-web2), and the walk ran green with `drawn` reduced to two
+  frames and its `aria-busy` check, but `webapp/e2e/harness.ts::drawn` keeps its `__openReads` loop.
+  **Rides with:** w11-tests3. **Re-test:** `drawn` keeps only its `aria-busy` check and the walk stays green.
+- **Controls restate base's focus ring, and two acts stay hand-looped** (w11-web2, 11-28):
+  - About 25 non-field controls (chat, dashboard, onboarding…) restate `base.css`'s focus ring in
+    their domain CSS.
+  - `IngestComposer` opens the views it names with a loop of `open` calls, where
+    `workspace.tsx::arrange` is the one act.
+  - `RosterNote` shows `Loading` for an idle read, because `cells-states.test` decides it.
+
+  Root: the ring lives in `base.css` only, a set of views opens through `arrange`, and an idle read
+  says idle. **Rides with:** area 12's chain. **Re-test:** `git grep -c "focus-visible" -- webapp/app/styles`
+  counts base's rule alone, and `IngestComposer` calls `arrange`.
 - **The Candidates card derives what its reads should serve** (w11-web census, 11-27):
   `webapp/components/candidates/useCandidatesModel.ts` takes `divergentRound` as a min over views
   (:103), counts replayed cells that `CandidatesToolbar.tsx:152` shows "of" `views.length` (:170), and
@@ -1027,11 +997,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   derives `nodeLocked`; `NodeSurface.tsx:245` counts tunables; `L1Variants.tsx:62` casts an untyped
   value to a hand-declared `Variant[]`. Action: `/pipeline?at=` serves each flag and count, and the
   variant shape is generated. **Rides with:** area 11's chain. **Re-test:** `git grep -cE "axisMenu|as Variant" -- webapp/components` is 0.
-- **Node-surface prose hides in `title=`** (w11-web census, 11-27): `MeasurementRun.tsx:118,159,167`
-  and `NodeConfigEditor.tsx:484` teach through `title=`, and `.rsv-why>p`'s nowrap ellipsis
-  (`dashboard.css:68`) cuts the change list it titles at phone width. Action: the prose rides
-  `ui/HoverCard` and the line wraps. **Rides with:** area 12's chain. **Re-test:** the eslint rule
-  `local/title-is-a-label` passes over `components/node-surface` with no disable.
 
 ## 13 · Identity, accounts, access
 

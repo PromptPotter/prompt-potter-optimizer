@@ -17,6 +17,7 @@ import {
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
 import type { NodeScope } from "@/lib/address";
+import type { EditSubject } from "./PromptFieldsEditor";
 import { PromptWithLibrary } from "./PromptWithLibrary";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
 import { SchemaTreeEditor } from "./SchemaTreeEditor";
@@ -35,6 +36,7 @@ export function NodeSurface({
   onApply,
   onConfigChange,
   onNarrowing,
+  writtenIn = null,
 }: {
   node: PipelineViewNode | null;
   // Whose pipeline the prompt rows are: an optimizer node's edit is an optimizer override.
@@ -53,6 +55,8 @@ export function NodeSurface({
   onApply?: ((patch: DraftPatch) => void) | undefined;
   onConfigChange?: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
   onNarrowing?: ((node: string, rows: ParamIntent[]) => void) | undefined;
+  // The subject an edit is written in: a snippet banks there.
+  writtenIn?: EditSubject | null;
 }) {
   const kind = node?.kind;
   const schema = useNodeSchema(pipelineAt, promptScope);
@@ -142,6 +146,7 @@ export function NodeSurface({
           readOnly={readOnly}
           compact={compact}
           onApply={readOnly ? undefined : onApply}
+          writtenIn={readOnly ? null : writtenIn}
           locks={Object.fromEntries(params.map((p) => [p.key, p.movable_by.length === 0]))}
           onLock={lockKeys ? (field, locked) => lockKeys([field], locked) : undefined}
         />

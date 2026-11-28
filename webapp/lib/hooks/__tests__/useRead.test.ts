@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
+import { meRead } from "@/lib/api/reads";
 import { AuthProvider, useAuth } from "@/lib/state/auth";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearIncidents } from "@/lib/diagnostics";
@@ -180,6 +181,40 @@ describe("useRead — a session probe answered 404", () => {
     await reconnect();
     await reconnect();
     expect(probes).toBe(1);
+  });
+});
+
+describe("useRead — a signed-in page", () => {
+  let probes = 0;
+  let user = "u";
+  beforeEach(() => {
+    clearReadCache(true);
+    probes = 0;
+    user = "u";
+    vi.stubGlobal("fetch", async () => {
+      probes += 1;
+      return new Response(JSON.stringify({ tenant_id: "t", user_id: user }), { status: 200 });
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    clearIncidents();
+    vi.unstubAllGlobals();
+  });
+
+  // The probe's answer is the identity it names: adopting it re-asks nothing, a flip keeps it.
+  it("asks /auth/me once, and once per identity flip", async () => {
+    const { result } = renderHook(() => ({ auth: useAuth(), me: useRead(meRead()) }), { wrapper });
+    await act(async () => {});
+    expect(result.current.auth.status).toBe("authed");
+    expect(result.current.me.status).toBe("ready");
+    expect(probes).toBe(1);
+
+    user = "v";
+    act(() => result.current.auth.refresh());
+    await act(async () => {});
+    expect(result.current.me).toMatchObject({ status: "ready", data: { user_id: "v" } });
+    expect(probes).toBe(2);
   });
 });
 

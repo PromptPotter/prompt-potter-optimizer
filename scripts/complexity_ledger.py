@@ -394,7 +394,9 @@ BASELINE = {
     # w11-connectors2 (+9): Harbor's harness fault typed at its door, and the connector's roster-pin
     # declaration.
     # w11-tests3 (+2): the bundle check's scratch index seeds from the checkout's own.
-    "package_lines": 113969,
+    # w11-web2 (+22): a command route refuses its body by the model it declares
+    # (`commands.py::_CommandRoute`), where the app's handler dug it out of `request.scope`.
+    "package_lines": 113991,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

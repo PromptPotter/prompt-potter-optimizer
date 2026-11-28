@@ -73,6 +73,7 @@ export function PipelineSetupSection({
                   mode="search-space"
                   modelCapabilities={pipeline.model_capabilities}
                   onApply={onApply}
+                  writtenIn={{ checkin: draft.draft_id }}
                 />
               ) : (
                 <small className="config-hint">This pipeline serves no LLM node.</small>
