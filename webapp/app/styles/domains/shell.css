@@ -255,9 +255,10 @@
   .shell:not(.mobile-list):has(> .main > .view-tabs){--nav-dock-h:var(--nav-row-h)}
 }
 /* A landscape phone has no height for a standing masthead: the panes take all of it under the bars,
-   and the masthead scrolls away above them. */
+   and the masthead scrolls away above them. The bars stand over that scroller's foot, so its scroll
+   padding names their band: a control scrolled into view (a tap, a focus) lands clear of the dock. */
 @media (max-width:880px) and (orientation:landscape){
-  .shell > .main{overflow-y:auto}
+  .shell > .main{overflow-y:auto;scroll-padding-bottom:calc(var(--nav-dock-h) + var(--remote-dock-h) + var(--safe-bottom))}
   .views{min-height:calc(100% - var(--nav-dock-h) - var(--remote-dock-h))}
   .view-tabs{position:sticky;bottom:0}
 }

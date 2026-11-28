@@ -19,10 +19,15 @@ else:
 _ADOPTED = b"adopted\n"
 
 
+def command(module: str) -> list[str]:
+    """The command line *module*'s process runs by: this interpreter's."""
+    return [sys.executable, "-X", "utf8", "-m", module]
+
+
 def start(module: str, spec: bytes, log: IO[bytes] | None) -> subprocess.Popen[bytes]:
     """*module* run with *spec* on stdin; stdout is `adopted`'s, stderr *log* (none: discarded)."""
     child = subprocess.Popen(
-        [sys.executable, "-X", "utf8", "-m", module],
+        command(module),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL if log is None else log,

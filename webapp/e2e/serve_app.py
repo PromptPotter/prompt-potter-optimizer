@@ -1,8 +1,9 @@
 """The app a browser world walks, behind the world its posture names: ``live`` reaches whatever
-``TERMNORM_ENDPOINTS`` and every other host name, ``offline`` answers every send of this process with
-``scripts/offline_world.py::Router`` (its ``FakeBackend``, an empty model catalogue, the bundled price
-floor) and resolves no name — so a check-in reads the same world on every machine, CI's included,
-and no request leaves for a proxy to refuse."""
+``TERMNORM_ENDPOINTS`` and every other host name, ``offline`` holds this process and every run it
+launches inside ``scripts/offline_world.py::served`` (its optimizer, its ``FakeBackend``, a key per
+provider, an empty model catalogue, the bundled price floor) and resolves no name — so a check-in
+and the round it launches read the same world on every machine, CI's included, and no request
+leaves for a proxy to refuse."""
 
 from __future__ import annotations
 
@@ -14,10 +15,10 @@ REPO = Path(__file__).resolve().parents[2]
 
 def _install_offline_world() -> None:
     sys.path.insert(0, str(REPO / "scripts"))
-    from offline_world import Router, install_network
+    from offline_world import served
 
-    install_network(Router.idle())
-    print("[e2e] offline world: every send answered in-process", flush=True)
+    served()
+    print("[e2e] offline world: every send answered and every run launched in it", flush=True)
 
 
 def main(argv: list[str]) -> int:

@@ -12,20 +12,35 @@ import functools
 import hashlib
 import inspect
 import io
+import itertools
 import json
+import random
 import re
 import signal
 import socket
 import sys
 import urllib.error
 import urllib.request
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 import httpx
 from pydantic import SecretStr
 
+from promptpotter.application.jobs import spawning
+
+# Its registries complete as it imports: the manifests `optimizer` renders read them.
+from promptpotter.application.maintenance import landing  # noqa: F401
+from promptpotter.application.optimizer_contract import MANIFESTS
+from promptpotter.application.optimizer_manifest import (
+    bench_choice,
+    running_prompt,
+    select_optimizer,
+)
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import normalize_model_id
@@ -43,11 +58,15 @@ from promptpotter.infrastructure.llm.registry import (
     providers,
 )
 from promptpotter.infrastructure.llm.telemetry import current_round
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.stores import Stores
 
 # What the world answers, by version: an edit to any edge's answer bumps it, so a trace names its world.
 WORLD = "2"
@@ -288,6 +307,382 @@ def prompt_node(name: str, start: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
+# What the rebase leg's L2 steers L1 onto (`L2Memory.steered_onto`): no other leg's L2 steers.
+L2_STEER = {"temperature": 0.5}
+LISTED = 15
+
+WORDS = [
+    "premise", "claim", "negation", "quantifier", "conditional", "chain", "derive", "verify",
+    "contrapositive", "modus", "ponens", "tollens", "entail", "contradict", "universal", "scope",
+    "track", "rewrite", "restate", "isolate", "compare", "check", "each", "step", "atoms", "map",
+    "literals", "resolve", "disjunction", "conjunction", "implication", "assume", "refute",
+    "confirm", "consistent", "evidence", "symbol", "table", "audit", "trace", "backward", "goal",
+    "lemma", "case", "split", "exhaust", "enumerate", "count", "parity", "order", "strict",
+    "commit", "label", "decide", "final", "answer", "stated", "facts", "closed", "open", "proven",
+]  # fmt: skip
+
+
+_ROW_MARK = re.compile(r"\[#(\d+)\]")
+
+
+def _marks(text: str) -> list[int]:
+    return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
+
+
+_AXIS_MENU = re.compile(r"(?:EXACTLY one of|VERBATIM from): (.+)")
+# A cited panel, by the heading it opens on: the framing where the prompt renders one, else the tally.
+FRAMING = "TASK CONTEXT:\n"
+TALLY = "ANSWER DISTRIBUTION ("
+
+
+def _axis_menu(prompt: str) -> list[str]:
+    """Empty where an L4 arm rewrote the instruction stating it away."""
+    if (menu := _AXIS_MENU.search(prompt)) is None:
+        return []
+    return menu.group(1).split(". ", 1)[0].removesuffix(".").split(", ")
+
+
+def _variant(tag: str, rng: random.Random) -> str:
+    return f"Variant {tag}: " + " ".join(rng.sample(WORDS, 18)) + "."
+
+
+class SchemaFiller:
+    def __init__(self, schema: dict[str, Any], *, node: str, call: str) -> None:
+        self.node = node
+        self.call = call
+        self.defs: dict[str, Any] = {**schema.get("$defs", {}), **schema.get("definitions", {})}
+
+    def resolve(self, s: dict[str, Any]) -> dict[str, Any]:
+        while "$ref" in s:
+            ref = self.defs[s["$ref"].split("/")[-1]]
+            s = {**ref, **{k: v for k, v in s.items() if k != "$ref"}}
+        if "allOf" in s and len(s["allOf"]) == 1:
+            s = {**self.resolve(s["allOf"][0]), **{k: v for k, v in s.items() if k != "allOf"}}
+        return s
+
+    def said(self, s: dict[str, Any]) -> dict[str, Any]:
+        """A nullable schema's other arm: what a model with something to say writes."""
+        s = self.resolve(s)
+        return next((self.resolve(o) for o in s.get("anyOf", ()) if o.get("type") != "null"), s)
+
+    def fill(self, s: dict[str, Any], path: tuple[str, ...]) -> Any:
+        s = self.resolve(s)
+        if "const" in s:
+            return s["const"]
+        if "enum" in s:
+            return s["enum"][0]
+        for key in ("anyOf", "oneOf"):
+            if key in s:
+                opts = [self.resolve(o) for o in s[key]]
+                # As a model with nothing to say: a nullable property is left unsaid.
+                if any(o.get("type") == "null" for o in opts):
+                    return None
+                return self.fill(opts[0], path)
+        t = s.get("type")
+        if isinstance(t, list):
+            t = next(x for x in t if x != "null")
+        if t == "object" or (t is None and "properties" in s):
+            props = s.get("properties", {})
+            return {n: self.fill(props.get(n, {}), (*path, n)) for n in s.get("required", [])}
+        if t == "array":
+            items = s.get("items", {})
+            return [self.fill(items, (*path, str(i))) for i in range(s.get("minItems", 0))]
+        if t == "string":
+            text = f"{'.'.join(path) or 'value'} {self.node} {self.call}".ljust(
+                s.get("minLength", 0), "x"
+            )
+            return text[: s["maxLength"]] if "maxLength" in s else text
+        if t == "integer":
+            return int(s.get("minimum", 0))
+        if t == "number":
+            return float(s.get("minimum", 0.0))
+        if t == "boolean":
+            return False
+        return None
+
+
+def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller, call: str) -> None:
+    """Where the slot is offered, as many children as it takes, each the next main given one locus
+    by the next donor apart from it."""
+    if "recombinations" not in props:
+        return
+    slot = filler.said(props["recombinations"])
+    spec = filler.resolve(slot["items"])["properties"]
+    mains = filler.resolve(spec["main"])["enum"]
+    ids = filler.resolve(spec["donor"])["enum"]
+    loci = filler.resolve(spec["from_donor"]["items"])["enum"]
+    children = []
+    for i in range(slot["maxItems"]):
+        main = mains[i % len(mains)]
+        donors = [d for d in ids if d != main]
+        children.append(
+            {
+                "main": main,
+                "donor": donors[i % len(donors)],
+                "from_donor": [loci[i % len(loci)]],
+                "changes_description": f"Recombine (call {call}, child {i}).",
+            }
+        )
+    obj["recombinations"] = children
+
+
+def inner_cell(stores: Stores, hop: CycleHop) -> str:
+    """An L4 cell's inner campaign at *hop* by its seat's `run_seed` and the arm laid into its
+    overlay, so two seats of one arm never share it, never by its id, which hashes the code."""
+    config = cycle_config(stores, stores.campaigns.campaign_cycle(hop)).config
+    overlay = {node: dict(o.config) for node, o in sorted(config.optimization.nodes.items())}
+    held = json.dumps([config.run_seed, overlay], sort_keys=True, default=str)
+    return hashlib.sha256(held.encode()).hexdigest()[:8]
+
+
+def _asker() -> str:
+    """Empty for the run's own call; an L4 cell's inner campaign by its `inner_cell`."""
+    if not run_scope().depth:
+        return ""
+    scope = run_scope()
+    spawn, stores = scope.spawn, scope.account
+    assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
+    return inner_cell(stores, spawn.inside[-1])
+
+
+class ByCallIdentity:
+    """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
+    prompt's wording nor the arrival order. Each request is kept in *capture* (none: kept
+    nowhere). *rebasing*, every L2 fire steers L1 and proposes a fork. *crossing*, every variant
+    rewrites a second field, so any two arms differ on two loci a crossover swaps."""
+
+    def __init__(
+        self,
+        capture: Path | None,
+        templates: Mapping[str, str],
+        *,
+        rebasing: bool = False,
+        crossing: bool = False,
+    ) -> None:
+        self.capture = capture
+        self.templates = templates
+        self.rebasing = rebasing
+        self.crossing = crossing
+        self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
+        self.calls: dict[str, int] = {}
+        self.turns: dict[tuple[str, str, int | None], int] = {}
+        # Scripted invalid answers by call (`node_call`), one per send before the call heals.
+        self.heals: dict[str, tuple[Heal, ...]] = {}
+        # Scripted invalid answers by call on its every send: a structured call fails each rung.
+        self.wounds: dict[str, tuple[Heal, ...]] = {}
+        self.sends: Counter[str] = Counter()
+        # A structured node's call a heal left open, by asker: its next send retries it.
+        self.healing: dict[tuple[str, str], tuple[str, int]] = {}
+        # The captured requests an L4 cell's inner campaign sent, by file name.
+        self.inner: set[str] = set()
+
+    def _text_node(self, prompt: str) -> str:
+        opened = [node for node, prefix in self.prefixes.items() if prompt.startswith(prefix)]
+        if not opened:
+            raise KeyError(f"offline run: no llm node's template opens {prompt[:80]!r}")
+        return max(opened, key=lambda node: len(self.prefixes[node]))
+
+    def __call__(self, body: dict[str, Any]) -> Said:
+        # A retry re-sends the call's own turns, then the failed answer and the ask to mend it.
+        asked = itertools.takewhile(lambda m: m["role"] != "assistant", body["messages"])
+        prompt = "\n".join(str(m["content"]) for m in asked)
+        schema = body.get("response_format", {}).get("json_schema")
+        node = schema["name"] if schema else self._text_node(prompt)
+        self.calls[node] = self.calls.get(node, 0) + 1
+        asker = _asker()
+        if (asker, node) in self.healing:
+            call, turn = self.healing.pop((asker, node))
+        else:
+            # Concurrent text sends of one node land in any order; their seeds tell them apart. A
+            # structured node sends one at a time per asker, so its turn is the asker's count of it.
+            seed: int | None = None if schema else body.get("seed")
+            turn = self.turns.get((asker, node, seed), 0)
+            self.turns[asker, node, seed] = turn + 1
+            call = ".".join(str(p) for p in (asker, seed, turn) if p not in ("", None))
+        if schema:
+            filler = SchemaFiller(schema["schema"], node=node, call=call)
+            obj = filler.fill(schema["schema"], ())
+            content = json.dumps(
+                self._shape(node, call, turn, obj, filler, schema["schema"], prompt)
+            )
+        else:
+            content = self._text(node, call, prompt)
+        key = f"{node}_{call}"
+        attempt = self.sends[key]
+        self.sends[key] += 1
+        script = self.heals.get(key) or self.wounds.get(key, ())
+        said: Said = completion(content, model=body["model"], id=f"offline-{node}-{call}")
+        shown: Any = content
+        if attempt < len(script):
+            said = invalid(script[attempt], content, model=body["model"])
+            # Its bytes hash into the key, so a price (the rate table's, not the run's) stays off it.
+            shown = (
+                said.json()
+                if isinstance(said, httpx.Response)
+                else {k: v for k, v in said.items() if k != "usage"}
+            )
+            # A wound's last send leaves the client no rung to retry it on.
+            retried = key in self.heals or attempt + 1 < len(script)
+            if schema and script[attempt] is not Heal.REFUSED and retried:
+                self.healing[asker, node] = (call, turn)
+        sent = f"{key}{f'~{attempt}' if attempt else ''}.json"
+        if asker:
+            self.inner.add(sent)
+        if self.capture is None:
+            return said
+        (self.capture / sent).write_text(
+            json.dumps(
+                {"request": body, "response": shown}, indent=1, sort_keys=True, ensure_ascii=False
+            ),
+            encoding="utf-8",
+            # Its bytes are the request's hash in a behaviour key: one platform's newline.
+            newline="\n",
+        )
+        return said
+
+    def off_script(self) -> list[str]:
+        """Each scripted call not sent once per invalid answer, plus the send that healed it where
+        it heals; a refusal heals on its own send."""
+        healed = [
+            key
+            for key, script in self.heals.items()
+            if self.sends[key] != len(script) + (script[-1] is not Heal.REFUSED)
+        ]
+        return healed + [k for k, script in self.wounds.items() if self.sends[k] != len(script)]
+
+    def _text(self, node: str, call: str, prompt: str) -> str:
+        rng = random.Random(f"{node}:{call}")
+        fresh = _variant(f"{node}.{call}", rng)
+        template = self.templates[node]
+        if "<prompt>" in template:
+            # Rephrasing the individual's own instruction keeps its parent's marker, so its skill.
+            parents = MARKER.findall(prompt) if "{{instruction}}" in template else []
+            return f"<prompt>{_variant(parents[-1], rng) if parents else fresh}</prompt>"
+        if "```" in template:
+            return f"```\n{fresh}\n```"
+        if "array" in template:
+            return json.dumps([_variant(f"{node}.{call}.{i}", rng) for i in range(LISTED)])
+        raise KeyError(
+            f"offline run: llm node {node!r}'s template asks for no form the fake writes"
+        )
+
+    def _shape(
+        self,
+        node: str,
+        call: str,
+        turn: int,
+        obj: dict[str, Any],
+        filler: SchemaFiller,
+        schema: dict[str, Any],
+        prompt: str,
+    ) -> dict[str, Any]:
+        if node.startswith("L1Generate"):
+            props = filler.resolve(schema)["properties"]
+            item = filler.resolve(props["variants"])
+            obj["variants"] = [
+                self._variant_edit(turn, i, filler, filler.resolve(item["items"]), prompt)
+                for i in range(item.get("minItems") or item["maxItems"])
+            ]
+            _recombine(obj, props, filler, call)
+        elif node.startswith("L1Critique"):
+            # Read off the prompt as a model would: the rows a cluster may span are the `[#id]` marks.
+            # Pairs of them, then one row alone: the parse drops the lone row, and every pair where
+            # the detectable move is wider (`critique_response_model`), keeping the rest.
+            ids = _marks(prompt)
+            clusters = [*(ids[k : k + 2] for k in range(0, min(len(ids), 4) - 1, 2)), ids[4:5]]
+            obj["failure_highlights"] = [
+                {
+                    "sample_ids": rows,
+                    "mechanism": f"negation tracking {call}.{k}",
+                    "claim": f"critique {call}: the chain breaks at a negation; said and truth differ",
+                }
+                for k, rows in enumerate(clusters)
+                if rows
+            ]
+            # Read off the prompt's axis list, as a model naming its axis verbatim would.
+            axes = _axis_menu(prompt)
+            # Listing none, a model names the axis it guesses, which the parse drops.
+            guess = axes[0] if axes else "instruction"
+            lead = next((a for a in axes if a.endswith(".instruction")), guess)
+            obj["priority_fix"] = f"{lead}: track every negation explicitly (critique {call})"
+            obj["suggested_axes"] = axes[:2]
+        elif node.startswith("L2Context"):
+            obj["axis_targeted"] = "instruction"
+            obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
+            _recombine(obj, filler.resolve(schema)["properties"], filler, call)
+            obj.pop("fork_proposal", None)
+            if self.rebasing:
+                obj["l1_overrides"] = L2_STEER
+                obj["fork_proposal"] = {
+                    "reason": f"L2 fire {call}: the stall is the output schema's names.",
+                    "unlock_schema_field_rename": True,
+                }
+        elif node.startswith("L3Plan"):
+            obj["plan"] = (
+                f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
+            )
+            obj["note"] = f"l3 note {call}"
+            obj["rationale"] = f"L2 stalled twice (replan {call})"
+            obj.pop("fork_proposal", None)
+        return obj
+
+    def _variant_edit(
+        self, generation: int, i: int, filler: SchemaFiller, item: dict[str, Any], prompt: str
+    ) -> dict[str, Any]:
+        """*generation* is the call's turn whatever its seed: the `SKILL` trajectory is keyed on it."""
+        v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
+        # A citation quotes one panel's whole words, at an offset that is the call's, not the text's.
+        cites = FRAMING if FRAMING in prompt else TALLY
+        assert cites in prompt, f"offline run: no {cites!r} panel to cite"
+        start = prompt.index(cites) + len(cites) + draw("cite", generation, i) % 20
+        v["evidence_grounding"] = {"citation": " ".join(prompt[start : start + 40].split()[1:-1])}
+        # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
+        second = ("thinking_style",) if self.crossing else ()
+
+        def text(node: str, tag: str) -> str:
+            rng = random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}")
+            return _variant(f"g{generation}v{i}{node}{tag}", rng)
+
+        edits = filler.said(item["properties"]["edits"])
+        at = filler.resolve(edits["items"])["properties"]["at"]["enum"]
+        nodes = [locus.split(".")[0] for locus in at if locus.endswith(".instruction")]
+        v["edits"] = [
+            {
+                "at": f"{node}.{field}",
+                "op": "replace",
+                "anchor": shown_text(prompt, f"{node}.{field}"),
+                "text": text(node, tag),
+            }
+            for node in nodes
+            for field, tag in (("instruction", ""), *((f, f) for f in second))
+            if f"{node}.{field}" in at
+        ]
+        # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
+        clusters = [
+            ids for line in prompt.splitlines() if " rows: " in line and (ids := _marks(line))
+        ]
+        v["targets_rows"] = (clusters[i % len(clusters)] if clusters else _marks(prompt))[:2]
+        v["mechanism"] = f"Rewrite the instruction (generation {generation}, variant {i})."
+        return v
+
+
+def rendered(selected: SelectedOptimizer) -> dict[str, str]:
+    """Each of *selected*'s llm nodes by its rendered template: how `ByCallIdentity` names a text call."""
+    return {
+        node: running_prompt(node, selected.node_config(node), selected.manifest).render()
+        for node in selected.llm_nodes
+    }
+
+
+def optimizer() -> ByCallIdentity:
+    """The optimizer LLM of a world no journey scripted (a served app's, each run it launches):
+    every installed optimizer's call answered by its identity, its request kept nowhere."""
+    templates: dict[str, str] = {}
+    for name in sorted(MANIFESTS.table):
+        templates |= rendered(select_optimizer(bench_choice(name)))
+    return ByCallIdentity(None, templates)
+
+
 class FakeHarness:
     """The n8n eval-harness edge: one webhook at `URL`, each POST kept in `asked` as its headers
     and body. *says* is the policy: a reply body, or a response carrying a status."""
@@ -343,6 +738,9 @@ class FakeBackend:
         hardness: int = 0,
     ) -> None:
         self.truth = {s.query: s.ground_truth for s in samples}
+        # The terms the run's session posted (`/sessions`): a row the world holds no truth for
+        # (a served world's, whose rows are the operator's) takes its truth and answers from them.
+        self.terms: list[str] = []
         self.cells = 0
         self.interrupts = interrupts
         self.hardness = hardness
@@ -393,7 +791,8 @@ class FakeBackend:
             case "/status":
                 answer = {"status": "ok"}
             case "/sessions":
-                answer = {"status": "success", "data": {"terms_count": 0}}
+                self.terms = [str(t) for t in json.loads(body).get("terms") or ()]
+                answer = {"status": "success", "data": {"terms_count": len(self.terms)}}
             case "/matches":
                 payload = json.loads(body)
                 prompt = self.prompt(payload)
@@ -438,18 +837,22 @@ class FakeBackend:
         tag = marks[-1] if marks else None
         k = self.SKILL.get(tag, 1 + draw("skill", tag) % 9)
         k += self.hardness * (draw("hard", query) % 3 - 1)
-        gt = self.truth[query]
+        labels: tuple[str, ...] = LABELS
+        if (gt := self.truth.get(query)) is None:
+            assert self.terms, f"offline: no truth and no session's terms for {query[:60]!r}"
+            labels = tuple(self.terms)
+            gt = labels[draw("truth", query) % len(labels)]
         label: str | None
         if self.answers is not None:
             right = self.answers(prompt, query)
-            label = gt if right else next(lab for lab in LABELS if lab != gt)
+            label = gt if right else next(lab for lab in labels if lab != gt)
         elif tag is None and self.origin_errors and draw("errs", query) % self.origin_errors == 0:
             # The pipeline's own failure on the row, which the walk charges as a miss.
             label = "ERROR"
         elif draw("cell", prompt, query) % 10 < k:
             label = gt
         else:
-            wrong = [lab for lab in LABELS if lab != gt]
+            wrong = [lab for lab in labels if lab != gt] or [gt]
             label = wrong[draw("wrong", prompt, query) % len(wrong)]
         return {
             "status": "success",
@@ -739,18 +1142,45 @@ def install_network(router: Router) -> Callable[[], None]:
 def child(code: str, *argv: str) -> list[str]:
     """The command line a fact spawns a child process by: *code* runs as `python -c` runs it, *argv*
     its arguments, inside this world (`run_child`)."""
-    return [sys.executable, __file__, code, *argv]
+    return [sys.executable, "-X", "utf8", __file__, code, *argv]
 
 
-def run_child(code: str, *argv: str) -> None:
-    """A spawned child's world, as the `offline` fixture lays the suite's: every key one its
-    provider accepts, no rate capped, every send answered by one `Router`, which *code* reads as
-    `world`. A send no route answered fails the child at its exit, whatever *code* did."""
+# A run's own process, spawned from inside a world: the module `spawning.command` names, run as
+# `python -m` runs it, on the served world's optimizer.
+_LAUNCHED = """
+import runpy, sys
+from offline_world import optimizer
+world.llm.says = optimizer()
+runpy.run_module(sys.argv[1], run_name="__main__", alter_sys=True)
+"""
+
+
+def held(world: Router) -> None:
+    """This process inside *world*, for good, as the `offline` fixture lays the suite's: every key
+    one its provider accepts, no rate capped, every send answered by *world*, and every run it
+    spawns (`jobs/spawning.py::command`) a child inside a world of its own."""
     for key in PROVIDER_KEYS:
         setattr(settings, key, SecretStr(NOT_A_KEY))
     settings.RATE_LIMITS = {}
-    world = Router.idle()
     install_network(world)
+
+    spawning.command = lambda module: child(_LAUNCHED, module)
+
+
+def served() -> Router:
+    """The world a served app runs in (`webapp/e2e/serve_app.py`): its optimizer answers every
+    installed optimizer's call, its backend the terms each run's session posts."""
+    world = Router.idle()
+    world.llm.says = optimizer()
+    held(world)
+    return world
+
+
+def run_child(code: str, *argv: str) -> None:
+    """A spawned child's world (`held`), which *code* reads as `world`. A send no route answered
+    fails the child at its exit, whatever *code* did."""
+    world = Router.idle()
+    held(world)
     sys.argv = [sys.argv[0], *argv]
     try:
         exec(compile(code, "<offline child>", "exec"), {"__name__": "__main__", "world": world})
