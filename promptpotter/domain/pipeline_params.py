@@ -12,6 +12,7 @@ from pydantic import (
     GetJsonSchemaHandler,
     ModelWrapValidatorHandler,
     PrivateAttr,
+    SerializationInfo,
     model_serializer,
     model_validator,
 )
@@ -29,6 +30,13 @@ STEPS_KEY = "steps"
 
 # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
 CellIdentity = dict[str, dict[str, Any]]
+
+
+def resolved_key(family: object, version: object) -> str | None:
+    """The `resolved_prompts` / `resolved_schemas` key a family and version name."""
+    if not family:
+        return None
+    return f"{family}/{version}" if version is not None else str(family)
 
 
 def moved_leaves(
@@ -114,11 +122,14 @@ class NodeCall(FrozenModel):
         return call
 
     @model_serializer(mode="plain")
-    def _dump(self) -> dict[str, object]:
+    def _dump(self, info: SerializationInfo) -> dict[str, object]:
+        include, exclude = info.include, info.exclude or ()
         held = {
             key: getattr(self, key)
             for key in (*type(self).model_fields, *(self.model_extra or {}))
             if key in self.model_fields_set
+            and (include is None or key in include)
+            and key not in exclude
         }
         return {**{key: held[key] for key in self._laid if key in held}, **held}
 

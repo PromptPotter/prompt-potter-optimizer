@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from promptpotter import connectors
 from promptpotter.application.mask.record import (
     MaskCandidate,
     MaskCycle,
@@ -12,7 +11,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.pipeline_resolve import declared_config, resolved
+from promptpotter.application.pipeline_resolve import campaign_connector, declared_config, resolved
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
@@ -205,7 +204,7 @@ def load_mask_record(
         origin_rows = [
             cell for sheet in (origin_file.cells if origin_file else {}).values() for cell in sheet
         ]
-        terms = campaign_terms(connectors.CONNECTORS.get(campaign.connector))
+        terms = campaign_terms(campaign_connector(campaign))
         formula = realize_dials(
             parse_dials(lens.body, terms),
             _dial_anchors(declared_config(stores, campaign).config, origin_rows, terms),

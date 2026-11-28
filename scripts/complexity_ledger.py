@@ -458,7 +458,9 @@ BASELINE = {
     # loci a donor gave as `donated_loci`).
     # w10-records (+1): θ left the browser with the round's statement; `AbilityReading` stays
     # served to the CLI and MCP readers (evidence, export).
-    "p_served": 201,
+    # w11-config (+2): a check-in's mode pick sends `mode` and the server maps it to the chain, so
+    # the browser no longer reads the `exclude_nodes` the config models serve.
+    "p_served": 203,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

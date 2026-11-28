@@ -6,6 +6,7 @@ from typing import Any, NoReturn
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
+from promptpotter.domain.pipeline_params import resolved_key
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -258,9 +259,9 @@ def parse_resolved_schema(resolved: Mapping[str, Any]) -> NodeOutputSchema:
 def _registered(
     registry: Mapping[str, object], family: object, version: object, where: str
 ) -> Mapping[str, Any] | None:
-    if not family:
+    if not (key := resolved_key(family, version)):
         return None
-    entry = registry.get(f"{family}/{version}" if version is not None else str(family))
+    entry = registry.get(key)
     return None if entry is None else _block(entry, f"{where}.{family}")
 
 

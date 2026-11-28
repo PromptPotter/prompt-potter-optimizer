@@ -48,6 +48,7 @@ from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import RulerReach, RulerScope
@@ -118,10 +119,11 @@ def _span(
 ) -> CellSpan:
     usage = pd.step_tokens.get(node)
     prompt, config = split_rendered_prompt(cfg)
+    call = NodeCall.model_validate(config)
     return CellSpan(
         node=node,
-        model=(usage.model if usage else None) or cfg.get("model"),
-        provider=(usage.provider if usage else None) or cfg.get("provider"),
+        model=(usage.model if usage else None) or call.model,
+        provider=(usage.provider if usage else None) or call.provider,
         input=interpolate_prompt(prompt, variables) if isinstance(prompt, str) else None,
         config=config,
         outputs={k: recorded[k] for k in output_keys if k in recorded},

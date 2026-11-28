@@ -542,9 +542,6 @@ runs, the second consuming the first. Params are one fold (`ParamLayers`); an op
 dataset file is a partial laid on its chain (`dataset_access.py::definition_chain`), and the overlay is the
 sole route for a backend tunable.
 
-**Unexamined:** `config_map.py`, `pipeline_responses.py`, `domain/pipeline_parsing.py`,
-`domain/pipeline_schema.py`, `campaign_config.py`
-
 - **Params are not one fold** (w10-survey): `pipeline_resolve.py::bind_resolution` lays starting prompts
   through `pipeline_resolve.py::_apply_starting_prompts` after `ParamLayers.fold`, and
   `fold_output_contract` is a second post-fold at `pipeline_resolve.py::resolved_output_schemas`,
@@ -554,55 +551,57 @@ sole route for a backend tunable.
   block's per-key merge are `ParamLayer`s or `CAMPAIGN_RULE`, so params are final once folded. **Rides
   with:** area 07's chain. **Re-test:** `git grep -c "fold_output_contract(" -- promptpotter` is 1 (the def;
   4 now) and `git grep -c "_folded_scoring" -- promptpotter` is 0 (2 now).
-- **The second seam re-resolves the dataset by name** (w10-survey): `pipeline_resolve.py` calls
-  `resolve_dataset(` five times (`_draft_dataset`, `_draft_local`, `draft_backend`, `draft_layers`,
-  `resolve_pipeline_for_dataset`) and `datasets/startability.py` four more, so one request resolves one
-  dataset several times instead of consuming the first seam's `ResolvedDataset`. Root: one resolved dataset
-  per request, passed in. **Rides with:** **A dataset read is a third resolution**. **Re-test:**
-  `git grep -c "resolve_dataset(" -- promptpotter/application/pipeline_resolve.py` is at most 1 (5 now).
-- **A definition that cannot be read becomes "no extra needed"** (w10-survey):
-  `datasets/startability.py::_connector` turns a `DEFINITION_READ_ERRORS` fault into `None`, so
-  `dataset_extra` reads it as "needs none" and `offer_connectors` drops the dataset. Root: an unreadable
-  definition is `StartBlock.UNREADABLE` or raises. `datasets/loaders.py::_bank` also keeps a source default
-  in code (`src.get("shuffled", True)`), which belongs in the dataset file or `defaults.yaml`. **Re-test:**
-  `git grep -c "except DEFINITION_READ_ERRORS" -- promptpotter/application` is 1 (2 now) and
-  `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py` is 0.
-- **A check-in cannot switch an upload between its connector's pipelines**: a draft edit has no chain
-  key, so a mode outside the held chain is disabled (`PipelineSetupSection.tsx`), and
-  `draft_build.py::_modes` ignores a definition's own `pipelines`. Action: a mode pick sets the draft's
-  `pipelines.default`, its definition half. **Re-test:** pick TermNorm's `default` on an upload; the
-  draft's `active_steps` is that chain.
+- **A source default lives in code** (w10-survey): `datasets/loaders.py::_bank` keeps
+  `src.get("shuffled", True)`, which belongs in the dataset file or `defaults.yaml`. **Rides with:** area
+  07's chain. **Re-test:** `git grep -c '"shuffled", True' -- promptpotter/application/datasets/loaders.py`
+  is 0 (1 now).
+- **A resolved dataset is resolved again past the seam** (w11-config): `datasets/ingest.py::draft_from_dataset`
+  resolves the dataset, then `datasets/startability.py::checkin_bank` resolves it again by name;
+  `datasets/loaders.py::resolve_bank`, `held_bank` and `fetch_bank` each read the definition the
+  `ResolvedDataset` already carries; `UploadBasis.connector` is a `str` that `pipeline_resolve.py::basis_source`
+  looks up again. Root: the seam's answer (`ResolvedDataset`, `DraftSource`) is handed down, never a name.
+  **Rides with:** area 07's chain. **Re-test:** `git grep -c "checkin_bank(" --
+  promptpotter/application/datasets/ingest.py` is 0 (1 now).
+- **A knob's provenance is diffed, not read off the fold** (w11-config): `config_map.py::_knob_rows` calls a
+  bench knob `default` where its value equals `defaults.yaml`'s, so a campaign that states the default reads as
+  unstated; `campaign_config.py::OptimizerChoice.arm_gate` keeps a code default (`"off"`) the
+  `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
+  map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
+  **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
+- **A refusal is swallowed into nothing** (w11-config): `datasets/origin_resolve.py::raised_commands` drops a
+  finding whose patch fails `EditDraftPatch` with `continue`, and `datasets/harbor_panel.py::write_task_panel`
+  drops a row with no documents; neither files what it dropped, and `harbor_panel.py::_panel_yaml` hardcodes
+  `terminus-2` / `docker` the dataset file should name. Root: a dropped finding or row is a reported
+  refusal; the panel's agent and environment are the dataset's. **Rides with:** area 07's chain.
+  **Re-test:** `git grep -c "except ValidationError" -- promptpotter/application/datasets/origin_resolve.py`
+  is 0 (1 now) and `git grep -c "name: terminus-2" -- promptpotter/application/datasets/harbor_panel.py` is
+  0 (1 now).
+- **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
+  `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
+  connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
+  definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
+  `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
   patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
   before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
-  (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
-  closes the pipeline-switch row. **Rides with:** cfg.
-- **The pipeline carrier is typed only at its door**: `PipelineNode.current_config` is a `NodeCall`
-  now, but two laid dumps still read the model by string: `measurement_log.py::_span` reads a cell's
-  `node_configs` (the archive address, `measurement_archive.py::config_key`'s `list[tuple[str, dict]]`)
-  and `injections/wounds.py::_format_runtime_failure_group` reads `RuntimeFailure.observed_config`,
-  laid as a dict by `scoring/arm_states.py`. Action: the archive address and `observed_config` carry
-  a `NodeCall` per node, each hash reading its laid dump. **Re-test:**
-  `git grep -cE "cfg\.get\(\"(model|provider)\"" -- promptpotter` is 0.
-- **A campaign names its connector, and five readers look it up again** (w9-payer):
-  `Campaign.connector` / `Environment.connector` are `str`, so `wiring.py:258`,
-  `admission.py::campaign_sends`, `mint_and_start.py:123`, `mask/load.py:206` and
-  `pipeline_resolve.py:1043` each call `CONNECTORS.get`. Root: the campaign domain
-  (`domain/campaign.py`) holds the `Connector`. **Re-test:**
-  `git grep -c "CONNECTORS.get(.*campaign.connector)" -- promptpotter` is 1.
-- **A dataset read is a third resolution** (w7-res3, w7-rows6):
-  `pipeline_resolve.py::resolve_pipeline_for_dataset` parses and narrows a schema beside `RunResolution`.
-  Root: one resolution, the dataset read a projection of it. **Rides with:** area 07's chain (one typed
-  node document). **Re-test:** the function is gone or reads `RunResolution`.
-- **A call's plain serializer drops `include=`** (valid-3, 11-14): `promptpotter/domain/pipeline_params.py::NodeCall` —
-  `_dump` is a plain model serializer taking no serialization info, so `model_dump(include=...)` returns
-  every key; `promptpotter/domain/search_point.py::prompt_edits` read by attribute as a workaround
-  (items 631) — the model dump honours `include`/`exclude` like every other model, so no caller reads
-  by attribute to dodge it — **Rides with:** `area 07's chain` — **Re-test:** `NodeCall(...).model_dump(include={"model"})`
-  returns only `model`.
+  (6 modules define one: `potter/records.py`, `pipeline_overlay`, `pipeline_params`, `pipeline_parsing`,
+  `pipeline_schema`, `search_point`; 22 name `NodeCall`, 31 carry the bag). The untyped edges show it:
+  `datasets/prompts.py::pipeline_node_overlay` skips a non-dict node or config silently,
+  `pipeline_parsing.py::_registered` answers `None` for a family no registry holds,
+  `ManifestNode.optimizer` is a `dict[str, Any]`, `pipeline_schema.py::node_config_schema` takes optional
+  `values` / `sources` that act as fallbacks, and `layer_fold.py::_laid` ignores a non-list SUBSET value.
+  Action: one typed node document with knobs a view on it; the steer a named layer.
+  **Rides with:** area 07's chain.
+- **The pipeline carrier is typed only at its door**: the archive address
+  (`measurement_archive.py::config_key`'s `list[tuple[str, dict]]`) and `RuntimeFailure.observed_config`
+  (laid as a dict by `scoring/arm_states.py`; an abort's holds the whole document) stay dicts, typed at
+  their reads (`RuntimeFailure.observed_call`, `measurement_log.py::_span`). Action: each carries a
+  `NodeCall` per node, each hash reading its laid dump. **Rides with:** area 02's chain (the archive),
+  area 04's (`observed_config`). **Re-test:** `git grep -c "NodeCall.model_validate(" --
+  promptpotter/application/scoring/measurement_log.py promptpotter/domain/wounds.py` is 0 (2 now).
 - **A cap's help is its developer docstring** (w11-walk, 11-27): check-in → Run bounds renders each
   field's served `description`: "Halt at fitness: Stop target_hit once … None → no such stop", each name in RST double backticks
   (`promptpotter/domain/campaign_config.py`) and, under "Wall-clock cap (minutes)", "Seconds ONE launch

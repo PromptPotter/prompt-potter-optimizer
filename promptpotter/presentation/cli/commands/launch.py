@@ -16,7 +16,6 @@ from collections.abc import Callable, Coroutine, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from promptpotter import connectors
 from promptpotter.application.account import local_stores
 from promptpotter.application.commands import (
     draft_editing,
@@ -43,6 +42,7 @@ from promptpotter.application.path_patch import path_patch
 from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.application.views.render.phase import acts_line, render_completion
 from promptpotter.config.logging import setup_logging
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.checkin_draft import OriginResolution
 from promptpotter.domain.command_kinds import (
@@ -122,12 +122,12 @@ def log_startup_summary(
     )
 
 
-def backend_reach_line(connector: str, backend_url: str) -> str:
+def backend_reach_line(connector: Connector, backend_url: str) -> str:
     """Said of a held run, whose admission probed the backend live; an ``in_process`` connector was
     never contacted, so no URL is claimed for it."""
     reached = BACKEND_REACHABILITY_INFO["live"].label
-    if connectors.CONNECTORS.get(connector).execution == "in_process":
-        return f"{reached} in-process ({connector}) — no wire"
+    if connector.execution == "in_process":
+        return f"{reached} in-process ({connector.name}) — no wire"
     return f"{reached} at {backend_url}"
 
 
@@ -606,7 +606,7 @@ async def _run_origin(held: HeldRun) -> CommandResult:
     dataset_name = session.dataset_name or "?"
     _checkin_line(
         "backend",
-        backend_reach_line(session.backend_client.connector.name, session.backend_client.base_url),
+        backend_reach_line(session.backend_client.connector, session.backend_client.base_url),
     )
     _checkin_line("dataset", f"{dataset_name} ({len(session.bank.samples)} queries)")
     _checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))

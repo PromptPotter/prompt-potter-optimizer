@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import Field
 
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.strict_model import FrozenModel
 
 
@@ -165,6 +166,11 @@ class RuntimeFailure(FrozenModel):
             "stamped ``OPERATOR`` so it escalates instead of churning in-loop."
         ),
     )
+
+    @property
+    def observed_call(self) -> NodeCall:
+        """The failing node's call, typed; an abort captures the whole document, no node's call."""
+        return NodeCall() if self.node is None else NodeCall.model_validate(self.observed_config)
 
 
 _NON_FATAL_REASONS = frozenset({ValidationReason.HALLUCINATED_NODE})

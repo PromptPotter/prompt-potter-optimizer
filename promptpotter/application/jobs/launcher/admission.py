@@ -7,7 +7,6 @@ from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, contextma
 from functools import cmp_to_key
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
-from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.jobs.launcher.opening import (
     Opening,
@@ -31,7 +30,11 @@ from promptpotter.application.jobs.shares import (
     move_campaign_money,
     share_campaign_ceiling,
 )
-from promptpotter.application.pipeline_resolve import cycle_config, experiment_outside_run
+from promptpotter.application.pipeline_resolve import (
+    campaign_connector,
+    cycle_config,
+    experiment_outside_run,
+)
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.bench import CampaignRefusal
@@ -702,6 +705,4 @@ def _open_pass(
 
 def campaign_sends(stores: Stores, at: CampaignCycle) -> tuple[Send, ...]:
     """What a run or pass on *at* sends, under its resolved config and connector."""
-    return sends_on(
-        stores, cycle_config(stores, at).config, connectors.CONNECTORS.get(at.campaign.connector)
-    )
+    return sends_on(stores, cycle_config(stores, at).config, campaign_connector(at.campaign))

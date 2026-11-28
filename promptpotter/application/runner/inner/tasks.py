@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field, PrivateAttr, model_validator
 
-from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.optimizer_contract import BehaviourKeys
 from promptpotter.application.optimizer_manifest import (
@@ -266,10 +265,6 @@ class ResolvedInnerPanel(FrozenModel):
             }
             for t in self.inner_panel.tasks
         ]
-
-
-def is_self_optimization(connector: str) -> bool:
-    return connectors.CONNECTORS.get(connector).self_optimization
 
 
 INNER_ARM_GATE: ArmGateMode = "off"

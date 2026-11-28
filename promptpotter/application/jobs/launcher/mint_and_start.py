@@ -6,7 +6,6 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
     fork_config,
@@ -25,7 +24,12 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
+from promptpotter.application.pipeline_resolve import (
+    campaign_connector,
+    cycle_config,
+    laid_config,
+    laid_session,
+)
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.campaign import Campaign, CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
@@ -120,7 +124,7 @@ class LaunchRequest:
     def connector(self, stores: Stores) -> Connector:
         """Its campaign's, as minted; else its definition's."""
         if self.campaign is not None:
-            return connectors.CONNECTORS.get(self.campaign.connector)
+            return campaign_connector(self.campaign)
         return runnable_definition(resolve_dataset(stores, self.dataset_name)).owner
 
     def endpoint(self, stores: Stores) -> str | None:

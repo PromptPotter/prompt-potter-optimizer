@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import Field
@@ -19,7 +19,7 @@ from promptpotter.domain.checkin_draft import DraftBasis, DraftFile
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
-from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
+from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, PipelineSchema
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
@@ -35,19 +35,30 @@ UPLOAD_DEFINITION_KEYS = frozenset({"pipeline_overlay"})
 node overlay), never its campaign's."""
 
 
-def upload_pipeline_json(connector: Connector, overlay: Mapping[str, NodeCall]) -> dict[str, Any]:
-    """An upload's ``dataset.yaml::pipeline``: its *connector*'s upload chain, *overlay* (per
-    node, its params) laid on as each node's ``config``. The one definition its Start writes, the
-    sole route for a backend tunable (`assets/datasets/CLAUDE.md`); a read lays the node templates."""
+def upload_pipeline_json(
+    connector: Connector, chain: Sequence[str] | None, overlay: Mapping[str, NodeCall]
+) -> dict[str, Any]:
+    """An upload's ``dataset.yaml::pipeline``: *chain* (``None``: its *connector*'s upload chain),
+    *overlay* (per node, its params) laid on as each node's ``config``. The one definition its
+    Start writes, the sole route for a backend tunable (`assets/datasets/CLAUDE.md`); a read lays
+    the node templates."""
     uploads = connector.uploads
     assert uploads is not None, "`draft_patch.py` and ingest name only a connector serving uploads"
+    steps = list(uploads.chain if chain is None else chain)
     declared = {node: {"config": call.laid_keys()} for node, call in overlay.items()}
     return {
         "connector": connector.name,
-        "nodes": merge_node_blocks({node: {} for node in uploads.chain}, declared),
-        "pipelines": {DEFAULT_PIPELINE: list(uploads.chain)},
+        "nodes": merge_node_blocks({node: {} for node in steps}, declared),
+        "pipelines": {DEFAULT_PIPELINE: steps},
         "available_models": list(uploads.available_models),
     }
+
+
+def mode_exclusions(held: PipelineSchema, steps: Sequence[str]) -> list[str] | None:
+    """What a reused dataset excludes to run *steps* off the chain it *held*; ``None`` where that
+    chain does not hold them, so no exclusion runs them."""
+    chain = held.active_steps
+    return [n for n in chain if n not in steps] if set(steps) <= set(chain) else None
 
 
 class DraftCriterion(StrictModel):

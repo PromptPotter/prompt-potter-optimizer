@@ -74,7 +74,7 @@ from promptpotter.domain.campaign_config import (
     LaidSpan,
     node_config_stamps,
 )
-from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Layer, fold_layers
@@ -343,51 +343,71 @@ async def served_pipeline(
     return ServedPipeline(connector, endpoint, served)
 
 
-def _draft_dataset(stores: Stores, draft: DraftFile) -> ResolvedDataset | None:
-    match draft.basis:
-        case UploadBasis():
-            return None
+def campaign_connector(campaign: Campaign) -> Connector:
+    """The connector *campaign* named at its mint, the one lookup of it."""
+    return connectors.CONNECTORS.get(campaign.connector)
+
+
+@dataclass(frozen=True)
+class DraftSource:
+    """The first seam's answer for one request: the dataset a basis names, resolved once (``None``
+    for an upload), the backend its Start runs, the edit laid over its basis, and an upload's
+    picked chain (`UploadBasis.chain`)."""
+
+    dataset: ResolvedDataset | None
+    connector: Connector
+    endpoint: str | None
+    edit: Mapping[str, Any]
+    chain: tuple[str, ...] | None = None
+
+    @property
+    def layers(self) -> ConfigLayers:
+        """The edit over its basis: an upload's `defaults.yaml` campaign, its definition's half
+        (`UPLOAD_DEFINITION_KEYS`) left to `local`; a reused dataset's own block."""
+        if self.dataset is None:
+            edit = {k: v for k, v in self.edit.items() if k not in UPLOAD_DEFINITION_KEYS}
+            return ConfigLayers(campaign_defaults(), edit)
+        return ConfigLayers(dataset_campaign_block(self.dataset), self.edit)
+
+    @property
+    def local(self) -> dict[str, Any]:
+        """What run init lays over the served pipeline once Start lands: an upload's definition,
+        the edit's definition half laid in, which its Start writes; a reused dataset's own file."""
+        if self.dataset is None:
+            half = ConfigLayers(campaign_defaults(), self.edit).config()
+            return upload_pipeline_json(self.connector, self.chain, half.pipeline_overlay)
+        return runnable_definition(self.dataset).pipeline
+
+
+def basis_source(stores: Stores, basis: DraftBasis, edit: Mapping[str, Any]) -> DraftSource:
+    """An upload runs its pick on its connector's one endpoint; a dataset the pair its
+    definition names."""
+    match basis:
+        case UploadBasis(connector=name, chain=chain):
+            return DraftSource(None, connectors.CONNECTORS.get(name), None, edit, chain)
         case DatasetBasis(dataset=name):
-            return resolve_dataset(stores, name)
+            dataset = resolve_dataset(stores, name)
+            definition = runnable_definition(dataset)
+            return DraftSource(dataset, definition.owner, definition.endpoint, edit)
         case _:
-            assert_never(draft.basis)
+            assert_never(basis)
 
 
-def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
-    """What run init lays over the served pipeline once Start lands: an upload's definition, the
-    draft's definition half (`UPLOAD_DEFINITION_KEYS`) laid in, which its Start writes; a reused
-    dataset's own file."""
-    match draft.basis:
-        case UploadBasis():
-            half = ConfigLayers(campaign_defaults(), draft.config).config()
-            return upload_pipeline_json(draft_backend(stores, draft)[0], half.pipeline_overlay)
-        case DatasetBasis(dataset=name):
-            return runnable_definition(resolve_dataset(stores, name)).pipeline
-        case _:
-            assert_never(draft.basis)
+def draft_source(stores: Stores, draft: DraftFile) -> DraftSource:
+    return basis_source(stores, draft.basis, draft.config)
 
 
-def draft_backend(stores: Stores, draft: DraftFile) -> tuple[Connector, str | None]:
-    """The connector and endpoint the draft's Start runs: an upload's pick and its connector's one
-    endpoint, else the pair its definition names."""
-    match draft.basis:
-        case UploadBasis(connector=connector):
-            return connectors.CONNECTORS.get(connector), None
-        case DatasetBasis(dataset=name):
-            definition = runnable_definition(resolve_dataset(stores, name))
-            return definition.owner, definition.endpoint
-        case _:
-            assert_never(draft.basis)
+async def source_served(stores: Stores, source: DraftSource) -> ServedPipeline:
+    return await served_pipeline(
+        stores,
+        source.connector,
+        endpoint=source.endpoint,
+        experiment=experiment_outside_run(stores, source.dataset),
+    )
 
 
 async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
-    connector, endpoint = draft_backend(stores, draft)
-    return await served_pipeline(
-        stores,
-        connector,
-        endpoint=endpoint,
-        experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
-    )
+    return await source_served(stores, draft_source(stores, draft))
 
 
 def experiment_outside_run(stores: Stores, dataset: ResolvedDataset | None) -> BaseModel | None:
@@ -593,27 +613,13 @@ def laid_session(session: Session, layers: ConfigLayers) -> tuple[Session, Campa
     return replace(session, pipeline_read=read), laid.config
 
 
-def draft_layers(stores: Stores, draft: DraftFile) -> ConfigLayers:
-    """``draft.config`` over its basis: an upload's `defaults.yaml` campaign, its definition's half
-    (`UPLOAD_DEFINITION_KEYS`) left to `_draft_local`; a reused dataset's own block."""
-    match draft.basis:
-        case UploadBasis():
-            edit = {k: v for k, v in draft.config.items() if k not in UPLOAD_DEFINITION_KEYS}
-            return ConfigLayers(campaign_defaults(), edit)
-        case DatasetBasis(dataset=name):
-            return ConfigLayers(dataset_campaign_block(resolve_dataset(stores, name)), draft.config)
-        case _:
-            assert_never(draft.basis)
+def _source_config(stores: Stores, source: DraftSource) -> CampaignConfig:
+    """The draft's config, bound to no node: what its Start admits and sends reads no pipeline."""
+    return laid_config(stores, source.layers, connector=source.connector, schema=None).config
 
 
 def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
-    """The draft's config, bound to no node: what its Start admits and sends reads no pipeline."""
-    return laid_config(
-        stores,
-        draft_layers(stores, draft),
-        connector=draft_backend(stores, draft)[0],
-        schema=None,
-    ).config
+    return _source_config(stores, draft_source(stores, draft))
 
 
 def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
@@ -622,7 +628,8 @@ def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each."""
-    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0])
+    source = draft_source(stores, draft)
+    return sends_on(stores, _source_config(stores, source), source.connector)
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
@@ -683,13 +690,17 @@ class Resolution:
 
 
 @dataclass(frozen=True)
-class SchemaResolution:
-    """A pipeline as its config narrows it, no cycle, no bank: a dataset read's (`outside_run`), every
-    run's base. *menu_at*: where it reads today's menu; a read off records reads none."""
+class RunResolution(Resolution):
+    """Its grading, params and optimizer as the ONE fold (`ParamLayers`) lays its line over *read*:
+    its mint's record (`resolved`), a launch's own, which `Session.bound` lays the mint's layers
+    into (`run_resolution`), or a read before any mint (`DraftPipeline`). A ledger that lost its
+    read still grades: only its pipeline refuses. *menu_at*: where it reads today's menu; a read
+    off records reads none."""
 
-    config: CampaignConfig
     recorded: PipelineRead | FileUnreadableError
     menu_at: Path | None
+    cycle: CycleConfig
+    workspace: Path
 
     @property
     def read(self) -> PipelineRead:
@@ -710,16 +721,6 @@ class SchemaResolution:
             narrowing=self.config.optimizer_narrowing,
             workspace=self.menu_at,
         )
-
-
-@dataclass(frozen=True)
-class RunResolution(SchemaResolution, Resolution):
-    """Its grading, params and optimizer as the ONE fold (`ParamLayers`) lays its line over *read*:
-    its mint's record (`resolved`), or a launch's own, which `Session.bound` lays the mint's layers
-    into (`run_resolution`). A ledger that lost its read still grades: only its pipeline refuses."""
-
-    cycle: CycleConfig
-    workspace: Path
 
     @functools.cached_property
     def layers(self) -> ParamLayers:
@@ -826,10 +827,16 @@ class DraftPipeline(RunResolution):
         return draft_criterion(self.config.scoring, campaign_terms(self.connector))
 
 
-def outside_run(
-    stores: Stores, local: Mapping[str, Any], config_layers: ConfigLayers, served: ServedPipeline
-) -> SchemaResolution:
-    """*config_layers* over *local* as a mint would lay them, opening no session."""
+def merge_outside_run(
+    stores: Stores,
+    local: dict[str, Any],
+    config_layers: ConfigLayers,
+    served: ServedPipeline,
+    *,
+    verifier_graded: bool,
+) -> DraftPipeline:
+    """*config_layers* over *local* as a mint would lay them, graded under *verifier_graded*,
+    opening no session."""
     templated = with_node_templates(local)
     declaration = served.over(templated)
     declared = parse_pipeline_response(declaration)
@@ -841,47 +848,35 @@ def outside_run(
         free_tier_overlay=free_tier_overlay(laid.config, declared, fence),
         knob_layers=laid.knob_layers,
     )
-    return SchemaResolution(laid.config, read, menu_at=None)
-
-
-def merge_outside_run(
-    stores: Stores,
-    local: dict[str, Any],
-    config_layers: ConfigLayers,
-    served: ServedPipeline,
-    *,
-    verifier_graded: bool,
-) -> DraftPipeline:
-    """`outside_run`, graded under *verifier_graded*, as a check-in reads it."""
-    base = outside_run(stores, local, config_layers, served)
     return DraftPipeline(
-        base.config,
+        laid.config,
         verifier_graded,
-        recorded=base.recorded,
+        recorded=read,
         menu_at=None,
-        cycle=CycleConfig.laid(base.config, ()),
+        cycle=CycleConfig.laid(laid.config, ()),
         workspace=stores.base_dir,
         config_layers=config_layers,
         local=local,
         connector=served.connector,
-        free=_task_fenced(free_fence(stores, served.connector)),
+        free=_task_fenced(fence),
     )
 
 
-def _draft_pipeline(
-    stores: Stores, draft: DraftFile, served: ServedPipeline, bank: Bank | None
+def _source_pipeline(
+    stores: Stores, source: DraftSource, served: ServedPipeline, bank: Bank | None
 ) -> DraftPipeline:
     return merge_outside_run(
         stores,
-        _draft_local(stores, draft),
-        draft_layers(stores, draft),
+        source.local,
+        source.layers,
         served,
         verifier_graded=bank is not None and bank.verifier_graded,
     )
 
 
 def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
-    return _draft_pipeline(stores, draft, served, draft_bank(stores, draft))
+    source = draft_source(stores, draft)
+    return _source_pipeline(stores, source, served, draft_bank(stores, draft, source.dataset))
 
 
 def _task_fenced(fence: FreeFence | None) -> bool:
@@ -1005,8 +1000,9 @@ def _response(
 def resolve_pipeline_for_draft(
     stores: Stores, draft: DraftFile, served: ServedPipeline
 ) -> CampaignPipelineResponse:
-    bank = draft_bank(stores, draft)
-    pipeline = _draft_pipeline(stores, draft, served, bank)
+    source = draft_source(stores, draft)
+    bank = draft_bank(stores, draft, source.dataset)
+    pipeline = _source_pipeline(stores, source, served, bank)
     return _response(
         stores,
         pipeline,
@@ -1040,7 +1036,7 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=on.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=connectors.CONNECTORS.get(campaign.connector),
+        connector=campaign_connector(campaign),
         mint=_cycle_mint(stores, on.hop, res),
     )
 
@@ -1107,20 +1103,15 @@ def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
 async def resolve_pipeline_for_dataset(
     stores: Stores, dataset_name: str, *, above: frozenset[str] = frozenset()
 ) -> DatasetPipelineResponse:
-    """*above*: the datasets enclosing this one on its branch, which it may not nest."""
-    dataset = resolve_dataset(stores, dataset_name)
-    definition = runnable_definition(dataset)
-    served = await served_pipeline(
-        stores,
-        definition.owner,
-        endpoint=definition.endpoint,
-        experiment=experiment_outside_run(stores, dataset),
-    )
-    res = outside_run(stores, definition.pipeline, ConfigLayers.of(dataset, None), served)
+    """A reused dataset's draft before any edit, as its check-in would resolve it; *above*: the
+    datasets enclosing this one on its branch, which it may not nest."""
+    source = basis_source(stores, DatasetBasis(dataset=dataset_name), {})
+    served = await source_served(stores, source)
+    res = _source_pipeline(stores, source, served, bank=None)
     # Declared, valueless: nothing steers it.
     rows = res.schema.node_config_schema(steer_bound=False)
     return DatasetPipelineResponse(
-        connector=definition.connector,
+        connector=source.connector.name,
         view=res.schema.view,
         node_config_schema=rows,
         reach=reach_map(rows),

@@ -109,6 +109,13 @@ class EditDraftPatch(StrictModel):
         default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
     )
     connector: str | None = Field(default=None, min_length=1, max_length=64)
+    mode: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="A pipeline the draft's connector declares (`modes`): an upload runs its "
+        "steps; a reused dataset excludes the nodes its chain holds beyond them.",
+    )
     # A blank task is no task: the draft holds none until one is set.
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
     config: ConfigEdit | None = Field(

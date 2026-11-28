@@ -6483,6 +6483,20 @@
             ],
             "title": "Connector"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A pipeline the draft's connector declares (`modes`): an upload runs its steps; a reused dataset excludes the nodes its chain holds beyond them.",
+            "title": "Mode"
+          },
           "node_narrowing": {
             "anyOf": [
               {
@@ -13957,24 +13971,14 @@
         "additionalProperties": false,
         "description": "One pipeline the connector declares, as a check-in's Mode offers it.",
         "properties": {
-          "exclude_nodes": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What picking it sends as `config.exclude_nodes`; null where the draft's chain does not hold its steps, so no exclusion runs it.",
-            "title": "Exclude Nodes"
-          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "pickable": {
+            "description": "Whether `EditDraftPatch.mode` takes it: always on an upload; on a reused dataset, where its chain holds the steps.",
+            "title": "Pickable",
+            "type": "boolean"
           },
           "steps": {
             "items": {
@@ -13987,7 +13991,7 @@
         "required": [
           "name",
           "steps",
-          "exclude_nodes"
+          "pickable"
         ],
         "title": "PipelineMode",
         "type": "object"
