@@ -4752,7 +4752,7 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
     async def raising(_args: argparse.Namespace) -> Any:
         raise raised.value
 
-    monkeypatch.setattr(cli_main, "_handler", lambda _verb: raising)
+    monkeypatch.setattr(cli_main, "verb_handler", lambda _verb: raising)
     monkeypatch.setattr(sys, "argv", ["promptpotter", "--json", "reindex"])
     with pytest.raises(SystemExit):
         # The terminal runs its own loop, so off this test's.

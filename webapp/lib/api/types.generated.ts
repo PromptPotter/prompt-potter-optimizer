@@ -5179,7 +5179,7 @@ export interface MintedToken {
 export interface TokenEntry {
   id: string;
   name: string;
-  /** The `/grant` names of what it may command. */
+  /** The `grant-delegation` names of what it may command. */
   scopes: string[];
   created_at: string;
   revoked_at: string | null;
@@ -5396,7 +5396,7 @@ export type ListApiTokensPayload = Record<string, never>;
  * command; its text is served by this answer alone. */
 export interface MintApiTokenPayload {
   name: string;
-  /** The `/grant` names it may command; reads need none. */
+  /** The `grant-delegation` names it may command; reads need none. */
   scopes: string[];
 }
 
@@ -5831,7 +5831,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "b234071abdb64483";
+export const SERVED_CONTRACT = "5f1931c1ae6330cd";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {
@@ -6160,6 +6160,7 @@ export interface ArmEndInfo {
 export interface ArchiveModeInfo {
   label: string;
   sentence: string;
+  irreversible: boolean;
 }
 
 export interface BackendReachabilityInfo {
@@ -6543,10 +6544,10 @@ export const VERIFY_WORDS: Record<'saturated', string> = {
 
 // Mirror of domain/command_kinds.py::ARCHIVE_MODE_INFO, in display order.
 export const ARCHIVE_MODE_INFO: Record<ArchiveMode, ArchiveModeInfo> = {
-  "compact": { label: "Compact", sentence: "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay." },
-  "restore": { label: "Restore", sentence: "Puts every moved field back and drops the compressed copy." },
-  "purge-cold": { label: "Purge", sentence: "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back." },
-  "reclaim": { label: "Reclaim", sentence: "Deletes every answer one dataset measured, and names the runs that lose them. Nothing puts them back." },
+  "compact": { label: "Compact", sentence: "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay.", irreversible: false },
+  "restore": { label: "Restore", sentence: "Puts every moved field back and drops the compressed copy.", irreversible: false },
+  "purge-cold": { label: "Purge", sentence: "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.", irreversible: true },
+  "reclaim": { label: "Reclaim", sentence: "Deletes every answer one dataset measured, and names the runs that lose them. Nothing puts them back.", irreversible: true },
 };
 
 // Mirror of domain/connector.py::BACKEND_REACHABILITY_INFO, in display order.

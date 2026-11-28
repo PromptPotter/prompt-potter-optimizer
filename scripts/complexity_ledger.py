@@ -425,11 +425,14 @@ BASELINE = {
     # the free tier lays its first task model where a node's own is off it (`free_tier.py`); +28:
     # a cycle's row reads its cut sends off the charge book (`account_spend.py::cycle_unreported`)
     # and an unbilled series is said (`served_dashboard.py::SpendByRound.empty`).
-    "package_lines": 114477,
+    # w11-cli (−59): the maintenance renderers leave the CLI for `views/render/maintenance.py`, and
+    # the admin bot relays CLI verbs on the CLI grammar instead of its own verb table.
+    "package_lines": 114418,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
-    "model_copy_updates": 156,
+    # Ratcheted to the measured 139 at w11-cli's landing (the count wave 11 left).
+    "model_copy_updates": 139,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
@@ -451,7 +454,9 @@ BASELINE = {
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     # w10-seal (+1): `BOX_KEY_FILE`, the box key's path off the data root (the unit's credential).
-    "settings_env": 40,
+    # Ratcheted to the measured 30 at w11-cli's landing: w11-connectors3 moved each connector's
+    # tunables out of `Settings` into its own `EnvBlock`.
+    "settings_env": 30,
     # Parameters annotated `Any`.
     "any_params": 34,
     # `dict[str, Any]` maps declared in `domain/`.
@@ -585,9 +590,12 @@ def _served_properties() -> list[str]:
 
 # Where a change lands by hand: the package, the scripts and the webapp's production source. A test, a prose doc and a generated file are no such site.
 _WEBAPP_SOURCE = ("app", "components", "lib")
-# The terminal's readers: the CLI, and the one view builder that renders only its lines.
+# The terminal's readers: the CLI, and the view builders that render only its lines.
 _CLI_ROOT = _PACKAGE_ROOT / "presentation" / "cli"
-_TERMINAL_VIEW = _PACKAGE_ROOT / "application" / "views" / "evidence.py"
+_TERMINAL_VIEWS = (
+    _PACKAGE_ROOT / "application" / "views" / "evidence.py",
+    _PACKAGE_ROOT / "application" / "views" / "render" / "maintenance.py",
+)
 
 
 def _sites() -> dict[Path, str]:
@@ -773,7 +781,7 @@ def _read_names(sites: dict[Path, str]) -> set[str]:
                 for entry in "".join(groups).split(","):
                     if key := re.match(r"\s*(\w+)", entry):
                         read.add(key[1])
-        elif _CLI_ROOT in path.parents or path == _TERMINAL_VIEW:
+        elif _CLI_ROOT in path.parents or path in _TERMINAL_VIEWS:
             code = text
         else:
             continue

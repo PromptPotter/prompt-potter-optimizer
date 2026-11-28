@@ -68,6 +68,7 @@ from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.infrastructure.store.read_model import Signature, file_sig
 from promptpotter.shared.errors import (
     FileKind,
+    FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
@@ -1111,6 +1112,19 @@ def _checkin_at(path: Path, _sig: Signature | None) -> CheckinManifest:
 def checkin_manifest() -> CheckinManifest:
     path = checkin_manifest_path()
     return _checkin_at(path, file_sig(path))
+
+
+def checkin_template() -> OptimizerPromptTemplate:
+    """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
+    checkin = checkin_manifest()
+    template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
+    if unknown := template.unknown_slots({"consultation_instruction"}):
+        raise FileUnreadableError(
+            FileKind.OPTIMIZER_PROMPT,
+            path=str(checkin_manifest_path()),
+            reason=unknown_slots_said(CHECKIN_NODE, unknown),
+        )
+    return template
 
 
 def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

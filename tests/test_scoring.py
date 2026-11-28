@@ -1985,6 +1985,22 @@ def test_a_ctrl_c_stops_a_pass_by_its_commands_cancel(
     assert not cycle_held(cycle_dir), "the pass kept its cycle"
 
 
+def test_a_refused_ctrl_c_stop_is_said_while_the_run_goes_on(
+    filed_cycle: _Filed, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A cancel of a command never filed is refused; a swallowed one leaves a paid run going unsaid.
+    unfiled = _verify_call(filed_cycle.hop, "never-filed")
+
+    async def _ctrl_c() -> str:
+        with ctrl_c_stops_pass(CommandDispatcher(filed_cycle.stores), unfiled):
+            signal.raise_signal(signal.SIGINT)
+            await asyncio.sleep(0)  # the handler's spawn of the stop lands on the loop
+            await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})
+        return capsys.readouterr().out
+
+    assert asyncio.run(_ctrl_c()).strip(), "a refused Ctrl+C stop said nothing"
+
+
 def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
     monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed, world: World
 ) -> None:

@@ -14,13 +14,11 @@ from promptpotter.application.bench.llm_call import (
     OptimizerResponseModel,
     answer,
 )
-from promptpotter.application.optimizer_manifest import checkin_manifest, running_prompt
-from promptpotter.config.paths import checkin_manifest_path
+from promptpotter.application.optimizer_manifest import checkin_manifest, checkin_template
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.optimizer_template import (
     PROMPT_FIELDS,
-    OptimizerPromptTemplate,
 )
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.search_point import TaskDecomposition
@@ -30,7 +28,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import FileKind, FileUnreadableError, unknown_slots_said
 
 ORIGIN_FIELD_MAX = 600
 
@@ -208,19 +205,6 @@ def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> T
 def checkin_provider() -> str:
     """What a check-in call sends on, which its `quota.py::paid_call` is admitted against."""
     return checkin_manifest().config.provider
-
-
-def checkin_template() -> OptimizerPromptTemplate:
-    """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
-    checkin = checkin_manifest()
-    template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
-    if unknown := template.unknown_slots({"consultation_instruction"}):
-        raise FileUnreadableError(
-            FileKind.OPTIMIZER_PROMPT,
-            path=str(checkin_manifest_path()),
-            reason=unknown_slots_said(CHECKIN_NODE, unknown),
-        )
-    return template
 
 
 async def run_checkin(

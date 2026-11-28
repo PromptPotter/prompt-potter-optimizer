@@ -46,8 +46,7 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
 from promptpotter.infrastructure.identity.accounts import IdentityBundle, build_identity_bundle
 from promptpotter.infrastructure.identity.grants import default_identity_paths
-from promptpotter.infrastructure.outbound import notify_operator
-from promptpotter.infrastructure.producer_lock import minted_producer, this_producer
+from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -68,23 +67,6 @@ from promptpotter.shared.errors import ContentTooLargeError, PotterError, gracef
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-
-def _telegram_shutdown_notice(registry: JobRegistry) -> None:
-    """A clean exit 0 leaves ``Restart=on-failure`` quiet; a SIGKILL or OOM never reaches this hook."""
-    own = minted_producer(registry.jobs_dir)
-    running = [] if own is None else [j for j in registry.list_running() if j.producer_id == own]
-    if running:
-        interrupted = ", ".join(job.what for job in running)
-        notify_operator(
-            f"⚠ {settings.BRAND_SERVICE_NAME} stopped with {len(running)} run(s) in flight: "
-            f"{interrupted}\nResume from the campaign once it is back up.",
-            ring=True,
-        )
-    else:
-        notify_operator(
-            f"{settings.BRAND_SERVICE_NAME} stopped (nothing of its own running).", ring=False
-        )
 
 
 def _open_server(version: str) -> tuple[IdentityBundle, JobRegistry]:
@@ -127,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await sweep_task
-    await asyncio.to_thread(_telegram_shutdown_notice, registry)
+    await asyncio.to_thread(notices.tell_shutdown, registry)
     logger.info("Shutting down %s", settings.BRAND_SERVICE_NAME)
 
 
@@ -288,19 +270,11 @@ class HealthResponse(StrictModel):
 
 @_health.get("/health")
 async def health_check() -> HealthResponse:
-    bundle = await asyncio.to_thread(health.webapp_bundle)
     return HealthResponse(
         status="healthy",
         timestamp=utcnow_iso(),
         version=APP_VERSION,
-        webapp=Said(
-            key=health.WEBAPP_BUNDLE,
-            tone="warn",
-            label="This page is out of date",
-            sub=f"{bundle.said}: {health.REBUILD}.",
-        )
-        if bundle is not None and bundle.state == "broken"
-        else None,
+        webapp=await asyncio.to_thread(health.stale_page),
     )
 
 

@@ -86,7 +86,6 @@ from promptpotter.application.bench.task_context import (
     OriginFinding,
     campaign_framing,
     checkin_output,
-    checkin_template,
     committed_task_context,
 )
 from promptpotter.application.commands import launching, origin_resolving
@@ -169,6 +168,7 @@ from promptpotter.application.optimizer_manifest import (
     base_optimizer_template,
     bench_choice,
     checkin_manifest,
+    checkin_template,
     running_prompt,
     select_optimizer,
 )

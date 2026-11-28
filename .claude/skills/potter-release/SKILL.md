@@ -89,14 +89,14 @@ history stays rewritable until the box has passed.
       once it proves.
 - [ ] A release that wipes run data (a landing's line drops it) warns every account FIRST, before
       `update.sh`, with a bulletin that pops up until each one dismisses it. Its board is a survivor, so
-      the warning outlives the wipe. Send `/bulletin popup <text>` to the admin bot, or on the box
+      the warning outlives the wipe. Send `/post-bulletin --pops-up "<text>"` to the admin bot, or on the box
       `deploy-linux/verb.sh post-bulletin "The next deploy, at <HH:MM> UTC, wipes run data: export what
       you keep." --pops-up`. Either way, `deploy-linux/verb.sh bulletins` there reads it back. Give the accounts the time the text names.
 - [ ] Deploy the branch as `/potter-box` says (`./update.sh release/vX.Y.Z`). Verify: health on 127.0.0.1
       and on the public host, both units active, `offer_faults()` empty for the unit's `DATASET_OFFER`,
       `update.sh`'s `landed: proven N file(s)` line. The operator tests the UI there.
-- [ ] Once the box verifies, post the release note the same way, without `popup` / `--pops-up`, so it
-      waits in the list: `/bulletin vX.Y.Z is live: <the release body's bold intro>`.
+- [ ] Once the box verifies, post the release note the same way, without `--pops-up`, so it
+      waits in the list: `/post-bulletin "vX.Y.Z is live: <the release body's bold intro>"`.
 - [ ] Anything that fails here is fixed on the branch; steps 2 to 4 run again, the gate on the fix's
       delta alone and the desk landing only where the fix moves a shape the landing reads.
 

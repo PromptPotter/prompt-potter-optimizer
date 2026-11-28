@@ -768,12 +768,15 @@ never a copy of history.
 one `Verb` row; every write goes through `CommandDispatcher.dispatch`; everything on stdout is also on disk;
 the served contract is generated and the browser derives nothing; mobile first.
 
-- **The host door's import closure loads the LLM client** (w11-web3 census, 11-28):
-  `application/host_surface.py` imports `bench/task_context.py::checkin_template`, which imports
-  `bench/llm_call.py`, so the stdio host fact in `tests/test_security.py` runs 2.05–2.44 s against the 2 s
-  budget. The template reads only `optimizer_manifest.py`. Root: `checkin_template` moves into
-  `optimizer_manifest.py`, with no lazy import. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -c "bench.task_context" -- promptpotter/application/host_surface.py` is 0.
+- **The host door's import closure loads the LLM client** (w11-web3 census, 11-28; w11-cli, 11-28):
+  `host_surface.py` imports `commands/dispatcher.py`, whose `jobs/launcher/launch.py` →
+  `launcher/checkin.py` → `mint_and_start.py` → `datasets/draft_build.py` → `jobs/mint.py` imports
+  `bench/task_context.py` (`campaign_framing`, `checkin_provider`, `commit_task_framing`,
+  `committed_task_context`), which imports `bench/llm_call.py`; so the stdio host fact in
+  `tests/test_security.py` runs 2.2 s against the 2 s budget (2.4 s before `checkin_template` moved into
+  `optimizer_manifest.py`). Root: the framing `jobs/mint.py` reads lives below `bench/`, beside the
+  manifest it reads. **Rides with:** area 05's chain. **Re-test:**
+  `git grep -c "bench.task_context" -- promptpotter/application/jobs/mint.py` is 0.
 - **A locked act's reason is written in the browser** (w11-web3 census, 11-28):
   `RunLimitsControl.tsx:190` and `AccountPreferencesTab.tsx:34` both spell "not yours to set", because
   `lib/hooks/useFiles.ts::useFiles` answers only a boolean from `filable`. Root: the served filable answer
@@ -784,44 +787,20 @@ the served contract is generated and the browser derives nothing; mobile first.
   remote control, so the panel's render against a served cycle rides RTL tests alone. Root: a walk spec
   opens the remote on a served run and reads its limits. **Rides with:** area 12's chain. **Re-test:**
   `git grep -c "Campaign remote control" -- webapp/e2e/walk` is at least 1.
-- **The CLI's welcome and the archive modes are spelled beside their rows** (w11-web3 census, 11-28):
-  `cli/main.py::main` hand-writes five verbs and their help beside the `VERBS` rows that carry it;
-  `cli/main.py`'s `compact-archive` choices restate `command_kinds.py::ArchiveMode`, and
-  `cli/commands/writes.py::_render` and `ArchiveCompactionControl.tsx`'s `DELETES` each re-spell
-  `("purge-cold", "reclaim")` as the irreversible pair. Root: the welcome draws from `VERBS` (a `Verb` flag
-  names the listed ones), `ArchiveModeInfo` serves `irreversible`, and the choices come from
-  `get_args(ArchiveMode)`. **Rides with:** area 12's chain. **Re-test:**
-  `git grep -cE '"purge-cold",? "reclaim"' -- promptpotter webapp/components` is 1 (4 now).
-- **A refused Ctrl+C pause is swallowed** (w11-web3 census, 11-28): `cli/commands/launch.py`'s
-  `ctrl_c_pauses._pause_each` and `ctrl_c_stops_pass._stop` wrap the dispatch in
-  `contextlib.suppress(PotterError)`, so a refused pause or cancel says nothing while the run goes on;
-  `_ctrl_c.send` in the same file says its refusal. Root: both go through `send`, said with its
-  `next_acts`. **Rides with:** area 12's chain. **Re-test:** `git grep -c "suppress(PotterError)" --
-  promptpotter/presentation/cli/commands/launch.py` is 0 (2 now).
 - **A terminal launch's start-up summary is said on stderr only** (w11-web3 census, 11-28):
   `cli/commands/launch.py::_run_origin` and `_resume` say the reached backend URL, the dataset and its query count,
   the node list and the minted campaign through `_checkin_line` and `log_startup_summary`, a logger on
   stderr; no `readout.log` holds them and no other door says them. Root: the readout's header renders
-  them, and the CLI hands only its line sink. **Rides with:** area 12's chain. **Re-test:**
+  them, and the CLI hands only its line sink. w11-cli: the header's writer is
+  `run_observers.py::_bind_observers`, which builds the `ReadoutProjection` with no backend client and
+  opens it; the backend URL and the node list reach the readout only through that constructor, so the
+  fix rides with the chain owning `run_observers.py`. **Rides with:** area 05's chain. **Re-test:**
   `git grep -cE "_checkin_line\(|log_startup_summary\(" -- promptpotter/presentation/cli/commands/launch.py`
   is 0 (14 now).
-- **The server's adapter words health and shutdown itself** (w11-web3 census, 11-28):
-  `promptpotter/main.py::health_check` builds the stale-bundle `Said` row beside `health.py::WEBAPP_BUNDLE`,
-  and `promptpotter/main.py::_telegram_shutdown_notice` decides which jobs are this producer's and words the notice. Root:
-  `health.py` serves the bundle row and `notices.py` owns the notice. **Rides with:** area 12's chain.
-  **Re-test:** `git grep -cE "This page is out of date|stopped with" -- promptpotter/main.py` is 0.
-- **The admin bot keeps its own verb table, grammar and spend sums** (w11-web3 census, 11-28):
-  `admin_bot.py::handle_command` is a 13-branch if-chain with `_USAGE`, parsing each kind by hand
-  (`_set_coupon` spells unbounded `-` where the CLI spells `unbounded`), and `_render_install_spend`
-  totals and flags the install's spend outside `application/views/`. Root: the bot's commands derive from
-  `CommandKind` rows and their payload spellings as `cli/main.py::command_verb` does, and
-  `jobs/install_spend.py` serves the totals the views render. **Rides with:** area 12's chain.
-  **Re-test:** `git grep -cE "if command (==|in)|def _render" -- promptpotter/presentation/admin_bot.py` is 0.
-- **The maintenance verbs' renderers live in the CLI adapter** (w11-web3 census, 11-28):
-  `cli/commands/writes.py::_render_summary`, `_render_landing`, `_render` and `_render_inventory` format
-  the reset, landing and archive reports in `cli/`, where every renderer is `application/views/`'s. Root:
-  they move to `application/views/render`, and the verbs hand back the text. **Rides with:** area 12's
-  chain. **Re-test:** `git grep -c "def _render" -- promptpotter/presentation/cli` is 0 (4 now).
+- **The admin bot keeps its own spend sums** (w11-web3 census, 11-28): `admin_bot.py::_render_install_spend`
+  totals and flags the install's spend outside `application/views/` (the verb table and grammar now
+  ride the CLI's rows: w11-cli). Root: `jobs/install_spend.py` serves the totals the views render.
+  **Rides with:** area 05's chain. **Re-test:** `git grep -c "def _render" -- promptpotter/presentation/admin_bot.py` is 0.
 - **Adapters over a flat served shape** (webb-5's): `useCandidatesModel.ts` joins about twelve sources;
   `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
   served rows carry what the adapters join. **Rides with:** webd. **Re-test:**

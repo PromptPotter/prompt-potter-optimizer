@@ -46,7 +46,7 @@ CAMPAIGN_CAP_BY_NAME: dict[str, str] = {
     "lookahead": CAMPAIGN_LOOKAHEAD_CAP,
 }
 
-# What a grant may carry: every rung `/grant` names.
+# What a grant may carry: every rung `grant-delegation` names.
 DELEGABLE_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_NAME.values())
 # The account's own provider keys: its owner's alone, never delegated (bl4.B6).
 ACCOUNT_KEYS_CAP = "account.keys"
@@ -64,7 +64,7 @@ _NAME_OF_CAPABILITY = {cap: name for name, cap in CAMPAIGN_CAP_BY_NAME.items()}
 
 
 def capability_names(capabilities: Iterable[str]) -> list[str]:
-    """The `/grant` names of *capabilities*, sorted: the inverse of `capabilities_from_names`."""
+    """The `grant-delegation` names of *capabilities*, sorted: the inverse of `capabilities_from_names`."""
     return sorted(_NAME_OF_CAPABILITY[cap] for cap in capabilities)
 
 

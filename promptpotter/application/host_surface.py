@@ -26,7 +26,6 @@ from urllib.parse import quote, unquote
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_core import to_jsonable_python
 
-from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import (
     TERMINAL,
@@ -45,6 +44,7 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.commands.launching import launched
 from promptpotter.application.jobs.quota import refuse_request_rate
+from promptpotter.application.optimizer_manifest import checkin_template
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
     HierarchyParams,

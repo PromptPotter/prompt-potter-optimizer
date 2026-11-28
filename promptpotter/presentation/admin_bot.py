@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
+import json
 import logging
+import shlex
 import sys
 import time
 from collections.abc import Callable
@@ -9,54 +13,39 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application import bulletins, health, notices
-from promptpotter.application.account import (
-    blocked_emails,
-    grants,
-    local_stores,
-    trail_by_email,
-)
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application import health, notices
+from promptpotter.application.account import blocked_emails, grants
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.power import PowerLevel
-from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import (
-    BlockEmailPayload,
-    CommandPayload,
-    DeleteAccountPayload,
-    Door,
-    GrantDelegationPayload,
-    PostBulletinPayload,
-    RevokeDelegationPayload,
-    SetCouponPayload,
-    UnblockEmailPayload,
-    WithdrawBulletinPayload,
-)
-from promptpotter.domain.layer_fold import UNBOUNDED
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.presentation.cli.main import VERBS, build_parser, verb_handler
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
 _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
-_COUPON_USAGE = "/coupon <user_id> <usd|-> <tokens|-> [afresh]"
-_BULLETIN_USAGE = "/bulletin [popup] <text>"
-_WITHDRAW_USAGE = "/withdraw [bulletin_id]"
-_USAGE = (
-    "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
-    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
-    f"{_COUPON_USAGE}\n/delete <user_id>\n/spend\n/trail <email>\n{_BULLETIN_USAGE}\n{_WITHDRAW_USAGE}"
+# The host-admin acts the bot files, each its CLI verb, spelled and answered as the terminal's is.
+_FILED = (
+    CommandKind.BLOCK_EMAIL,
+    CommandKind.UNBLOCK_EMAIL,
+    CommandKind.GRANT_DELEGATION,
+    CommandKind.REVOKE_DELEGATION,
+    CommandKind.SET_COUPON,
+    CommandKind.DELETE_ACCOUNT,
+    CommandKind.POST_BULLETIN,
+    CommandKind.WITHDRAW_BULLETIN,
 )
+_RELAYED = frozenset({*(str(kind.cli_verb) for kind in _FILED), "trail", "bulletins"})
+_PARSER = build_parser(verb for verb in VERBS if verb.name in _RELAYED)
 _TELEGRAM_MAX_CHARS = 4096
-_TRAIL_WINDOW_H = 24
 _HEALTH_EVERY_S = 1800
 _POWER_EVERY_S = 60
 _DIGEST_EVERY_S = 600
@@ -78,87 +67,60 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
 
 
 def handle_command(command: str, argument: str) -> str:
-    if command == "blocked":
-        emails = blocked_emails()
-        return "Blocked:\n" + ("\n".join(emails) if emails else "(nobody)")
-    if command in ("block", "unblock"):
-        if not argument:
-            return f"Usage: /{command} <email>"
-        kind = BlockEmailPayload if command == "block" else UnblockEmailPayload
-        _file(kind, {"email": argument.strip()})
-        return f"{'Blocked' if command == 'block' else 'Unblocked'} {argument.strip().lower()}."
-    if command in ("grant", "revoke", "grants"):
-        return _handle_grant_command(command, argument)
-    if command == "coupon":
-        return _set_coupon(argument)
-    if command == "delete":
-        if not (user_id := argument.strip()):
-            return "Usage: /delete <user_id>"
-        _file(DeleteAccountPayload, {"user_id": user_id})
-        return f"Deleted the account {user_id}."
-    if command == "spend":
-        return _render_install_spend()
-    if command == "trail":
-        return _render_trail(argument)
-    if command == "bulletin":
-        return _post_bulletin(argument)
-    if command == "withdraw":
-        return _withdraw_bulletin(argument)
-    return _USAGE
+    """The bot's own reads, else a CLI verb it relays, else what it answers."""
+    reads: dict[str, Callable[[], str]] = {
+        "blocked": _blocked,
+        "grants": _grants,
+        "spend": _render_install_spend,
+    }
+    if (read := reads.get(command)) is not None:
+        return read()
+    if command in _RELAYED:
+        return _clipped(_relayed(command, argument))
+    return "Commands: " + " ".join(f"/{name}" for name in sorted({*reads, *_RELAYED}))
 
 
-def _file(model: type[CommandPayload], fields: dict[str, object]) -> None:
-    """A host-admin act, filed at the terminal door as its CLI verb is."""
-    call = CommandCall(PayloadInvalidError.validating(model, fields), door=Door.TERMINAL)
-    asyncio.run(CommandDispatcher(local_stores(tenant=None)).dispatch(call))
+def _blocked() -> str:
+    emails = blocked_emails()
+    return "Blocked:\n" + ("\n".join(emails) if emails else "(nobody)")
 
 
-def _post_bulletin(argument: str) -> str:
-    """The host's word to every account, filed as the terminal's `post-bulletin` is."""
-    first, _, rest = argument.strip().partition(" ")
-    pops_up = first.lower() == "popup"
-    text = (rest if pops_up else argument).strip()
-    if not text:
-        return f"Usage: {_BULLETIN_USAGE}"
-    _file(PostBulletinPayload, {"text": text, "pops_up": pops_up})
-    return f"Posted to every account{', popping up' if pops_up else ''}: {text}"
+def _relayed(verb: str, argument: str) -> str:
+    """*verb* run as the terminal runs it, on the CLI's own grammar; its usage on a misspelling."""
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
+            args = _PARSER.parse_args([verb, *shlex.split(argument)])
+    except SystemExit:
+        return said.getvalue().strip()
+    result = asyncio.run(verb_handler(verb)(args))
+    if args.json_output or result.human is None:
+        return json.dumps(result.data, indent=2, default=str)
+    return result.human
 
 
-def _withdraw_bulletin(argument: str) -> str:
-    """Bare, it lists what stands with each id; with an id, it takes that bulletin back."""
-    bulletin_id = argument.strip()
-    if not bulletin_id:
-        standing = bulletins.account_bulletins(local_stores(tenant=None)).bulletins
-        lines = [f"{b.id}: {b.text}" for b in standing]
-        return "\n".join(lines) if lines else "No bulletin is posted."
-    _file(WithdrawBulletinPayload, {"bulletin_id": bulletin_id})
-    return f"Withdrew {bulletin_id} from every account."
-
-
-def _render_trail(argument: str) -> str:
-    email = argument.strip()
-    if not email:
-        return "Usage: /trail <email>"
-    trail = trail_by_email(default_projects_root(), email)
-    notes = trail_notes(trail)
-    if not trail.own:
-        return "\n".join([f"No account with email {email}.", *notes])
-    rows = trail_rows(trail)
-
-    def head(dropped: int) -> str:
-        counted = f"{email}: {len(rows)} lines, UTC" + (
-            f" ({dropped} earlier dropped)" if dropped else ""
-        )
-        return "\n".join([counted, *notes])
-
-    room = _TELEGRAM_MAX_CHARS - len(head(len(rows)))
-    kept = 0
-    for row in reversed(rows):
-        room -= len(row) + 1
+def _clipped(reply: str) -> str:
+    """A reply past Telegram's bound keeps its newest lines."""
+    lines = reply.splitlines()
+    kept: list[str] = []
+    room = _TELEGRAM_MAX_CHARS - len("(99999 earlier lines dropped)\n")
+    for line in reversed(lines):
+        room -= len(line) + 1
         if room < 0:
-            break
-        kept += 1
-    return "\n".join([head(len(rows) - kept), *rows[len(rows) - kept :]])
+            return "\n".join([f"({len(lines) - len(kept)} earlier lines dropped)", *kept[::-1]])
+        kept.append(line)
+    return reply
+
+
+def _grants() -> str:
+    held = grants()
+    if not held:
+        return "Delegations: (none)"
+    lines = [
+        f"{sub} → by {g.delegated_by or '?'}: {', '.join(sorted(g.capabilities)) or '(none)'}"
+        for sub, g in sorted(held.items())
+    ]
+    return "Delegations:\n" + "\n".join(lines)
 
 
 def _render_install_spend() -> str:
@@ -196,44 +158,6 @@ def _render_install_spend() -> str:
             + (f" · {'; '.join(flags)}" if flags else "")
         )
     return "\n".join(lines)
-
-
-def _set_coupon(argument: str) -> str:
-    """`-` leaves a unit unbounded on the box's keys; `afresh` starts the coupon's draw now."""
-    parts = argument.split()
-    if len(parts) not in (3, 4) or parts[3:] not in ([], ["afresh"]):
-        return f"Usage: {_COUPON_USAGE}"
-    try:
-        budget = {
-            "usd": UNBOUNDED if parts[1] == "-" else float(parts[1]),
-            "tokens": UNBOUNDED if parts[2] == "-" else int(parts[2]),
-        }
-    except ValueError:
-        return f"Usage: {_COUPON_USAGE}"
-    _file(SetCouponPayload, {"user_id": parts[0], "budget": budget, "afresh": len(parts) == 4})
-    return f"Coupon for {parts[0]} set to {parts[1]} usd / {parts[2]} tokens."
-
-
-def _handle_grant_command(command: str, argument: str) -> str:
-    if command == "grants":
-        held = grants()
-        if not held:
-            return "Delegations: (none)"
-        lines: list[str] = []
-        for sub, g in sorted(held.items()):
-            caps_str = ", ".join(sorted(g.capabilities))
-            lines.append(f"{sub} → by {g.delegated_by or '?'}: {caps_str or '(none)'}")
-        return "Delegations:\n" + "\n".join(lines)
-    if command == "revoke":
-        if not argument:
-            return "Usage: /revoke <sub_user_id>"
-        _file(RevokeDelegationPayload, {"user_id": argument.strip()})
-        return f"Revoked {argument.strip()}."
-    parts = argument.split(maxsplit=1)
-    if len(parts) < 2:
-        return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
-    _file(GrantDelegationPayload, {"user_id": parts[0].strip(), "capabilities": parts[1]})
-    return f"Granted {parts[0].strip()} [{parts[1]}]."
 
 
 class _Duties:

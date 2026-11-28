@@ -22,6 +22,7 @@ from pydantic.fields import FieldInfo
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
+    ArchiveMode,
     CampaignPayload,
     CommandKind,
     CommandPayload,
@@ -82,6 +83,8 @@ class Verb:
     # False for a verb a deploy runs beside the landing, under code the root may not be landed for:
     # `land-data` is the landing, and its dry run writes nothing; the others read the root as it stands.
     lands_at_entry: bool = True
+    # Listed by a bare `promptpotter` before any campaign is active, by its help's first sentence.
+    welcome: bool = False
 
 
 GLOBAL_ARGS = (
@@ -318,6 +321,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "new",
         "cli.commands.launch:cmd_new",
+        welcome=True,
         unspelled={
             "filename": "the FILE positional: its name",
             "blob": "the FILE positional: its bytes",
@@ -420,6 +424,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "resume",
         "cli.commands.launch:cmd_resume",
+        welcome=True,
         unspelled={
             "keep_rounds": "`--rewind` keeps them, a bare `--steer` does not",
             "start.pipeline_overlay": "`--steer NODE.PARAM=VALUE`, folded per node",
@@ -501,8 +506,9 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "ab",
         "cli.commands.measure:cmd_ab",
         terminal_only="it replays recorded decisions under the engine this checkout runs, which no server door holds",
-        help="Deterministic A/B replay of a campaign (the active one, or --campaign): "
-        "re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
+        welcome=True,
+        help="Re-derive a campaign's decisions under the current engine. A deterministic A/B "
+        "replay of the active campaign, or --campaign: re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
         "the CURRENT engine + scorer, and report where the change stops carrying over — "
         "which branches survive it and where a fork is needed. Zero LLM calls — run a "
         "cycle under one engine/scorer, then `ab` under another to diff.",
@@ -553,10 +559,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "verify",
         "cli.commands.measure:cmd_verify",
+        welcome=True,
         unspelled={
             "candidate_id": "the SUBJECT positional's last part, beside its campaign and cycle",
         },
-        help="Re-score one campaign candidate on search cells it has never met and bank "
+        help="Re-score one campaign candidate on search cells it has never met. It banks "
         "the pass on its cycle's ledger. Use to doublecheck whether a confidence-locked "
         "candidate's verdict generalises beyond the round's leader-locked sample budget. "
         "Moves no round and no election.",
@@ -629,7 +636,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         args=(
             Arg(
                 "mode",
-                choices=["inventory", "compact", "restore", "purge-cold", "reclaim"],
+                choices=["inventory", *get_args(ArchiveMode.__value__)],
                 help="Which step to run.",
             ),
             Arg("--dataset", default=None, help="Scope to one dataset (default: every dataset)."),
@@ -751,8 +758,9 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "held-out",
         "cli.commands.measure:cmd_held_out",
+        welcome=True,
         help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
-        "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
+        "the headline. It is the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
         "a line with a run in flight, a split holding nothing out and a selection already graded "
         "— the served status's own answer (the cycle's `facts.bench.status`). Spends: two passes "
@@ -1079,7 +1087,7 @@ _LANDS_AT_ENTRY = frozenset(verb.name for verb in VERBS if verb.lands_at_entry)
 _PARSER = build_parser(VERBS)
 
 
-def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
+def verb_handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
     return cast(
         "Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]",
         imported(VERB_PACKAGE, COMMANDS[verb]),
@@ -1095,17 +1103,17 @@ def main() -> None:
         # Named as a string like the handlers: `--help` loads no use case.
         listing = importlib.import_module("promptpotter.application.cycle_addressing")
         if not listing.holds_active_pointer(tenant=args.tenant):
+            listed = (
+                f"  promptpotter {verb.name:<9} {verb.help.split('. ', 1)[0].rstrip('.')}."
+                for verb in VERBS
+                if verb.welcome
+            )
             print(
-                f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"
-                "Pick a verb to get started:\n"
-                "  promptpotter new <dataset>   mint a fresh campaign on the named dataset\n"
-                "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
-                "  promptpotter resume          continue the active campaign\n"
-                "  promptpotter verify          re-score a candidate on more samples\n"
-                "  promptpotter held-out        grade the origin and the selection on held-out rows\n"
-                "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
-                "Run `promptpotter <verb> --help` for per-verb options.\n"
-                f"Docs: {settings.BRAND_DOCS_URL}"
+                f"Welcome to {settings.BRAND_SHORT_NAME}.\n\nPick a verb to get started:",
+                *listed,
+                "\nRun `promptpotter <verb> --help` for per-verb options.",
+                f"Docs: {settings.BRAND_DOCS_URL}",
+                sep="\n",
             )
             return
         # Appended to the ORIGINAL argv, so `resume`'s defaults populate without dropping the globals before the verb.
@@ -1121,7 +1129,7 @@ def main() -> None:
             landing.land_at_entry(every_treatment=False)
         # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's
         # refusal is this one catch's to say, as the run's is.
-        result = runner.run(_handler(args.command)(args))
+        result = runner.run(verb_handler(args.command)(args))
     except PotterError as exc:
         runner.close()
         refused = Refusal.of(exc)

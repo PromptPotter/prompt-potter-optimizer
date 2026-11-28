@@ -137,8 +137,8 @@ def ring(signed: SignedIn | SignInRefused) -> None:
         f"Accounts now: {total}\n"
         f"Access: {signed.identity.access_state}\n"
         f"Device: {signed.device or 'unknown'}"
-        + (f"\nRevoke it with:  /block {email}" if email else ""),
-        # A stranger's arrival is the one decision this channel offers: /block it now, or not.
+        + (f"\nRevoke it with:  /block-email {email}" if email else ""),
+        # A stranger's arrival is the one decision this channel offers: /block-email it now, or not.
         ring=True,
     )
     record_operator_notice(

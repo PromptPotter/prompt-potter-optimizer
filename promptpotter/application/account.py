@@ -612,7 +612,7 @@ class TokenEntry(StrictModel):
 
     id: str
     name: str
-    scopes: list[str] = Field(description="The `/grant` names of what it may command.")
+    scopes: list[str] = Field(description="The `grant-delegation` names of what it may command.")
     created_at: str
     revoked_at: str | None
 
