@@ -33,17 +33,9 @@ logger = logging.getLogger(__name__)
 _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 # The host-admin acts the bot files, each its CLI verb, spelled and answered as the terminal's is.
-_FILED = (
-    CommandKind.BLOCK_EMAIL,
-    CommandKind.UNBLOCK_EMAIL,
-    CommandKind.GRANT_DELEGATION,
-    CommandKind.REVOKE_DELEGATION,
-    CommandKind.SET_COUPON,
-    CommandKind.DELETE_ACCOUNT,
-    CommandKind.POST_BULLETIN,
-    CommandKind.WITHDRAW_BULLETIN,
+_RELAYED = frozenset(
+    {*(str(k.cli_verb) for k in CommandKind if k.host_administered), "trail", "bulletins"}
 )
-_RELAYED = frozenset({*(str(kind.cli_verb) for kind in _FILED), "trail", "bulletins"})
 _PARSER = build_parser(verb for verb in VERBS if verb.name in _RELAYED)
 _TELEGRAM_MAX_CHARS = 4096
 _HEALTH_EVERY_S = 1800

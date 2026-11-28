@@ -4157,7 +4157,7 @@
         "type": "object"
       },
       "CommandKind": {
-        "description": "A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is\n`application/commands/{module}:{attr}`; every kind names its capability;\n`destructive` is MCP's `destructiveHint`, true for an apply that overwrites or removes.",
+        "description": "A command kind: the `/commands/{kind}` path and the command log's key, one `Row` of every\nfact about it.",
         "enum": [
           "pause",
           "submit-arms",

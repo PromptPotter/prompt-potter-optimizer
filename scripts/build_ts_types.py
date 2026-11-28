@@ -25,7 +25,7 @@ from promptpotter.application.maintenance.landing import check_every_treatment
 from promptpotter.application.read_params import PARAMS_FOR_READ
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.campaign import LifecycleFilter
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.cycle_paths import HOP_SEP, ID_COMPONENT_PATTERN, UNIT_SEP
 from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.paired_reading import UNIT_FORMATS, Estimate, EstimateForm
@@ -257,7 +257,7 @@ def _emit_command_contract() -> str:
     }
     sent, answered = [], []
     for kind in sorted(CommandKind):
-        model = PAYLOAD_MODEL_FOR_KIND[kind]
+        model = kind.payload_model
         route = vars(routes[kind.value])
         answered.append(f"  {json.dumps(kind.value)}: {_emit_type(route['response_model'])};")
         # A kind posted as a form has no JSON body to type.
@@ -277,7 +277,7 @@ def _emit_command_contract() -> str:
         "  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;\n"
         "};\n\n"
         "// Each JSON-posted kind's body IS its payload model "
-        "(domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).\n"
+        "(domain/command_kinds.py::CommandKind.payload_model).\n"
         "export interface CommandPayloads {\n" + "\n".join(sent) + "\n}\n\n"
         "// What each kind answers: its route's `response_model` "
         "(presentation/api/routers/commands.py).\n"

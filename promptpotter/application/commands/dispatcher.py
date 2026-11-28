@@ -29,7 +29,6 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     COMMAND_ID_CHARS,
-    PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
     CancelPayload,
     CommandAcceptedBody,
@@ -127,22 +126,6 @@ class Replaying[P: CommandPayload]:
 
 
 type Replay[R] = Callable[[Replaying[Any]], Awaitable[R]]
-
-_REPLAYS: dict[CommandKind, Replay[Any]] = {}
-
-
-def replays[R](*kinds: CommandKind) -> Callable[[Replay[R]], Replay[R]]:
-    """Registers how a retry of *kinds* answers its first act. A kind answering nothing, or one
-    whose end keeps its answer (`keeps_answer`), registers none."""
-
-    def _registered(replay: Replay[R]) -> Replay[R]:
-        for kind in kinds:
-            if kind in _REPLAYS:
-                raise TypeError(f"{kind} already replays by {_REPLAYS[kind]!r}")
-            _REPLAYS[kind] = replay
-        return replay
-
-    return _registered
 
 
 async def _no_body(_: Replaying[Any]) -> None:
@@ -265,7 +248,7 @@ def _rung(stores: Stores, payload: CommandPayload) -> str:
     if isinstance(payload, CancelPayload):
         filed = stores.commands.book().filing(payload.command_id)
         if filed is not None:
-            return PAYLOAD_MODEL_FOR_KIND[filed.kind].kind.capability
+            return filed.kind.capability
     return payload.kind.capability
 
 
@@ -344,16 +327,16 @@ async def _kept(replaying: Replaying[Any]) -> object:
 
 
 def replay_of(kind: CommandKind) -> Replay[Any]:
-    """How a retry of *kind* answers its first act: what its end kept, nothing for a kind that
-    answers nothing, else the replay its handler's module registered (`replays`)."""
-    handler = handler_of(kind)
-    if (replay := _REPLAYS.get(kind)) is not None:
-        return replay
+    """How a retry of *kind* answers its first act: the replay its row names, else what its end
+    kept, else nothing for a kind that answers nothing. A kind whose end keeps its answer
+    (`keeps_answer`), or that answers nothing, names none."""
+    if kind.replay is not None:
+        return cast(Replay[Any], imported(_HANDLER_PACKAGE, kind.replay))
     if keeps_answer(kind):
         return _kept
-    if get_args(returned(handler))[0] is object:
+    if get_args(returned(handler_of(kind)))[0] is object:
         return _no_body
-    raise TypeError(f"{kind} answers a retry with nothing its end keeps; register its replay")
+    raise TypeError(f"{kind} answers a retry with nothing its end keeps; its row names no replay")
 
 
 class CommandDispatcher:

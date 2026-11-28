@@ -55,7 +55,6 @@ from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_effects import LaunchAnswer
 from promptpotter.domain.command_events import CommandAckRecord, KeptRefusal
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
     CancelPayload,
     CommandAcceptedBody,
     CommandKind,
@@ -113,7 +112,7 @@ class HostTool:
     def model(self) -> type[CommandPayload] | type[ReadParams]:
         if isinstance(self.kind, ReadKind):
             return PARAMS_FOR_READ[self.kind]
-        return PAYLOAD_MODEL_FOR_KIND[self.kind]
+        return self.kind.payload_model
 
     @property
     def description(self) -> str:

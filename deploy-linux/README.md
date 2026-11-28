@@ -339,7 +339,7 @@ signed out, and the public site flags its visits `self`, so the morning briefing
 `?self=1` on any site page marks a browser that never signs in; `?self=0` takes the mark off.
 
 A write is the terminal's verb of the same name, run on the terminal's own grammar
-(`presentation/admin_bot.py::_FILED`; quote a text holding spaces): a misspelling answers that verb's
+(each kind `domain/command_kinds.py::CommandKind.host_administered`; quote a text holding spaces): a misspelling answers that verb's
 usage, and any other message the list of commands.
 
 | You send | Effect |

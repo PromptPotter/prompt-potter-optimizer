@@ -5686,7 +5686,7 @@ export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } 
   [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;
 };
 
-// Each JSON-posted kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
+// Each JSON-posted kind's body IS its payload model (domain/command_kinds.py::CommandKind.payload_model).
 export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
@@ -5831,7 +5831,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "5f1931c1ae6330cd";
+export const SERVED_CONTRACT = "29ef1413fc507ad4";
 
 // Each GET read's query (application/read_params.py::ReadParams): its fields the route does not fill.
 export interface ReadQueries {

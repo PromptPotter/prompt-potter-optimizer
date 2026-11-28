@@ -27,7 +27,7 @@ from pydantic import (
 from promptpotter.domain.bulletin import BULLETIN_TEXT_CHARS
 from promptpotter.domain.campaign import ArmName, ArmSeat
 from promptpotter.domain.cycle_paths import PathComponent
-from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
+from promptpotter.domain.dataset_name import DatasetName
 from promptpotter.domain.draft_edit import (
     CampaignLayer,
     EditDraftPatch,
@@ -106,33 +106,45 @@ _HOST_ADMINISTERS = "the host administers from its terminal or its bot"
 type Answering = Literal["inline", "task"]
 
 
-class CommandKind(StrEnum):
-    """A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is
-    `application/commands/{module}:{attr}`; every kind names its capability;
-    `destructive` is MCP's `destructiveHint`, true for an apply that overwrites or removes."""
+class Row(NamedTuple):
+    """Every fact of one command kind but its payload model, which declares the kind it carries
+    (`CommandKind.payload_model`): every surface, rule and fold reads these, never a table of its own.
+    The handler and the replay are `application/commands/{module}:{attr}`; `destructive` is MCP's
+    `destructiveHint`, true for an apply that overwrites or removes."""
 
+    kind: str
+    handler: str
+    capability: str
+    press: Press | None
+    destructive: bool = False
+    answering: Answering = "inline"
+    # How a retry answers its first act; none: what its end kept, or nothing (`dispatcher.py::replay_of`).
+    replay: str | None = None
+    # The run verbs a served offer files it by (`RunAdmission.offers`): a resume is a start of a paused cycle.
+    run_actions: tuple[RunAction, ...] = ()
+
+
+class CommandKind(StrEnum):
+    """A command kind: the `/commands/{kind}` path and the command log's key, one `Row` of every
+    fact about it."""
+
+    _value_: str
     handler: str
     capability: str
     press: Press | None
     destructive: bool
     answering: Answering
+    replay: str | None
+    run_actions: tuple[RunAction, ...]
+    payload_model: type[CommandPayload]
 
-    def __new__(
-        cls,
-        kind: str,
-        handler: str,
-        capability: str,
-        press: Press | None,
-        destructive: bool = False,
-        answering: Answering = "inline",
-    ) -> Self:
-        member = str.__new__(cls, kind)
-        member._value_ = kind
-        member.handler = handler
-        member.capability = capability
-        member.press = press
-        member.destructive = destructive
-        member.answering = answering
+    # A row is a tuple, so the enum hands its columns over unpacked.
+    def __new__(cls, *columns: Any) -> Self:
+        row = Row(*columns)
+        member = str.__new__(cls, row.kind)
+        member._value_ = row.kind
+        for name in Row._fields[1:]:
+            setattr(member, name, getattr(row, name))
         return member
 
     @property
@@ -149,6 +161,11 @@ class CommandKind(StrEnum):
         """The webapp presses it."""
         return self.press is None or not self.press.no_browser
 
+    @property
+    def host_administered(self) -> bool:
+        """Pressed at the host's own terminal alone, so its admin bot relays the verb."""
+        return self.cli_verb is not None and not self.host and not self.browser
+
     def pressed_at(self, door: Door) -> bool:
         match door:
             case Door.API:
@@ -158,77 +175,84 @@ class CommandKind(StrEnum):
             case Door.HOST:
                 return self.host
 
-    PAUSE = (
+    PAUSE = Row(
         "pause",
         "loop_commands:pause_cycle",
         CAMPAIGN_STEP_CAP,
         anyone("pause"),
         True,
+        run_actions=("pause",),
     )
-    SUBMIT_ARMS = (
+    SUBMIT_ARMS = Row(
         "submit-arms",
         "loop_commands:submit_arms",
         CAMPAIGN_STEP_CAP,
         anyone("submit-arms"),
     )
-    SKIP_SEARCHPOINT = (
+    SKIP_SEARCHPOINT = Row(
         "skip-searchpoint",
         "loop_commands:skip_searchpoint",
         CAMPAIGN_STEP_CAP,
         anyone("skip-searchpoint"),
         True,
     )
-    SET_SAMPLE_LOOKAHEAD = (
+    SET_SAMPLE_LOOKAHEAD = Row(
         "set-sample-lookahead",
         "loop_commands:set_sample_lookahead",
         CAMPAIGN_LOOKAHEAD_CAP,
         anyone("set-sample-lookahead"),
         True,
     )
-    START_RUN = (
+    START_RUN = Row(
         "start-run",
         "launching:start_run",
         CAMPAIGN_RUN_CAP,
         anyone("resume"),
         False,
         "task",
+        replay="launching:relaunched",
+        run_actions=("resume", "start"),
     )
     # Its fork supersedes the line's head, which it pauses.
-    FORK_CYCLE = (
+    FORK_CYCLE = Row(
         "fork-cycle",
         "launching:fork_cycle",
         CAMPAIGN_RUN_CAP,
         anyone("resume"),
         True,
         "task",
+        replay="launching:relaunched",
     )
-    MINT_CAMPAIGN = (
+    MINT_CAMPAIGN = Row(
         "mint-campaign",
         "launching:mint_campaign",
         CAMPAIGN_CREATE_CAP,
         anyone("new", no_browser=_MINTS_THROUGH_CHECKIN),
         False,
         "task",
+        replay="launching:relaunched",
     )
-    HEAD_TO_HEAD = (
+    HEAD_TO_HEAD = Row(
         "head-to-head",
         "launching:mint_head_to_head",
         CAMPAIGN_CREATE_CAP,
         anyone("head-to-head", no_browser=_MINTS_THROUGH_CHECKIN),
         False,
         "task",
+        replay="launching:relaunched",
     )
     # It closes the draft it mints from.
-    START_CHECKIN = (
+    START_CHECKIN = Row(
         "start-checkin",
         "launching:start_checkin",
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
         True,
         "task",
+        replay="launching:relaunched",
     )
     # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
-    VERIFY_CANDIDATE = (
+    VERIFY_CANDIDATE = Row(
         "verify-candidate",
         "measuring:verify_candidate",
         CAMPAIGN_RUN_CAP,
@@ -237,7 +261,7 @@ class CommandKind(StrEnum):
         "task",
     )
     # It restates the line's headline in place.
-    HELD_OUT = (
+    HELD_OUT = Row(
         "held-out",
         "measuring:held_out",
         CAMPAIGN_RUN_CAP,
@@ -247,16 +271,17 @@ class CommandKind(StrEnum):
     )
     # Its act is asking: the pass it names reads it as its pause (`run_phase_control.py::RunControl`).
     # Acts under the rung of the command it stops (`dispatcher.py::_rung`); its own, for none filed.
-    CANCEL = "cancel", "cancelling:cancel", CAMPAIGN_RUN_CAP, anyone("cancel"), True
-    SET_LIMITS = (
+    CANCEL = Row("cancel", "cancelling:cancel", CAMPAIGN_RUN_CAP, anyone("cancel"), True)
+    SET_LIMITS = Row(
         "set-limits",
         "limits_and_queue:change_run_limits",
         CAMPAIGN_BUDGET_CAP,
         anyone("set-limits"),
         True,
+        replay="limits_and_queue:limits_armed",
     )
     # Account-scoped, and set only by whoever runs this server: `quota.py::set_concurrent_cycles`.
-    SET_CONCURRENT_CYCLES = (
+    SET_CONCURRENT_CYCLES = Row(
         "set-concurrent-cycles",
         "limits_and_queue:set_concurrent_cycles",
         CAMPAIGN_BUDGET_CAP,
@@ -264,42 +289,42 @@ class CommandKind(StrEnum):
         True,
     )
     # A queued MINT has no cycle to address yet, and WHOSE launch it is `cancel_queued_run` checks.
-    CANCEL_QUEUED = (
+    CANCEL_QUEUED = Row(
         "cancel-queued",
         "limits_and_queue:cancel_queued_run",
         CAMPAIGN_RUN_CAP,
         anyone("cancel-queued"),
         True,
     )
-    DELETE_CYCLE = (
+    DELETE_CYCLE = Row(
         "delete-cycle",
         "cycle_cleanup:delete_cycle",
         CAMPAIGN_LIFECYCLE_CAP,
         anyone("delete-cycle"),
         True,
     )
-    CLEANUP_EMPTY_CYCLES = (
+    CLEANUP_EMPTY_CYCLES = Row(
         "cleanup-empty-cycles",
         "cycle_cleanup:cleanup_empty_cycles",
         CAMPAIGN_LIFECYCLE_CAP,
         anyone("cleanup-empty-cycles"),
         True,
     )
-    ARCHIVE_CAMPAIGN = (
+    ARCHIVE_CAMPAIGN = Row(
         "archive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
         anyone("archive-campaign"),
         True,
     )
-    UNARCHIVE_CAMPAIGN = (
+    UNARCHIVE_CAMPAIGN = Row(
         "unarchive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
         anyone("unarchive-campaign"),
         True,
     )
-    DELETE_CAMPAIGN = (
+    DELETE_CAMPAIGN = Row(
         "delete-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
@@ -307,7 +332,7 @@ class CommandKind(StrEnum):
         True,
     )
     # The label is how every other surface addresses the campaign to a human.
-    RENAME_CAMPAIGN = (
+    RENAME_CAMPAIGN = Row(
         "rename-campaign",
         "workspace_edits:set_campaign_label",
         CAMPAIGN_LIFECYCLE_CAP,
@@ -315,22 +340,24 @@ class CommandKind(StrEnum):
         True,
     )
     # Its purge step destroys paid spend.
-    COMPACT_ARCHIVE = (
+    COMPACT_ARCHIVE = Row(
         "compact-archive",
         "archive_compaction:compact_archive",
         CAMPAIGN_LIFECYCLE_CAP,
         anyone("compact-archive"),
         True,
+        replay="archive_compaction:compacted_once",
     )
-    EDIT_DRAFT_CAMPAIGN = (
+    EDIT_DRAFT_CAMPAIGN = Row(
         "edit-draft-campaign",
         "draft_editing:edit_draft_campaign",
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
         True,
+        replay="draft_editing:edited",
     )
     # Its turn writes the draft's fields.
-    RESOLVE_ORIGIN = (
+    RESOLVE_ORIGIN = Row(
         "resolve-origin",
         "origin_resolving:resolve_origin",
         CAMPAIGN_CREATE_CAP,
@@ -339,14 +366,14 @@ class CommandKind(StrEnum):
         "task",
     )
     # It writes what a later campaign's `packs` may draw, so it sits with the verbs that make one.
-    BANK_SNIPPET = (
+    BANK_SNIPPET = Row(
         "bank-snippet",
         "workspace_edits:bank_snippet",
         CAMPAIGN_CREATE_CAP,
         anyone("bank-snippet"),
     )
     # Filed on the workspace: the draft it discards goes with its apply.
-    DISCARD_DRAFT = (
+    DISCARD_DRAFT = Row(
         "discard-draft",
         "draft_editing:discard_draft",
         CAMPAIGN_CREATE_CAP,
@@ -354,40 +381,45 @@ class CommandKind(StrEnum):
         True,
     )
     # The three doors a check-in draft opens by; each is filed on the workspace, as no draft is open yet.
-    INGEST_UPLOAD = (
+    INGEST_UPLOAD = Row(
         "ingest-upload",
         "workspace_edits:ingest_upload",
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
+        replay="workspace_edits:reopened",
     )
-    OPEN_DATASET_DRAFT = (
+    OPEN_DATASET_DRAFT = Row(
         "open-dataset-draft",
         "workspace_edits:open_dataset_draft",
         CAMPAIGN_CREATE_CAP,
         anyone("open-dataset-draft"),
+        replay="workspace_edits:reopened",
     )
-    OPEN_ORIGIN_DRAFT = (
+    OPEN_ORIGIN_DRAFT = Row(
         "open-origin-draft",
         "workspace_edits:open_origin_draft",
         CAMPAIGN_CREATE_CAP,
         anyone("open-origin-draft"),
+        replay="workspace_edits:reopened",
     )
-    SET_USER_SETTINGS = (
+    SET_USER_SETTINGS = Row(
         "set-user-settings",
         "workspace_edits:set_user_settings",
         ACCOUNT_SELF_CAP,
         anyone("set-user-settings"),
         True,
+        replay="workspace_edits:settings_set",
     )
     # A person's consent: their own act, never a host's.
-    ACCEPT_TERMS = (
+    ACCEPT_TERMS = Row(
         "accept-terms",
         "workspace_edits:accept_terms",
         ACCOUNT_SELF_CAP,
         person("accept-terms"),
+        replay="workspace_edits:terms_accepted",
     )
     # The host's word to every account: its terminal and its admin bot post (`bulletins.py::post_bulletin`).
-    POST_BULLETIN = (
+    POST_BULLETIN = Row(
         "post-bulletin",
         "bulletin_acts:post_bulletin",
         ACCOUNT_SELF_CAP,
@@ -396,7 +428,7 @@ class CommandKind(StrEnum):
         ),
     )
     # The host's word taken back, from the doors that posted it; its dismissals go with it.
-    WITHDRAW_BULLETIN = (
+    WITHDRAW_BULLETIN = Row(
         "withdraw-bulletin",
         "bulletin_acts:withdraw_bulletin",
         ACCOUNT_SELF_CAP,
@@ -407,7 +439,7 @@ class CommandKind(StrEnum):
         ),
     )
     # Its account's own act: a host never dismisses one for its person.
-    DISMISS_BULLETIN = (
+    DISMISS_BULLETIN = Row(
         "dismiss-bulletin",
         "bulletin_acts:dismiss_bulletin",
         ACCOUNT_SELF_CAP,
@@ -415,38 +447,38 @@ class CommandKind(StrEnum):
     )
     # The host's administration of who may sign in and what each account holds: its terminal and its
     # admin bot file them, refused to any other (`account.py::require_host`), decisions § 0004.
-    BLOCK_EMAIL = (
+    BLOCK_EMAIL = Row(
         "block-email",
         "operator_acts:block_email",
         ACCOUNT_SELF_CAP,
         Press("block-email", host=False, no_browser=_HOST_ADMINISTERS),
     )
-    UNBLOCK_EMAIL = (
+    UNBLOCK_EMAIL = Row(
         "unblock-email",
         "operator_acts:unblock_email",
         ACCOUNT_SELF_CAP,
         Press("unblock-email", host=False, no_browser=_HOST_ADMINISTERS),
     )
-    GRANT_DELEGATION = (
+    GRANT_DELEGATION = Row(
         "grant-delegation",
         "operator_acts:grant_delegation",
         ACCOUNT_SELF_CAP,
         Press("grant-delegation", host=False, no_browser=_HOST_ADMINISTERS),
     )
-    REVOKE_DELEGATION = (
+    REVOKE_DELEGATION = Row(
         "revoke-delegation",
         "operator_acts:revoke_delegation",
         ACCOUNT_SELF_CAP,
         Press("revoke-delegation", host=False, no_browser=_HOST_ADMINISTERS),
         True,
     )
-    SET_COUPON = (
+    SET_COUPON = Row(
         "set-coupon",
         "operator_acts:set_coupon",
         ACCOUNT_SELF_CAP,
         Press("set-coupon", host=False, no_browser=_HOST_ADMINISTERS),
     )
-    DELETE_ACCOUNT = (
+    DELETE_ACCOUNT = Row(
         "delete-account",
         "operator_acts:delete_account",
         ACCOUNT_SELF_CAP,
@@ -455,24 +487,28 @@ class CommandKind(StrEnum):
     )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
-    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", ACCOUNT_KEYS_CAP, BROWSER, True
-    REMOVE_API_KEY = (
+    SET_API_KEY = Row("set-api-key", "workspace_edits:set_api_key", ACCOUNT_KEYS_CAP, BROWSER, True)
+    REMOVE_API_KEY = Row(
         "remove-api-key",
         "workspace_edits:remove_api_key",
         ACCOUNT_KEYS_CAP,
         BROWSER,
         True,
+        replay="workspace_edits:key_removed",
     )
     # Browser-only ON PURPOSE: the terminal is the host's own machine, and the host is refused on
     # the bearer door; its capability is never a token's, so no bearer reaches these three.
-    MINT_API_TOKEN = "mint-api-token", "workspace_edits:mint_api_token", ACCOUNT_TOKENS_CAP, BROWSER
-    LIST_API_TOKENS = (
+    MINT_API_TOKEN = Row(
+        "mint-api-token", "workspace_edits:mint_api_token", ACCOUNT_TOKENS_CAP, BROWSER
+    )
+    LIST_API_TOKENS = Row(
         "list-api-tokens",
         "workspace_edits:list_api_tokens",
         ACCOUNT_TOKENS_CAP,
         BROWSER,
+        replay="workspace_edits:tokens_listed",
     )
-    REVOKE_API_TOKEN = (
+    REVOKE_API_TOKEN = Row(
         "revoke-api-token",
         "workspace_edits:revoke_api_token",
         ACCOUNT_TOKENS_CAP,
@@ -489,14 +525,6 @@ def filable(identity: IdentityContext) -> tuple[CommandKind, ...]:
     return tuple(k for k in CommandKind if has_capability(identity, k.capability))
 
 
-# The kind each run verb files (`RunAdmission.offers`): a resume is a start of a paused cycle.
-RUN_VERB_KIND: dict[RunAction, CommandKind] = {
-    "pause": CommandKind.PAUSE,
-    "resume": CommandKind.START_RUN,
-    "start": CommandKind.START_RUN,
-}
-
-
 def acts_filed(acts: Iterable[NextAct], kinds: Collection[CommandKind]) -> tuple[NextAct, ...]:
     """*acts* a reader filing *kinds* may take: a kind among them, or a field or a file."""
     return tuple(act for act in acts if not act.kind or act.kind in kinds)
@@ -504,9 +532,6 @@ def acts_filed(acts: Iterable[NextAct], kinds: Collection[CommandKind]) -> tuple
 
 # The longest command id a door sends or names; `CommandCall` mints a uuid's 36.
 COMMAND_ID_CHARS = 64
-
-# Filled as each model declares the kind it carries: the ONE kind → payload table, keyed `str`.
-PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 
 
 class CommandPayload(RequestBody):
@@ -549,12 +574,12 @@ class CommandPayload(RequestBody):
         if kind is None:
             return
         require_own_docstring(cls, kind)
-        if kind in PAYLOAD_MODEL_FOR_KIND:
-            raise TypeError(f"{kind} already carries {PAYLOAD_MODEL_FOR_KIND[kind].__name__}")
+        if hasattr(kind, "payload_model"):
+            raise TypeError(f"{kind} already carries {kind.payload_model.__name__}")
         if issubclass(cls, CyclePayload) and not hasattr(cls, "inner_refusal"):
             raise TypeError(f"{cls.__name__} is cycle-scoped and declares no `inner_refusal`")
         cls.kind = kind
-        PAYLOAD_MODEL_FOR_KIND[kind] = cls
+        kind.payload_model = cls
 
     def act_digest(self) -> str:
         """What an idempotency key names: the act as its `CommandRecord` keeps it, and the bytes of
@@ -607,12 +632,6 @@ class CyclePayload(CampaignPayload):
 
 class LoopPayload(CyclePayload):
     """Only a RUNNING loop takes it, off its cycle's inbox (`command_log.py::Controls`) — which is why these sit below `application/`."""
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        # `command_log.py::LOOP_KINDS` reads the kind table having imported this module alone.
-        if cls.__module__ != __name__:
-            raise TypeError(f"{cls.__name__} is a loop payload declared outside {__name__}")
 
 
 class SkipSearchpointPayload(LoopPayload, kind=CommandKind.SKIP_SEARCHPOINT):
@@ -1067,14 +1086,8 @@ class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):
     the operator consents on, so the write has to be asked for rather than defaulted into."""
 
     mode: ArchiveMode
-    dataset: str | None = Field(default=None, min_length=1, max_length=64)
+    dataset: DatasetName | None = Field(default=None, min_length=1, max_length=64)
     apply: bool = False
-
-    @model_validator(mode="after")
-    def _dataset_is_a_dataset_name(self) -> CompactArchivePayload:
-        if self.dataset is not None:
-            validate_dataset_name(self.dataset)
-        return self
 
 
 class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIGN):
@@ -1201,7 +1214,7 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
     """Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,
     priced and admitted before any is minted, so a refused arm leaves none behind."""
 
-    dataset_name: str = Field(min_length=1, max_length=64)
+    dataset_name: DatasetName = Field(min_length=1, max_length=64)
     head_to_head: HeadToHeadRequest
     campaign_config: StatedCampaign | None = Field(
         default=None, description=f"{_STATED}, every arm's"
@@ -1212,17 +1225,12 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
         "head_to_head.arms": "--arm",
     }
 
-    @model_validator(mode="after")
-    def _name_is_a_dataset_name(self) -> MintHeadToHeadPayload:
-        validate_dataset_name(self.dataset_name)
-        return self
-
 
 class MintCampaignPayload(LaunchPayload, kind=CommandKind.MINT_CAMPAIGN):
     """Mint a campaign on an authored dataset and launch its root cycle."""
 
     cli_spellings: ClassVar[Mapping[str, str]] = {"dataset_name": "dataset"}
-    dataset_name: str = Field(min_length=1, max_length=64)
+    dataset_name: DatasetName = Field(min_length=1, max_length=64)
     budget: Budget = Budget()
     step_rounds: StepRounds = None
     optimization: OptimizationOverrides | None = Field(
@@ -1251,11 +1259,6 @@ class MintCampaignPayload(LaunchPayload, kind=CommandKind.MINT_CAMPAIGN):
         data: dict[str, JsonValue] = handler(self)
         data["optimization"] = self.optimization_sent or None
         return data
-
-    @model_validator(mode="after")
-    def _name_is_a_dataset_name(self) -> MintCampaignPayload:
-        validate_dataset_name(self.dataset_name)
-        return self
 
 
 class IngestUploadPayload(CommandPayload, kind=CommandKind.INGEST_UPLOAD):
@@ -1416,7 +1419,7 @@ class RevokeApiTokenPayload(CommandPayload, kind=CommandKind.REVOKE_API_TOKEN):
 
 
 # The last payload model is declared above, so a kind carrying none fails right here.
-if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
+if _unpaired := sorted(k for k in CommandKind if not hasattr(k, "payload_model")):
     raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
 # A tool's description is its model's docstring: it names kinds and fields, never a path or a verb.
 _TICKED = re.compile(r"`+([^`]+)`+")
@@ -1425,7 +1428,7 @@ if _worded := sorted(
     f"{k}: `{ticked}`"
     for k in CommandKind
     if k.host
-    for ticked in _TICKED.findall(vars(PAYLOAD_MODEL_FOR_KIND[k]).get("__doc__") or "")
+    for ticked in _TICKED.findall(vars(k.payload_model).get("__doc__") or "")
     if ".py::" in ticked or ticked.split()[0] in _VERBS
 ):
     raise RuntimeError(f"tool descriptions naming a path or a terminal verb: {_worded}")
@@ -1447,8 +1450,8 @@ def takes_act(act: NextAct) -> bool:
     stop's checked below, a refusal's at the gate."""
     if not act.kind:
         return bool(act.field) != bool(act.reads)
-    model = PAYLOAD_MODEL_FOR_KIND.get(act.kind)
-    if model is None or act.reads or (act.field and not _fills(model, act.field)):
+    model = CommandKind(act.kind).payload_model
+    if act.reads or (act.field and not _fills(model, act.field)):
         return False
     try:
         for head, sent in act.payload.items():
@@ -1468,15 +1471,16 @@ if _unacted := sorted(
 # A secret no digest names would match two keys as one act.
 if _secretive := sorted(
     k
-    for k, m in PAYLOAD_MODEL_FOR_KIND.items()
-    if not m.unmatched
-    and any(SecretStr in (f.annotation, *get_args(f.annotation)) for f in m.model_fields.values())
+    for k in CommandKind
+    if not k.payload_model.unmatched
+    and any(
+        SecretStr in (f.annotation, *get_args(f.annotation))
+        for f in k.payload_model.model_fields.values()
+    )
 ):
     raise RuntimeError(f"payloads holding a secret yet matched on a retry: {_secretive}")
 # A payload keeping an undeclared key carries a steer no handler owns, an endpoint among them.
-if _lax := sorted(
-    k for k, m in PAYLOAD_MODEL_FOR_KIND.items() if m.model_config["extra"] != "forbid"
-):
+if _lax := sorted(k for k in CommandKind if k.payload_model.model_config["extra"] != "forbid"):
     raise RuntimeError(f"command payloads accepting undeclared keys: {_lax}")
 
 

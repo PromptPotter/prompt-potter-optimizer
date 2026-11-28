@@ -36,7 +36,6 @@ from promptpotter.application.views.render.maintenance import (
 from promptpotter.config.paths import default_projects_root
 from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     CompactArchivePayload,
     CyclePayload,
@@ -54,7 +53,7 @@ _ADDRESS = ("campaign_id", "cycle_id")
 async def cmd_command(args: argparse.Namespace) -> CommandResult:
     """Every verb `cli/main.py::command_verb` derives from a payload model runs here."""
     kind = next(kind for kind in CommandKind if kind.cli_verb == args.command)
-    model = PAYLOAD_MODEL_FOR_KIND[kind]
+    model = kind.payload_model
     stores = local_stores(tenant=args.tenant)
     fields: dict[str, Any] = {
         name: read_payload_file(value) if isinstance(value, Path) else value

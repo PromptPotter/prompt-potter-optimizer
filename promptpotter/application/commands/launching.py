@@ -16,7 +16,6 @@ from promptpotter.application.commands.dispatcher import (
     DispatchedToDraft,
     RejectedError,
     Replaying,
-    replays,
 )
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -223,13 +222,6 @@ def _launched_effect(ran: LaunchOutcome) -> CommandEffect:
     return LaunchedEffect(launches=ran.as_launches())
 
 
-@replays(
-    CommandKind.START_RUN,
-    CommandKind.FORK_CYCLE,
-    CommandKind.MINT_CAMPAIGN,
-    CommandKind.HEAD_TO_HEAD,
-    CommandKind.START_CHECKIN,
-)
 async def relaunched(replaying: Replaying[Any]) -> StartAnswer:
     """Every launch kind's retry: each job its first act's ack recorded, read live as
     `read_command` reads them (the cycle a queued mint took since that ack included), as the ack

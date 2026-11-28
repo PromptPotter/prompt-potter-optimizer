@@ -21,7 +21,6 @@ from pydantic.fields import FieldInfo
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
     ArchiveMode,
     CampaignPayload,
     CommandKind,
@@ -994,7 +993,7 @@ def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tup
 
 def command_verb(kind: CommandKind) -> Verb:
     """The kind's payload model IS the verb: its docstring the help, its fields the arguments."""
-    model = PAYLOAD_MODEL_FOR_KIND[kind]
+    model = kind.payload_model
     address: tuple[Arg, ...] = ()
     if issubclass(model, CyclePayload):
         cycle = ACTIVE_CYCLE if model.implied_target else Arg(*ACTIVE_CYCLE.flags, required=True)
@@ -1034,7 +1033,7 @@ def _unsaid(verb: Verb) -> list[str]:
     is an argument it takes."""
     if verb.read is not None:
         return []
-    models = [PAYLOAD_MODEL_FOR_KIND[kind] for kind in CommandKind if kind.cli_verb == verb.name]
+    models = [kind.payload_model for kind in CommandKind if kind.cli_verb == verb.name]
     if not models:
         return [] if verb.terminal_only else [f"`{verb.name}` dispatches no kind and says not why"]
     fields = {

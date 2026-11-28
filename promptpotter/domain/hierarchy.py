@@ -10,8 +10,6 @@ from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchCurve, BenchScore, PassAdmission
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
-    RUN_VERB_KIND,
     CommandKind,
     acts_filed,
 )
@@ -124,7 +122,7 @@ class RunAdmission(FrozenModel):
     def launches(run: RunState) -> bool:
         """The verb *run*'s phase names files a launch: a resume files what a start does."""
         action = RUN_PHASE_INFO[run.run_phase].action
-        return action is not None and RUN_VERB_KIND[action] is RUN_VERB_KIND["start"]
+        return action in CommandKind.START_RUN.run_actions
 
     @classmethod
     def of(
@@ -155,7 +153,7 @@ class RunAdmission(FrozenModel):
             refusal = launch_refusal
         if refusal is None:
             # The run asks its verb alone: a reader who may not file it reads the run.
-            if info.action and RUN_VERB_KIND[info.action] not in filable:
+            if info.action and not any(info.action in k.run_actions for k in filable):
                 refusal = READ_ONLY
         elif refusal.next_acts:
             # Its own refusal stands with the acts past it its reader files; none, it reads the run.
@@ -508,7 +506,7 @@ class DeleteAct(FrozenModel):
 
     @classmethod
     def of(cls, kind: DeleteKind) -> DeleteAct:
-        payload = PAYLOAD_MODEL_FOR_KIND[kind]
+        payload = kind.payload_model
         keep = payload.model_fields.get("keep_results")
         return cls(kind=kind, says=str(payload.__doc__), keep_results=keep and keep.description)
 

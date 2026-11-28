@@ -8,7 +8,6 @@ from promptpotter.application.commands.dispatcher import (
     Dispatched,
     DispatchedToCycle,
     Replaying,
-    replays,
 )
 from promptpotter.application.jobs import quota, shares
 from promptpotter.application.jobs.launcher.admission import campaign_sends
@@ -17,7 +16,6 @@ from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     ChangeRunLimitsPayload,
-    CommandKind,
     SetConcurrentCyclesPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop
@@ -41,7 +39,6 @@ async def change_run_limits(
     return Applier(_apply)
 
 
-@replays(CommandKind.SET_LIMITS)
 async def limits_armed(replaying: Replaying[ChangeRunLimitsPayload]) -> ArmedCaps:
     """Off the cycle as it stands: caps are a standing state, so what binds now is the honest answer
     to a retry, whatever moved them since; a cycle deleted since answers its 404."""

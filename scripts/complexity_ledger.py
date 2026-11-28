@@ -429,7 +429,10 @@ BASELINE = {
     # the admin bot relays CLI verbs on the CLI grammar instead of its own verb table.
     # w11-tests5 (+10): each shipped framing's budget is checked where the registries complete
     # (`dataset_access.py::check_shipped_framings`), where a test scanned the shipped tiers.
-    "package_lines": 114428,
+    # bb-commands (-57): one `CommandKind` row per kind; its tables (`PAYLOAD_MODEL_FOR_KIND`,
+    # `_REPLAYS`, `LOOP_KINDS`, `RUN_VERB_KIND`, `_NAMED`, the bot's `_FILED`) and the payloads'
+    # three dataset-name validators (`DatasetName` instead) go.
+    "package_lines": 114371,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -1103,7 +1106,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application.maintenance.landing import complete_registries
     from promptpotter.application.optimizer_contract import NODE_MEMBERS, CycleRead
     from promptpotter.config.settings import Settings
-    from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+    from promptpotter.domain.command_kinds import CommandKind
     from promptpotter.domain.record_kinds import RECORDS
 
     complete_registries()
@@ -1119,10 +1122,7 @@ def compute_ledger() -> dict[str, int]:
     )
     commands, commands_left_out = _enumerations(
         sites,
-        [
-            _spelled(k.value, f"CommandKind.{k.name}", PAYLOAD_MODEL_FOR_KIND[k].__name__)
-            for k in CommandKind
-        ],
+        [_spelled(k.value, f"CommandKind.{k.name}", k.payload_model.__name__) for k in CommandKind],
     )
     priced: collections.Counter[str] = collections.Counter()
     for member in NODE_MEMBERS.table.values():

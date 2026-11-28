@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, get_args
 
-from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
+from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
     compact_measurement_archive,
@@ -11,7 +11,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
     reclaim_dataset,
     restore_measurement_archive,
 )
-from promptpotter.domain.command_kinds import ArchiveMode, CommandKind, CompactArchivePayload
+from promptpotter.domain.command_kinds import ArchiveMode, CompactArchivePayload
 
 #: Each mode's pass, every one called alike: the stores, the dataset it is scoped to, and `apply`.
 _PASS: dict[ArchiveMode, Callable[..., ArchiveReport]] = {
@@ -33,7 +33,6 @@ async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Appl
     return Applier(_apply)
 
 
-@replays(CommandKind.COMPACT_ARCHIVE)
 async def compacted_once(_: Replaying[Any]) -> ArchiveReport:
     # A deduped retry replays an EMPTY report: re-running `purge-cold` would report gone bytes deleted twice.
     return ArchiveReport()

@@ -24,7 +24,6 @@ from promptpotter.domain.command_effects import (
     StandingEffect,
 )
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     CommandPayload,
     Door,
@@ -71,7 +70,7 @@ def subject_of(spelled: str) -> Subject | None:
 def _recorded_shape(kind: CommandKind) -> type[CommandPayload]:
     """*kind*'s payload as its record keeps it: a field the dump excludes is held elsewhere (an
     upload's bytes in the upload store), so the record holds none of it."""
-    model = PAYLOAD_MODEL_FOR_KIND[kind]
+    model = kind.payload_model
     held_elsewhere: dict[str, Any] = {
         name: (None, Field(default=None, exclude=True))
         for name, info in model.model_fields.items()

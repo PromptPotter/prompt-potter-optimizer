@@ -80,7 +80,12 @@ from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
 from promptpotter.application.commands import cycle_cleanup, draft_editing, launching, measuring
-from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import (
+    Applier,
+    CommandCall,
+    CommandDispatcher,
+    replay_of,
+)
 from promptpotter.application.commands.launching import launch_cancels
 from promptpotter.application.cycle_addressing import cycle_target, followed_cycle
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
@@ -4038,6 +4043,8 @@ async def test_every_kind_replays_off_the_log_but_a_payload_holding_a_secret() -
     assert getattr(answers[1].result, "last4", None) == "bbbb", (
         "a retried set-api-key under one key with another secret was answered as the first"
     )
+    # A retry of any other kind answers by its row alone: one naming no replay it needs refuses.
+    assert all(replay_of(k) for k in CommandKind if not k.payload_model.unmatched)
 
 
 # 5. The host surface

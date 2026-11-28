@@ -10,7 +10,7 @@ No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictMod
 - **`pipeline_params.py::PipelineParams` is built only by reading the laid document it dumps back to**, so whatever it builds reads back; `STEPS_KEY`, `NodeCall`'s fields and `node_rule` are the one spelling of the key, the call-key rosters and the node fold's rule. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
 - **`spend.py::TokenAccount` IS the carrier**: never hand-convert it at a call site.
 - **`deprecated` names the fatal-warning sample lifecycle only** (`is_deprecated`, `CellFold.deprecated`), never a back-compat shim: do not delete it as one.
-- **A command kind is ONE `command_kinds.py::CommandKind` row** (here because the lazy CLI `--help` and a ledger fold cannot import the dispatcher): its payload model declares the kind, the row names `handler`, `capability` and `press`; spec, TS types and `BrowserKind` are generated, and a kind the browser presses takes its sender in `webapp/lib/api/commands.ts::commands`.
+- **A command kind is ONE `command_kinds.py::CommandKind` row** (here because the lazy CLI `--help` and a ledger fold cannot import the dispatcher): its payload model declares the kind (`CommandKind.payload_model`), and its `Row` holds every other per-kind fact (`handler`, `capability`, `press`, `replay`, `run_actions`, …), which every surface derives its verbs and rules from, never a table of its own; spec, TS types and `BrowserKind` are generated, and a kind the browser presses takes its sender in `webapp/lib/api/commands.ts::commands`.
 
 ## Tolerance is scoped by what a payload is FOR
 

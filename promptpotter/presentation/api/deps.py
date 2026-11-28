@@ -16,7 +16,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.read_params import ReadParams
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import CommandKind, ReadKind
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.strict_model import UPLOAD_READ_BYTES, RequestBody
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -93,7 +93,7 @@ def _drawn(request: Request, identity: IdentityDep) -> None:
     """The request drawn on its principal's rate, read or write as the kind its route is named by
     (every session route is named by one), before anything is built for it."""
     route = request.scope.get("route")
-    refuse_request_rate(identity, read=isinstance(_NAMED[getattr(route, "name", "")], ReadKind))
+    refuse_request_rate(identity, read=getattr(route, "name", "") in ReadKind)
 
 
 def _caller(request: Request, stores: Stores, jobs: JobRegistry) -> Caller:
@@ -119,9 +119,6 @@ def mounted_caller(request: Request) -> Caller:
     drawn on no rate, since what the app serves draws its own (`HostSession.answer`)."""
     stores = build_stores_from_identity(resolve_identity(request))
     return _caller(request, stores, get_job_registry(request))
-
-
-_NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, *ReadKind)}
 
 
 CallerDep = Annotated[Caller, Depends(open_caller)]

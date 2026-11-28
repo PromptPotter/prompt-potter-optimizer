@@ -22,7 +22,7 @@ from promptpotter.application.views.render.primitives import (
     render_pipeline_overlay,
 )
 from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CyclePayload
+from promptpotter.domain.command_kinds import CommandKind, CyclePayload
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import ServedRound
@@ -55,7 +55,7 @@ def _spelled(act: NextAct) -> str:
         if act.field in CyclePayload.cli_spellings:
             return f"`{CyclePayload.cli_spelling(act.field)}{value}`"
         return f"`{act.field}: {act.value}`" if act.value else f"`{act.field}`"
-    model = PAYLOAD_MODEL_FOR_KIND[act.kind]
+    model = CommandKind(act.kind).payload_model
     spelled = model.cli_spelling(act.field) if act.field else ""
     if spelled and not spelled.startswith("-"):
         spelled = value.strip() or f"<{spelled}>"

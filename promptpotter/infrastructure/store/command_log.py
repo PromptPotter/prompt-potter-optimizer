@@ -25,7 +25,6 @@ from promptpotter.domain.command_events import (
     subject_key,
 )
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
     UNARMED,
     CancelPayload,
     CommandKind,
@@ -104,10 +103,6 @@ def effective_lookahead(press: LookaheadPress, ceiling: int) -> LookaheadWindow:
     )
 
 
-LOOP_KINDS = frozenset(
-    kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(model, LoopPayload)
-)
-
 _Event = CommandRecord | CommandAckRecord
 
 
@@ -122,7 +117,7 @@ class _Inbox:
     def feed(self, event: _Event) -> None:
         match event:
             case CommandRecord():
-                if event.kind in LOOP_KINDS:
+                if isinstance(event.payload, LoopPayload):
                     self._asked[event.command_id] = event
             case CommandAckRecord(command_id=command_id, status="accepted", effect=effect):
                 if asked := self._asked.pop(command_id, None):
@@ -144,7 +139,7 @@ class _Inbox:
     def _arm(self, asked: CommandRecord, hold: str | None) -> None:
         command_id, held = asked.command_id, self._held
         payload = asked.payload
-        assert isinstance(payload, LoopPayload), "only a kind in `LOOP_KINDS` is asked"
+        assert isinstance(payload, LoopPayload), "only a loop payload is asked"
         match payload:
             case PauseCyclePayload():
                 if any(p.hold == hold for p in held.pauses):
@@ -363,7 +358,7 @@ class CommandBook:
             record.command_id
             for record in self.subject_events(subject)
             if isinstance(record, CommandRecord)
-            and record.kind in LOOP_KINDS
+            and isinstance(record.payload, LoopPayload)
             and record.command_id != keep
             and self.status(record.command_id) == "accepted"
             and (sparing is None or self._standing_for(record.command_id) != sparing)
@@ -456,7 +451,7 @@ class CommandLog:
                     "of its own",
                     code="command_id_reused",
                 )
-            matched = not PAYLOAD_MODEL_FOR_KIND[record.kind].unmatched
+            matched = not record.payload.unmatched
             key = record.subject, record.kind, record.act_digest, record.idempotency_key
             if matched and book.keyed(*key) is not None:
                 raise ConflictError(

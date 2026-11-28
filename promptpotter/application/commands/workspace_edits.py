@@ -13,7 +13,7 @@ from promptpotter.application.account import (
     put_account_key,
     remove_account_key,
 )
-from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
+from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying
 from promptpotter.application.commands.draft_editing import reread_draft_wire
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.ingest import (
@@ -28,7 +28,6 @@ from promptpotter.domain.command_kinds import (
     AcceptTermsPayload,
     ArchiveCampaignPayload,
     BankSnippetPayload,
-    CommandKind,
     IngestUploadPayload,
     LifecyclePayload,
     ListApiTokensPayload,
@@ -80,7 +79,6 @@ def _opening(run: Callable[[], Awaitable[DraftCampaignWire]]) -> Applier[DraftCa
     return Applier(run, effect_fn=lambda wire: DraftOpenedEffect(draft_id=wire.draft_id))
 
 
-@replays(CommandKind.INGEST_UPLOAD, CommandKind.OPEN_DATASET_DRAFT, CommandKind.OPEN_ORIGIN_DRAFT)
 async def reopened(replaying: Replaying[Any]) -> DraftCampaignWire:
     """A retry under the first act's key answers the draft it opened, as that draft reads now."""
     effect, stores = replaying.end.effect, replaying.stores
@@ -134,7 +132,6 @@ async def set_user_settings(
     return Applier.blocking(lambda: account.set_user_settings(stores, sent))
 
 
-@replays(CommandKind.SET_USER_SETTINGS)
 async def settings_set(replaying: Replaying[SetUserSettingsPayload]) -> account.UserSettings:
     # Its key names this payload, so the first act set exactly these.
     return account.UserSettings(demo_mode_enabled=replaying.payload.demo_mode_enabled)
@@ -148,7 +145,6 @@ async def accept_terms(
     return Applier.blocking(lambda: account.accept_terms(stores, version))
 
 
-@replays(CommandKind.ACCEPT_TERMS)
 async def terms_accepted(replaying: Replaying[AcceptTermsPayload]) -> account.TermsConsent:
     # One consent line per act: a retry writes none.
     version = replaying.payload.version
@@ -168,7 +164,6 @@ async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier
     return Applier.blocking(lambda: remove_account_key(stores, provider))
 
 
-@replays(CommandKind.REMOVE_API_KEY)
 async def key_removed(replaying: Replaying[RemoveApiKeyPayload]) -> RemovedKey:
     # Its key names this payload, so the first act emptied exactly this slot.
     return RemovedKey(provider=replaying.payload.provider)
@@ -189,7 +184,6 @@ async def list_api_tokens(
     return Applier.blocking(lambda: account.account_tokens(stores))
 
 
-@replays(CommandKind.LIST_API_TOKENS)
 async def tokens_listed(replaying: Replaying[ListApiTokensPayload]) -> AccountTokens:
     # A listing acts on nothing, so a retry lists again.
     return await asyncio.to_thread(account.account_tokens, replaying.stores)

@@ -5,7 +5,6 @@ from promptpotter.application.commands.dispatcher import (
     Dispatched,
     DispatchedToDraft,
     Replaying,
-    replays,
 )
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
@@ -15,7 +14,6 @@ from promptpotter.application.datasets.draft_build import (
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.domain.command_kinds import (
-    CommandKind,
     DiscardDraftPayload,
     EditDraftCampaignPayload,
 )
@@ -40,7 +38,6 @@ async def edit_draft_campaign(
     return Applier(_apply)
 
 
-@replays(CommandKind.EDIT_DRAFT_CAMPAIGN)
 async def edited(replaying: Replaying[EditDraftCampaignPayload]) -> DraftCampaignWire:
     """The draft as it reads now: its key names this patch, so the first act applied it."""
     return await reread_draft_wire(replaying.stores, replaying.payload.draft_id)

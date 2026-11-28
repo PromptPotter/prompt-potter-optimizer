@@ -28,7 +28,6 @@ from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_effects import LaunchAnswer
 from promptpotter.domain.command_kinds import (
     COMMAND_ID_CHARS,
-    PAYLOAD_MODEL_FOR_KIND,
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
@@ -182,7 +181,7 @@ for _kind in CommandKind:
         _answers = command_answer(_kind)
         commands_router.add_api_route(
             f"/{_kind}",
-            _Dispatching(PAYLOAD_MODEL_FOR_KIND[_kind], _answers),
+            _Dispatching(_kind.payload_model, _answers),
             methods=["POST"],
             name=_kind,
             response_model=_answers or CommandAcceptedBody,

@@ -329,8 +329,8 @@ _ROUTES = [route for mount in API_ROUTERS for route in mount.routes]
 
 
 def _off_catalogue(route: APIRoute) -> str | None:
-    """A session route out of the catalogue: named by no kind (its rate draw would 500 its first
-    request, `deps.py::_drawn`), a read's route other than the one its row's loop made, or a
+    """A session route out of the catalogue: named by no kind (its rate draw would read it as a
+    write, `deps.py::_drawn`), a read's route other than the one its row's loop made, or a
     command route answering other than the kind applies."""
     where = f"{sorted(route.methods or ())} {route.path}"
     if route.name in ReadKind:
