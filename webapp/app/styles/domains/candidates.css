@@ -1,7 +1,7 @@
 .cand-card > .card-title{display:block;margin-bottom:10px}
 .cand-title{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
 .cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;
-  color:var(--color-text-secondary)}
+  color:var(--color-text-secondary);white-space:normal;flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
 .cand-crumb:hover{color:var(--color-text-primary)}
 .cand-forest-toggle{display:inline-flex;align-items:center;gap:3px}
 /* The toggle sits in the chart's bottom-left corner, under the y-axis and left of the first round:

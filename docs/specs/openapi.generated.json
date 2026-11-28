@@ -2162,9 +2162,6 @@
                 "type": "integer"
               },
               {
-                "type": "null"
-              },
-              {
                 "const": "unbounded",
                 "type": "string"
               }
@@ -2177,9 +2174,6 @@
               {
                 "minimum": 0.0,
                 "type": "integer"
-              },
-              {
-                "type": "null"
               },
               {
                 "const": "unbounded",
@@ -2196,9 +2190,6 @@
                 "type": "number"
               },
               {
-                "type": "null"
-              },
-              {
                 "const": "unbounded",
                 "type": "string"
               }
@@ -2211,9 +2202,6 @@
               {
                 "exclusiveMinimum": 0.0,
                 "type": "number"
-              },
-              {
-                "type": "null"
               },
               {
                 "const": "unbounded",
@@ -18159,6 +18147,12 @@
         "additionalProperties": false,
         "description": "What only the subtree read knows: it scans every sibling's ledger.",
         "properties": {
+          "candidates": {
+            "description": "The candidates this read serves under the campaign, at every depth it reads: the count the lineage tree draws.",
+            "minimum": 0.0,
+            "title": "Candidates",
+            "type": "integer"
+          },
           "deletable_stubs": {
             "description": "How many cycles `cleanup-empty-cycles` deletes here now (`admission.py::deletable_stubs`, the command's own list: no held stub counts); none where its reader may not file it.",
             "title": "Deletable Stubs",
@@ -18228,7 +18222,8 @@
           "lifecycle",
           "runs_with",
           "deletable_stubs",
-          "filable"
+          "filable",
+          "candidates"
         ],
         "title": "SubtreeCampaignFacts",
         "type": "object"

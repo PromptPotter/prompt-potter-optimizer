@@ -380,7 +380,9 @@ BASELINE = {
     # Set to the measured count at the w10 landing.
     # w11-store (+157) set 114204; plugin −31, scoring −186, config +61, access +50, connectors −40
     # (each its report's count): set to the measured count once they landed (−140).
-    "package_lines": 114064,
+    # w11-web (+17): the subtree read serves `SubtreeCampaignFacts.candidates`, the count the
+    # lineage tree draws, in place of the browser's count of forked cycles.
+    "package_lines": 114081,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

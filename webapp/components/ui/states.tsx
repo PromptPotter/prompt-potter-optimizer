@@ -31,7 +31,8 @@ export function Loading({
   className?: string | undefined;
 }) {
   return (
-    <p className={cx("note-empty", className)} role="status">
+    // A read in flight marks its pane busy: the one place a wait is drawn, so nothing counts fetches.
+    <p className={cx("note-empty", className)} role="status" aria-busy="true">
       {children}
     </p>
   );

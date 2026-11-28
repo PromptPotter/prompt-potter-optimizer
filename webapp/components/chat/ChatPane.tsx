@@ -18,9 +18,12 @@ import {
 import { Thread } from "@/components/chat/Thread";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
+import { AuthCore } from "@/components/login/AuthCore";
+import { useAuth } from "@/lib/state/auth";
 
 // The pane renders ONE subject's conversation: the viewed check-in's, or the viewed run's.
 export function ChatPane() {
+  const { status } = useAuth();
   const datasetName = useViewedDatasetName();
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
@@ -89,8 +92,15 @@ export function ChatPane() {
       <div className="chat-grid">
         <div className="chat-panel">
           <div className="ingest-conversation">
-            <Thread items={items} renderRun={(cycle) => <RunSummaryItem cycle={cycle} />} />
-            <IngestComposer />
+            {/* I4: signed out, the pane is the sign-in, never an upload no read would take. */}
+            {status === "unauthed" ? (
+              <AuthCore />
+            ) : (
+              <>
+                <Thread items={items} renderRun={(cycle) => <RunSummaryItem cycle={cycle} />} />
+                <IngestComposer />
+              </>
+            )}
           </div>
         </div>
       </div>

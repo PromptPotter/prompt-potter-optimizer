@@ -65,7 +65,7 @@ export function SubjectBox() {
           cfg={cfg}
           changes={evidence.changes}
           read={evidence.read}
-          verdict={<RoundVerdict reading={subject.verdict} />}
+          verdict={<RoundVerdict reading={reading} />}
         />
       ) : shown.read.status === "failed" ? (
         <FailureLine failure={shown.read.failure} />

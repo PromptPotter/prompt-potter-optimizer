@@ -114,8 +114,9 @@ export function ComparePane() {
                 Tick <strong>▢</strong> beside two or more campaigns in the campaign list. Each lands on
                 its own winner; open a channel&rsquo;s lineage to walk its cladogram — click any
                 searchpoint to move that channel onto it, or to put it on the board beside the
-                winner. They may come from different datasets — the read says what that costs
-                rather than refusing it.
+                winner. They may come from different datasets — the read says what that costs —
+                but one scorer must grade them all: subjects graded under different scorers share
+                no column, and the read refuses them.
               </p>
             </CardFrame>
           ) : evidence === null && read.status === "failed" ? (

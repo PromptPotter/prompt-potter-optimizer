@@ -12,7 +12,7 @@ import {
 
 // Pinned literals: changing an address string breaks every link anyone saved.
 
-const roundTrip = (a: Address): Address | RefusedAddress => parseAddress(formatAddress(a));
+const roundTrip = (a: Address) => parseAddress(formatAddress(a));
 const MALFORMED: RefusedAddress = { refused: "malformed" };
 const PATH = [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }];
 const INNER = [
@@ -106,9 +106,24 @@ describe("parseAddress tolerates what a person types", () => {
   });
 });
 
+describe("parseAddress reads a campaign's served address", () => {
+  // `/hierarchy` serves a campaign's address without a cycle: the workspace opens its line.
+  it("reads a head that is no view and no hop as a campaign", () => {
+    expect(parseAddress("#/justlogic.d234__3ddd32")).toEqual({
+      campaign: "justlogic.d234__3ddd32",
+      views: DEFAULT_VIEWS,
+      keys: NO_KEYS,
+    });
+    expect(parseAddress("#/a__b/samples;round=2")).toEqual({
+      campaign: "a__b",
+      views: [view("samples")],
+      keys: { ...NO_KEYS, round: 2 },
+    });
+  });
+});
+
 describe("parseAddress refuses what is not an address", () => {
   const bad = [
-    "#/a__b", // a campaign alone: nothing mints one, a link names its cycle
     "#/a__b::cycle_x/r3", // a pick names its arm; a round alone is `;round=`
     "#/a__b::cycle_x/sp_9f2",
     "#/a__b::cycle_x/r3/sp_9f2/leftover",
@@ -124,7 +139,6 @@ describe("parseAddress refuses what is not an address", () => {
     "#/samples/samples", // one family never shows twice
     "#/samples=a=b",
     "#/samples=..",
-    "#/nosuchview",
     "#/node=llm_only", // a node is scoped
     "#/node=judge.llm_only",
     "#/new/d",

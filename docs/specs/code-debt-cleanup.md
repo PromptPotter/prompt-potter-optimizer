@@ -909,7 +909,7 @@ one `Verb` row; every write goes through `CommandDispatcher.dispatch`; everythin
 the served contract is generated and the browser derives nothing; mobile first.
 
 **Unexamined:** `presentation/cli/main.py`, `cli/commands/launch.py`, `main.py`, `presentation/admin_bot.py`,
-`cli/commands/writes.py`, `webapp/components/candidates`, `webapp/components/node-surface`
+`cli/commands/writes.py`
 
 - **Adapters over a flat served shape** (webb-5's): `useCandidatesModel.ts` joins about twelve sources;
   `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
@@ -959,11 +959,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
   `useActivePointer()` poll for one failure line; a `/hierarchy` 200 replaces every entry object
   `lib/hooks/useRegistry.ts::useRegistry` indexes. The anti-rot pass re-finds them. **Rides with:** rel 3.
-- **A Candidates card draws an empty chart over a served lineage**: campaign
-  `bbh-multistep-arithmetic-8b__244ba5` (history 2, rounds 2) renders `.cand-card`'s canvas blank
-  with no console error, while its hierarchy and dashboard reads serve rows. A state the card enters
-  but does not report; cause not traced. **Re-test:** the card for a campaign with a closed round
-  draws at least one bar or point, or says why it cannot.
 - **The served contract is generated and the browser derives nothing (root E)**: `webapp/lib/derivations`
   holds 44 files and 3,827 lines, about 1,780 of tests; `webapp/lib/test-fixtures.ts` 666 lines;
   `.facts.` 121/47 over `webapp/`. **Closes:** **The browser inks a served state from its own map**,
@@ -976,14 +971,11 @@ the served contract is generated and the browser derives nothing; mobile first.
   `.cmp-expr-bad{border-color}` state a field's look beside the skin. Root: the focus and invalid states of
   a field skin in `foundation/base.css` (`:focus-visible`, `[aria-invalid=true]`). **Re-test:** no `outline`
   or `border-color` on a field class outside `foundation/base.css`.
-- **A pane's data read in flight reports nothing**: `webapp/components/chat/HardSamplesPreview.tsx` (and
-  every `useRead` consumer but `AccountSpend` and `PipelineFlow`) draws its rows when the read lands but sets
-  no `aria-busy` while it is in flight, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
-  Root: `useRead`'s `loading` state marks its pane busy, one rule in `webapp/lib/hooks/useRead.ts`.
-  **Re-test:** `drawn` keeps only its `aria-busy` check and `landscape-844 › every view` stays red 3/3 at base.
-- **A pool chip pressed twice inside one write's ack builds from the pre-write read** (feed-version, not
-  re-tested): `NodeKnobsPanel.tsx::PoolPicker`. **Rides with:** area 12's chain. **Re-test:** two presses
-  inside one ack keep both picks.
+- **A pane's data read in flight reports nothing, where it draws no `Loading`**: `ui/states.tsx::Loading`
+  marks its pane `aria-busy` (w11-web), but a `useRead` consumer that renders nothing while its read
+  flies still reports nothing, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
+  Root: every in-flight read renders `Loading` or `ReadState`. **Rides with:** w11-tests2 (`drawn`) and
+  area 12's chain. **Re-test:** `drawn` keeps only its `aria-busy` check and the walk stays green.
 - **A pane's phone layout keys on the screen, not its column** (webapp-1, 11-19): measurements.css,
   scoring.css, dashboard-pipeline.css, remote.css and ui/IntervalRow.module.css still switch at
   `@media (max-width: 640px)` though they draw in a narrower `.view` — the root: the `column`
@@ -1013,73 +1005,35 @@ the served contract is generated and the browser derives nothing; mobile first.
   check-in — the editor's host names the subject an edit is written in, never a fallback by order —
   **Rides with:** `area 12's chain` — **Re-test:** follow the exhibit, open a check-in, edit a
   snippet; it banks into the check-in.
-- **The login page promises a grant no read serves** (w11-walk, 11-27):
-  `webapp/components/login/AuthCore.tsx::AuthCore` hard-codes "10 optimization runs on your own data,
-  up to 10 rounds each, on my key"; the served grant is "$0.0000 of $0.3000" (`/auth/coupon`), 1000
-  campaigns a day (`/auth/quota-status`) and a check-in's "up to 5 rounds". Root: the grant's words are
-  served. **Rides with:** `area 12's chain` — **Re-test:**
-  `git grep -c "10 optimization runs" -- webapp` is 0.
-- **A phone clips the run's masthead and three rows** (w11-walk, 11-27), at 390×844, each fine at
-  1440: `webapp/components/shell/masthead/RunMasthead.tsx` cuts the stat strip ("BEN…", "10(") and
-  the Follow button, over a ~100px empty band; `webapp/components/account/ApiTokens.tsx`'s scope chips
-  run off the card ("step" at x=399); `webapp/components/pipeline/KnobClashes.tsx` lays a dotted key in
-  a ~50px column, one to three letters a line; the Account view opens under an empty ~150px band
-  below its CHAT/ACCOUNT tabs. No page scrolls sideways, so `noSidewaysScroll` passes all four.
-  Root: a row of unwrapped items owns its overflow at column width. **Rides with:** `area 12's chain`
-  — **Re-test:** at 390px every element of these four lies inside its card.
-- **A reopened check-in tells itself as the dataset's whole task file** (w11-walk, 11-27):
-  `webapp/lib/hooks/useIngestFlow.ts` (`retell`) echoes `draft.raw_task_description` as the user's
-  message: the dataset's markdown task, newlines collapsed into one block, pushing the draft card off
-  the first screen; a fresh pick echoes "Use dataset “Email Tagging”". Expected one telling of a
-  draft, the same fresh or reopened. **Rides with:** `area 12's chain` — **Re-test:** reopen a
-  dataset check-in; the thread holds no line the operator did not type.
-- **A campaign's served address opens nothing and draws another campaign** (w11-walk, 11-27): a deep
-  link to `#/justlogic.d234__3ddd32`, the walk world's hierarchy `address` for that campaign, shows
-  `webapp/lib/state/poll.tsx`'s "This link opens nothing" over promptpotter-self/e2e's masthead and
-  pipeline. Expected: a campaign address opens its line cycle, or the gone state alone, never
-  another run beneath it. **Rides with:** `area 12's chain` — **Re-test:** each `/hierarchy` entry's
-  `#/<address>` opens that entry.
-- **The Leader card heads one round with another's line** (w11-walk, 11-27): on the walk world's
-  `justlogic.d234` (desktop and phone), Best reads "round 1 Critique · best · C1.1" over "round 4: no
-  arm cleared the parent; the line moves on to C4.1, uncrowned …"
-  (`webapp/components/searchpoint/WinnerStanding.tsx`'s card). Expected the line of the round it
-  heads. **Rides with:** `area 12's chain` — **Re-test:** the card's round label and its line name one
-  round.
-- **The Candidates chart's lift names no floor** (w11-walk, 11-27):
-  `webapp/components/candidates/FitnessChart.tsx` captions "+80.0 pts" beside the crown, drawn over
-  the crown glyph and the interval cap, while the masthead serves "+71.4 pts [+44.4, +98.5]" on the
-  origin panel. Expected (I8) the caption names its floor and panel, legible. **Rides with:**
-  `area 12's chain` — **Re-test:** the caption reads its floor and overlaps no mark.
-- **Lineage counts "0 descendants" over a drawn tree** (w11-walk, 11-27): the freed tree of 13
-  candidates is headed "0 descendants", `webapp/lib/hooks/useCampaignForest.ts`'s `cycles.length - 1`,
-  a browser count of forked cycles under a candidate tree. Expected a served count of what is drawn,
-  named for it. **Rides with:** `area 12's chain` — **Re-test:** the header's count names the drawn
-  nodes' kind and matches them.
-- **Compare promises a read it refuses** (w11-walk, 11-27): `webapp/components/compare/ComparePane.tsx`
-  says subjects "may come from different datasets — the read says what that costs rather than refusing
-  it"; ticking the walk world's two campaigns answers 400 "Could not read the selection … graded under
-  2 scorers". Expected the empty state names the one-scorer rule, or the second tick says it before
-  the read. **Rides with:** `area 12's chain` — **Re-test:** the help text and the refusal agree.
-- **Uncap is refused, in the validator's own words** (w11-walk, 11-27):
-  `webapp/components/shell/remote/RunLimitsControl.tsx`'s Uncap sends `{budget: {rounds: null}}`, but
-  `promptpotter/domain/command_kinds.py::ChangeRunLimitsPayload` lifts an axis on `unbounded` and
-  reads null as unnamed, so every Uncap answers 422 and shows "a budget naming at least one of usd /
-  tokens / rounds / wall_clock_s, or `overshoot`, is required". Route: walk world campaign → Job
-  status and configuration → Rounds → Uncap. Root: one spelling of a lift, the generated payload type
-  refusing null. **Rides with:** `area 12's chain` — **Re-test:** Uncap on a capped axis applies.
-- **A signed-out phone lands on an empty pane that offers an upload** (w11-walk, 11-27): `/` at 390px
-  without a session draws a blank pane over "Drop a dataset file…" with the attach control; sign-in
-  sits only behind the "<" sidebar. An account deleted by the host drops to the same with no word.
-  Expected (I4) anon shows anon chrome and its sign-in CTA on the first screen. **Rides with:**
-  `area 12's chain` — **Re-test:** a cookieless phone load of `/` shows a sign-in link and no
-  attach control.
-- **Account controls render disabled with no reason** (w11-walk, 11-27):
-  `webapp/components/account/AccountProfileTab.tsx` shows "Update profile" and the sole sign-in's
-  "Remove" disabled with no `aria-describedby`; Permissions lists `account.keys` beside bare
-  `babysit`, `budget` … (the `campaign.` prefix dropped for one family only); `DatasetPickList.tsx`'s
-  Discard is a native unstyled button on its own line. Expected (I3) a control no read offers is not
-  drawn, or says why; one word per capability. **Rides with:** `area 12's chain` — **Re-test:** every
-  disabled control on Account → Profile carries its reason.
+- **The Account view's phone band and token chips are unproven** (w11-walk, 11-27; cut by w11-web):
+  the ~150px empty band under the Account view's CHAT/ACCOUNT tabs and `ApiTokens.tsx`'s scope chips
+  running off the card did not reproduce in the auth-off walk world, which serves no grantable scope;
+  `ui/Chip.module.css`'s group now wraps. **Rides with:** w11-tests2 (an auth-on walk world).
+  **Re-test:** at 390px, signed in with a grantable scope, every element of Account lies inside its card.
+- **The Candidates card derives what its reads should serve** (w11-web census, 11-27):
+  `webapp/components/candidates/useCandidatesModel.ts` takes `divergentRound` as a min over views
+  (:103), counts replayed cells that `CandidatesToolbar.tsx:152` shows "of" `views.length` (:170), and
+  sets the in-flight arms from `openCells` (:122); `ApplyScenarioPanel.tsx:30` falls back to
+  `history.length` for the fork round; `SampleSetControl.tsx:37,47` derives the measuring rounds and
+  `everywhere`; `lineage-tree.ts:89` (`standingElection`) re-decides a candidate's standing from its
+  election at three sites. Action: the dashboard and subtree reads serve the fork round, the replay
+  count, the in-flight arms, per-sample coverage and the standing; the browser copies go. **Rides with:**
+  root E (webd). **Re-test:** `git grep -cE "standingElection|divergentRound" -- webapp/components/candidates` is 0.
+- **Candidates and node-surface keep words and fallbacks for served sets** (w11-web census, 11-27):
+  `SnippetLibrary.tsx:40`'s `FACET_LABEL` Record, `lineage-tree.ts`'s hand-written link-note words,
+  and `FitnessRankSummary.tsx:37`'s `?? PLACEHOLDER` on an index miss, because the served `lens_shift`
+  holds addresses, not labels. Action: the words are `Worded` rows; a lens shift serves its labels.
+  **Rides with:** area 11's chain. **Re-test:** `git grep -cE "FACET_LABEL|\?\? PLACEHOLDER" -- webapp/components` is 0.
+- **The node surface diffs config in the browser** (I9; w11-web census, 11-27):
+  `NodeConfigEditor.tsx:256` (`axisMenu`) marks values inert or user-added by a client diff and :110
+  derives `nodeLocked`; `NodeSurface.tsx:245` counts tunables; `L1Variants.tsx:62` casts an untyped
+  value to a hand-declared `Variant[]`. Action: `/pipeline?at=` serves each flag and count, and the
+  variant shape is generated. **Rides with:** area 11's chain. **Re-test:** `git grep -cE "axisMenu|as Variant" -- webapp/components` is 0.
+- **Node-surface prose hides in `title=`** (w11-web census, 11-27): `MeasurementRun.tsx:118,159,167`
+  and `NodeConfigEditor.tsx:484` teach through `title=`, and `.rsv-why>p`'s nowrap ellipsis
+  (`dashboard.css:68`) cuts the change list it titles at phone width. Action: the prose rides
+  `ui/HoverCard` and the line wraps. **Rides with:** area 12's chain. **Re-test:** the eslint rule
+  `local/title-is-a-label` passes over `components/node-surface` with no disable.
 
 ## 13 · Identity, accounts, access
 

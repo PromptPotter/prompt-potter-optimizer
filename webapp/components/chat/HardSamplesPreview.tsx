@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { type DatasetItem, HIT_SPREAD_LABELS } from "@/lib/api/types";
 import { useCells } from "@/lib/hooks/useCells";
-import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { failureOf, readGap, shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useWorkspace } from "@/lib/state/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
-import { Said } from "@/components/ui";
+import { Loading, Said } from "@/components/ui";
 import { fmtSampleTag, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
@@ -38,6 +38,8 @@ export function HardSamplesPreview() {
 
   const byId = useMemo(() => new Map(items.map((it) => [it.position, it])), [items]);
 
+  // In flight it says so; only a landed read with no row is the roster's note.
+  if (readGap(read)?.status === "loading") return <Loading>Reading the hardest rows…</Loading>;
   if (failureOf(read) !== null || items.length === 0) return <RosterNote />;
 
   const maxStart = Math.max(0, ids.length - ROWS);

@@ -135,9 +135,9 @@ export interface ObserveSubject {
   state: ObserveState;
   options: { value: ObserveState; label: string }[];
   point: ObservePoint | null;
-  // The round as served; null for the one no file holds yet (`round_axis.unfiled`).
+  // The round as served, its verdict too, so a card names one round; null for the one no file
+  // holds yet (`round_axis.unfiled`).
   reading: ServedRound | null;
-  verdict: ServedRound | null;
   round: number | null;
   live: boolean;
 }
@@ -179,7 +179,6 @@ export function resolveObserveSubject(
   const target = targets[state];
   const round = followsLive && liveRound != null ? liveRound : (target?.round ?? null);
   const reading = target ? closedRound(dash, target.round) : null;
-  const newestClosed = dash?.round_axis.completed.at(-1);
   return {
     state,
     options: observeOptions(
@@ -194,14 +193,6 @@ export function resolveObserveSubject(
       ? pointAt(target, subjectTitle(state, target, state === "latest" && inFlight))
       : null,
     reading,
-    verdict:
-      state === "latest"
-        ? null
-        : state === "best"
-          ? newestClosed != null
-            ? closedRound(dash, newestClosed)
-            : null
-          : reading,
     round,
     live: round != null && round === liveRound,
   };

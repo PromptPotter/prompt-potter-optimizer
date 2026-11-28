@@ -8,10 +8,8 @@ import {
   unclutteredLabels,
   type LabelBox,
 } from "@/lib/chart";
-import { fmtMetric } from "@/lib/format";
 import { cssPx, getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
-import { liftOf } from "@/lib/derivations";
 import type { CandidateBar } from "@/lib/types";
 import {
   activeSeries,
@@ -46,7 +44,7 @@ declare module "chart.js" {
   // Type param arity must match chart.js's own declaration to merge; unused here.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
-    barCaps?: { counts: (number | null)[]; standing: number | null; crown: string };
+    barCaps?: { counts: (number | null)[]; standing: number | null };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { indices: readonly number[] };
     ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
@@ -69,7 +67,7 @@ const markRoom = (chart: ChartJS): boolean => {
 type Caption = LabelBox & { text: string; font: string; ink: string };
 const barCapsPlugin: Plugin<
   "bar",
-  { counts: (number | null)[]; standing: number | null; crown: string }
+  { counts: (number | null)[]; standing: number | null }
 > = {
   id: "barCaps",
   afterDatasetsDraw(chart, _args, opts) {
@@ -108,7 +106,8 @@ const barCapsPlugin: Plugin<
       if (Number.isFinite(topY)) {
         const capY = counts[w] != null ? topY - 15 : topY - 4;
         const bottom = Math.max(capY, chartArea.top + 10);
-        captions.push(caption(`${CROWN}${opts.crown}`, "--text-sm", getCss("--color-accent"), xScale.getPixelForValue(w), bottom, 0));
+        // The crown alone: a lift names its floor (I8), which the reading below the chart does.
+        captions.push(caption(CROWN, "--text-sm", getCss("--color-accent"), xScale.getPixelForValue(w), bottom, 0));
       }
     }
     counts.forEach((n, i) => {
@@ -433,12 +432,6 @@ export const FitnessChart = memo(function FitnessChart({
     return idx >= 0 ? idx : null;
   }, [views]);
 
-  const crown = useMemo(() => {
-    const lift = standingIdx == null ? null : liftOf(views[standingIdx]?.reading?.vs_reference ?? null);
-    return lift == null || lift.side === "spans" ? "" : ` ${fmtMetric(lift.estimate)}`;
-
-  }, [views, standingIdx]);
-
   const cutCounts = useMemo(
     () => views.map((v) => (v.reading?.samples.cut ? v.reading.samples.scored : null)),
     [views],
@@ -573,7 +566,7 @@ export const FitnessChart = memo(function FitnessChart({
     },
     plugins: {
       legend: { display: false },
-      barCaps: { counts: cutCounts, standing: standingIdx, crown },
+      barCaps: { counts: cutCounts, standing: standingIdx },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { indices: inFlightIndices },
       ciWhisker: { bands, shaded: asLines },
@@ -581,7 +574,7 @@ export const FitnessChart = memo(function FitnessChart({
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndices, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndices, standingIdx, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="chart-frame">

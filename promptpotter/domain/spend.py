@@ -226,13 +226,14 @@ NESTED_NODE_PREFIX = "inner:"
 @dataclass(frozen=True, slots=True)
 class LiftWord:
     """A budget axis's lift: ``None`` in memory, :data:`UNBOUNDED` on the wire (``Budget``'s
-    validator and serializer translate), so its schema and TS type name the word beside the number."""
+    validator and serializer translate), so its schema and TS type spell a lift by it, never null."""
 
     def __get_pydantic_json_schema__(
         self, core: CoreSchema, handler: GetJsonSchemaHandler
     ) -> JsonSchemaValue:
         schema = handler(core)
-        return {**schema, "anyOf": [*schema["anyOf"], {"const": UNBOUNDED, "type": "string"}]}
+        named = [arm for arm in schema["anyOf"] if arm != {"type": "null"}]
+        return {**schema, "anyOf": [*named, {"const": UNBOUNDED, "type": "string"}]}
 
 
 LIFTED = LiftWord()
