@@ -1,8 +1,11 @@
-/* Layered beneath the `ui` primitives: an unlayered `*` reset out-ranks every layered rule and strips their padding and focus ring. */
+/* Layered beneath the `ui` primitives: an unlayered `*` reset out-ranks every layered rule and strips their padding. The focus ring is important here,
+   as a touch target's box is, so no surface's own `outline` or `all:unset` strips it: it is every control's one focus look, restated nowhere. */
 @layer ui.reset {
 *{box-sizing:border-box;margin:0;padding:0}
 *:focus{outline:none}
-*:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
+*:focus-visible{outline:2px solid var(--color-accent) !important;outline-offset:2px;border-radius:2px}
+/* An SVG mark paints `outline` unreliably (iOS): its surface draws its focus on the mark instead. */
+svg :focus-visible{outline:none !important}
 /* A chart's canvas carries its last measured width inline until its resize lands a frame later; capped, a box that narrows never lays out wider for it. */
 canvas{max-width:100%}
 /* The ONE field look: a surface sizes a field, never re-skins it. */
@@ -13,7 +16,7 @@ input:not([type=checkbox],[type=radio],[type=file],[type=range]),select,textarea
 .chat-field{background:Field;border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
 .chat-field:focus-within{border-color:var(--color-accent)}
 :is(.chat-field,.prompt-snippet) :is(input,textarea){border:0;background:transparent}
-.chat-field :is(input,textarea):focus-visible{outline:none}
+.chat-field :is(input,textarea):focus-visible{outline:none !important}
 fieldset{padding:var(--space-4) var(--space-8);border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
 }
 

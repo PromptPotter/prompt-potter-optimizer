@@ -20,14 +20,6 @@
   }
 }
 
-.inline:focus-visible,
-.block:focus-visible,
-.control:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-
 /* Pointer events stay ON: the operator points into the card to select an id out of it. A host caps
    the card with `--hovercard-max-w` / `-h`; the placement's free space (`--overlay-room-*`,
    `overlay.ts::room`) caps it too. */

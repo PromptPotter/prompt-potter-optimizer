@@ -14,8 +14,7 @@
 .sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border);display:flex;flex-direction:column;padding:var(--space-16) 0;overflow:hidden}
 .sidebar-resizer{position:absolute;top:0;bottom:0;left:var(--sidebar-width);width:9px;transform:translateX(-4px);z-index:6;cursor:col-resize;touch-action:none;background:transparent}
 .sidebar-resizer::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:1px;background:transparent;transition:background 120ms ease}
-.sidebar-resizer:hover::after,.sidebar-resizer:focus-visible::after{background:var(--color-accent)}
-.sidebar-resizer:focus-visible{outline:none}
+.sidebar-resizer:hover::after{background:var(--color-accent)}
 @media (max-width:880px){.sidebar-resizer{display:none}}
 .sidebar-toggle{position:absolute;top:8px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);font-size:var(--text-md);font-family:inherit;border-radius:var(--border-radius-sm)}
 .sidebar-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary)}

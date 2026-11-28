@@ -102,7 +102,7 @@ def owned_draft(stores: Stores, draft_id: str) -> DraftFile:
     """Asked before a draft's claim is taken; the tenant directory is the owner."""
     data = stores.drafts.read_draft(draft_id)
     if data is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="draft_not_found")
     return data
 
 

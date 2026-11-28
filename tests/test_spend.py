@@ -72,6 +72,7 @@ from world import Shared, World, shared_run
 from promptpotter import connectors
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores, set_coupon
+from promptpotter.application.account_activity import account_activity
 from promptpotter.application.bench.line import cycle_bench, live_cycle_run
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.commands.dispatcher import (
@@ -92,8 +93,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs import registry as registry_mod
-from promptpotter.application.jobs.account_activity import account_activity
-from promptpotter.application.jobs.launcher import run_job as run_job_mod
+from promptpotter.application.jobs.launcher import held as held_mod
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
     admit_and_share,
@@ -103,10 +103,10 @@ from promptpotter.application.jobs.launcher.admission import (
     request_jobs,
     slotless_opening,
 )
+from promptpotter.application.jobs.launcher.held import HeldLaunch, HeldRun, JobSpec
 from promptpotter.application.jobs.launcher.launch import Inline, admit
 from promptpotter.application.jobs.launcher.mint_and_start import ForkLaunch
 from promptpotter.application.jobs.launcher.opening import Opening, claim_cycle, open_spend_book
-from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
@@ -192,7 +192,6 @@ from promptpotter.domain.fitness_fold import cell_channels_of
 from promptpotter.domain.fork import ConfigOverrides, ForkRemainder, ForkTrigger, RebaseRequest
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import (
-    UNRESOLVED_HOP,
     CampaignLaunch,
     EmbeddedRun,
     LaunchMove,
@@ -399,7 +398,7 @@ def _held(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
         workspace=stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP,
+        hop=None,
         holder=EmbeddedRun("ds1"),
     )
     _admitted(stores, registry, job.job_id, Budget() if reserve is None else reserve)
@@ -1802,7 +1801,7 @@ def test_a_busy_admission_gate_refuses_a_launch_and_never_a_running_jobs_stamp(
         user_id=payer.user_id,
         principal_id=payer.user_id,
         workspace=built_stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP,
+        hop=None,
         holder=EmbeddedRun("ds1"),
     )
     JobRegistry(jobs, capacity=lambda _live: 4).move(running.job_id, LaunchMove.ADMIT)
@@ -2940,7 +2939,9 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
         async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
             return await run_trial(
                 InProcessWorkload(
-                    experiment=harbor.HarborPanel(tasks=[], agent={"environment": "docker"}),
+                    experiment=harbor.HarborPanel(
+                        tasks=[], agent={"name": "terminus-2", "environment": "docker"}
+                    ),
                     experiment_dir=tmp_path,
                     program=None,
                     workspace=None,
@@ -2955,6 +2956,30 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     assert len(trials) == harbor.CONNECTOR.cell_attempts, (
         f"{len(trials)} trials: a container cell reran past the budget its connector sized"
     )
+
+
+@pytest.mark.usefixtures("run_bound")
+async def test_a_machine_held_cell_in_a_process_with_no_producer_yet_is_measured(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def ran(*_args: Any) -> dict[str, Any]:
+        return {"data": {"answer": docker_host.machine_producer(), "terminal_node": "agent"}}
+
+    monkeypatch.setattr(docker_host, "_claimed", None)
+    held = fake_connector(
+        "held",
+        execution="in_process",
+        in_process_run=ran,
+        endpoint=None,
+        cells_hold_the_machine=True,
+        pipeline_declaration=world.net.backend.declared,
+    )
+    async with world.opened(connector=held) as session:
+        with scoped(book=spend_book()):
+            row_ = await measure_sample(
+                Sample(id=0, query="10452", ground_truth=None), session, PipelineParams()
+            )
+    assert row_.error_category is None, f"a machine-held cell was refused: {row_!r}"
 
 
 @pytest.mark.usefixtures("run_bound")
@@ -2973,7 +2998,7 @@ def test_harbors_own_docker_fault_out_of_a_trial_ends_the_cell_on_the_machine_re
         raise RuntimeError("Docker compose command failed for environment task. Return code: 1.")
 
     monkeypatch.setattr(Trial, "create", compose_down)
-    # The machine claimed off the loop, as a launch claims it, and the producer its trials are
+    # The machine claimed off the loop, as a session's opening claims it, and the producer its trials are
     # labelled with: both restored after.
     monkeypatch.setattr(docker_host, "_claimed", None)
     monkeypatch.setenv(harbor._PRODUCER_ENV, "")
@@ -2984,7 +3009,7 @@ def test_harbors_own_docker_fault_out_of_a_trial_ends_the_cell_on_the_machine_re
         workload=InProcessWorkload(
             # Harbor's own agent, so no model of ours is bound before the trial is.
             experiment=harbor.HarborPanel(
-                tasks=[], agent={"environment": "docker", "name": "oracle"}
+                tasks=[], agent={"name": "oracle", "environment": "docker"}
             ),
             experiment_dir=tmp_path,
             program=None,
@@ -3488,7 +3513,7 @@ def _running(stores: Stores, registry: JobRegistry, *, admitted: bool, reserve: 
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
         workspace=stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP,
+        hop=None,
         holder=CampaignLaunch(dataset_name="d"),
     )
     if admitted:
@@ -4726,7 +4751,7 @@ def test_a_call_on_no_run_holds_the_coupon_under_its_own_job_until_the_sweep_rea
         user_id="sub-6",
         principal_id="sub-6",
         workspace=biller.campaigns.workspace,
-        hop=UNRESOLVED_HOP,
+        hop=None,
         holder=PaidCall("turn"),
     )
     _admitted(biller, billing, chat.job_id, Budget())
@@ -4785,7 +4810,7 @@ def duel(monkeypatch: pytest.MonkeyPatch) -> _Duel:
         held.opening.hand_off()
         return asyncio.create_task(asyncio.sleep(0))
 
-    monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
+    monkeypatch.setattr(held_mod, "spawn_job", ran_elsewhere)
     return _Duel(stores, definition, pipeline, detached)
 
 

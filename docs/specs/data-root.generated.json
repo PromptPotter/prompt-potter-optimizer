@@ -2515,7 +2515,7 @@
         "$defs": {
           "CampaignLaunch": {
             "additionalProperties": false,
-            "description": "A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle.",
+            "description": "A campaign run: its hop is ``None`` until a fresh mint or a fork's cut lands it.",
             "properties": {
               "campaign_id": {
                 "anyOf": [
@@ -2556,6 +2556,26 @@
               "dataset_name"
             ],
             "title": "CampaignLaunch",
+            "type": "object"
+          },
+          "CycleHop": {
+            "additionalProperties": false,
+            "description": "One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone.",
+            "properties": {
+              "campaign_id": {
+                "title": "Campaign Id",
+                "type": "string"
+              },
+              "cycle_id": {
+                "title": "Cycle Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "campaign_id",
+              "cycle_id"
+            ],
+            "title": "CycleHop",
             "type": "object"
           },
           "EmbeddedRun": {
@@ -2675,20 +2695,12 @@
             "default": null,
             "title": "Admitted At"
           },
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
           "code_revision": {
             "title": "Code Revision",
             "type": "string"
           },
           "created_at": {
             "title": "Created At",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
             "type": "string"
           },
           "holder": {
@@ -2720,6 +2732,16 @@
               }
             ],
             "title": "Holder"
+          },
+          "hop": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "job_id": {
             "title": "Job Id",
@@ -2786,8 +2808,7 @@
           "user_id",
           "principal_id",
           "workspace",
-          "campaign_id",
-          "cycle_id",
+          "hop",
           "holder",
           "stage",
           "created_at",

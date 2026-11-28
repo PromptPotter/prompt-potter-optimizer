@@ -21,7 +21,7 @@
 /* No horizontal padding or border: the SVG viewport must BE the chart's plot area, so percentage x lands on the bar centres. */
 .cand-dendro{width:100%;box-sizing:border-box}
 .cand-dendro-svg{display:block;overflow:visible}
-.cand-dendro-hit{cursor:pointer;outline:none}
+.cand-dendro-hit{cursor:pointer}
 .cand-dendro-hitarea{fill:transparent}
 .cand-dendro-dot{stroke-width:1.25;transition:r .12s,fill .12s}
 .cand-dendro-dot.winner{fill:var(--color-accent);stroke:var(--color-accent)}
@@ -30,7 +30,7 @@
 .cand-dendro-hit:hover .cand-dendro-dot{r:4.5}
 .cand-dendro-hit.selected .cand-dendro-dot{fill:var(--color-selection);stroke:var(--color-selection)}
 .cand-dendro-hit:focus-visible .cand-dendro-dot{stroke:var(--color-accent);filter:drop-shadow(0 0 5px var(--color-accent-glow))}
-.cand-dendro-fork{cursor:pointer;outline:none}
+.cand-dendro-fork{cursor:pointer}
 .cand-dendro-fork-glyph{fill:var(--color-text-secondary);font-size:var(--text-xs);text-anchor:middle}
 .cand-dendro-fork:hover .cand-dendro-fork-glyph,.cand-dendro-fork:focus-visible .cand-dendro-fork-glyph{fill:var(--color-accent)}
 .ss-control{display:flex;flex-direction:column;gap:var(--space-6);padding:var(--space-6) var(--space-8);margin-bottom:var(--space-6);border:0.5px solid var(--color-new-border);border-radius:3px}

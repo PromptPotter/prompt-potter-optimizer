@@ -9,6 +9,7 @@ from promptpotter.application.account import (
     AccountKey,
     AccountTokens,
     MintedToken,
+    RemovedKey,
     put_account_key,
     remove_account_key,
 )
@@ -161,10 +162,16 @@ async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[Accou
     return Applier.blocking(lambda: put_account_key(stores, payload.provider, payload.secret))
 
 
-async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[object]:
+async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[RemovedKey]:
     stores, provider = dispatched.dispatcher.stores, dispatched.payload.provider
 
     return Applier.blocking(lambda: remove_account_key(stores, provider))
+
+
+@replays(CommandKind.REMOVE_API_KEY)
+async def key_removed(replaying: Replaying[RemoveApiKeyPayload]) -> RemovedKey:
+    # Its key names this payload, so the first act emptied exactly this slot.
+    return RemovedKey(provider=replaying.payload.provider)
 
 
 async def mint_api_token(dispatched: Dispatched[MintApiTokenPayload]) -> Applier[MintedToken]:

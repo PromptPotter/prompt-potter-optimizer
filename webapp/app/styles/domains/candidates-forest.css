@@ -1,6 +1,5 @@
 .lineage-node:hover .lineage-stub{stroke-width:3}
 /* SVG <g> paints `outline` unreliably, so focus mirrors the hover affordance on stub + label. */
-.lineage-node:focus{outline:none}
 .lineage-node:focus-visible .lineage-stub{stroke-width:3}
 .lineage-node:focus-visible .lineage-label{text-decoration:underline}
 .lineage-node:not(.selected) .lineage-stub{stroke:var(--color-accent)}
@@ -46,9 +45,7 @@
 .family-cladogram-cyclelabel.selected{fill:var(--color-accent);font-weight:600}
 .family-cladogram-node:hover .family-cladogram-dot{r:5}
 .family-cladogram-lane-hit{fill:transparent}
-.family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
-.family-cladogram-lane-hit:focus{outline:none}
-.family-cladogram-lane-hit:focus-visible{fill:var(--color-background-hover);opacity:0.5}
+.family-cladogram-lane-hit:hover,.family-cladogram-lane-hit:focus-visible{fill:var(--color-background-hover);opacity:0.5}
 .family-cladogram-node.mask-divergent,
 .lineage-node.mask-divergent{opacity:0.38}
 .lineage-node.retired{opacity:0.55}

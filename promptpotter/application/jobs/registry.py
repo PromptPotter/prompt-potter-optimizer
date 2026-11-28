@@ -31,7 +31,6 @@ from promptpotter.domain.job import (
     JOB_ADAPTER,
     LAUNCH_MOVES,
     LIVE_JOB_IDS,
-    UNRESOLVED_HOP,
     UNSWEPT_FAULTS,
     CampaignLaunch,
     Job,
@@ -107,7 +106,7 @@ class JobRegistry:
         user_id: str,
         principal_id: str,
         workspace: WorkspaceDir,
-        hop: CycleHop,
+        hop: CycleHop | None,
         holder: JobHolder,
         stage: LaunchStage = RunPhase.STARTING,
     ) -> Job:
@@ -124,8 +123,7 @@ class JobRegistry:
                 user_id=user_id,
                 principal_id=principal_id,
                 workspace=str(workspace),
-                campaign_id=hop.campaign_id,
-                cycle_id=hop.cycle_id,
+                hop=hop,
                 holder=holder,
                 stage=stage,
                 created_at=utcnow_iso(),
@@ -151,7 +149,7 @@ class JobRegistry:
         principal_id: str,
         workspace: WorkspaceDir,
         holder: SlotHolder,
-        hop: CycleHop = UNRESOLVED_HOP,
+        hop: CycleHop | None = None,
     ) -> Job:
         """Count, capacity and write stay under the gate with no ``await`` between them."""
         with self.admission_gate():
@@ -244,7 +242,7 @@ class JobRegistry:
                 stamp = {"admitted_at": utcnow_iso()}
             case LaunchMove.LAND:
                 assert hop is not None, "a launch lands on a cycle"
-                stamp = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
+                stamp = {"hop": hop}
             case LaunchMove.START:
                 stamp = {"stage": RunPhase.RUNNING, "started_at": utcnow_iso()}
             case LaunchMove.END:

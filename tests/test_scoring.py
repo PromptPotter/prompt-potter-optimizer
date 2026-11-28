@@ -236,7 +236,6 @@ from promptpotter.application.scoring.selection import (
     crowning_cells,
 )
 from promptpotter.config.paths import optimizers_root
-from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.arm_reading import order_floor
@@ -4237,8 +4236,8 @@ _HARNESS_ROW = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=_H
 def harness_cell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, world: World
 ) -> Callable[..., MeasuredCell]:
-    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": FakeHarness.URL})
-    monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
+    monkeypatch.setattr(n8n.env_block, "ENDPOINTS", {"classify": FakeHarness.URL})
+    monkeypatch.setattr(n8n.env_block, "TOKEN", SecretStr("harness-secret"))
 
     def cell(params: dict[str, Any], book_usd: float | None = None) -> MeasuredCell:
         async def measured() -> MeasuredCell:

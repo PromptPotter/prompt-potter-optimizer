@@ -1,6 +1,12 @@
 import { API, send, toApiError } from "./client";
 import { commands } from "./commands";
-import type { AccountKey, AccountTokens, MintedToken, UserSettings } from "@/lib/api/types";
+import type {
+  AccountKey,
+  AccountTokens,
+  MintedToken,
+  RemovedKey,
+  UserSettings,
+} from "@/lib/api/types";
 
 export function patchUserSettings(settings: UserSettings): Promise<UserSettings> {
   return commands["set-user-settings"](settings);
@@ -9,8 +15,9 @@ export function patchUserSettings(settings: UserSettings): Promise<UserSettings>
 export function putApiKey(provider: string, secret: string): Promise<AccountKey> {
   return commands["set-api-key"]({ provider, secret });
 }
-export async function deleteApiKey(provider: string): Promise<void> {
-  await commands["remove-api-key"]({ provider });
+// Answers the slot it emptied; a key not held is refused `api_key_not_held`.
+export function deleteApiKey(provider: string): Promise<RemovedKey> {
+  return commands["remove-api-key"]({ provider });
 }
 // The token's text rides this answer alone; the listing names it by id, name and scopes.
 export function mintApiToken(name: string, scopes: string[]): Promise<MintedToken> {

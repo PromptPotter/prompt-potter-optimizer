@@ -54,7 +54,6 @@ from promptpotter.domain.hierarchy import (
     ListingLifecycle,
     UnstartedCampaign,
 )
-from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
@@ -547,11 +546,11 @@ def store_version(
             for name in stores.campaigns.dataset_names(campaign_ids)
         ),
         *(
-            (job.job_id, *producer_stamps(stores.campaigns.cycle_dir(job.hop), stores.jobs_dir))
+            (job.job_id, *producer_stamps(stores.campaigns.cycle_dir(hop), stores.jobs_dir))
             for job in jobs.list_holding_spend()
-            if job.workspace == str(stores.base_dir)
-            and job.hop != UNRESOLVED_HOP
-            and (campaign_ids is None or job.hop.campaign_id in campaign_ids)
+            if (hop := job.hop) is not None
+            and job.workspace == str(stores.base_dir)
+            and (campaign_ids is None or hop.campaign_id in campaign_ids)
         ),
     )
 

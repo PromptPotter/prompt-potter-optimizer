@@ -10,6 +10,7 @@ from pathlib import Path
 
 from promptpotter.application.maintenance.migrations import (
     job_endings,
+    job_hops,
     job_workspaces,
     sealed_api_keys,
 )
@@ -17,6 +18,7 @@ from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
     "job endings": job_endings.staged,
+    "job hops": job_hops.staged,
     "job workspaces": job_workspaces.staged,
     "sealed api keys": sealed_api_keys.staged,
 }

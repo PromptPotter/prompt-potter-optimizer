@@ -595,8 +595,16 @@ def put_account_key(stores: Stores, provider: str, secret: SecretStr) -> Account
     return AccountKey(provider=provider, last4=held.last4, added_at=held.added_at)
 
 
-def remove_account_key(stores: Stores, provider: str) -> bool:
-    return stores.api_keys.remove(check_provider(provider))
+class RemovedKey(StrictModel):
+    """What a removal answers, its retry too: the slot it emptied, whose key is gone for good."""
+
+    provider: str
+
+
+def remove_account_key(stores: Stores, provider: str) -> RemovedKey:
+    if not stores.api_keys.remove(check_provider(provider)):
+        raise NotFoundError(f"Your account holds no {provider} key.", code="api_key_not_held")
+    return RemovedKey(provider=provider)
 
 
 class TokenEntry(StrictModel):

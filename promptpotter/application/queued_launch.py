@@ -9,8 +9,8 @@ import sys
 
 from promptpotter.application.commands.dispatcher import CommandDispatcher
 from promptpotter.application.commands.launching import launched
+from promptpotter.application.jobs.launcher.held import stores_of
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.jobs.launcher.run_job import stores_of
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spawning import tell_spawner
 from promptpotter.application.runner.entry import run_held

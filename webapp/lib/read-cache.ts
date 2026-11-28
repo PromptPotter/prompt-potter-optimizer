@@ -403,10 +403,23 @@ function syncRetry(): void {
   }
 }
 
-// The operator's retry of a mounted read: asked again now, whatever its subject.
+// A mounted read asked again now, whatever its subject, and followed again if it was retired.
 export function reaskRead(id: string): void {
   const slot = slots.get(id);
-  if (slot && slot.subs.size > 0) ask(slot, true);
+  if (!slot || slot.subs.size === 0) return;
+  slot.stopped = false;
+  ask(slot, true);
+}
+
+// A read whose address an act consumes (Start mints its draft): it keeps its body and asks nothing
+// more, so no move, ack or beat meets the address gone (I7). `reaskRead` follows it again.
+export function retireRead(id: string): void {
+  const slot = slots.get(id);
+  if (!slot) return;
+  slot.stopped = true;
+  supersede(slot);
+  syncRetry();
+  settleReached();
 }
 
 // The server says what moved (`GET /feed`): each subject at its version, then each move. A frame is

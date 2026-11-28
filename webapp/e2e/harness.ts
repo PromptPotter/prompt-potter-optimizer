@@ -28,8 +28,6 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/evidence\b/, 400],
   // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
   [/\/rounds\/\d+(\?|$)/, 404],
-  // Start closes its draft: the open check-in's read meets it gone (I7) and stops asking.
-  [/\/drafts\/d_[0-9a-f]+$/, 404],
 ];
 
 type Problem = { kind: string; text: string };

@@ -612,7 +612,9 @@ def fresh_campaign_id(session: Session) -> str:
     )
 
 
-def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> Session:
+def _mint_campaign(
+    plan: CyclePlan, *, hop: CycleHop, adopting: str | None, opening: Opening | None
+) -> Session:
     """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
@@ -631,6 +633,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     # read of the cycle, and what the origin hash was taken under, before the campaign is visible.
     campaigns.mint_cycle(hop, CycleMintedRecord(start=plan.cycle.own_start))
     campaigns.append(hop, plan.drawn)
+    # Its job lands with its share on a ledger that exists, before any sibling can list the campaign.
+    if opening is not None:
+        opening.land(hop)
     campaign = Campaign(
         campaign_id=hop.campaign_id,
         dataset_name=session.measured_dataset,
@@ -657,15 +662,16 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
 def mint(
     plan: CyclePlan, *, campaign_id: str, adopting: str | None, opening: Opening | None = None
 ) -> OpenedCycle:
-    """*adopting* is a draft whose ledger paid toward this cycle before it existed; *opening*'s job
-    names the cycle before anything of it is written (a job-less mint is a test's)."""
+    """*adopting* is a draft whose ledger paid toward this cycle before it existed; *opening*'s
+    raise stamps the cycle from before anything of it is written, and its job lands on it once
+    its ledger exists (a job-less mint is a test's)."""
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
     if opening is not None:
-        opening.name(hop)
+        opening.owns(hop)
     return OpenedCycle(
         cycle=plan.cycle,
-        session=_mint_campaign(plan, hop=hop, adopting=adopting),
+        session=_mint_campaign(plan, hop=hop, adopting=adopting, opening=opening),
         optimizer=plan.optimizer,
     )
 

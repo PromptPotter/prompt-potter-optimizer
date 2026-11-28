@@ -80,7 +80,7 @@ def share_campaign_ceiling(
 
 def cycle_share(stores: Stores, job: Job) -> Budget:
     """A live job's share, off its cycle: admission lands it there before the job is on the campaign."""
-    record = stores.campaigns.last(job.hop, CycleShareRecord)
+    record = None if job.hop is None else stores.campaigns.last(job.hop, CycleShareRecord)
     if record is None:
         raise RuntimeError(f"job {job.job_id} holds spend on {job.hop} with no share landed there")
     return record.allotment
@@ -103,19 +103,24 @@ def _held_by_siblings(
     meter: CeilingMeter,
 ) -> Budget:
     held = NOTHING_METERED
-    for job in _live_on(stores, job_registry, campaign_id):
-        if job.hop != hop:
-            own = stores.campaigns.cycle_metered(job.hop, meter)
+    for job, on in _live_on(stores, job_registry, campaign_id):
+        if on != hop:
+            own = stores.campaigns.cycle_metered(on, meter)
             held = held.plus(_held(cycle_share(stores, job), own))
     return held
 
 
-def _live_on(stores: Stores, job_registry: JobRegistry, campaign_id: str) -> list[Job]:
-    """Launches, embedded and inner runs and scoring passes alike: each spends on the campaign."""
+def _live_on(
+    stores: Stores, job_registry: JobRegistry, campaign_id: str
+) -> list[tuple[Job, CycleHop]]:
+    """Launches, embedded and inner runs and scoring passes alike, each with the cycle it landed
+    on: each spends on the campaign."""
     return [
-        job
+        (job, job.hop)
         for job in job_registry.list_holding_spend(user_id=str(stores.identity.user_id))
-        if job.on_campaign(stores.campaigns.workspace, campaign_id) and job.admitted
+        if job.hop is not None
+        and job.on_campaign(stores.campaigns.workspace, campaign_id)
+        and job.admitted
     ]
 
 
@@ -132,6 +137,7 @@ def _refuse_unshared(
         if (
             other.job_id == job.job_id
             or not other.on_campaign(stores.campaigns.workspace, campaign_id)
+            or other.hop is None
             or other.hop == hop
         ):
             continue
@@ -143,11 +149,11 @@ def _refuse_unshared(
         for axis in sorted(MONEY_AXES):
             ours, theirs = getattr(money, axis), getattr(held, axis)
             if (ours is None) != (theirs is None):
-                unbounded = f"cycle {other.cycle_id}" if theirs is None else "this launch"
+                unbounded = f"cycle {other.hop.cycle_id}" if theirs is None else "this launch"
                 raise QuotaExceededError(
                     code="campaign_ceiling_unshared",
                     message=(
-                        f"Only one of this launch and cycle {other.cycle_id} holds a {axis} "
+                        f"Only one of this launch and cycle {other.hop.cycle_id} holds a {axis} "
                         f"ceiling ({unbounded} runs with none), and a campaign's {axis} ceiling "
                         "binds every live cycle or none. Pause the other one, or move the "
                         "campaign's ceiling."
@@ -165,16 +171,16 @@ def _reshare_campaign_ceiling(
         return
     meter = ceiling_meter(campaign.declaration.purpose)
     spent = stores.campaigns.metered_spend(campaign.campaign_id, meter)
-    own = {job.job_id: stores.campaigns.cycle_metered(job.hop, meter) for job in jobs}
+    own = {job.job_id: stores.campaigns.cycle_metered(on, meter) for job, on in jobs}
     # Read before any moves: each cycle is re-shared from what the rest held going in.
-    held = {job.job_id: cycle_share(stores, job) for job in jobs}
-    for job in jobs:
+    held = {job.job_id: cycle_share(stores, job) for job, _ in jobs}
+    for job, on in jobs:
         beside = NOTHING_METERED
-        for other in jobs:
+        for other, _ in jobs:
             if other.job_id != job.job_id:
                 beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
         share = moved.less(spent, beside).bound_over(own[job.job_id])
-        hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
+        hold_moved(stores, on, held[job.job_id].over(share.only(moved.named)))
 
 
 def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:

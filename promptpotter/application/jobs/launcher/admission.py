@@ -51,7 +51,6 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.hierarchy import RunAdmission
 from promptpotter.domain.job import (
-    UNRESOLVED_HOP,
     CallBucket,
     CampaignLaunch,
     EmbeddedRun,
@@ -207,8 +206,9 @@ def launch_preflight(stores: Stores, at: CampaignCycle) -> PotterError | None:
     raises), so the read offering a Start serves what its press answers."""
     if (refused := campaign_refusal(stores, at.campaign)) is not None:
         return refused
-    declared = next_launch_budget(cycle_config(stores, at).config, stores=stores, at=at)
-    sends = campaign_sends(stores, at)
+    config = cycle_config(stores, at).config
+    declared = next_launch_budget(config, stores=stores, at=at)
+    sends = sends_on(stores, config, campaign_connector(at.campaign))
     return launch_refusal(account_wallet(stores), declared, sends, stores=stores, refusing=None)
 
 
@@ -226,13 +226,13 @@ def request_jobs(
     stores: Stores,
     job_registry: JobRegistry,
     holder: SlotHolder,
-    hop: CycleHop = UNRESOLVED_HOP,
+    hop: CycleHop | None = None,
     count: int = 1,
 ) -> list[Job]:
     """THE slot door of every launch, head-to-head and scoring pass: *count* jobs or none. Only a
     lone ask queues; N asked together never do, so no arm searches while a sibling waits on
     another machine. A rate token is debited per job returned, past every refusal but the queue's."""
-    assert count == 1 or hop == UNRESOLVED_HOP, "jobs asked together mint their cycles"
+    assert count == 1 or hop is None, "jobs asked together mint their cycles"
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate(launching=True), slot_rate(stores, holder, hop, asked=count):
         # First, under the gate an archive or a delete takes too: a refused campaign's act is
@@ -249,7 +249,7 @@ def request_jobs(
                 hop=hop,
                 launches=count,
             )
-        if hop != UNRESOLVED_HOP:
+        if hop is not None:
             refuse_taken_cycle(stores, hop)
         if count > 1 and not job_registry.has_room(count):
             raise _machine_busy(job_registry)
@@ -263,7 +263,7 @@ def request_jobs(
             )
             for _ in range(count)
         ]
-        if hop != UNRESOLVED_HOP:
+        if hop is not None:
             claim_cycle(stores, hop, jobs[0].job_id)
         return jobs
 
@@ -375,7 +375,8 @@ async def admit_and_hold(
                 sends=sends,
                 enclosing=enclosing,
             )
-            return held, request.stand(opening, held)
+            opening.share = held.share
+            return held, request.stand(opening)
 
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     return await asyncio.to_thread(admitted)
@@ -476,8 +477,9 @@ def admit_arms(
         arms = list(zip(openings, declared, strict=True))
         # In the order a wallet read ranks its siblings (`quota.py::admitting_before`): an arm
         # admitted before an earlier-ranked one still asked would read it contending.
-        shares = {
-            opening.job_id: admit_and_share(
+        held: dict[str, HeldBudget] = {}
+        for opening, (budget, sends) in sorted(arms, key=cmp_to_key(_ranked)):
+            held[opening.job_id] = admit_and_share(
                 budget,
                 Budget(),
                 stores=stores,
@@ -488,10 +490,9 @@ def admit_arms(
                 step_rounds=None,
                 sends=sends,
             )
-            for opening, (budget, sends) in sorted(arms, key=cmp_to_key(_ranked))
-        }
+            opening.share = held[opening.job_id].share
         refused.pop_all()
-    return [(opening, shares[opening.job_id]) for opening in openings]
+    return [(opening, held[opening.job_id]) for opening in openings]
 
 
 def _ranked(arm: tuple[Opening, object], other: tuple[Opening, object]) -> int:
@@ -511,15 +512,13 @@ def _arm_jobs(
                 refuse_as_busy(job_registry, jobs[0])
             return jobs
         case EmbeddedRun():
-            return [
-                _slotless_job(stores, job_registry, holder, UNRESOLVED_HOP) for _ in range(count)
-            ]
+            return [_slotless_job(stores, job_registry, holder, None) for _ in range(count)]
         case _:
             assert_never(holder)
 
 
 def _slotless_job(
-    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop
+    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop | None
 ) -> Job:
     return job_registry.create(
         user_id=str(stores.identity.user_id),
@@ -531,12 +530,12 @@ def _slotless_job(
 
 
 def slotless_opening(
-    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop
+    stores: Stores, job_registry: JobRegistry, holder: EmbeddedRun | InnerRun, hop: CycleHop | None
 ) -> Opening:
     """THE door with no slot, the declared exemption (an embedded host's run, an inner seat): its
     job ASKED and entered, claiming *hop*'s cycle where it names one. Its admission is `hold`'s."""
     opening = Opening.of(stores, job_registry, _slotless_job(stores, job_registry, holder, hop))
-    if hop != UNRESOLVED_HOP:
+    if hop is not None:
         with ExitStack() as refused:
             refused.push(opening)
             claim_cycle(stores, hop, opening.job_id)
@@ -554,7 +553,7 @@ def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[Openin
     job_registry = JobRegistry.attach(stores.jobs_dir)
     with (
         job_registry.admission_gate(launching=True),
-        slot_rate(stores, holder, UNRESOLVED_HOP, asked=1),
+        slot_rate(stores, holder, None, asked=1),
         ExitStack() as refused,
     ):
         opening = Opening.of(
@@ -564,7 +563,7 @@ def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[Openin
                 user_id=str(stores.identity.user_id),
                 principal_id=acting_principal(stores.identity).id,
                 workspace=stores.campaigns.workspace,
-                hop=UNRESOLVED_HOP,
+                hop=None,
                 holder=holder,
             ),
         )
@@ -664,7 +663,7 @@ def _open_pass(
         stores=stores,
         job_registry=job_registry,
         holder=ScoringPass(pass_kind),
-        hop=UNRESOLVED_HOP if at is None else at.hop,
+        hop=None if at is None else at.hop,
     )
     if job.queued:
         refuse_as_busy(job_registry, job)

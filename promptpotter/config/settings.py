@@ -13,7 +13,7 @@ from pydantic import (
     SecretStr,
     field_validator,
 )
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
 
@@ -96,7 +96,20 @@ LOCK_TIMEOUT: float = 5.0
 _ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?")
 
 
-class Settings(BaseSettings):
+class EnvBlock(BaseSettings):
+    """A block of the install's env file: `Settings`, or a connector's own, by its `env_prefix`."""
+
+    model_config = SettingsConfigDict(env_file=env_file_path(), case_sensitive=True, extra="ignore")
+
+    def model_post_init(self, _context: object) -> None:
+        ENV_BLOCKS.append(self)
+
+
+# Every block read, each `SecretStr` field the log redactor's (`log_redaction.py::_secret_values`).
+ENV_BLOCKS: list[EnvBlock] = []
+
+
+class Settings(EnvBlock):
     # `off` runs every request as the CLI's on-disk identity: a local harness, never a served box.
     PROMPTPOTTER_AUTH: Literal["on", "off"] = "on"
 
@@ -130,25 +143,6 @@ class Settings(BaseSettings):
 
     # provider -> [rpm, tpm] per rolling 60s; a missing provider or a null slot is unthrottled.
     RATE_LIMITS: dict[str, list[int | None]] = {}
-
-    # Read ONLY by the termnorm connector's `endpoint` and `auth_token` hooks: a second backend
-    # declares its own. Each URL is the operator's alone, by the name a dataset's
-    # `pipeline.endpoint` gives, so the token never travels elsewhere.
-    TERMNORM_ENDPOINTS: dict[str, str] = {}
-    TERMNORM_TOKEN: SecretStr = SecretStr("")
-
-    # Read only by `connectors/n8n.py`: the eval-harness webhooks by name, and their one secret,
-    # sent as `<N8N_HARNESS_AUTH_HEADER>: <N8N_HARNESS_AUTH_PREFIX><N8N_HARNESS_TOKEN>`.
-    N8N_HARNESS_ENDPOINTS: dict[str, str] = {}
-    N8N_HARNESS_TOKEN: SecretStr = SecretStr("")
-    N8N_HARNESS_AUTH_HEADER: str = "X-Eval-Secret"
-    N8N_HARNESS_AUTH_PREFIX: str = ""
-
-    # Read only by `connectors/dbllmbench.py`, whose probe refuses an empty URL.
-    DBLLMBENCH_DB_URL: str = ""
-    DBLLMBENCH_DB_USERNAME: str = ""
-    DBLLMBENCH_DB_PASSWORD: SecretStr = SecretStr("")
-    DBLLMBENCH_DB_TLS: bool = False
 
     # The box key's file, which seals every account's held keys (`identity/sealing.py`): never
     # under the data root. On the box, the unit's credential (`%d/box.key`); unset, a per-user one.
@@ -205,8 +199,6 @@ class Settings(BaseSettings):
     MACHINE_RUN_CAPACITY: int = 3
     QUEUE_MAX_WAIT_S: float = 6 * 3600.0
 
-    model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
-
 
 settings = Settings()
 
@@ -218,8 +210,10 @@ def non_utf8_encoding() -> str | None:
 
 __all__ = [
     "APP_VERSION",
+    "ENV_BLOCKS",
     "LOCK_TIMEOUT",
     "TERMS_VERSION",
+    "EnvBlock",
     "Settings",
     "non_utf8_encoding",
     "settings",

@@ -11,7 +11,6 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
-    UNRESOLVED_HOP,
     EmbeddedRun,
     InnerRun,
     Job,
@@ -65,7 +64,7 @@ class MachineSlot(StrictModel):
             job_id=job.job_id,
             what=job.what,
             holder=holder,
-            cycle=None if job.hop == UNRESOLVED_HOP else job.hop,
+            cycle=job.hop,
             user=job.user_id,
             mine=job.user_id == account,
             started_at=job.started_at,

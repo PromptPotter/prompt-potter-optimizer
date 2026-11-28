@@ -5,10 +5,12 @@ import {
   READ_CACHE_MAX_KEYS,
   clearReadCache,
   dropCachedRead,
+  reached,
   reaskRead,
   readName,
   readResult,
   readThrough,
+  retireRead,
   subscribe,
   type ReadDescriptor,
   type ReadLoad,
@@ -182,6 +184,24 @@ describe("read cache — subscribers", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect([quota, cycles]).toEqual([2, 1]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("asks a retired read nothing on a write that moved its subject, keeping its body, until re-asked", async () => {
+    let asks = 0;
+    const read = at("draft\x1fd1", async () => ({ kind: "ok", data: ++asks, validator: null }), {
+      subject: "store:",
+    });
+    watch(read);
+    await settle();
+    retireRead(read.id);
+    await reached({ "store:t": { process: "p", n: 9 } });
+    await settle();
+    expect([asks, stored(read.id)]).toEqual([1, 1]);
+    reaskRead(read.id);
+    await settle();
+    await reached({ "store:t": { process: "p", n: 10 } });
+    await settle();
+    expect(asks).toBe(3);
   });
 
   it("re-asks in a fresh flight that never deletes another caller's", async () => {

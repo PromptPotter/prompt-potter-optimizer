@@ -30,6 +30,7 @@ from promptpotter.application.jobs.launcher.head_to_head import (
     dataset_arms,
     head_to_head_answer,
 )
+from promptpotter.application.jobs.launcher.held import HeldLaunch
 from promptpotter.application.jobs.launcher.launch import (
     Admitted,
     Asked,
@@ -44,7 +45,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     FreshMint,
     assert_origin_ready,
 )
-from promptpotter.application.jobs.launcher.run_job import HeldLaunch
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
@@ -80,7 +80,7 @@ from promptpotter.domain.command_kinds import (
     StartRunPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun, Job
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun, Job
 from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
@@ -274,7 +274,7 @@ def launch_cancels(
             continue
         if isinstance(job.holder, InnerRun):
             raise TaskUncancellableError(f"{job.what}: {INNER_PAUSE_REFUSAL}")
-        if job.hop == UNRESOLVED_HOP:
+        if job.hop is None:
             raise TaskUncancellableError(f"{job.what} names no cycle to pause yet; cancel again")
         if job.workspace != str(stores.campaigns.workspace):
             raise TaskUncancellableError(
@@ -283,7 +283,7 @@ def launch_cancels(
         if refusal := stores.run_state(job.hop).pause_refusal:
             raise TaskUncancellableError(f"{job.what}: {refusal}")
         pause = PauseCyclePayload(
-            campaign_id=job.campaign_id, cycle_id=job.cycle_id, reason=_CANCELLED
+            campaign_id=job.hop.campaign_id, cycle_id=job.hop.cycle_id, reason=_CANCELLED
         )
         acts.append(CommandCall(pause, key, door=door))
     return acts

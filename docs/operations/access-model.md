@@ -33,7 +33,7 @@ One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which the deleg
 
 ## loop ↔ everything — OS privilege
 
-- A run is a separate OS process from the API (`jobs/launcher/run_job.py::spawn_job` hands the identity and held ceiling over stdin), a child of the API's unit — same OS user, `.env`, keys and hardening.
+- A run is a separate OS process from the API (`jobs/launcher/held.py::spawn_job` hands the identity and held ceiling over stdin), a child of the API's unit — same OS user, `.env`, keys and hardening.
 - Terminal and server hold the same machine slot (`jobs/launcher/admission.py::admit_and_hold`), a machine-wide OS lock released only by proving its producer's lock gone (`infrastructure/producer_lock.py::this_producer`).
 - The hardened unit (`deploy-linux/install-service.sh`) bounds the API and its runs (`KillMode=process`); a set `DATA_DIR` keeps the service from rewriting its own source, venv and `.env`; the bot's secrets ride `BOT_ENV_FILE`.
 - Every tenant-controlled path is inert: the scoring formula AST-allowlisted (`application/scoring/formula/compiler.py`), YAML `safe_load`ed, slugs regex-validated, the provider registry closed.

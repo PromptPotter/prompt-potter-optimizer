@@ -15,14 +15,11 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.identity import IdentityContext
 from promptpotter.shared.measurement_context import MeasurementRole
 
-# The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
-UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
 
-
-def launch_campaign(holder: JobHolder, hop: CycleHop) -> str | None:
+def launch_campaign(holder: JobHolder, hop: CycleHop | None) -> str | None:
     """The campaign a job runs on: its cycle's, or a fork's before its cut names one; ``None`` for
     a fresh mint and a job on no campaign."""
-    if hop != UNRESOLVED_HOP:
+    if hop is not None:
         return hop.campaign_id
     return holder.campaign_id if isinstance(holder, CampaignLaunch) else None
 
@@ -38,7 +35,7 @@ assert SLOT_STAGES < _JOB_STAGES, "a slot stage no job can be in"
 
 @dataclass(frozen=True)
 class CampaignLaunch:
-    """A campaign run: its hop is UNRESOLVED until a fresh mint or a fork's cut names the cycle."""
+    """A campaign run: its hop is ``None`` until a fresh mint or a fork's cut lands it."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
@@ -138,8 +135,8 @@ class Job:
     principal_id: str
     # The store its hop names a cycle in: an L4 sandbox repeats content-addressed campaign ids.
     workspace: str
-    campaign_id: str
-    cycle_id: str
+    # The cycle it holds: ``None`` until its LAND files its share and its claim there.
+    hop: CycleHop | None
     # WHAT holds (or waits for) the slot, or the spend alone.
     holder: JobHolder
     stage: JobStage
@@ -156,28 +153,25 @@ class Job:
     @property
     def what(self) -> str:
         """What holds the slot, in words: every surface naming a job says it this way."""
-        resolved = self.hop != UNRESOLVED_HOP
-        where = f"{self.campaign_id}/{self.cycle_id}"
+        where = None if self.hop is None else f"{self.hop.campaign_id}/{self.hop.cycle_id}"
         match self.holder:
             case CampaignLaunch(dataset_name=dataset):
-                return where if resolved else f"a new campaign on {dataset}"
+                return where or f"a new campaign on {dataset}"
             case ScoringPass(pass_kind=pass_kind):
-                return f"{pass_kind} on {where if resolved else 'the workspace'}"
+                return f"{pass_kind} on {where or 'the workspace'}"
             case EmbeddedRun(dataset_name=dataset):
-                return f"an embedded run on {where if resolved else dataset}"
+                return f"an embedded run on {where or dataset}"
             case InnerRun(dataset_name=dataset):
-                return f"an inner run on {where if resolved else dataset}"
+                return f"an inner run on {where or dataset}"
             case PaidCall(bucket=bucket):
                 return f"a {bucket} call"
             case _:
                 assert_never(self.holder)
 
-    @property
-    def hop(self) -> CycleHop:
-        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
-
     def on_campaign(self, workspace: WorkspaceDir, campaign_id: str) -> bool:
-        return self.workspace == str(workspace) and self.campaign_id == campaign_id
+        """Landed there: before its LAND a job holds no share of any campaign's ceiling."""
+        on = self.hop is not None and self.hop.campaign_id == campaign_id
+        return on and self.workspace == str(workspace)
 
     @property
     def admitted(self) -> bool:
@@ -208,7 +202,7 @@ class Job:
             return LaunchState.RUNNING
         if not self.admitted:
             return LaunchState.ASKED
-        return LaunchState.ADMITTED if self.hop == UNRESOLVED_HOP else LaunchState.HELD
+        return LaunchState.ADMITTED if self.hop is None else LaunchState.HELD
 
     @property
     def holds_slot(self) -> bool:

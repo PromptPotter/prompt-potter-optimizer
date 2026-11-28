@@ -19,7 +19,6 @@
 .critical-alert-stop{font-family:inherit;font-size:var(--text-sm);font-weight:700;color:currentColor;background:var(--color-background-primary);
   border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px var(--space-10);cursor:pointer;flex-shrink:0}
 .critical-alert-stop:hover{background:var(--color-background-hover)}
-.critical-alert-stop:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .critical-alert-stop:disabled{cursor:progress;opacity:.6}
 /* A refused Pause takes its own row under the alert. */
 .critical-alert-failure{flex-basis:100%}
@@ -89,7 +88,6 @@
 .mech-pool-readers li{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8)}
 .mech-pool-access{font-weight:600;color:var(--color-text-primary)}
 .mech-fold > summary{cursor:pointer;font-size:var(--text-sm);color:var(--color-text-secondary);padding:var(--space-4) 0;min-height:32px;display:flex;align-items:center}
-.mech-fold > summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .mech-fold[open] > summary{margin-bottom:var(--space-6)}
 /* A flex summary drops its marker, so the fold draws its own. */
 .mech-fold > summary,.mech-all > summary{list-style:none}
@@ -119,7 +117,6 @@
 .mech-all{display:flex;flex-direction:column;gap:var(--space-12)}
 .mech-all > summary{cursor:pointer;font-size:var(--text-sm);font-weight:600;color:var(--color-text-secondary);padding:var(--space-4) 0;min-height:32px;display:flex;align-items:center;gap:var(--space-6)}
 .mech-all > summary small{font-weight:400}
-.mech-all > summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .mech-all > .mech-group:first-of-type{padding-top:var(--space-12);border-top:0.5px solid var(--color-border)}
 .mech-offer small{margin-left:var(--space-4);font-size:var(--text-xs);color:var(--color-text-secondary);font-variant-numeric:tabular-nums}
 .mech-offer.is-group{font-weight:600}
@@ -146,7 +143,6 @@
   color:var(--color-text-secondary);font-family:inherit;font-size:var(--text-xs);
   transition:color .12s,border-color .12s}
 .dash-time-ray-step:hover{color:var(--color-accent);border-color:var(--color-accent)}
-.dash-time-ray-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .dash-time-ray-step-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dash-time-ray-step.is-elsewhere{border-style:dashed}
 .dash-time-ray-step.is-viewing{color:var(--color-accent);border-color:var(--color-accent);

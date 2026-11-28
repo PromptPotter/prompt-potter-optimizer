@@ -32,9 +32,9 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.origin_readiness import checklist_field
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
+from promptpotter.application.jobs.launcher.held import HeldRun
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
-from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.machine_status import served_machine_status
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.origin_listing import no_dataset_hint

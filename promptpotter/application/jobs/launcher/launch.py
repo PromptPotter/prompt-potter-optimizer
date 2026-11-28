@@ -14,16 +14,16 @@ from promptpotter.application.jobs.launcher.admission import (
     slotless_opening,
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
+from promptpotter.application.jobs.launcher.held import HeldLaunch, HeldRun, launched_as
 from promptpotter.application.jobs.launcher.mint_and_start import Hosted, LaunchRequest
 from promptpotter.application.jobs.launcher.opening import Opening
-from promptpotter.application.jobs.launcher.run_job import HeldLaunch, HeldRun, launched_as
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_effects import LaunchedJob
 from promptpotter.domain.command_events import QueuedLaunch
 from promptpotter.domain.command_kinds import Door
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, InnerRun, Job
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -83,8 +83,6 @@ async def hold(
             if standing.at is not None and not here:
                 return HeldLaunch(opening, standing.at.hop, held, closing.pop_all(), mode)
             opened = await closing.enter_async_context(standing.open(opening))
-            if standing.at is None:
-                await asyncio.to_thread(opening.land, opened.hop, held)
             return HeldRun.of(opening, opened, held, closing.pop_all(), mode)
     finally:
         if isinstance(request, CheckinStart):
@@ -160,7 +158,7 @@ def admit(
     Every slotted launch first reclaims what a dead producer left, so the machine it counts is
     live; its sweep and its admission wait on the gate, so every async door offloads it once. A
     queued one files its ask and waits on disk; its process asks its campaign again."""
-    hop = UNRESOLVED_HOP if request.at is None else request.at.hop
+    hop = None if request.at is None else request.at.hop
     match holder := request.holder:
         case CampaignLaunch() if inline is not None and inline.claimed is not None:
             opening = Opening.of(stores, job_registry, inline.claimed)

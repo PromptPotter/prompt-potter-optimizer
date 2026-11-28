@@ -158,7 +158,7 @@ read standing rounds off the ledger.
   per schema, so the wait sits on the backend's network edges (every symbol is present, but the box
   half is unchecked; bac873699, landing 41, changed the TermNorm term push, so that candidate's cost may
   have moved). A detached resume opens its session once now, in its own process (w8-launch4,
-  `run_job.py::HeldLaunch`). Action: time `probe_backend`,
+  `held.py::HeldLaunch`). Action: time `probe_backend`,
   `served_pipeline`, `ensure_model_capabilities` and the term push on the box for one paused cycle, then
   drop whichever one a resume re-does. **Rides with:** box (it needs the box measured), whose Owns gain
   `runner/run_init.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
@@ -396,20 +396,16 @@ bill.
   sends, and `cells_paid_by` reads it as a library's. Symptom under it:
   `infrastructure/backend.py::BackendClient.cells_paid_by` asks for the bound account even for a remote backend,
   which never reads the keys. **Re-test:** `git grep -n "api_key_attr).get_secret_value\|ANTHROPIC_API_KEY.get_secret_value" -- promptpotter/connectors`
-  is empty.
+  is empty. w11-connectors3 found the door blocked upstream: `llm/registry.py::providers()` holds no
+  `anthropic`, so `host_key_attr("anthropic")` raises a `KeyError` and `wallet.py::cells_paid_by` would
+  raise on an anthropic cell. Root: the wallet's providers include every provider a connector's container
+  sends on, and the send is admitted in-module as `harbor.py::_installed_run` does.
 - **`StepUsage` re-declares `TokenAccount`'s parts** (usage-2, 11-19):
   `promptpotter/domain/spend.py::StepUsage` — its flat `reasoning`, `cache_read`, `cache_write`
   fields repeat the names `TokenAccount.model_fields` already rosters (`from_account` and `account`
   go through that roster) — the root: `step_tokens`' flat wire shape; `StepUsage` holds a
   `TokenAccount` and the wire flattens it — **Rides with:** `area 05's chain` — **Re-test:** a new
   `TokenAccount` part reaches `StepUsage` without a second field edit.
-- **A mint's job names its hop before its cycle share lands** (w8-launch4, 11-27; trim, 11-27):
-  `promptpotter/application/jobs/shares.py::cycle_share` — raises "no share landed there" for a live
-  job whose cycle has no `CycleShareRecord` yet; unreachable today only because a fresh campaign id
-  is unknown before its manifest, and nothing enforces it — a job holds its hop only once its share
-  is filed (one write, or a job without a share reads as zero) — **Rides with:** `area 05's chain` —
-  **Re-test:** a sibling admitted on the campaign during a mint window reads a share, never raises.
-  (items 68, 134)
 - **An unbilled run's spend reads three ways** (w11-walk, 11-27): on the walk world's
   `justlogic.d234` campaign the sidebar panel says "SPEND unmetered", the masthead "$0.0000", and
   `webapp/components/dashboard/scoring/CostStrip.tsx` ("Spend by round") draws an empty 0–1.0 axis with
@@ -441,6 +437,10 @@ bill.
   that offers the tier's model. Seen: every pick refused. Root: the tier lays its first task model
   where the dataset's is off it, as it lays a param's lowest value. **Rides with:** `area 05's chain`.
   **Re-test:** a fresh free account's email-tagging check-in serves no `not_on_free_tier`.
+- **A landed job's cycle is asked twice** (w11-jobs3, 11-28): `shares.py::_refuse_unshared` tests
+  `other.hop is None` beside `Job.on_campaign`, which already implies it, only so the type narrows. Root:
+  `Job.on_campaign` answers the landed hop. **Rides with:** area 05's chain. **Re-test:** no `hop is None`
+  guard beside an `on_campaign` call.
 
 ## 06 · Jobs, launch, commands
 
@@ -453,19 +453,11 @@ written under the gate.
 `jobs/launcher/head_to_head.py`, `jobs/reaper.py`, `store/command_log.py`, `domain/command_kinds.py`,
 `jobs/launcher/admission.py`
 
-- **Two jobs/ smells from w11-jobs2's census** (11-28):
-  - `jobs/account_activity.py` is a billing-activity read that lives in `jobs/`, though it reads as
-    area 05's or area 11's.
-  - `launcher/admission.py::launch_preflight` resolves `cycle_config` twice per read: once itself, and
-    once through `campaign_sends`.
-
-  Root: the read moves to its area, and the preflight hands its resolved config down. **Rides with:**
-  area 06's chain. **Re-test:** `jobs/` holds no billing read, and one `cycle_config` call per
-  preflight.
-- **`jobs/launcher/run_job.py` no longer runs a job** (w11-runner, 11-28): the held run moved to
-  `runner/entry.py`, leaving `JobSpec`, `HeldLaunch` and `spawn_job`, so the module's name says what it
-  stopped doing. Root: rename it (e.g. `launcher/held.py`) with its doc and `CLAUDE.md` rows. **Rides
-  with:** area 06's chain. **Re-test:** no module under `jobs/` is named for a run it does not hold.
+- **An arm's admission is held twice** (w11-jobs3, 11-28): `jobs/launcher/head_to_head.py::AdmittedHeadToHead.admitted`
+  pairs each `Opening` with its `HeldBudget`, while `Opening.share` already holds the share that budget
+  names; `opening.py::Opening.land_cut` is a two-line wrapper with one caller (`ForkLaunch.stand`). Root:
+  the opening carries what its admission granted, so the pair and the wrapper go. **Rides with:** area
+  06's chain. **Re-test:** `git grep -c "tuple\[Opening, HeldBudget\]" -- promptpotter` is 0.
 - **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
   each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
@@ -483,7 +475,7 @@ written under the gate.
   cross-process wake on the command log's end write (a lock handoff or a file watch). **Rides with:**
   area 06's chain. **Re-test:** neither constant exists and no test patches a poll.
 - **A promoted launch's stderr is discarded until its cycle exists** (w10-jobs): `JobRegistry.promote`
-  spawns its child with `log=None`, so a child dying before `run_job.py` opens the cycle's job log
+  spawns its child with `log=None`, so a child dying before `held.py::spawn_job` opens the cycle's job log
   says nothing. Root: the child's output has a home from its spawn, named by its job. **Rides with:**
   area 06's chain. **Re-test:** `git grep -n "log=None" -- promptpotter/application/jobs` is empty.
 - **A queued launch's ending files where an unasked one does** (w10-jobs): a released queued launch
@@ -497,11 +489,6 @@ written under the gate.
   never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
   `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
   built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
-- **A launch not yet landed carries a hop of two empty strings** (w11-tests4, 11-28):
-  `domain/job.py::UNRESOLVED_HOP` stands for a job whose campaign and cycle do not exist yet, and 9
-  readers compare against it. A tenth (`application/hierarchy.py::store_version`) 500'd on it until w11-tests4
-  added the skip. Root: `Job.hop` is `None` until LAND, so a reader must ask. **Rides with:** area 06's
-  chain. **Re-test:** `git grep -c "UNRESOLVED_HOP" -- promptpotter` is 0.
 - **A fork's preview does not serve the refusal its launch meets** (w11-walk, 11-27): on the walk world
   with no key, Steer & fork's "Confirm steered fork" is enabled and its press answers 422
   `no_api_key`; the cycle's own Start serves it (`admission.py::launch_preflight`), the fork preview's
@@ -579,13 +566,6 @@ sole route for a backend tunable.
   `defaults.yaml` guard never sees. Root: the fold stamps each key's layer (`layer_fold.py::Laid`) and the
   map reads the stamp; every bench default lives in `defaults.yaml`. **Rides with:** area 07's chain.
   **Re-test:** `git grep -c "campaign_defaults()" -- promptpotter/application/config_map.py` is 0 (2 now).
-- **Per-connector tunables are install globals** (w11-config): `config/settings.py::Settings` holds
-  `TERMNORM_ENDPOINTS`, `N8N_HARNESS_AUTH_*` and `DBLLMBENCH_DB_TLS` beside the install's own settings, so a
-  connector's reach is configured outside its definition. Root: each is its connector's extra, read from its
-  definition or its own env block. **Rides with:** area 08's chain. **Re-test:**
-  `git grep -cE "^ +(TERMNORM_|N8N_|DBLLMBENCH_)" -- promptpotter/config/settings.py` is 0 (13 now).
-  w11-config2 adds a code default of the same root: `connectors/harbor.py`'s
-  `(agent or {}).get("name") or "terminus-2"`.
 - **An origin finding with an unknown row is dropped unserved** (w11-config2, 11-28):
   `datasets/origin_resolve.py::raised_commands` drops through `_coerce` a finding whose row is unknown,
   whose evidence is empty or that names an absent header, and serves none of them, while a finding
@@ -631,14 +611,17 @@ selection explicit.
   reads `bound_account` for a backend that sends on its own keys, harmless while every sending entry
   binds one. Root: the payer is asked only of a connector that `holds_own_sends` or is host-paid
   (`wallet.py::cells_paid_by`). **Rides with:** area 05's chain. **Re-test:** a remote cell scored under
-  no bound account is admitted.
+  no bound account is admitted. w11-connectors3 cut it there: `cells_paid_by` takes `stores` eagerly,
+  where it should read `bound_account` itself, only for a `holds_own_sends` connector, as `sending_key` does.
+- **`Endpoint.setting` restates its env block's key** (w11-connectors3, 11-28): `connectors/protocol.py::Endpoint`
+  names `"TERMNORM_ENDPOINTS"` beside `TermNormEnv.ENDPOINTS`. Root: the refusal derives the name from the
+  block's prefix and field. **Rides with:** area 08's chain. **Re-test:** `git grep -c 'Endpoint("' --
+  promptpotter/connectors` is 0.
+- **The docker host's producer claim is a process global** (w11-connectors3, 11-28):
+  `infrastructure/docker_host.py::_claimed` stands in for a producer that `producer_lock.py::_tokens` keys
+  per `jobs_dir`, so two data roots in one process share one claim. Root: the claim is keyed by its jobs
+  dir. **Rides with:** area 08's chain. **Re-test:** no module-level claim flag in `docker_host.py`.
 
-- **Harbor's identity is named in core** (w10-survey): `application/datasets/harbor_panel.py` writes
-  Harbor's panel document and `application/datasets/loaders.py::_harbor_tasks` is its recipe, both in
-  core because what they read (`loaders.py::from_hub`, `Source`) sits above `connectors/`
-  (`scripts/gate.py::_LAYERING`). Root: a connector declares its panel recipe on `Connector`, over a hub
-  read and a `Source` moved below `connectors/`; core reads the declaration. **Rides with:** area 07's
-  chain. **Re-test:** `git grep -c "harbor" -- promptpotter/application/datasets/loaders.py` is 0 (3 now).
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -673,13 +656,6 @@ selection explicit.
   raise in `application/jobs/reaper.py::sweep`'s earlier steps, or a `docker ps` the box refuses. **Rides with:** the
   next box read. **Re-test:** `machine-status`'s orphans step on the box names no fault, and
   `ls jobs/producers | wc -l` there falls to the live producers after one sweep.
-- **A machine slot claims its producer on the event loop** (w11-connectors2, 11-28):
-  `infrastructure/backend.py::MachineSlots.hold` calls `docker_host.py::claim_machine` inline. When the
-  producer is unclaimed, `producer_lock.this_producer` waits on a lock, and `io.py::refuse_on_event_loop`
-  raises. A cell is safe only where a launch claimed the producer earlier. Root: the claim is taken off
-  the loop at the async door, or at the launch that owns the process. **Rides with:** area 08's chain.
-  **Re-test:** a harbor cell through `BackendClient.run_query`, in a process that has not claimed a
-  producer, is measured, never refused.
 
 ## 09 · Optimizers (potter, capo, gepa, levi)
 
@@ -828,6 +804,13 @@ never a copy of history.
   should carry whether the press expires, so the narration reads a fact — **Rides with:** `area 11's
   chain` — **Re-test:** `git grep -n "expires when this round" -- promptpotter`; still one hit means
   it stands.
+- **The node surface re-words what `domain/` serves** (w11-web3 census, 11-28): `MeasurementRun.tsx`
+  hand-writes "rejected" and its teaching sentences for an `invalid` arm, beside the served
+  `domain/arms.py::ARM_END_INFO`; `SchemaTreeEditor.tsx::objectOf` forces `required` on every field and
+  `additionalProperties: false` over a local closed `TYPES`, beside `bench/llm_call.py::wire_closed`, which
+  closes every schema at send. Root: the browser renders `ARM_END_INFO.invalid`, the served param says
+  the editable types, and the server closes the schema. **Rides with:** area 11's chain. **Re-test:**
+  `git grep -ciE "rejected|additionalProperties: false" -- webapp/components/node-surface` is 0.
 
 ## 12 · Surfaces: CLI, REST API, MCP, webapp
 
@@ -835,13 +818,65 @@ never a copy of history.
 one `Verb` row; every write goes through `CommandDispatcher.dispatch`; everything on stdout is also on disk;
 the served contract is generated and the browser derives nothing; mobile first.
 
-**Unexamined:** `presentation/cli/main.py`, `cli/commands/launch.py`, `main.py`, `presentation/admin_bot.py`,
-`cli/commands/writes.py`
-
+- **The host door's import closure loads the LLM client** (w11-web3 census, 11-28):
+  `application/host_surface.py` imports `bench/task_context.py::checkin_template`, which imports
+  `bench/llm_call.py`, so the stdio host fact in `tests/test_security.py` runs 2.05–2.44 s against the 2 s
+  budget. The template reads only `optimizer_manifest.py`. Root: `checkin_template` moves into
+  `optimizer_manifest.py`, with no lazy import. **Rides with:** area 12's chain. **Re-test:**
+  `git grep -c "bench.task_context" -- promptpotter/application/host_surface.py` is 0.
+- **A locked act's reason is written in the browser** (w11-web3 census, 11-28):
+  `RunLimitsControl.tsx:190` and `AccountPreferencesTab.tsx:34` both spell "not yours to set", because
+  `lib/hooks/useFiles.ts::useFiles` answers only a boolean from `filable`. Root: the served filable answer
+  carries its refusal as a `Said` row, and `useFiles` returns it. **Rides with:** area 12's chain.
+  **Re-test:** `git grep -c "not yours to set" -- webapp/components` is 0.
+- **No walk spec opens the remote panel** (w11-web3 census, 11-28): `RemoteControl.tsx:31` mounts
+  `RemotePanel` (provenance, `RunLimitsControl`) only when open, and no file under `webapp/e2e` names the
+  remote control, so the panel's render against a served cycle rides RTL tests alone. Root: a walk spec
+  opens the remote on a served run and reads its limits. **Rides with:** area 12's chain. **Re-test:**
+  `git grep -c "Campaign remote control" -- webapp/e2e/walk` is at least 1.
+- **The CLI's welcome and the archive modes are spelled beside their rows** (w11-web3 census, 11-28):
+  `cli/main.py::main` hand-writes five verbs and their help beside the `VERBS` rows that carry it;
+  `cli/main.py`'s `compact-archive` choices restate `command_kinds.py::ArchiveMode`, and
+  `cli/commands/writes.py::_render` and `ArchiveCompactionControl.tsx`'s `DELETES` each re-spell
+  `("purge-cold", "reclaim")` as the irreversible pair. Root: the welcome draws from `VERBS` (a `Verb` flag
+  names the listed ones), `ArchiveModeInfo` serves `irreversible`, and the choices come from
+  `get_args(ArchiveMode)`. **Rides with:** area 12's chain. **Re-test:**
+  `git grep -cE '"purge-cold",? "reclaim"' -- promptpotter webapp/components` is 1 (4 now).
+- **A refused Ctrl+C pause is swallowed** (w11-web3 census, 11-28): `cli/commands/launch.py`'s
+  `ctrl_c_pauses._pause_each` and `ctrl_c_stops_pass._stop` wrap the dispatch in
+  `contextlib.suppress(PotterError)`, so a refused pause or cancel says nothing while the run goes on;
+  `_ctrl_c.send` in the same file says its refusal. Root: both go through `send`, said with its
+  `next_acts`. **Rides with:** area 12's chain. **Re-test:** `git grep -c "suppress(PotterError)" --
+  promptpotter/presentation/cli/commands/launch.py` is 0 (2 now).
+- **A terminal launch's start-up summary is said on stderr only** (w11-web3 census, 11-28):
+  `cli/commands/launch.py::_run_origin` and `_resume` say the reached backend URL, the dataset and its query count,
+  the node list and the minted campaign through `_checkin_line` and `log_startup_summary`, a logger on
+  stderr; no `readout.log` holds them and no other door says them. Root: the readout's header renders
+  them, and the CLI hands only its line sink. **Rides with:** area 12's chain. **Re-test:**
+  `git grep -cE "_checkin_line\(|log_startup_summary\(" -- promptpotter/presentation/cli/commands/launch.py`
+  is 0 (14 now).
+- **The server's adapter words health and shutdown itself** (w11-web3 census, 11-28):
+  `promptpotter/main.py::health_check` builds the stale-bundle `Said` row beside `health.py::WEBAPP_BUNDLE`,
+  and `promptpotter/main.py::_telegram_shutdown_notice` decides which jobs are this producer's and words the notice. Root:
+  `health.py` serves the bundle row and `notices.py` owns the notice. **Rides with:** area 12's chain.
+  **Re-test:** `git grep -cE "This page is out of date|stopped with" -- promptpotter/main.py` is 0.
+- **The admin bot keeps its own verb table, grammar and spend sums** (w11-web3 census, 11-28):
+  `admin_bot.py::handle_command` is a 13-branch if-chain with `_USAGE`, parsing each kind by hand
+  (`_set_coupon` spells unbounded `-` where the CLI spells `unbounded`), and `_render_install_spend`
+  totals and flags the install's spend outside `application/views/`. Root: the bot's commands derive from
+  `CommandKind` rows and their payload spellings as `cli/main.py::command_verb` does, and
+  `jobs/install_spend.py` serves the totals the views render. **Rides with:** area 12's chain.
+  **Re-test:** `git grep -cE "if command (==|in)|def _render" -- promptpotter/presentation/admin_bot.py` is 0.
+- **The maintenance verbs' renderers live in the CLI adapter** (w11-web3 census, 11-28):
+  `cli/commands/writes.py::_render_summary`, `_render_landing`, `_render` and `_render_inventory` format
+  the reset, landing and archive reports in `cli/`, where every renderer is `application/views/`'s. Root:
+  they move to `application/views/render`, and the verbs hand back the text. **Rides with:** area 12's
+  chain. **Re-test:** `git grep -c "def _render" -- promptpotter/presentation/cli` is 0 (4 now).
 - **Adapters over a flat served shape** (webb-5's): `useCandidatesModel.ts` joins about twelve sources;
   `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
   served rows carry what the adapters join. **Rides with:** webd. **Re-test:**
-  `git grep -c "\.facts\." -- webapp/components webapp/lib`.
+  `git grep -c "\.facts\." -- webapp/components webapp/lib`. w11-web3: `HardSamplesPreview.tsx:27`
+  re-checks `walk.ids.length > 0`, though `served_dashboard.py::_walk` serves `None` when no arm walks.
 - **The browser recomputes engine facts**: `webapp/lib/derivations/` (~2.2k lines, plus tests) derives
   node config, spend, run phase and the search point the engine already computes. Action: each fact is
   served on its existing read and the TypeScript copy and its tests go; so do `wonOnTheta` (9 hits in 5 files; its filed row and `electedMetric` went, ec96b1cda) and
@@ -849,6 +884,8 @@ the served contract is generated and the browser derives nothing; mobile first.
   of a cycle's acts, which drops only `start-run` where `phases.py:447` drops every act of a refused
   admission (narr-2's review): the acts are served once faults 1 serves `next_acts`. **Rides with:** webd. **Re-test:**
   `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
+  w11-web3: `candidate-search-point.ts::nodeConfigs` still filters non-dict nodes out of
+  `resolved_params`, and `node-config.ts::knobGroups` joins `knobs` to `node_config_schema` by key.
 - **A hand-kept mirror of the served shapes**: `webapp/lib/test-fixtures.ts` (666 lines, imported by 23
   webapp files) hand-writes default builders for ~30 Python-served types (`configParam`,
   `pairedReading`, `armReading`, `runStanding`, `dash`, `liveRow`, `roundDoc`, …). Since 2026-08-15 it
@@ -860,7 +897,8 @@ the served contract is generated and the browser derives nothing; mobile first.
   `domain/results.py` 31 times and `domain/records/run_records.py` 33 times since 2026-06-01, and draws from the
   same snapshot. **Rides with:** webd, whose Owns gain `scripts/offline_world.py`, the file shared with
   tests-w, which owns it. **Re-test:** `webapp/lib/test-fixtures.ts` holds no
-  hand-written builder of a served type.
+  hand-written builder of a served type. w11-web3: `press-subject.test.tsx:36` still writes
+  `bench: {...} as never`.
 - **Served fields the browser never reads**: 157 of the 926 field names in
   `webapp/lib/api/types.generated.ts` (17%) appear in no webapp source outside the generated types,
   fixtures and tests: the whole `campaign_config` (`halt_at_fitness`, `origin_gate`, `panel_gate`,
@@ -893,16 +931,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   **A hand-kept mirror of the served shapes**, **Served fields the browser never reads**. About 4,500
   TypeScript lines go. **Run data:** none. **Size:** large, a link per served fact. **Rides with:** webd.
   **Re-test:** `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
-- **Controls restate base's focus ring, and two acts stay hand-looped** (w11-web2, 11-28):
-  - About 25 non-field controls (chat, dashboard, onboarding…) restate `base.css`'s focus ring in
-    their domain CSS.
-  - `IngestComposer` opens the views it names with a loop of `open` calls, where
-    `workspace.tsx::arrange` is the one act.
-  - `RosterNote` shows `Loading` for an idle read, because `cells-states.test` decides it.
-
-  Root: the ring lives in `base.css` only, a set of views opens through `arrange`, and an idle read
-  says idle. **Rides with:** area 12's chain. **Re-test:** `git grep -c "focus-visible" -- webapp/app/styles`
-  counts base's rule alone, and `IngestComposer` calls `arrange`.
 - **The Candidates card derives what its reads should serve** (w11-web census, 11-27):
   `webapp/components/candidates/useCandidatesModel.ts` takes `divergentRound` as a min over views
   (:103), counts replayed cells that `CandidatesToolbar.tsx:152` shows "of" `views.length` (:170), and
@@ -912,6 +940,23 @@ the served contract is generated and the browser derives nothing; mobile first.
   election at three sites. Action: the dashboard and subtree reads serve the fork round, the replay
   count, the in-flight arms, per-sample coverage and the standing; the browser copies go. **Rides with:**
   root E (webd). **Re-test:** `git grep -cE "standingElection|divergentRound" -- webapp/components/candidates` is 0.
+- **The Candidates charts re-decide what their reads serve** (w11-web3 census, 11-28):
+  `FitnessChart.tsx::shortPanels` tests `scored < expected` beside the served `arm_reading.py::ArmSamples.cut`,
+  and the two rules disagree on a proposed arm; `Forest.tsx` counts a lane's rounds beside the served
+  `rounds` figure, hand-words the `trigger` and `direction` sets and prints "undefined" on a missing
+  `state` figure; `useCandidateBars.ts` finds `dash.overlap_line_round` in `rounds[]`, and its `?? null`
+  reads a missing round as no overlap. Root: each reads its served field (`samples.cut`, the figures and
+  `Worded` spawn rows, an overlap `panel_reading` on `dashboard.json`). **Rides with:** root E (webd).
+  **Re-test:** `git grep -cE "p\.scored < p\.expected|roundCount|r\.round === lineRoundNum" --
+  webapp/components` is 0.
+- **The node surface decides a run's chips and a snippet's version itself** (w11-web3 census, 11-28):
+  `NodeDetail.tsx` picks the model chip from the untyped `block.config["model"]` over `block.model`, adds
+  `usage.input + usage.output` and hand-words "not reported"; `PromptFieldsEditor.tsx::bankEdits` matches
+  typed text to library snippets (`segmentPrompt`, `snippetSupersedes`) and files one `bank-snippet` per
+  edit in a loop. Root: the audit read serves the asked model, the total and the word, and the
+  prompt-edit command banks its superseding versions on the server. **Rides with:** root E (webd).
+  **Re-test:** `git grep -cE 'config\["model"\]|usage\.input \+ usage\.output|segmentPrompt\(' --
+  webapp/components` is 0.
 - **Candidates and node-surface keep words and fallbacks for served sets** (w11-web census, 11-27):
   `SnippetLibrary.tsx:40`'s `FACET_LABEL` Record, `lineage-tree.ts`'s hand-written link-note words,
   and `FitnessRankSummary.tsx:37`'s `?? PLACEHOLDER` on an index miss, because the served `lens_shift`
@@ -922,22 +967,6 @@ the served contract is generated and the browser derives nothing; mobile first.
   derives `nodeLocked`; `NodeSurface.tsx:245` counts tunables; `L1Variants.tsx:62` casts an untyped
   value to a hand-declared `Variant[]`. Action: `/pipeline?at=` serves each flag and count, and the
   variant shape is generated. **Rides with:** area 11's chain. **Re-test:** `git grep -cE "axisMenu|as Variant" -- webapp/components` is 0.
-- **A provider key goes on one tap, with no confirm and no undo** (w11-walk2, 11-28): on the cold
-  world, at 390×844, go to Account → API keys and add an openrouter key ("…abcd added just now"), then
-  tap Remove. `remove-api-key` answers 202 with `subject: ""`, and the key is gone. Re-adding it means
-  pasting the whole secret again, which only its last four characters are ever shown of. Expected: the
-  destructive press asks once, as a campaign's delete does, and its ack names the key it moved.
-  **Rides with:** `area 12's chain`. **Re-test:** one tap on Remove leaves the key held until
-  confirmed.
-- **A started check-in keeps re-reading its consumed draft** (w11-walk2, 11-28): on the cold world,
-  open an email-tagging check-in with a key held, and press Start. `start-checkin` answers 200, the
-  view moves to the minted campaign, and `GET /drafts/<id>` then answers 404
-  `command_target_not_found` 2–4 times, each a console error (`webapp/lib/hooks/useIngestFlow.ts`'s
-  `draftRead`). A read's 404 is coded as a command's. Expected: Start's ack retires the draft's read,
-  so a 404 on a GONE draft is asked once at most (I7), and coded as a read's. **Rides with:** `area 12's
-  chain`. **Re-test:** after Start, the console shows no `/drafts/` 404. w11-tests4 (11-28): the
-  launch walk sees it too, and `harness.ts::EXPECTED_4XX` allows the 404, so the e2e spec hides it.
-  The allowance goes with the fix.
 
 ## 13 · Identity, accounts, access
 

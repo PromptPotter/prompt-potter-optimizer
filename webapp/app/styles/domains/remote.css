@@ -46,7 +46,6 @@
   transition:border-color .12s,color .12s,background .12s;
 }
 .remote-btn:hover:not(:disabled){border-color:var(--color-accent)}
-.remote-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-btn:disabled{opacity:.5;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
 .remote-drill{color:var(--color-accent)}
@@ -83,7 +82,6 @@
 .remote-readout:hover,
 .remote-readout-on{background:var(--color-background-hover);border-color:var(--color-border);color:var(--color-text-primary)}
 .remote-readout-on{background:var(--color-background-primary)}
-.remote-readout:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-readout .chev{transition:transform .15s;flex-shrink:0}
 .remote-readout[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
 

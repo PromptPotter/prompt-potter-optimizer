@@ -14,8 +14,9 @@ from collections.abc import Mapping
 from typing import Any
 
 import httpx
+from pydantic import Field, SecretStr
 
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import EnvBlock
 from promptpotter.connectors.protocol import Connector, Endpoint, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -32,6 +33,17 @@ INSTRUMENT_KEY = "n8n_harness"
 
 # One harness execution and its resends.
 _CELL_ENVELOPE_S = 300.0
+
+
+class N8nHarnessEnv(EnvBlock, env_prefix="N8N_HARNESS_"):
+    # The webhooks by name, and their one secret, sent as `<AUTH_HEADER>: <AUTH_PREFIX><TOKEN>`.
+    ENDPOINTS: dict[str, str] = Field(default_factory=dict)
+    TOKEN: SecretStr = SecretStr("")
+    AUTH_HEADER: str = "X-Eval-Secret"
+    AUTH_PREFIX: str = ""
+
+
+env_block = N8nHarnessEnv()
 
 
 def _object_or_text(text: str) -> Any:
@@ -102,7 +114,7 @@ def _identity_config(
 
 
 async def _preflight(backend_url: str) -> str | None:
-    if not settings.N8N_HARNESS_TOKEN.get_secret_value():
+    if not env_block.TOKEN.get_secret_value():
         return "N8N_HARNESS_TOKEN is unset: the harness refuses a request without its secret."
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
@@ -113,11 +125,11 @@ async def _preflight(backend_url: str) -> str | None:
 
 
 def _auth_token() -> str | None:
-    return settings.N8N_HARNESS_TOKEN.get_secret_value() or None
+    return env_block.TOKEN.get_secret_value() or None
 
 
 def _auth_scheme() -> AuthScheme:
-    return AuthScheme(settings.N8N_HARNESS_AUTH_HEADER, settings.N8N_HARNESS_AUTH_PREFIX)
+    return AuthScheme(env_block.AUTH_HEADER, env_block.AUTH_PREFIX)
 
 
 CONNECTOR = Connector(
@@ -134,7 +146,7 @@ CONNECTOR = Connector(
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
     preflight=_preflight,
-    endpoint=Endpoint("N8N_HARNESS_ENDPOINTS", lambda: settings.N8N_HARNESS_ENDPOINTS),
+    endpoint=Endpoint("N8N_HARNESS_ENDPOINTS", lambda: env_block.ENDPOINTS),
     auth_token=_auth_token,
     auth_scheme=_auth_scheme,
 )

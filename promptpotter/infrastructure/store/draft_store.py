@@ -71,7 +71,7 @@ class DraftStore:
         claim = self.hold(draft_id)
         if self.read_draft(draft_id) is None:
             claim.release()
-            raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+            raise NotFoundError(f"draft {draft_id!r} not found.", code="draft_not_found")
         return claim
 
     def write_draft(self, draft: DraftFile) -> Path:

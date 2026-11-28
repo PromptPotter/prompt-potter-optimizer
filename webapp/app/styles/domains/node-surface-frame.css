@@ -52,4 +52,3 @@
   border-radius: var(--border-radius-sm);
 }
 .bnode-close:hover { color: var(--color-accent); background: var(--color-background-primary); }
-.bnode-close:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
